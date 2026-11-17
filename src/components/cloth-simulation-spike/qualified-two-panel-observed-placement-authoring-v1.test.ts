@@ -1,3 +1,4 @@
+import { OBSERVED_BOUNDED_RADIAL_INITIALIZATION_POLICY_V1 } from 'lib/cloth/domain/observed-bounded-radial-initialization-v1';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildQualifiedTwoPanelObservedPlacementIntentV1 as build,
@@ -8,6 +9,7 @@ import {
 } from './qualified-two-panel-observed-placement-authoring-v1';
 import {
   QUALIFIED_TWO_PANEL_BOUNDARY_ROLES_V1,
+  qualifiedTwoPanelPlacementAuthoringInternalsV1,
   selectQualifiedTwoPanelBoundarySpanV1,
   type QualifiedTwoPanelCurveSpanV1,
 } from './qualified-two-panel-placement-authoring-v1';
@@ -140,6 +142,7 @@ describe('pure explicit observed-target placement intent', () => {
       ]);
       expect(draft.confirmation).toBeNull();
       expect(draft.annularProfileReviewed).toBe(false);
+      expect(draft.allowBoundedRadialInitialization).toBe(false);
       for (const side of ['front', 'back'] as const)
         for (const role of QUALIFIED_TWO_PANEL_BOUNDARY_ROLES_V1)
           expect(draft.boundaries[side][role]).toEqual({
@@ -172,6 +175,126 @@ describe('pure explicit observed-target placement intent', () => {
       f.body.dispose();
     }
   });
+
+  it('keeps legacy intent bytes and changes only policy identity after explicit bounded initialization confirmation', async () => {
+    const f = await fixture();
+    try {
+      const before = structuredClone(f.input);
+      const legacy = await build(f.input);
+      const profile = qualifiedTwoPanelPlacementAuthoringInternalsV1.buildGarmentProfile(
+        f.input.composerSnapshot,
+        f.input.composerProjection,
+        f.input.draft,
+        true,
+      );
+      // Exact previous return shape/order and values, including all reviewed acceptance fields.
+      expect(JSON.stringify(legacy)).toBe(
+        JSON.stringify({
+          garment: profile.garment,
+          policy: profile.policy,
+          annularParameters: profile.annularParameters,
+          confirmedTargetSha256: f.target.canonicalSha256,
+        }),
+      );
+      const opted = await build({
+        ...f.input,
+        draft: confirm({ ...f.input.draft, allowBoundedRadialInitialization: true }),
+      });
+      expect(opted).toEqual({
+        ...legacy,
+        policy: { ...legacy.policy, ...OBSERVED_BOUNDED_RADIAL_INITIALIZATION_POLICY_V1 },
+      });
+      expect(opted.policy).toMatchObject({
+        id: 'observed-body-bounded-radial-initialization',
+        revision: 'observed-body-bounded-radial-initialization-v1',
+      });
+      expect(f.input).toEqual(before);
+    } finally {
+      f.body.dispose();
+    }
+  });
+
+  it('requires fresh confirmation when the allowance changes in either direction', async () => {
+    const f = await fixture();
+    try {
+      for (const previous of [false, true]) {
+        const draft = confirm({ ...f.input.draft, allowBoundedRadialInitialization: previous });
+        expect(draft.confirmation?.allowBoundedRadialInitialization).toBe(previous);
+        const changed = { ...draft, allowBoundedRadialInitialization: !previous };
+        await expect(build({ ...f.input, draft: changed })).rejects.toThrow('Explicitly confirm');
+        const result = await build({ ...f.input, draft: confirm(changed) });
+        expect(result.policy.id === OBSERVED_BOUNDED_RADIAL_INITIALIZATION_POLICY_V1.id).toBe(
+          !previous,
+        );
+      }
+    } finally {
+      f.body.dispose();
+    }
+  });
+
+  it('refuses missing/nonboolean allowance and accessors instead of coercing opt-in', async () => {
+    const f = await fixture();
+    let reads = 0;
+    try {
+      for (const allow of [undefined, null, 0, 1, 'true']) {
+        const draft = { ...f.input.draft, allowBoundedRadialInitialization: allow } as never;
+        expect(() => confirm(draft)).toThrow('explicit initial radial placement allowance');
+        await expect(build({ ...f.input, draft })).rejects.toThrow(
+          'explicit initial radial placement allowance',
+        );
+      }
+      const accessor = Object.defineProperty(
+        { ...f.input.draft },
+        'allowBoundedRadialInitialization',
+        {
+          enumerable: true,
+          get() {
+            reads += 1;
+            return true;
+          },
+        },
+      );
+      expect(() => confirm(accessor)).toThrow('accessors');
+      await expect(build({ ...f.input, draft: accessor })).rejects.toThrow('accessors');
+      expect(reads).toBe(0);
+    } finally {
+      f.body.dispose();
+    }
+  });
+
+  it.each([false, true])(
+    'captures allowance %s and confirmation before hashing, despite caller mutation',
+    async (allow) => {
+      const f = await fixture();
+      let release = () => {};
+      try {
+        const draft = structuredClone(
+          confirm({ ...f.input.draft, allowBoundedRadialInitialization: allow }),
+        );
+        const input = { ...f.input, draft };
+        const entered = new Promise<void>((resolve) => {
+          hashGate.entered = resolve;
+        });
+        hashGate.wait = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        hashGate.enabled = true;
+        const pending = build(input);
+        await entered;
+        Object.assign(draft, { allowBoundedRadialInitialization: !allow });
+        Object.assign(draft.confirmation!, { allowBoundedRadialInitialization: !allow });
+        release();
+        const result = await pending;
+        expect(result.policy.id === OBSERVED_BOUNDED_RADIAL_INITIALIZATION_POLICY_V1.id).toBe(
+          allow,
+        );
+        expect(result.confirmedTargetSha256).toBe(f.target.canonicalSha256);
+      } finally {
+        release();
+        f.body.dispose();
+      }
+    },
+  );
 
   it('requires explicit profile/target confirmation and preserves the reviewed FRONT/BACK restriction', async () => {
     const f = await fixture();
@@ -388,16 +511,31 @@ describe('pure explicit observed-target placement intent', () => {
             draft,
             observedTarget: f.target,
           });
-          const d0 = await buildDxfProductTwoPanelSkirtGarmentSemanticsV1({
-            schemaVersion: DXF_PRODUCT_TWO_PANEL_SKIRT_GARMENT_SEMANTICS_REQUEST_V1,
-            origin: snapshot.origin,
-            composerOwner: composerV2Owner,
-            expectedComposerCanonicalSha256: snapshot.seal.canonicalSha256,
-            garment: result.garment,
-            policy: result.policy,
+          const opted = await build({
+            composerSnapshot: snapshot,
+            composerProjection: projection,
+            draft: confirm({ ...draft, allowBoundedRadialInitialization: true }),
+            observedTarget: f.target,
           });
-          expect(d0, JSON.stringify(d0)).toMatchObject({ ok: true });
-          if (d0.ok) disposeDxfProductTwoPanelSkirtGarmentSemanticsV1(d0.owner);
+          expect(opted).toEqual({
+            ...result,
+            policy: { ...result.policy, ...OBSERVED_BOUNDED_RADIAL_INITIALIZATION_POLICY_V1 },
+          });
+          for (const intent of [result, opted]) {
+            const d0 = await buildDxfProductTwoPanelSkirtGarmentSemanticsV1({
+              schemaVersion: DXF_PRODUCT_TWO_PANEL_SKIRT_GARMENT_SEMANTICS_REQUEST_V1,
+              origin: snapshot.origin,
+              composerOwner: composerV2Owner,
+              expectedComposerCanonicalSha256: snapshot.seal.canonicalSha256,
+              garment: intent.garment,
+              policy: intent.policy,
+            });
+            expect(d0, JSON.stringify(d0)).toMatchObject({ ok: true });
+            if (d0.ok) disposeDxfProductTwoPanelSkirtGarmentSemanticsV1(d0.owner);
+          }
+          expect(projectPatternImportDxfProductGarmentMeshComposerV2(composerV2Owner)).toEqual(
+            projection,
+          );
           expect(result.garment.boundaries[0].waist.sourceCurveIds).toHaveLength(40);
           expect(result.garment.boundaries[0].hem.sourceCurveIds).toHaveLength(50);
         },

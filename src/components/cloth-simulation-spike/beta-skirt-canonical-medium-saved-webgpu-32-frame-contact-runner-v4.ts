@@ -1,4 +1,16 @@
+import { createBetaSkirtPersonalizedFemaleNonconfinedSelfCarrierResponseV1 } from './beta-skirt-personalized-female-nonconfined-self-carrier-response-v1';
+import { evaluateBetaSkirtExactSweptBodyAuditV1 } from './beta-skirt-exact-swept-body-audit-v1';
+import { auditBetaSkirtObserved32StaticCarrierStateV1 } from './beta-skirt-observed32-static-carrier-state-audit-v1';
+import { serializeBetaSkirtObserved16SafeguardedDiagnosticAbiV1 } from './beta-skirt-observed16-safeguarded-diagnostic-abi-v1';
 /* global GPUBindGroup, GPUBuffer, GPUCommandEncoder, GPUComputePipeline, GPUDevice, GPUShaderModuleDescriptor */
+
+import {
+  XPBD_EMBEDDED_SCALAR_BEND_KERNEL_V2,
+  XPBD_EMBEDDED_SCALAR_BEND_SOURCE_SHA256_V2,
+  XPBD_EMBEDDED_SCALAR_BEND_DIAGNOSTICS_BYTES_V2,
+  getXpbdEmbeddedScalarBendPipelineIdentityV2,
+  xpbdEmbeddedScalarBendShaderDescriptorV2,
+} from 'lib/cloth/runtime/webgpu/xpbd-embedded-scalar-bend-kernel-v2';
 
 import { decodeClothMaterialGpuV1 } from '../../lib/cloth/compiler/material-package';
 import {
@@ -466,8 +478,13 @@ function diagnosticSnapshotBytes(
   bendInvalidCount: number,
   continuum: Uint32Array,
   contact: Uint32Array,
+  bendLimitedStepCount?: number,
 ): Uint8Array<ArrayBuffer> {
-  const bend = new CapturedUint32Array([bendInvalidCount]);
+  const bend = new CapturedUint32Array(
+    bendLimitedStepCount === undefined
+      ? [bendInvalidCount]
+      : [bendInvalidCount, bendLimitedStepCount],
+  );
   const parts = [
     uint32LeBytes(velocity),
     uint32LeBytes(bend),
@@ -1717,7 +1734,7 @@ function prepareRun(projection: Observed32CoreProjection) {
   });
 }
 
-async function resolvePipelineIdentities() {
+async function resolvePipelineIdentities(safeguardedBend = false) {
   const crypto = cryptoShim();
   const resetNames = ['distance', 'seam-all-active', 'bend', 'continuum'] as const;
   const [predict, distance, seam, bend, continuum, velocity, contact, ...resets] =
@@ -1725,7 +1742,9 @@ async function resolvePipelineIdentities() {
       getXpbdPredictPipelineIdentityV1({ crypto }),
       getXpbdDistancePipelineIdentityV1({ crypto }),
       getXpbdSeamSolvePipelineIdentityV1({ crypto }),
-      getXpbdEmbeddedScalarBendPipelineIdentityV1({ crypto }),
+      safeguardedBend
+        ? getXpbdEmbeddedScalarBendPipelineIdentityV2({ crypto })
+        : getXpbdEmbeddedScalarBendPipelineIdentityV1({ crypto }),
       getContinuumStrainVNextPipelineIdentityV1({ crypto }),
       getXpbdVelocityDiagnosticPipelineIdentityV1({ crypto }),
       getActualBodyTriangleMeshContactPipelineIdentityV2({ crypto }),
@@ -1757,6 +1776,7 @@ async function executeGpuRun(
   identities: Awaited<ReturnType<typeof resolvePipelineIdentities>>,
   signal: AbortSignal | undefined,
   currentSource?: () => void,
+  safeguardedBend = false,
 ) {
   throwIfAborted(signal);
   currentSource?.();
@@ -1773,7 +1793,13 @@ async function executeGpuRun(
     createPipeline(device, xpbdPredictShaderDescriptorV1(), identities.predict.entryPoint),
     createPipeline(device, xpbdDistanceShaderDescriptorV1(), identities.distance.entryPoint),
     createPipeline(device, xpbdSeamSolveShaderDescriptorV1(), identities.seam.entryPoint),
-    createPipeline(device, xpbdEmbeddedScalarBendShaderDescriptorV1(), identities.bend.entryPoint),
+    createPipeline(
+      device,
+      safeguardedBend
+        ? xpbdEmbeddedScalarBendShaderDescriptorV2()
+        : xpbdEmbeddedScalarBendShaderDescriptorV1(),
+      identities.bend.entryPoint,
+    ),
     createPipeline(
       device,
       continuumStrainVNextShaderDescriptorV1(),
@@ -1817,7 +1843,7 @@ async function executeGpuRun(
     trackedBuffers,
     'canonical-medium previous positions',
     prepared.physical,
-    STORAGE,
+    STORAGE | (safeguardedBend ? COPY_SRC : 0),
   );
   const velocitiesBuffer = createEmptyGpuBuffer(
     device,
@@ -1965,11 +1991,12 @@ async function executeGpuRun(
     prepared.bendLambdas,
     STORAGE,
   );
+  const bendDiagnosticsBytes = safeguardedBend ? XPBD_EMBEDDED_SCALAR_BEND_DIAGNOSTICS_BYTES_V2 : 4;
   const bendInvalidBuffer = createEmptyGpuBuffer(
     device,
     trackedBuffers,
     'canonical-medium bend invalid counter',
-    4,
+    bendDiagnosticsBytes,
     STORAGE | COPY_SRC,
   );
   const bendColorParamBuffers = prepared.bendSchedule.map((color, index) =>
@@ -2163,7 +2190,7 @@ async function executeGpuRun(
   const positionBytes = prepared.physical.byteLength;
   const velocityDiagnosticsOffset = positionBytes;
   const bendInvalidOffset = velocityDiagnosticsOffset + 32;
-  const continuumStatusesOffset = bendInvalidOffset + 4;
+  const continuumStatusesOffset = bendInvalidOffset + bendDiagnosticsBytes;
   const contactDiagnosticsOffset = continuumStatusesOffset + CONTINUUM_COUNT * 4;
   const snapshotBytes =
     contactDiagnosticsOffset + ACTUAL_BODY_TRIANGLE_MESH_CONTACT_DIAGNOSTICS_BYTES_V2;
@@ -2192,7 +2219,7 @@ async function executeGpuRun(
       0,
       target,
       targetBaseOffset + bendInvalidOffset,
-      4,
+      bendDiagnosticsBytes,
     );
     encoder.copyBufferToBuffer(
       continuumStatusesBuffer,
@@ -2279,7 +2306,8 @@ async function executeGpuRun(
     throwIfAborted(signal);
   }
 
-  const totalReadbackBytes = snapshotBytes * 2;
+  const finalPreviousOffset = snapshotBytes * 2;
+  const totalReadbackBytes = finalPreviousOffset + (safeguardedBend ? positionBytes : 0);
   const readbackBuffer = device.createBuffer({
     label: 'canonical-medium bounded frame-16 checkpoint and final readback',
     size: totalReadbackBytes,
@@ -2291,6 +2319,14 @@ async function executeGpuRun(
   });
   readbackEncoder.copyBufferToBuffer(frame16CheckpointBuffer, 0, readbackBuffer, 0, snapshotBytes);
   copySnapshot(readbackEncoder, readbackBuffer, snapshotBytes);
+  if (safeguardedBend)
+    readbackEncoder.copyBufferToBuffer(
+      previousPositionsBuffer,
+      0,
+      readbackBuffer,
+      finalPreviousOffset,
+      positionBytes,
+    );
   device.queue.submit([readbackEncoder.finish()]);
   await device.queue.onSubmittedWorkDone();
   currentSource?.();
@@ -2319,6 +2355,9 @@ async function executeGpuRun(
         baseOffset + bendInvalidOffset,
         true,
       ),
+      bendLimitedStepCount: safeguardedBend
+        ? new DataView(readback.buffer).getUint32(baseOffset + bendInvalidOffset + 4, true)
+        : 0,
       continuumStatuses: new CapturedUint32Array(
         readback.buffer.slice(
           baseOffset + continuumStatusesOffset,
@@ -2332,6 +2371,13 @@ async function executeGpuRun(
   return Object.freeze({
     checkpoint: decodeSnapshot(0),
     final: decodeSnapshot(snapshotBytes),
+    ...(safeguardedBend
+      ? {
+          finalPreviousPositionsInvMassKg: new CapturedFloat32Array(
+            readback.buffer.slice(finalPreviousOffset, totalReadbackBytes),
+          ),
+        }
+      : {}),
     snapshotBytes,
     totalReadbackBytes,
     totalFrameExecutionWallTimeMs,
@@ -2494,6 +2540,7 @@ type Observed32Strain = Awaited<ReturnType<typeof evaluateObserved32Strain>>['re
 export type BetaSkirtSavedAnnularObservedPlacement32FrameContactReportV1 = Readonly<{
   version: typeof BETA_SKIRT_SAVED_ANNULAR_OBSERVED_PLACEMENT_32_FRAME_CONTACT_V1;
   sourceKind: 'saved-annular-observed-placement-v3';
+  bendSolver: Observed16['report']['bendSolver'];
   status: 'diagnostic-completed' | 'diagnostic-blocked';
   bindings: Readonly<{
     runtimeSourceReportSha256: string;
@@ -2516,7 +2563,7 @@ export type BetaSkirtSavedAnnularObservedPlacement32FrameContactReportV1 = Reado
     expectedFrame16PositionsInvMassKgSha256: string;
     expectedFrame16Positions3MSha256: string;
     expectedFrame16DiagnosticsSha256: string;
-    exactPositionsAnd3724ByteDiagnosticsMatch: true;
+    exactPositionsAnd3728ByteDiagnosticsMatch: true;
   }>;
   config: ReturnType<typeof prepareRun>['reportConfig'];
   workload: ReturnType<typeof prepareRun>['reportWorkload'];
@@ -2540,6 +2587,17 @@ export type BetaSkirtSavedAnnularObservedPlacement32FrameContactReportV1 = Reado
   cleanup: Awaited<ReturnType<typeof executeObserved32Gpu>>['cleanup'];
   sourceReport: ObservedSource32['report'];
   observed16Report: Observed16['report'];
+  previewState: 'raw-gpu' | 'static-ao-carrier-corrected';
+  rawGpuOutput: Readonly<{
+    currentPositionsInvMassKgSha256: string;
+    previousPositionsInvMassKgSha256: string;
+    positions3MSha256: string;
+    previousReadbackByteLength: number;
+    stateAudit: ReturnType<typeof auditBetaSkirtObserved32StaticCarrierStateV1> | null;
+  }>;
+  staticCarrierCorrection:
+    | Awaited<ReturnType<typeof correctObserved32StaticCarriers>>['receipt']
+    | null;
   postgate: Readonly<{
     collision: BetaSkirtRenderedBodyCollisionDiagnosticReportV2 | null;
     signedRefresh: BetaSkirtRenderedBodySignedVertexContactRefreshResultV42 | null;
@@ -2555,6 +2613,8 @@ export type BetaSkirtSavedAnnularObservedPlacement32FrameContactReportV1 = Reado
     immutableLocalRestRetained: true;
     worldPinAndRollbackAnchorsUploaded: true;
     bodySourceRebuilt: false;
+    staticCorrectionApplied: boolean;
+    solverContinuationQualified: false;
     stressPaComputed: false;
     runtimeAuthority: false;
     fitAuthority: false;
@@ -2640,6 +2700,31 @@ function waitObserved32<T>(promise: Promise<T>, signal: AbortSignal): Promise<T>
     );
   });
 }
+function evaluateObserved32Quality(
+  sourcePositions3M: Float32Array,
+  triangles: Uint32Array,
+  finalPositions3M: Float32Array,
+): BetaSkirtCoherentEnvelopeQualityReportV1 {
+  // The diagnostic deliberately forbids all storage aliasing, including immutable topology.
+  return evaluateBetaSkirtCoherentEnvelopeQualityV1({
+    sourcePositionsM: new CapturedFloat32Array(sourcePositions3M),
+    sourceTriangles: new CapturedUint32Array(triangles),
+    candidatePositionsM: new CapturedFloat32Array(finalPositions3M),
+    candidateTriangles: new CapturedUint32Array(triangles),
+  });
+}
+
+function observed32BendCountersValid(checkpointCount: number, finalCount: number): boolean {
+  return (
+    checkpointCount >>> 0 === checkpointCount &&
+    finalCount >>> 0 === finalCount &&
+    checkpointCount >= 0 &&
+    checkpointCount <= BEND_COUNT * FIXED_ITERATIONS * FRAME_16_CHECKPOINT_COUNT &&
+    finalCount >= checkpointCount &&
+    finalCount <= BEND_COUNT * FIXED_ITERATIONS * FRAME_COUNT
+  );
+}
+
 function observed32CheckpointMatches(
   actual: { positions4: Float32Array; positions3: Float32Array; diagnostics: Uint8Array },
   expected: { positions4: Float32Array; positions3: Float32Array; diagnostics: Uint8Array },
@@ -2647,10 +2732,10 @@ function observed32CheckpointMatches(
   return (
     actual.positions4.length === PARTICLE_COUNT * 4 &&
     actual.positions3.length === PARTICLE_COUNT * 3 &&
-    actual.diagnostics.byteLength === 3724 &&
+    actual.diagnostics.byteLength === 3728 &&
     expected.positions4.length === PARTICLE_COUNT * 4 &&
     expected.positions3.length === PARTICLE_COUNT * 3 &&
-    expected.diagnostics.byteLength === 3724 &&
+    expected.diagnostics.byteLength === 3728 &&
     bytesEqual(actual.positions4, expected.positions4) &&
     bytesEqual(actual.positions3, expected.positions3) &&
     bytesEqual(actual.diagnostics, expected.diagnostics)
@@ -2665,7 +2750,7 @@ async function executeObserved32Gpu(
   current();
   const gpu = options.gpu ?? navigator.gpu;
   if (!gpu) throw new Error('WebGPU unavailable.');
-  const identities = await resolvePipelineIdentities();
+  const identities = await resolvePipelineIdentities(true);
   current();
   let session: XpbdDeviceSession | null = null,
     lease: XpbdDeviceLease | null = null;
@@ -2697,6 +2782,7 @@ async function executeObserved32Gpu(
       identities,
       options.signal,
       current,
+      true,
     );
     current();
     return { observation, cleanup };
@@ -2796,6 +2882,262 @@ async function evaluateObserved32Self(
       pins.finalMaximumSeamGapM <= MAX_SEAM_GAP_M,
   };
 }
+function observed32BodyClear(
+  prepared: ReturnType<typeof prepareRun>,
+  collisionInput: BetaSkirtRenderedBodyCollisionDiagnosticInputV1,
+  collision: BetaSkirtRenderedBodyCollisionDiagnosticReportV2 | null,
+  signed: BetaSkirtRenderedBodySignedVertexContactRefreshResultV42 | null,
+  finalPositionsSha256: string,
+): boolean {
+  return (
+    !!collision &&
+    collision.status === 'signed-clearance-measured' &&
+    collision.claims.signedClassificationDefensible &&
+    collision.binding.garmentPositionsSha256 === finalPositionsSha256 &&
+    collisionReplayRetainsSource(prepared.collisionInput, {
+      ...collisionInput,
+      binding: collision.binding,
+    }) &&
+    collision.intersections.bodySelfIntersectionCount === 0 &&
+    collision.intersections.bodyGarmentTriangleIntersectionCount === 0 &&
+    collision.clearance.penetratingVertexCount === 0 &&
+    collision.clearance.unsafeVertexCount === 0 &&
+    collision.clearance.ambiguousSignVertexCount === 0 &&
+    collision.clearance.minimumSignedClearanceM !== null &&
+    collision.clearance.minimumSignedClearanceM >= EXACT_POSTGATE_MINIMUM_SIGNED_CLEARANCE_M &&
+    signed?.contacts.length === 0
+  );
+}
+
+/** All post-deformation diagnostics consume the same exact candidate and unchanged body binding. */
+async function rebuildObserved32PhysicalPostgate(
+  prepared: ReturnType<typeof prepareRun>,
+  candidate4: Float32Array,
+  current: () => void,
+) {
+  current();
+  const candidate3 = positions3(candidate4);
+  const [positions4Sha256, positions3Sha256] = await Promise.all([
+    digestBytes(float32LeBytes(candidate4)),
+    digestBytes(float32LeBytes(candidate3)),
+  ]);
+  current();
+  const collisionInput = finalCollisionInput(prepared.collisionInput, candidate3, positions3Sha256);
+  if (!collisionReplayRetainsSource(prepared.collisionInput, collisionInput))
+    throw new Error('Observed32 candidate changed the exact retained source/body binding.');
+  let collision: BetaSkirtRenderedBodyCollisionDiagnosticReportV2 | null = null;
+  let signed: BetaSkirtRenderedBodySignedVertexContactRefreshResultV42 | null = null;
+  let quality: BetaSkirtCoherentEnvelopeQualityReportV1 | null = null;
+  let self: Observed32Self | null = null;
+  const failures: { stage: string; detail: string }[] = [];
+  const failed = (stage: string, error: unknown) => {
+    current();
+    failures.push({ stage, detail: error instanceof Error ? error.message : 'Diagnostic failed.' });
+  };
+  try {
+    quality = evaluateObserved32Quality(prepared.sourcePositions3M, prepared.triangles, candidate3);
+    current();
+  } catch (error) {
+    failed('quality', error);
+  }
+  try {
+    collision = await evaluateBetaSkirtRenderedBodyCollisionDiagnosticV2(collisionInput);
+    current();
+    const terminalSha =
+      await computeBetaSkirtRenderedBodyTerminalCollisionReportSha256V42(collision);
+    current();
+    signed = await refreshBetaSkirtRenderedBodySignedVertexContactsV42({
+      extractionRound: 0,
+      collisionInput,
+      terminalCollisionReport: collision,
+      terminalReceiptBinding: {
+        collisionInputSha256: collision.contentFingerprintSha256,
+        terminalCollisionReportSha256: terminalSha,
+        collisionPolicyContentSha256:
+          BETA_SKIRT_RENDERED_BODY_COLLISION_POLICY_IDENTITY_V2.policyContentSha256,
+      },
+    });
+    current();
+  } catch (error) {
+    failed('actual-body', error);
+  }
+  try {
+    self = await evaluateObserved32Self(prepared, candidate3, candidate4, current);
+    current();
+  } catch (error) {
+    failed('self-orientation', error);
+  }
+  return {
+    candidate3,
+    positions4Sha256,
+    positions3Sha256,
+    collisionInput,
+    collision,
+    signed,
+    quality,
+    self,
+    failures,
+    bodyClear: observed32BodyClear(prepared, collisionInput, collision, signed, positions3Sha256),
+  };
+}
+
+/** A bounded static preview response; never a resumed solver state or a source/body authority. */
+async function correctObserved32StaticCarriers(
+  prepared: ReturnType<typeof prepareRun>,
+  rawCurrent: Float32Array,
+  rawPrevious: Float32Array,
+  rawPostgate: Awaited<ReturnType<typeof rebuildObserved32PhysicalPostgate>>,
+  current: () => void,
+  fresh: () => Promise<void>,
+) {
+  current();
+  const self = rawPostgate.self;
+  if (
+    !rawPostgate.bodyClear ||
+    rawPostgate.failures.length ||
+    rawPostgate.quality?.blockers.length !== 0 ||
+    rawPostgate.quality.triangle?.normalReversalCount !== 0 ||
+    !self ||
+    !self.exactRawExcludedResidualAccounting ||
+    self.residualBlockingCount < 1 ||
+    self.orientation.sourceDegenerateTriangleCount !== 0 ||
+    self.orientation.finalDegenerateTriangleCount !== 0 ||
+    self.orientation.normalReversalCount !== 0 ||
+    !self.seamPinParity.exactPinMaskParity
+  )
+    throw new Error(
+      'Observed32 static response requires clear raw body/quality and exact residual self evidence.',
+    );
+  const residualWitnesses = self.witnesses.filter(
+    (w) => w.disposition !== 'excluded-confined-authenticated-ao-seam-touching',
+  );
+  if (
+    residualWitnesses.length !== self.residualBlockingCount ||
+    residualWitnesses.some((w) => w.disposition !== 'residual-touching-non-confined-feature')
+  )
+    throw new Error(
+      'Observed32 static response does not support this complete residual witness set.',
+    );
+  const rawPreviousSha256 = await digestBytes(float32LeBytes(rawPrevious));
+  current();
+  await fresh();
+  current();
+  const response = await createBetaSkirtPersonalizedFemaleNonconfinedSelfCarrierResponseV1({
+    currentPositionsInvMass: rawCurrent,
+    previousPositionsInvMass: rawPrevious,
+    activeSeamPairs: prepared.seamPairs,
+    fixedHandleVertexIndices: prepared.pins,
+    epsilonM: self.oracle.epsilonM,
+    residualWitnesses,
+  });
+  current();
+  const candidateCurrent = new CapturedFloat32Array(response.candidatePositionsInvMass);
+  const candidatePrevious = new CapturedFloat32Array(response.candidatePreviousPositionsInvMass);
+  const [candidateCurrentSha256, candidatePreviousSha256] = await Promise.all([
+    digestBytes(float32LeBytes(candidateCurrent)),
+    digestBytes(float32LeBytes(candidatePrevious)),
+  ]);
+  current();
+  if (
+    response.report.binding.sourcePositionsInvMassSha256 !== rawPostgate.positions4Sha256 ||
+    response.report.binding.sourcePreviousPositionsInvMassSha256 !== rawPreviousSha256 ||
+    response.report.binding.candidatePositionsInvMassSha256 !== candidateCurrentSha256 ||
+    response.report.binding.candidatePreviousPositionsInvMassSha256 !== candidatePreviousSha256
+  )
+    throw new Error('Observed32 static response current/previous byte binding drifted.');
+  const stateAudit = auditBetaSkirtObserved32StaticCarrierStateV1({
+    initialPositionsXYZW: prepared.physical,
+    rawCurrentPositionsXYZW: rawCurrent,
+    rawPreviousPositionsXYZW: rawPrevious,
+    candidateCurrentPositionsXYZW: candidateCurrent,
+    candidatePreviousPositionsXYZW: candidatePrevious,
+    pinnedVertexIds: prepared.pins,
+    seamVertexPairs: prepared.seamPairs,
+    epsilonM: self.oracle.epsilonM,
+  });
+  current();
+  if (!stateAudit.passed)
+    throw new Error(
+      'Observed32 static correction state audit blocked: ' + stateAudit.blockers.join('; '),
+    );
+  await fresh();
+  current();
+  const candidatePostgate = await rebuildObserved32PhysicalPostgate(
+    prepared,
+    candidateCurrent,
+    current,
+  );
+  current();
+  if (candidatePostgate.positions4Sha256 !== candidateCurrentSha256)
+    throw new Error('Observed32 corrected postgate changed the candidate byte binding.');
+  const previousToCurrentBody = evaluateBetaSkirtExactSweptBodyAuditV1({
+    previousPositionsInvMass: candidatePrevious,
+    currentPositionsInvMass: candidateCurrent,
+    bodyPositionsM: prepared.bodyPositions,
+    bodyTriangles: prepared.bodyTriangles,
+  });
+  current();
+  const correctionBodyPath = evaluateBetaSkirtExactSweptBodyAuditV1({
+    previousPositionsInvMass: rawCurrent,
+    currentPositionsInvMass: candidateCurrent,
+    bodyPositionsM: prepared.bodyPositions,
+    bodyTriangles: prepared.bodyTriangles,
+  });
+  current();
+  const accepted =
+    candidatePostgate.bodyClear &&
+    candidatePostgate.failures.length === 0 &&
+    candidatePostgate.quality?.blockers.length === 0 &&
+    candidatePostgate.quality.triangle?.normalReversalCount === 0 &&
+    candidatePostgate.self?.passed === true &&
+    previousToCurrentBody.status === 'clear' &&
+    correctionBodyPath.status === 'clear';
+  await fresh();
+  current();
+  const publicPostgate = (value: typeof rawPostgate) => ({
+    positionsInvMassKgSha256: value.positions4Sha256,
+    positions3MSha256: value.positions3Sha256,
+    collision: value.collision,
+    signedRefresh: value.signed,
+    quality: value.quality,
+    selfOrientation: value.self,
+    failures: value.failures,
+  });
+  return {
+    accepted,
+    candidateCurrent,
+    candidatePrevious,
+    candidatePostgate,
+    receipt: {
+      version: 'beta-skirt-observed32-static-carrier-correction/1' as const,
+      status: accepted ? ('candidate-ready-for-strain' as const) : ('candidate-blocked' as const),
+      rawCurrentSha256: rawPostgate.positions4Sha256,
+      rawPreviousSha256,
+      candidateCurrentSha256,
+      candidatePreviousSha256,
+      response: response.report,
+      stateAudit,
+      rawPostgate: publicPostgate(rawPostgate),
+      candidatePostgate: publicPostgate(candidatePostgate),
+      previousToCurrentBody,
+      correctionBodyPath,
+      claims: {
+        staticPreviewOnly: true as const,
+        genuineGpuPreviousReadbackUsed: true as const,
+        rawSolverOutputMutated: false as const,
+        restMaterialOrPinsReauthored: false as const,
+        velocityStatePreservationEstablished: false as const,
+        solverContinuationQualified: false as const,
+        sweptSelfEvaluated: false as const,
+        freshStrainRequiredAfterCorrection: true as const,
+        runtimeAuthority: false as const,
+        fitAuthority: false as const,
+        productionAuthority: false as const,
+      },
+    },
+  };
+}
+
 async function evaluateObserved32Strain(
   canvas: HTMLCanvasElement,
   source: ObservedSource32,
@@ -2978,8 +3320,9 @@ export async function runBetaSkirtSavedAnnularObservedPlacement32FrameContactV1(
     };
     await validateDigestAuthority();
     current();
-    const expectedDiagnostics =
-      reconstructBetaSkirtCanonicalMedium16FrameDiagnosticBytesForSaved32V4(frame16.report);
+    const expectedDiagnostics = serializeBetaSkirtObserved16SafeguardedDiagnosticAbiV1(
+      frame16.report,
+    );
     const [expected4, expected3, expectedDiag] = await Promise.all([
       digestBytes(float32LeBytes(frame16.finalPositionsInvMassKg)),
       digestBytes(float32LeBytes(frame16.finalPositions3M)),
@@ -3033,22 +3376,32 @@ export async function runBetaSkirtSavedAnnularObservedPlacement32FrameContactV1(
       final.contactDiagnostics,
     );
     if (!state.valid) throw new Error(state.detail);
-    const final3 = positions3(final.positions),
+    if (!observed32BendCountersValid(checkpoint.bendLimitedStepCount, final.bendLimitedStepCount))
+      throw new Error(
+        'Observed32 bend limiter counters exceed the sealed workload or are not cumulative.',
+      );
+    const rawPrevious = observation.finalPreviousPositionsInvMassKg;
+    if (!rawPrevious || rawPrevious.length !== prepared.physical.length)
+      throw new Error('Observed32 genuine final previous-state readback is missing.');
+    const rawFinal3 = positions3(final.positions),
       checkpoint3 = positions3(checkpoint.positions);
     const checkpointDiag = diagnosticSnapshotBytes(
       checkpoint.velocityDiagnostics,
       checkpoint.bendInvalidCount,
       checkpoint.continuumStatuses,
       checkpoint.contactDiagnostics,
+      checkpoint.bendLimitedStepCount,
     );
-    const [actual4, actual3, actualDiag, final4Sha, final3Sha, topologySha] = await Promise.all([
-      digestBytes(float32LeBytes(checkpoint.positions)),
-      digestBytes(float32LeBytes(checkpoint3)),
-      digestBytes(checkpointDiag),
-      digestBytes(float32LeBytes(final.positions)),
-      digestBytes(float32LeBytes(final3)),
-      digestBytes(uint32LeBytes(prepared.triangles)),
-    ]);
+    const [actual4, actual3, actualDiag, rawFinal4Sha, rawFinal3Sha, topologySha, rawPreviousSha] =
+      await Promise.all([
+        digestBytes(float32LeBytes(checkpoint.positions)),
+        digestBytes(float32LeBytes(checkpoint3)),
+        digestBytes(checkpointDiag),
+        digestBytes(float32LeBytes(final.positions)),
+        digestBytes(float32LeBytes(rawFinal3)),
+        digestBytes(uint32LeBytes(prepared.triangles)),
+        digestBytes(float32LeBytes(rawPrevious)),
+      ]);
     current();
     if (
       actual4 !== expected4 ||
@@ -3064,107 +3417,124 @@ export async function runBetaSkirtSavedAnnularObservedPlacement32FrameContactV1(
       )
     )
       throw new Error('Observed32 frame16 differs from genuine observed16 checkpoint.');
-    const collisionInput = finalCollisionInput(prepared.collisionInput, final3, final3Sha);
+    if (rawFinal3Sha === source.report.bindings.sourcePositions3MSha256)
+      throw new Error('Observed32 raw final motion proof failed.');
+    const rawPostgate = await rebuildObserved32PhysicalPostgate(prepared, final.positions, current);
+    current();
     if (
-      !collisionReplayRetainsSource(prepared.collisionInput, collisionInput) ||
-      final3Sha === source.report.bindings.sourcePositions3MSha256
+      rawPostgate.positions4Sha256 !== rawFinal4Sha ||
+      rawPostgate.positions3Sha256 !== rawFinal3Sha
     )
-      throw new Error('Observed32 final body binding/motion proof failed.');
-    let collision: BetaSkirtRenderedBodyCollisionDiagnosticReportV2 | null = null,
-      signed: BetaSkirtRenderedBodySignedVertexContactRefreshResultV42 | null = null;
-    let quality: BetaSkirtCoherentEnvelopeQualityReportV1 | null = null,
-      self: Observed32Self | null = null,
-      strain: Awaited<ReturnType<typeof evaluateObserved32Strain>> | null = null;
-    const failures: { stage: string; detail: string }[] = [];
+      throw new Error('Observed32 raw postgate byte binding drifted.');
+    let selectedPostgate = rawPostgate;
+    let selectedFinal4 = final.positions;
+    let correction: Awaited<ReturnType<typeof correctObserved32StaticCarriers>> | null = null;
+    let rawStateAudit: ReturnType<typeof auditBetaSkirtObserved32StaticCarrierStateV1> | null =
+      null;
+    let strain: Awaited<ReturnType<typeof evaluateObserved32Strain>> | null = null;
+    const failures = [...rawPostgate.failures];
     const failed = (stage: string, e: unknown) => {
       current();
       failures.push({ stage, detail: e instanceof Error ? e.message : 'Diagnostic failed.' });
     };
     try {
-      quality = evaluateBetaSkirtCoherentEnvelopeQualityV1({
-        sourcePositionsM: prepared.sourcePositions3M,
-        sourceTriangles: prepared.triangles,
-        candidatePositionsM: final3,
-        candidateTriangles: prepared.triangles,
+      if (!rawPostgate.self) throw new Error('Raw self oracle epsilon unavailable.');
+      rawStateAudit = auditBetaSkirtObserved32StaticCarrierStateV1({
+        initialPositionsXYZW: prepared.physical,
+        rawCurrentPositionsXYZW: final.positions,
+        rawPreviousPositionsXYZW: rawPrevious,
+        candidateCurrentPositionsXYZW: final.positions,
+        candidatePreviousPositionsXYZW: rawPrevious,
+        pinnedVertexIds: prepared.pins,
+        seamVertexPairs: prepared.seamPairs,
+        epsilonM: rawPostgate.self.oracle.epsilonM,
       });
       current();
+      if (!rawStateAudit.passed) throw new Error(rawStateAudit.blockers.join('; '));
     } catch (e) {
-      failed('quality', e);
-    }
-    try {
-      collision = await evaluateBetaSkirtRenderedBodyCollisionDiagnosticV2(collisionInput);
-      current();
-      const collisionSha =
-        await computeBetaSkirtRenderedBodyTerminalCollisionReportSha256V42(collision);
-      current();
-      signed = await refreshBetaSkirtRenderedBodySignedVertexContactsV42({
-        extractionRound: 0,
-        collisionInput,
-        terminalCollisionReport: collision,
-        terminalReceiptBinding: {
-          collisionInputSha256: collision.contentFingerprintSha256,
-          terminalCollisionReportSha256: collisionSha,
-          collisionPolicyContentSha256:
-            BETA_SKIRT_RENDERED_BODY_COLLISION_POLICY_IDENTITY_V2.policyContentSha256,
-        },
-      });
-      current();
-    } catch (e) {
-      failed('actual-body', e);
-    }
-    try {
-      self = await evaluateObserved32Self(prepared, final3, final.positions, current);
-      current();
-    } catch (e) {
-      failed('self-orientation', e);
-    }
-    // Solver device/session is already cleaned before the existing bounded strain GPU pass.
-    try {
-      strain = await evaluateObserved32Strain(
-        canvas,
-        source,
-        final.positions,
-        { ...options, signal: controller.signal },
-        current,
-      );
-      current();
-    } catch (e) {
-      failed('strain', e);
+      failed('raw-current-previous-state', e);
     }
     const contactCap =
       positiveFloatFromBits(final.contactDiagnostics[4]!) >=
       Math.fround(CONTACT_MAXIMUM_CORRECTION_M);
-    const bodyClear =
-      !!collision &&
-      collision.status === 'signed-clearance-measured' &&
-      collision.claims.signedClassificationDefensible &&
-      collision.binding.garmentPositionsSha256 === final3Sha &&
-      collisionReplayRetainsSource(prepared.collisionInput, {
-        ...collisionInput,
-        binding: collision.binding,
-      }) &&
-      collision.intersections.bodySelfIntersectionCount === 0 &&
-      collision.intersections.bodyGarmentTriangleIntersectionCount === 0 &&
-      collision.clearance.penetratingVertexCount === 0 &&
-      collision.clearance.unsafeVertexCount === 0 &&
-      collision.clearance.ambiguousSignVertexCount === 0 &&
-      collision.clearance.minimumSignedClearanceM !== null &&
-      collision.clearance.minimumSignedClearanceM >= EXACT_POSTGATE_MINIMUM_SIGNED_CLEARANCE_M &&
-      signed?.contacts.length === 0;
+    if (
+      !contactCap &&
+      rawStateAudit?.passed &&
+      failures.length === 0 &&
+      rawPostgate.bodyClear &&
+      rawPostgate.quality?.blockers.length === 0 &&
+      (rawPostgate.self?.residualBlockingCount ?? 0) > 0
+    ) {
+      try {
+        correction = await correctObserved32StaticCarriers(
+          prepared,
+          final.positions,
+          rawPrevious,
+          rawPostgate,
+          current,
+          context.fresh,
+        );
+        current();
+        if (correction.accepted) {
+          selectedFinal4 = correction.candidateCurrent;
+          selectedPostgate = correction.candidatePostgate;
+        } else
+          failed(
+            'static-carrier-correction',
+            new Error('Corrected candidate physical or swept-body gate blocked.'),
+          );
+      } catch (e) {
+        failed('static-carrier-correction', e);
+      }
+    }
+    const { collision, signed, quality, self, bodyClear } = selectedPostgate;
+    const final3 = selectedPostgate.candidate3;
+    const final4Sha = selectedPostgate.positions4Sha256,
+      final3Sha = selectedPostgate.positions3Sha256;
+    // The solver is disposed; strain consumes the selected static candidate and immutable V5 rest.
+    await context.fresh();
+    current();
+    try {
+      strain = await evaluateObserved32Strain(
+        canvas,
+        source,
+        selectedFinal4,
+        { ...options, signal: controller.signal },
+        current,
+      );
+      current();
+      if (
+        strain.report.bindings.finalPositionsInvMassKgSha256 !== final4Sha ||
+        strain.report.bindings.normalizedTopologySha256 !== topologySha
+      )
+        throw new Error('Observed32 strain does not bind the selected exact candidate/topology.');
+    } catch (e) {
+      failed('strain', e);
+    }
+    await context.fresh();
+    current();
     const physicalClear =
       !contactCap &&
+      rawStateAudit?.passed === true &&
       bodyClear &&
       quality?.blockers.length === 0 &&
+      quality.triangle?.normalReversalCount === 0 &&
       self?.passed === true &&
       strain?.report.passed === true &&
       failures.length === 0;
     const blockers = [
       ...(contactCap ? ['contact-correction-cap-hit'] : []),
+      ...(!rawStateAudit?.passed ? ['raw-current-previous-state-blocked'] : []),
       ...(!bodyClear ? ['post-frame-actual-body-gate-failed'] : []),
-      ...(quality?.blockers.length !== 0 ? ['post-frame-structural-quality-failed'] : []),
+      ...(quality?.blockers.length !== 0 || quality.triangle?.normalReversalCount !== 0
+        ? ['post-frame-structural-quality-failed']
+        : []),
       ...(!self?.passed ? ['post-frame-self-orientation-blocked'] : []),
       ...(!strain?.report.passed ? ['post-frame-strain-diagnostic-blocked'] : []),
       ...failures.map((f) => 'post-frame-' + f.stage + '-diagnostic-failed'),
+      ...(correction?.accepted
+        ? ['static-carrier-correction-not-qualified-for-solver-continuation']
+        : []),
       'temporal-swept-self-gate-not-evaluated',
       'post-frame-distortion-acceptance-not-established',
       'anisotropic-bend-collapsed-to-conservative-scalar',
@@ -3177,6 +3547,13 @@ export async function runBetaSkirtSavedAnnularObservedPlacement32FrameContactV1(
     const payload = {
       version: BETA_SKIRT_SAVED_ANNULAR_OBSERVED_PLACEMENT_32_FRAME_CONTACT_V1,
       sourceKind: 'saved-annular-observed-placement-v3' as const,
+      bendSolver: {
+        kernel: XPBD_EMBEDDED_SCALAR_BEND_KERNEL_V2,
+        sourceSha256: XPBD_EMBEDDED_SCALAR_BEND_SOURCE_SHA256_V2,
+        stepBound: 'minimum-current-triangle-altitude-divided-by-eight' as const,
+        limitedStepCount: final.bendLimitedStepCount,
+        diagnosticsByteLength: 8 as const,
+      },
       status: physicalClear ? ('diagnostic-completed' as const) : ('diagnostic-blocked' as const),
       bindings: {
         runtimeSourceReportSha256: sourceSha,
@@ -3199,7 +3576,7 @@ export async function runBetaSkirtSavedAnnularObservedPlacement32FrameContactV1(
         expectedFrame16PositionsInvMassKgSha256: expected4,
         expectedFrame16Positions3MSha256: expected3,
         expectedFrame16DiagnosticsSha256: expectedDiag,
-        exactPositionsAnd3724ByteDiagnosticsMatch: true as const,
+        exactPositionsAnd3728ByteDiagnosticsMatch: true as const,
       },
       config: prepared.reportConfig,
       workload: prepared.reportWorkload,
@@ -3223,6 +3600,17 @@ export async function runBetaSkirtSavedAnnularObservedPlacement32FrameContactV1(
       cleanup,
       sourceReport: source.report,
       observed16Report: frame16.report,
+      previewState: correction?.accepted
+        ? ('static-ao-carrier-corrected' as const)
+        : ('raw-gpu' as const),
+      rawGpuOutput: {
+        currentPositionsInvMassKgSha256: rawFinal4Sha,
+        previousPositionsInvMassKgSha256: rawPreviousSha,
+        positions3MSha256: rawFinal3Sha,
+        previousReadbackByteLength: rawPrevious.byteLength,
+        stateAudit: rawStateAudit,
+      },
+      staticCarrierCorrection: correction?.receipt ?? null,
       postgate: {
         collision,
         signedRefresh: signed,
@@ -3238,6 +3626,8 @@ export async function runBetaSkirtSavedAnnularObservedPlacement32FrameContactV1(
         immutableLocalRestRetained: true as const,
         worldPinAndRollbackAnchorsUploaded: true as const,
         bodySourceRebuilt: false as const,
+        staticCorrectionApplied: correction?.accepted === true,
+        solverContinuationQualified: false as const,
         stressPaComputed: false as const,
         runtimeAuthority: false as const,
         fitAuthority: false as const,
@@ -3263,7 +3653,7 @@ export async function runBetaSkirtSavedAnnularObservedPlacement32FrameContactV1(
       projection: {
         report,
         frame16CheckpointPositionsInvMassKg: checkpoint.positions.slice(),
-        finalPositionsInvMassKg: final.positions.slice(),
+        finalPositionsInvMassKg: selectedFinal4.slice(),
         finalPositions3M: final3.slice(),
         normalizedTriangles: prepared.triangles.slice(),
         strainValues: strain?.values.slice() ?? null,
