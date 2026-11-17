@@ -1047,7 +1047,7 @@ describe('mounted exact annotation Save and remount', () => {
       expect(button).toBeTruthy();
       return button!;
     }
-    async function typeCallout(text: string) {
+    async function renderEditor() {
       const props = visitMountedTree(
         control.output(),
         (props) => !!props.source && !!props.onDraftChange,
@@ -1055,6 +1055,30 @@ describe('mounted exact annotation Save and remount', () => {
       await editor.render(
         props as Parameters<typeof PatternImportDxfPhaseEExactNTopologyAnnotationEditorV1>[0],
       );
+    }
+    async function addLineMeasurement() {
+      await renderEditor();
+      const tool = visitMountedTree(editor.output(), (props) => props.children === 'Line');
+      expect(tool).toBeTruthy();
+      await act(async () => (tool!.onClick as () => void)());
+      for (const vertexId of ['vertex:0:front:0', 'vertex:0:front:1']) {
+        const viewport = visitMountedTree(editor.output(), (props) => !!props.onPick);
+        expect(viewport).toBeTruthy();
+        const geometry = (viewport!.children as (props: { unit: number }) => ReactNode)({
+          unit: 1,
+        });
+        const vertex = visitMountedTree(
+          geometry,
+          (props) => props['data-exact-n-topology-vertex'] === vertexId,
+        );
+        expect(vertex).toBeTruthy();
+        await act(async () =>
+          (viewport!.onPick as (key: string) => void)(vertex!['data-key'] as string),
+        );
+      }
+    }
+    async function typeCallout(text: string) {
+      await renderEditor();
       const input = visitMountedTree(
         editor.output(),
         (props) => props['aria-label'] === 'Annotation callout 1 text',
@@ -1065,6 +1089,15 @@ describe('mounted exact annotation Save and remount', () => {
           target: { value: text },
         }),
       );
+    }
+    async function deleteAnnotation(kind: 'measurement' | 'callout') {
+      await renderEditor();
+      const button = visitMountedTree(
+        editor.output(),
+        (props) => props['aria-label'] === `Delete annotation ${kind} 1`,
+      );
+      expect(button).toBeTruthy();
+      await act(async () => (button!.onClick as () => void)());
     }
     await route.render(routeProps);
     await act(async () => {
@@ -1091,16 +1124,19 @@ describe('mounted exact annotation Save and remount', () => {
       editor,
       desktopOf,
       button,
+      addLineMeasurement,
+      deleteAnnotation,
       typeCallout,
     };
   }
 
   it.each(['v6', 'v7'] as const)(
-    'saves an edited %s callout explicitly and restores it under a freshly rebuilt exact owner',
+    'saves %s measurements and callouts explicitly and restores them under a freshly rebuilt exact owner',
     async (version) => {
       const view = await mountedFixture(version);
       expect(view.button('Save annotations').disabled).toBe(true);
       await view.typeCallout('Filo di controllo');
+      await view.addLineMeasurement();
       expect(view.button('Save annotations').disabled).toBe(false);
       expect(view.put).not.toHaveBeenCalled();
       const click = view.button('Save annotations').onClick as () => void;
@@ -1148,10 +1184,53 @@ describe('mounted exact annotation Save and remount', () => {
       const markup = renderToStaticMarkup(desktop);
       expect(markup).toContain('Filo di controllo');
       expect(markup).toContain('data-draft-cad-measurement="point"');
+      expect(markup).toContain('data-draft-cad-measurement="line"');
+      expect(markup).toContain('14.1 mm');
       expect(markup).toContain('aria-label="Show callouts" aria-pressed="true"');
       expect(view.put).toHaveBeenCalledTimes(1);
     },
   );
+
+  it('deletes both saved annotations from V7 through Save and a fresh exact remount', async () => {
+    const view = await mountedFixture('v7');
+    await view.deleteAnnotation('measurement');
+    await view.deleteAnnotation('callout');
+    expect(view.put).not.toHaveBeenCalled();
+    expect(view.desktopOf(view.route.output()).props.savedAnnotations).toMatchObject({
+      measurements: [{ id: 'measurement:1' }],
+      callouts: [{ id: 'callout:1' }],
+    });
+    const click = view.button('Save annotations').onClick as () => void;
+    await act(async () => {
+      click();
+      await view.save.mock.results[0].value;
+    });
+    expect(view.put).toHaveBeenCalledTimes(1);
+    expect(view.desktopOf(view.route.output()).props.savedAnnotations).toEqual({
+      measurements: [],
+      callouts: [],
+    });
+    const stored = outer!;
+    const before = await unwrapAnnotationSaveFixture('v7', view.current);
+    const after = await unwrapAnnotationSaveFixture('v7', stored);
+    expect(after.exactV4).toEqual(before.exactV4);
+    expect(after.arrangement).toEqual(before.arrangement);
+    expect(after.physical).toEqual(before.physical);
+    await view.editor.unmount();
+    await view.control.unmount();
+    await view.route.unmount();
+    const session = await openExactAnnotationFixture(view.storage, 'v7', stored);
+    const fresh = mountAnnotationFixtureView(PatternImportDxfProductExactNSeamProductionMountV2);
+    await fresh.render({ ...view.routeProps, session });
+    await act(async () => {
+      await view.read.mock.results.at(-1)!.value;
+    });
+    const markup = renderToStaticMarkup(view.desktopOf(fresh.output()));
+    expect(markup).toContain('aria-label="Edit annotations"');
+    expect(markup).not.toContain('aria-label="Show callouts"');
+    expect(markup).not.toContain('aria-label="Show measurements"');
+    expect(view.put).toHaveBeenCalledTimes(1);
+  });
 
   it('retains the local draft on a stale captured digest and reloads the concurrent V7 edit without a second PUT', async () => {
     const view = await mountedFixture('v7');
