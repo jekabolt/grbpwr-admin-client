@@ -21,10 +21,6 @@ import {
   type DxfGarmentPhysicalInitializationProjectionResultV1,
 } from 'lib/cloth/domain/dxf-garment-physical-initialization-v1';
 import {
-  buildGarmentMaterialRunPlanV1,
-  GARMENT_MATERIAL_RUN_PLAN_V1,
-} from 'lib/cloth/runtime/webgpu/garment-material-run-plan-v1';
-import {
   inspectOwnedActiveXpbdDeviceLeaseV1,
   type XpbdDeviceLease,
 } from 'lib/cloth/runtime/webgpu/xpbd-device-session';
@@ -35,14 +31,9 @@ import {
   runCurrentSavedModelGenericObserved32V1,
   type CurrentSavedModelGenericObservedReplayRequestV1,
 } from 'components/managers/models/components/saved-model-displayed-triangle-body-session-v2';
-import {
-  DXF_GARMENT_OBSERVED_WEBGPU_REPLAY_V1,
-  DXF_GARMENT_OBSERVED_WEBGPU_REPLAY_PROFILE_V1,
-  getDxfGarmentObservedWebgpuReplayLifetimeV1,
-  disposeDxfGarmentObservedWebgpuReplayV1,
-  projectDxfGarmentObservedWebgpuRenderV1,
-  type DxfGarmentObservedWebgpuReplayOwnerV1,
-  type DxfGarmentObservedWebgpuReplayReportV1,
+import type {
+  DxfGarmentObservedWebgpuReplayOwnerV1,
+  DxfGarmentObservedWebgpuReplayReportV1,
 } from './dxf-garment-observed-webgpu-replay-v1';
 
 import {
@@ -104,6 +95,7 @@ export const SAVED_GENERIC_OBSERVED_DURABLE_ADMISSION_V1 = Object.freeze({
   requiredIntegration:
     'TABLE fixed fresh durable graph/physical-initialization receipt reader; complete post-save native/source replay',
 });
+type ReplayApi = typeof import('./dxf-garment-observed-webgpu-replay-v1');
 type Preview = Awaited<
   ReturnType<
     (typeof import('./dxf-garment-observed-strain-heatmap-preview-v1'))['createDxfGarmentObservedStrainHeatmapPreviewV1']
@@ -401,6 +393,7 @@ export function createSavedGenericObservedPhysicalHostV1(
     seed = 0,
     latest: SavedFullAssemblyCompileResultV1 | null = null;
   let initialization: DxfGarmentPhysicalInitializationProjectionResultV1 | null = null;
+  let replayApi: ReplayApi | null = null;
   let frame16: DxfGarmentObservedWebgpuReplayOwnerV1 | null = null,
     frame32: DxfGarmentObservedWebgpuReplayOwnerV1 | null = null,
     lease16: XpbdDeviceLease | null = null;
@@ -454,7 +447,7 @@ export function createSavedGenericObservedPhysicalHostV1(
     if (!owner) return;
     childUnlinks.get(owner)?.();
     childUnlinks.delete(owner);
-    disposeDxfGarmentObservedWebgpuReplayV1(owner);
+    replayApi?.disposeDxfGarmentObservedWebgpuReplayV1(owner);
   };
   const releaseFrames = () => {
     const a = frame32,
@@ -467,8 +460,8 @@ export function createSavedGenericObservedPhysicalHostV1(
     try {
       releasePreview();
     } finally {
-      if (a) disposeDxfGarmentObservedWebgpuReplayV1(a);
-      if (b) disposeDxfGarmentObservedWebgpuReplayV1(b);
+      if (a) replayApi?.disposeDxfGarmentObservedWebgpuReplayV1(a);
+      if (b) replayApi?.disposeDxfGarmentObservedWebgpuReplayV1(b);
     }
   };
   const check = (signal?: AbortSignal, expectedEpoch = epoch) => {
@@ -643,7 +636,7 @@ export function createSavedGenericObservedPhysicalHostV1(
       throw new Error('Explicit initialization targets a different current body.');
     return value;
   };
-  async function prepare(signal: AbortSignal, current: () => void) {
+  async function prepare(signal: AbortSignal, current: () => void, replay: ReplayApi) {
     if (!initialization) throw new Error('Explicit initialization is not bound.');
     const old = initialization,
       { value, assemblySnapshot } = await fresh(signal, current);
@@ -667,6 +660,10 @@ export function createSavedGenericObservedPhysicalHostV1(
       throw new Error('Explicit placement changed or is not sealed.');
     await matchTarget(projected.document, signal, current);
     const placed = projected.placementResult.artifact;
+    const { buildGarmentMaterialRunPlanV1, GARMENT_MATERIAL_RUN_PLAN_V1 } = await import(
+      'lib/cloth/runtime/webgpu/garment-material-run-plan-v1'
+    );
+    current();
     const planned = await buildGarmentMaterialRunPlanV1(
       {
         schemaVersion: GARMENT_MATERIAL_RUN_PLAN_V1,
@@ -684,8 +681,8 @@ export function createSavedGenericObservedPhysicalHostV1(
     return {
       projected,
       request: {
-        schemaVersion: DXF_GARMENT_OBSERVED_WEBGPU_REPLAY_V1,
-        profile: DXF_GARMENT_OBSERVED_WEBGPU_REPLAY_PROFILE_V1,
+        schemaVersion: replay.DXF_GARMENT_OBSERVED_WEBGPU_REPLAY_V1,
+        profile: replay.DXF_GARMENT_OBSERVED_WEBGPU_REPLAY_PROFILE_V1,
         placementRequest: projected.placementRequest,
         hostCompileGeneration: sourceGeneration,
         parameters: SAVED_GENERIC_OBSERVED_NUMERIC_PROFILE_V1.parameters,
@@ -701,7 +698,7 @@ export function createSavedGenericObservedPhysicalHostV1(
     };
   }
   const frameLifetime = (owner: DxfGarmentObservedWebgpuReplayOwnerV1, current: () => void) => {
-    const lifetime = getDxfGarmentObservedWebgpuReplayLifetimeV1(owner);
+    const lifetime = replayApi?.getDxfGarmentObservedWebgpuReplayLifetimeV1(owner);
     current();
     if (!lifetime) throw new Error('Frame lifetime expired.');
     checkSignal(lifetime);
@@ -752,7 +749,10 @@ export function createSavedGenericObservedPhysicalHostV1(
           detail: null,
         });
         current();
-        const prepared = await prepare(s, current);
+        const replay = replayApi ?? (await import('./dxf-garment-observed-webgpu-replay-v1'));
+        current();
+        replayApi = replay;
+        const prepared = await prepare(s, current, replay);
         current();
         const result =
           frame === 16
@@ -821,7 +821,7 @@ export function createSavedGenericObservedPhysicalHostV1(
           frameLifetime(frame === 16 ? frame16! : frame32!, current);
           return { ok: true as const, report: result.report, claims: CLAIMS };
         } finally {
-          if (child) disposeDxfGarmentObservedWebgpuReplayV1(child);
+          if (child) replay.disposeDxfGarmentObservedWebgpuReplayV1(child);
         }
       });
     } catch (e) {
@@ -1228,12 +1228,12 @@ export function createSavedGenericObservedPhysicalHostV1(
       try {
         return await work('physical', signal, async (s, current) => {
           const owner = frame32 ?? frame16;
-          if (!owner || !initialization) throw new Error('No current numeric frame.');
+          if (!owner || !initialization || !replayApi) throw new Error('No current numeric frame.');
           accepted = true;
           const initial = initialization;
           await fresh(s, current);
           await matchTarget(initialization.document, s, current);
-          const projection = await projectDxfGarmentObservedWebgpuRenderV1(owner, s);
+          const projection = await replayApi.projectDxfGarmentObservedWebgpuRenderV1(owner, s);
           current();
           await fresh(s, current);
           current();
