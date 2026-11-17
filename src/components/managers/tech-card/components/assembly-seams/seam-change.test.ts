@@ -20,7 +20,7 @@ import {
   type SeamAdoption,
   type SeamFormBridge,
 } from './seam-form-bridge';
-import { hydrateSeams, resetSeams, useSeamsStore } from './seams-store';
+import { hydrateSeams, resetSeams, rowsOf, useSeamsStore } from './seams-store';
 
 const CARD = 6;
 const [a, b, c] = [...CARD6_SEAMS.values()];
@@ -426,6 +426,36 @@ describe('lock_version_moved', () => {
     });
     expect(call).not.toHaveBeenCalled();
     expect(f.log).toEqual(['hold', 'release']);
+  });
+
+  it('validates the existing saved seam while its own replacement is optimistic', async () => {
+    const f = fakeBridge();
+    const original = useSeamsStore.getState().server[0]!;
+    const replacement = { ...original, anchoredSize: 'XL' };
+    const call = vi.fn(async () =>
+      reply(8, [replacement], [{ operationNumber: 10, seamKeys: [original.seamKey] }]),
+    );
+    const result = await runSeamChange(
+      CARD,
+      { upsert: [replacement], link: [{ step, seamKey: original.seamKey }] },
+      {
+        verb: 'decision',
+        retryLockMoved: false,
+        beforeRequest: () => {
+          const state = useSeamsStore.getState();
+          expect(rowsOf(state)[0]?.anchoredSize).toBe('XL');
+          const committed = rowsOf(state, original.seamKey);
+          return committed[0] === original ? null : 'the captured seam moved';
+        },
+      },
+      depsOf(f.bridge, call),
+    );
+    expect(call).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({ ok: true, lockVersion: 8 });
+    expect(useSeamsStore.getState().server[0]).toMatchObject({
+      seamKey: original.seamKey,
+      anchoredSize: 'XL',
+    });
   });
 
   it('a change given as a function is built again for the retry, after the read', async () => {

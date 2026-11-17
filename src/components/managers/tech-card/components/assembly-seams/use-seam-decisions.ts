@@ -134,8 +134,10 @@ export type StrictSeamAcceptGuardResult =
   | Readonly<{ ok: false; why: string }>;
 
 export type StrictSeamAcceptGuard = Readonly<{
-  /** Exact saved-card version captured together with the empty target operation. */
+  /** Exact saved-card version captured with the target operation. */
   expectedLockVersion: number;
+  /** An existing seam edit keeps its persisted identity. */
+  expectedExistingSeamKey?: string;
   /** Re-check the live selected operation synchronously at the final request boundary. */
   validate: () => StrictSeamAcceptGuardResult;
 }>;
@@ -472,7 +474,19 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
           'The open tech card changed before the exact link write started.',
           'not-attempted',
         );
-      const [row] = reuseExactKeys([row0], rowsOf(useSeamsStore.getState()));
+      const seamState = useSeamsStore.getState();
+      const existingKey = guard?.expectedExistingSeamKey;
+      if (
+        existingKey &&
+        (row0.seamKey !== existingKey ||
+          seamState.server.filter(({ seamKey }) => seamKey === existingKey).length !== 1)
+      )
+        return strictUpsertBlocked(
+          'write-failed',
+          'The existing exact seam is no longer uniquely saved on this card.',
+          'not-attempted',
+        );
+      const [row] = existingKey ? [row0] : reuseExactKeys([row0], rowsOf(seamState));
       const result = await change(
         { upsert: [row], link: [{ step, seamKey: row.seamKey }] },
         {

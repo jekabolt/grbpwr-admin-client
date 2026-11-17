@@ -8813,7 +8813,7 @@ export function OperationsField({
               const revalidate = () =>
                 revalidatePatternImportDxfPhaseEZeroConnectExistingOperationPendingV1(pending, {
                   techCardId,
-                  selectedIndex,
+                  selectedIndex: seenRows.current.open,
                   liveOperations: (getValues('operations') ?? []) as OperationFormValue[],
                   savedCard,
                   seamWriterCardId: stepSeams.cardId,
@@ -8882,6 +8882,11 @@ export function OperationsField({
                         {
                           expectedLockVersion: pending.capturedCardLockVersion,
                           validate: () => {
+                            if (
+                              zeroConnectExistingOperationPendingRef.current !== pending ||
+                              frozenRef.current
+                            )
+                              return { ok: false as const, why: 'The exact connection changed.' };
                             const late = revalidate();
                             return late.ok
                               ? { ok: true as const }
@@ -9013,19 +9018,21 @@ export function OperationsField({
                   code: 'existing-linked-n1-finalize-blocked',
                   detail: 'The saved pattern metadata writer is unavailable.',
                 });
-              const revalidate = () =>
-                revalidatePatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1(pending, {
-                  techCardId,
-                  selectedIndex,
-                  liveOperations: (getValues('operations') ?? []) as OperationFormValue[],
-                  savedCard,
-                  currentRows: [
-                    ...rowsOf(useSeamsStore.getState()),
-                    ...posesOf(useSeamsStore.getState()),
-                  ],
-                  seamWriterCardId: stepSeams.cardId,
-                  seamWriterLockVersion: useSeamsStore.getState().serverVersion,
-                });
+              const revalidate = (committedSeamKey?: string) => {
+                const seamState = useSeamsStore.getState();
+                return revalidatePatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1(
+                  pending,
+                  {
+                    techCardId,
+                    selectedIndex: seenRows.current.open,
+                    liveOperations: (getValues('operations') ?? []) as OperationFormValue[],
+                    savedCard,
+                    currentRows: [...rowsOf(seamState, committedSeamKey), ...posesOf(seamState)],
+                    seamWriterCardId: stepSeams.cardId,
+                    seamWriterLockVersion: seamState.serverVersion,
+                  },
+                );
+              };
               const prepared = preparePatternImportDxfPhaseEZeroConnectExistingLinkedN1RebindV1(
                 pending,
                 direction,
@@ -9086,13 +9093,14 @@ export function OperationsField({
                         { historyKey: pending.target.historyKey },
                         {
                           expectedLockVersion: pending.target.capturedCardLockVersion,
+                          expectedExistingSeamKey: pending.target.seamKey,
                           validate: () => {
                             if (
                               zeroConnectExistingLinkedN1PendingRef.current !== pending ||
                               frozenRef.current
                             )
                               return { ok: false as const, why: 'The exact connection changed.' };
-                            const late = revalidate();
+                            const late = revalidate(pending.target.seamKey);
                             return late.ok
                               ? { ok: true as const }
                               : { ok: false as const, why: late.blocker.detail };

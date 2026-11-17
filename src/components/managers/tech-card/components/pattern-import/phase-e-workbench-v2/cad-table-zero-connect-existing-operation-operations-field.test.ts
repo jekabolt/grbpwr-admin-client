@@ -96,7 +96,10 @@ describe('existing linked one-physical-seam OperationsField owner', () => {
 
     expect(owner).toContain('stepSeams.writes.acceptSeamStrict(');
     expect(owner).toContain('expectedLockVersion: pending.target.capturedCardLockVersion');
-    expect(owner).toContain('const late = revalidate();');
+    expect(owner).toContain('expectedExistingSeamKey: pending.target.seamKey');
+    expect(owner).toContain('const late = revalidate(pending.target.seamKey);');
+    expect(owner).toContain('rowsOf(seamState, committedSeamKey)');
+    expect(owner).toContain('selectedIndex: seenRows.current.open');
     expect(owner).toContain('verifyPatternImportDxfPhaseEZeroConnectExistingLinkedN1ReadbackV1');
     expect(owner).toContain("accepted.outcome === 'not-attempted'");
     expect(owner).not.toContain('append(');
