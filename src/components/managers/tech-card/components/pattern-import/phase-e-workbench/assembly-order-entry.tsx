@@ -145,28 +145,57 @@ export function shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
   savedProjectionBlockerCode,
   selectedSeamKeys,
   savedOrderedSeamKeys,
+  exactSavedEmptyOperation,
 }: Readonly<{
   workbenchOpen: boolean;
   exactNSessionAvailable: boolean;
   savedProjectionBlockerCode: string | null;
   selectedSeamKeys: readonly string[];
   savedOrderedSeamKeys: readonly string[] | null;
+  exactSavedEmptyOperation: boolean;
 }>): boolean {
   const exactSavedLegacyN1 =
     savedProjectionBlockerCode === null &&
     selectedSeamKeys.length === 1 &&
     savedOrderedSeamKeys?.length === 1 &&
     selectedSeamKeys[0] === savedOrderedSeamKeys[0];
-  return workbenchOpen && !exactNSessionAvailable && exactSavedLegacyN1;
+  const exactSavedEmptyFallback =
+    savedProjectionBlockerCode === 'saved-operation-not-two-seam' &&
+    exactSavedEmptyOperation &&
+    selectedSeamKeys.length === 0 &&
+    savedOrderedSeamKeys === null;
+  return (
+    workbenchOpen && !exactNSessionAvailable && (exactSavedLegacyN1 || exactSavedEmptyFallback)
+  );
 }
 
-const LEGACY_N1_REBUILD_ONLY_HANDOFF: PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1 =
+export function isPatternImportDxfPhaseEExactSavedEmptyOperationV1({
+  liveOperationNumber,
+  liveSeamKeys,
+  savedOperations,
+}: Readonly<{
+  liveOperationNumber: number;
+  liveSeamKeys: readonly string[];
+  savedOperations: readonly Readonly<{
+    operationNumber?: number;
+    seamKeys?: readonly string[];
+  }>[];
+}>): boolean {
+  const matches = savedOperations.filter(
+    ({ operationNumber }) => operationNumber === liveOperationNumber,
+  );
+  return (
+    matches.length === 1 && liveSeamKeys.length === 0 && (matches[0].seamKeys ?? []).length === 0
+  );
+}
+
+const EXISTING_OPERATION_REBUILD_ONLY_HANDOFF: PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1 =
   Object.freeze({
     status: 'unavailable' as const,
     blocker: Object.freeze({
       code: 'zero-connect-authoring-write-refused' as const,
       detail:
-        'Direct Connect cannot modify an existing legacy one-seam operation safely. Remove that operation and rebuild it from the 2D table.',
+        'Direct Connect cannot modify this existing operation safely. Remove that operation and rebuild it from the 2D table.',
     }),
   });
 
@@ -1469,6 +1498,15 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
     [selected?.seamKeys],
   );
   const selectedOperationNumber = selected?.operationNumber ?? 0;
+  const exactSavedEmptyOperation = useMemo(() => {
+    const currentSavedCard = savedCard.data;
+    if (!currentSavedCard || currentSavedCard.id !== techCardId || !selected) return false;
+    return isPatternImportDxfPhaseEExactSavedEmptyOperationV1({
+      liveOperationNumber: selected.operationNumber ?? 0,
+      liveSeamKeys: selected.seamKeys ?? [],
+      savedOperations: currentSavedCard.techCard?.operations ?? [],
+    });
+  }, [savedCard.data, selected, techCardId]);
   const stitchVisual = useMemo(
     () =>
       selected
@@ -2016,6 +2054,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
     exactNSessionAvailable: exactNBoundarySession !== null,
     selectedSeamKeys,
     savedOrderedSeamKeys: savedProjection.ok ? savedProjection.orderedSeamKeys : null,
+    exactSavedEmptyOperation,
     savedProjectionBlockerCode: savedProjection.ok
       ? null
       : savedProjection.blockers[0]?.code ?? null,
@@ -2044,13 +2083,18 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
   }, [entryRoute, onOpenChange, workbenchRequested]);
   if (!source || !selected) return null;
   if (savedBrowseFallback) {
+    const savedEmptyOperation =
+      exactSavedEmptyOperation &&
+      !savedProjection.ok &&
+      savedProjection.blockers[0]?.code === 'saved-operation-not-two-seam';
     const fallbackResult: PatternImportDxfPhaseECadTableDraftOperationSessionBridgeResultV1 = {
       ok: false,
       plan: null,
       blocker: {
         code: 'exact-connection-incomplete',
-        detail:
-          'This legacy one-seam operation is available for inspection only. Remove it and rebuild it from the 2D table before using Direct Connect.',
+        detail: savedEmptyOperation
+          ? 'This empty saved operation is available for inspection only. Remove it and rebuild it from the 2D table before using Direct Connect.'
+          : 'This legacy one-seam operation is available for inspection only. Remove it and rebuild it from the 2D table before using Direct Connect.',
         operationNumber: source.selectedOperationNumber,
         processKind: 'connect',
       },
@@ -2059,16 +2103,23 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
       <PatternImportDxfPhaseECadTableZeroOperationProductionMountV1
         techCardId={techCardId}
         physicalHost={physicalHost}
-        zeroConnectAuthoringHandoff={LEGACY_N1_REBUILD_ONLY_HANDOFF}
+        zeroConnectAuthoringHandoff={EXISTING_OPERATION_REBUILD_ONLY_HANDOFF}
         disabled={frozen}
         selection={{ operationNumber: source.selectedOperationNumber }}
         defaultOperationsMode='docked'
         operationsPanel={
           <>
-            <CalloutBox tone='note' className='mb-2' data-legacy-n1-rebuild-required=''>
+            <CalloutBox
+              tone='note'
+              className='mb-2'
+              data-existing-operation-rebuild-required=''
+              data-legacy-n1-rebuild-required={savedEmptyOperation ? undefined : ''}
+              data-empty-operation-rebuild-required={savedEmptyOperation ? '' : undefined}
+            >
               <Text component='p' size='micro'>
-                Direct Connect is disabled for this existing legacy one-seam operation. Remove the
-                operation and rebuild it from the 2D table to create a durable exact connection.
+                {savedEmptyOperation
+                  ? 'Direct Connect is disabled for this existing empty operation. Remove the operation and rebuild it from the 2D table to create a durable exact connection.'
+                  : 'Direct Connect is disabled for this existing legacy one-seam operation. Remove the operation and rebuild it from the 2D table to create a durable exact connection.'}
               </Text>
             </CalloutBox>
             {durableReloadBlocker ? (

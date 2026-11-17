@@ -257,20 +257,25 @@ describe('V1 selected physical source handoff (actual source fragments, no physi
     expect(matches(['seam-b', 'seam-a'], ['seam-a', 'seam-b'])).toBe(false);
   });
 
-  it('mounts legacy N1 with a refusal-only handoff that cannot append an AO row or write a seam', () => {
+  it('mounts an incomplete existing operation with a refusal-only handoff that cannot append an AO row or write a seam', () => {
     const fallbackMount = elements(
       'PatternImportDxfPhaseECadTableZeroOperationProductionMountV1',
     )[0];
     expect(attribute(fallbackMount, 'zeroConnectAuthoringHandoff')).toBe(
-      'LEGACY_N1_REBUILD_ONLY_HANDOFF',
+      'EXISTING_OPERATION_REBUILD_ONLY_HANDOFF',
     );
-    const expression = variable('LEGACY_N1_REBUILD_ONLY_HANDOFF').getText(tree);
+    const expression = variable('EXISTING_OPERATION_REBUILD_ONLY_HANDOFF').getText(tree);
     expect(expression).not.toMatch(/ingest|append|seamWrite|zeroConnectAuthoringHandoff/u);
     expect(evaluate<Record<string, unknown>>(expression)).toMatchObject({
       status: 'unavailable',
       blocker: { code: 'zero-connect-authoring-write-refused' },
     });
-    expect(tree.getFullText()).toContain("data-legacy-n1-rebuild-required=''");
+    expect(tree.getFullText()).toContain(
+      "data-legacy-n1-rebuild-required={savedEmptyOperation ? undefined : ''}",
+    );
+    expect(tree.getFullText()).toContain(
+      "data-empty-operation-rebuild-required={savedEmptyOperation ? '' : undefined}",
+    );
     expect(zeroConnectCanvasSource).toContain(
       "const connectDisabled = disabled || zeroConnectAuthoringHandoff?.status === 'unavailable';",
     );
