@@ -320,8 +320,11 @@ describe('measurement open-reference beta shape runtime v1', () => {
     expect(result.limbStatus).toBe('unrepresented');
     expect(result.chestShoulderDiagnostics).toContain('beta-final-global-quality-rollback');
     expect(result.chestShoulderDiagnostics).not.toContain('beta-final-chest-subset-rollback');
+    expect(result.chestShoulderDiagnostics).not.toContain('beta-final-bust-subset-rollback');
     expect(result.status).toBe('partial');
-    expect(createLimbRuntime).toHaveBeenCalledTimes(4);
+    // Original, depth-free, chest halved, chest removed, then (female with under bust) the bust
+    // and its ribcage band dropped before the whole body rolls back.
+    expect(createLimbRuntime).toHaveBeenCalledTimes(5);
   }, 30_000);
 
   it('hard-fails instead of publishing a basis whose self-intersection evaluation cannot complete', async () => {
@@ -788,12 +791,15 @@ describe('measurement open-reference beta shape runtime v1', () => {
       ...result.representedVisualControls,
       ...(result.limitedVisualControls ?? []),
     ]);
-    console.log('DEPTH_SUBSET_ROLLBACK_V1=' + JSON.stringify({
-      status: result.status,
-      represented: result.representedVisualControls,
-      limited: result.limitedVisualControls,
-      diagnostics: result.chestShoulderDiagnostics,
-    }));
+    console.log(
+      'DEPTH_SUBSET_ROLLBACK_V1=' +
+        JSON.stringify({
+          status: result.status,
+          represented: result.representedVisualControls,
+          limited: result.limitedVisualControls,
+          diagnostics: result.chestShoulderDiagnostics,
+        }),
+    );
     expect(result.chestShoulderDiagnostics).toContain('beta-final-depth-subset-rollback');
     expect(result.chestShoulderDiagnostics).not.toContain('beta-final-global-quality-rollback');
     expect(applied.has('shoulderBreadthMm')).toBe(true);
