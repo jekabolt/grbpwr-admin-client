@@ -12,6 +12,7 @@ import {
   type MeasurementOpenReferenceDisplayQualityGateResultV1,
 } from './measurement-open-reference-display-quality-gate-v1';
 import { measureMeshPlaneSectionPerimetersV1 } from './mesh-plane-section-perimeter-v1';
+import { meshPlaneSectionLoopTapePerimeterMV1 } from './mesh-plane-section-tape-girth-v1';
 
 export const MEASUREMENT_OPEN_REFERENCE_CHEST_SHOULDER_RESEARCH_V1 =
   'measurement-open-reference-chest-shoulder-research/v1' as const;
@@ -144,7 +145,8 @@ export function measureChestShoulderResearchProxyMmV1(options: {
   if (!section.ok || !section.selectedLoop) {
     throw new Error(section.ok ? 'Chest loop selection failed.' : section.errors.join('; '));
   }
-  return section.selectedLoop.perimeterM * 1000;
+  // Typed chest is a tape girth: the hull of the section, not the raw loop.
+  return meshPlaneSectionLoopTapePerimeterMV1(section.selectedLoop) * 1000;
 }
 
 function applyStates(options: {

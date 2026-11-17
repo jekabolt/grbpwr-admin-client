@@ -57,19 +57,24 @@ const maleBasis = parseMakeHumanOpenReferenceBasisV1(
 );
 
 /**
- * ANSUR II subject 12377 (male, the p1 waist of the male pool): stature 1801, biacromial 393,
- * chest 875, waist 725, buttock 867, sleeve outseam 579, crotch height 845 mm. His hip is below
- * the male asset's narrowest endpoint, so the bounded solve stops it short (limited).
+ * ANSUR II subject 20376 (male, about the p0.2 buttock of the male pool): stature 1736,
+ * biacromial 377, chest 918, waist 770, buttock 822, sleeve outseam 605, crotch height 861 mm.
+ * His hip tape is below the male asset's narrowest endpoint (about 828 mm), so the bounded solve
+ * stops it short (limited).
+ *
+ * Re-baselined on purpose (tape-girth lane): the solver now closes the hip on the tape (convex
+ * hull), which is shorter than the raw loop, so the old fixture (subject 12377, buttock 867) is
+ * inside the finite asset and no longer exercises widening. Same assertions, narrower subject.
  */
-const SUBJECT_12377: CanonicalBodyMeasurementsMm = Object.freeze({
+const SUBJECT_20376: CanonicalBodyMeasurementsMm = Object.freeze({
   schemaVersion: CANONICAL_BODY_MEASUREMENTS_VERSION,
-  heightMm: 1801,
-  shoulderBreadthMm: 393,
-  chestCircumferenceMm: 875,
-  waistCircumferenceMm: 725,
-  hipCircumferenceMm: 867,
-  armLengthMm: 579,
-  inseamMm: 845,
+  heightMm: 1736,
+  shoulderBreadthMm: 377,
+  chestCircumferenceMm: 918,
+  waistCircumferenceMm: 770,
+  hipCircumferenceMm: 822,
+  armLengthMm: 605,
+  inseamMm: 861,
 });
 
 function openReferenceOf(measurements: CanonicalBodyMeasurementsMm) {
@@ -86,8 +91,8 @@ function runtimeOf(
 ) {
   return createMeasurementOpenReferenceUniformWaistHipRuntimeV1({
     basis: maleBasis,
-    measurements: SUBJECT_12377,
-    openReference: openReferenceOf(SUBJECT_12377),
+    measurements: SUBJECT_20376,
+    openReference: openReferenceOf(SUBJECT_20376),
     loadBundle: async () => torsoBundle,
     ...extra,
   });
@@ -101,14 +106,14 @@ const coefficientOf = (
 describe('waist/hip solver extrapolation ceiling', () => {
   const modes = createMakeHumanUniformWaistHipModesV1({
     basis: maleBasis,
-    heightMm: SUBJECT_12377.heightMm,
+    heightMm: SUBJECT_20376.heightMm,
     bundle: torsoBundle,
   });
   const solve = (policy?: Parameters<typeof solveOpenReferenceUniformWaistHipV1>[0]['policy']) =>
     solveOpenReferenceUniformWaistHipV1({
       uniformPositionsM: modes.uniformPositionsM,
       triangleIndices: maleBasis.indices,
-      measurements: { waistCircumferenceMm: 725, hipCircumferenceMm: 867 },
+      measurements: { waistCircumferenceMm: 770, hipCircumferenceMm: 822 },
       modes: modes.modes,
       policy,
     });
@@ -170,7 +175,7 @@ describe('waist/hip runtime safe-range widening', () => {
     // Rig anchors follow the extrapolated field: posing keeps joint pivots continuous.
     const posed = await createMeasurementOpenReferenceDisplayPoseRuntimeV1({
       basis: maleBasis,
-      measurements: SUBJECT_12377,
+      measurements: SUBJECT_20376,
       proxyRuntime: widened,
       presetId: 'near-t',
       loadResources: async () => poseResources,
@@ -179,17 +184,19 @@ describe('waist/hip runtime safe-range widening', () => {
   }, 120_000);
 
   it('moves a waist the wider field still cannot reach to the farther endpoint, still limited', async () => {
-    // ANSUR II subject 12744 (male, the p99 waist of the male pool): stature 1747, biacromial 450,
-    // chest 1232, waist 1214, buttock 1128, sleeve outseam 611, crotch height 813 mm.
+    // ANSUR II subject 15127 (male, about the p98.6 waist of the male pool): stature 1798,
+    // biacromial 392, chest 1151, waist 1194, buttock 1086, sleeve outseam 601, crotch height
+    // 855 mm. Re-baselined on purpose (tape-girth lane): the old subject 12744 (buttock 1128) has a
+    // hip tape past the asset too, so it widened both keys; this one keeps the hip in range.
     const subject: CanonicalBodyMeasurementsMm = Object.freeze({
       schemaVersion: CANONICAL_BODY_MEASUREMENTS_VERSION,
-      heightMm: 1747,
-      shoulderBreadthMm: 450,
-      chestCircumferenceMm: 1232,
-      waistCircumferenceMm: 1214,
-      hipCircumferenceMm: 1128,
-      armLengthMm: 611,
-      inseamMm: 813,
+      heightMm: 1798,
+      shoulderBreadthMm: 392,
+      chestCircumferenceMm: 1151,
+      waistCircumferenceMm: 1194,
+      hipCircumferenceMm: 1086,
+      armLengthMm: 601,
+      inseamMm: 855,
     });
     const build = (widenSafeRange: boolean) =>
       createMeasurementOpenReferenceUniformWaistHipRuntimeV1({
@@ -213,7 +220,7 @@ describe('waist/hip runtime safe-range widening', () => {
     expect(
       widened.diagnostics.map(({ measurementKey, code }) => `${measurementKey}:${code}`),
     ).toEqual(['waistCircumferenceMm:target-limited', 'waistCircumferenceMm:range-widened']);
-    // Closer to the 1214 mm target, never past it, and the hip stays on its target.
+    // Closer to the 1194 mm target, never past it, and the hip stays on its target.
     expect(endpointMm(widened)).toBeGreaterThan(endpointMm(bounded) + 50);
     expect(endpointMm(widened)).toBeLessThan(subject.waistCircumferenceMm);
     const hip = widened.modeResults.find((mode) => mode.measurementKey === 'hipCircumferenceMm')!;
@@ -250,7 +257,7 @@ describe('waist/hip runtime safe-range widening', () => {
   it('never consults the gate unless asked, and skips it when nothing is limited', async () => {
     const evaluate = vi.fn();
     await runtimeOf({ evaluateWidenedQualityGate: evaluate });
-    const reachable = { ...SUBJECT_12377, hipCircumferenceMm: 960 };
+    const reachable = { ...SUBJECT_20376, hipCircumferenceMm: 960 };
     const result = await createMeasurementOpenReferenceUniformWaistHipRuntimeV1({
       basis: maleBasis,
       measurements: reachable,
@@ -272,15 +279,15 @@ describe('waist/hip rig anchors past the finite asset', () => {
       basisKind: 'male',
       sourceMinimumY: maleBasis.sourceMinimumY,
       sourceMaximumY: maleBasis.sourceMaximumY,
-      heightMm: SUBJECT_12377.heightMm,
+      heightMm: SUBJECT_20376.heightMm,
       modeResults: [
         {
           measurementKey: 'hipCircumferenceMm',
           direction: 'decrease',
           coefficient,
-          targetMm: 867,
+          targetMm: 822,
           baselineMm: 950,
-          achievedMm: 867,
+          achievedMm: 822,
           residualMm: 0,
           crossTalkMm: 0,
         },

@@ -1176,7 +1176,13 @@ async function exerciseBust(page: import('@playwright/test').Page, basisKind: 'f
   } else {
     expect(`${underBust.applied},${underBust.limited}`).toMatch(/chestCircumferenceMm/u);
     expect(`${wide.applied},${wide.limited}`).toMatch(/chestCircumferenceMm/u);
-    expect(wide.applied).toMatch(/waistCircumferenceMm/u);
+    // Re-baselined with the final tape net (fix(mannequin): tape girths): chest alone keeps the
+    // waist tape on 750, but the typed 720 under bust narrows the male ribcage band down to the
+    // waist station and the final waist tape reads about 746. That waist is limited, not applied;
+    // hip keeps its tape, so it is no whole-body rollback.
+    expect(chest.applied).toMatch(/waistCircumferenceMm/u);
+    expect(wide.limited).toMatch(/waistCircumferenceMm/u);
+    expect(wide.applied).toMatch(/hipCircumferenceMm/u);
   }
   await expect(status).not.toContainText('Preview failed');
 }

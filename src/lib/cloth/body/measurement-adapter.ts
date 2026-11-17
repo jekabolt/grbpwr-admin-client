@@ -134,11 +134,44 @@ export const PROJECT_BODY_MEASUREMENT_ALIASES: CanonicalMeasurementAliasMap = {
   hpsToBustApexMm: ['BODY_MEASUREMENT_NAME_HPS_TO_BUST_APEX'],
 };
 
+/**
+ * ANSUR II (US Army 2012, public domain) biacromial breadth / stature, p0.5 and p99.5 per sex.
+ * Across shoulder scales with stature, so each sex's band is this ratio band over the form's
+ * stature range. Absolute ANSUR breadths (women p0.5 317 mm) are not used: the survey's shortest
+ * woman is 1409 mm tall, so they would reject short customers the form admits.
+ */
+export const ANSUR_II_SHOULDER_BREADTH_PER_STATURE_V1 = Object.freeze({
+  female: Object.freeze({ p0_5: 0.1965, p99_5: 0.2497 }),
+  male: Object.freeze({ p0_5: 0.2109, p99_5: 0.2627 }),
+});
+
+const FORM_STATURE_RANGE_MM = [1300, 2100] as const;
+
+/** Per-sex across-shoulder band (mm): ANSUR ratio band x form stature range, rounded outward. */
+export const ANSUR_II_SHOULDER_BREADTH_BAND_MM_V1 = Object.freeze({
+  female: Object.freeze([
+    Math.floor(ANSUR_II_SHOULDER_BREADTH_PER_STATURE_V1.female.p0_5 * FORM_STATURE_RANGE_MM[0]),
+    Math.ceil(ANSUR_II_SHOULDER_BREADTH_PER_STATURE_V1.female.p99_5 * FORM_STATURE_RANGE_MM[1]),
+  ] as const),
+  male: Object.freeze([
+    Math.floor(ANSUR_II_SHOULDER_BREADTH_PER_STATURE_V1.male.p0_5 * FORM_STATURE_RANGE_MM[0]),
+    Math.ceil(ANSUR_II_SHOULDER_BREADTH_PER_STATURE_V1.male.p99_5 * FORM_STATURE_RANGE_MM[1]),
+  ] as const),
+});
+
 export const CANONICAL_MEASUREMENT_PLAUSIBILITY_MM: Readonly<
   Record<CanonicalMeasurementKey, readonly [minimum: number, maximum: number]>
 > = {
-  heightMm: [1300, 2100],
-  shoulderBreadthMm: [280, 600],
+  heightMm: FORM_STATURE_RANGE_MM,
+  // The adapter has no sex, so the lower bound is the lower of the two ANSUR bands (women, 255).
+  // The upper bound keeps 600: it already admits the men's ANSUR band (552).
+  shoulderBreadthMm: [
+    Math.min(
+      ANSUR_II_SHOULDER_BREADTH_BAND_MM_V1.female[0],
+      ANSUR_II_SHOULDER_BREADTH_BAND_MM_V1.male[0],
+    ),
+    600,
+  ],
   chestCircumferenceMm: [600, 1600],
   underBustCircumferenceMm: [500, 1500],
   waistCircumferenceMm: [500, 1600],

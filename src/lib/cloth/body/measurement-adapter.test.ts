@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   adaptProjectBodyMeasurements,
+  ANSUR_II_SHOULDER_BREADTH_BAND_MM_V1,
   CANONICAL_MEASUREMENT_PLAUSIBILITY_MM,
 } from './measurement-adapter';
 
@@ -150,5 +151,48 @@ describe('measurement adapter canonical neck', () => {
     ]);
     expect(belowBase.ok).toBe(true);
     expect(belowBase.diagnostics).toEqual([]);
+  });
+});
+
+describe('measurement adapter across-shoulder bound (ANSUR II)', () => {
+  const withShoulder = (heightMm: number, shoulderMm: number, chestMm = 920) =>
+    adaptProjectBodyMeasurements(
+      REQUIRED.map((record) =>
+        record.name === 'BODY_MEASUREMENT_NAME_HEIGHT'
+          ? { ...record, valueMm: heightMm }
+          : record.name === 'BODY_MEASUREMENT_NAME_ACROSS_SHOULDER'
+            ? { ...record, valueMm: shoulderMm }
+            : record.name === 'BODY_MEASUREMENT_NAME_CHEST'
+              ? { ...record, valueMm: chestMm }
+              : record,
+      ),
+    );
+
+  it('derives the per-sex bands from the ANSUR ratio band over the form stature range', () => {
+    expect(ANSUR_II_SHOULDER_BREADTH_BAND_MM_V1).toEqual({ female: [255, 525], male: [274, 552] });
+    expect(CANONICAL_MEASUREMENT_PLAUSIBILITY_MM.shoulderBreadthMm).toEqual([255, 600]);
+  });
+
+  it('admits narrow-shouldered women the old 280 mm bound rejected', () => {
+    for (const shoulderMm of [277, 279]) {
+      const result = withShoulder(1675, shoulderMm);
+      expect(result.ok).toBe(true);
+      expect(result.diagnostics.filter(({ severity }) => severity === 'error')).toEqual([]);
+    }
+    expect(withShoulder(1300, 255, 800).ok).toBe(true);
+  });
+
+  it('still rejects across shoulder below the women band', () => {
+    const result = withShoulder(1300, 254, 800);
+    expect(result.ok).toBe(false);
+    expect(result.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'invalid-value',
+          canonicalKey: 'shoulderBreadthMm',
+        }),
+      ]),
+    );
   });
 });

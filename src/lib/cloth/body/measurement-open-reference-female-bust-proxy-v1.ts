@@ -12,6 +12,7 @@ import {
   type MeshPlaneSectionLoopV1,
   type MeshPlaneSectionVec3V1,
 } from './mesh-plane-section-perimeter-v1';
+import { meshPlaneSectionLoopTapePerimeterMV1 } from './mesh-plane-section-tape-girth-v1';
 
 export const MEASUREMENT_OPEN_REFERENCE_FEMALE_BUST_PROXY_V1 =
   'measurement-open-reference-female-bust-proxy/v1' as const;
@@ -290,6 +291,15 @@ function girthMm(options: {
   readonly originM: MeshPlaneSectionVec3V1;
 }): number {
   return selectedLoop(options).perimeterM * 1000;
+}
+
+/** Tape girth: the hull bridges the cleavage the raw loop dips into; the typed bust is a tape. */
+function tapeGirthMm(options: {
+  readonly positionsM: Float32Array;
+  readonly triangleIndices: Uint16Array | Uint32Array;
+  readonly originM: MeshPlaneSectionVec3V1;
+}): number {
+  return meshPlaneSectionLoopTapePerimeterMV1(selectedLoop(options)) * 1000;
 }
 
 /**
@@ -825,7 +835,7 @@ export function solveMeasurementOpenReferenceFemaleBustProxyV1(options: {
       },
     });
   const measureApex = (positionsM: Float32Array) =>
-    girthMm({ positionsM, triangleIndices: sectionTriangles, originM: apexStation.originM });
+    tapeGirthMm({ positionsM, triangleIndices: sectionTriangles, originM: apexStation.originM });
   const measureUnderBust = (positionsM: Float32Array) =>
     girthMm({
       positionsM,

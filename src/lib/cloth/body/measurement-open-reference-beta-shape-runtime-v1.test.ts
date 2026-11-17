@@ -39,6 +39,7 @@ import {
   DEFAULT_MEASUREMENT_SURFACE_SELF_INTERSECTION_POLICY_V1,
   validateMeasurementSurfaceSelfIntersectionV1,
 } from './measurement-surface-self-intersection-v1';
+import { measureMeshHorizontalSectionTapeGirthMmV1 } from './mesh-plane-section-tape-girth-v1';
 
 const torsoBundle = parseMakeHumanTorsoShapeDeltaBundleV1(
   readFileSync(resolve(process.cwd(), 'src/assets/cloth/makehuman-hm08-torso-shape-deltas-v1.bin')),
@@ -344,11 +345,14 @@ describe('measurement open-reference beta shape runtime v1', () => {
 
   // Male rows moved from chest 800/860 when the male chest started solving at the chest point:
   // those inputs no longer trip the initial final gate (800 is now a bounded limit, 860 is
-  // represented), so they could not exercise this rollback. 1150/1200 still trip it.
+  // represented), so they could not exercise this rollback. 1150/1160 still trip it.
+  // 1200 moved to 1160 on purpose (tape-girth lane): with the chest solved to the tape, the
+  // halfway retry for 1170 and above stays unsafe and the chest goes not applied
+  // (`beta-final-target-removed`), so 1160 is the widest male row that still halves.
   it.each([
     ['female', 1_020, 760],
     ['male', 1_150, 760],
-    ['male', 1_200, 760],
+    ['male', 1_160, 760],
     ['neutral', 1_100, 760],
     ['female', 800, undefined],
   ] as const)(
@@ -410,6 +414,44 @@ describe('measurement open-reference beta shape runtime v1', () => {
     },
     60_000,
   );
+
+  // Tape-girth lane: typed chest/waist/hip are tape girths. After every later stage the runtime
+  // re-measures the tape on the final mesh, so a girth a later stage pushed off its typed value is
+  // limited with a reason instead of staying applied.
+  it('limits a girth whose final tape misses the typed value instead of applying it', async () => {
+    const measurements = Object.freeze({
+      ...CANONICAL_MEASUREMENT_SIZE_RECORDS[1].measurements,
+      shoulderBreadthMm: 400,
+      chestCircumferenceMm: 1_150,
+      underBustCircumferenceMm: 760,
+      waistCircumferenceMm: 720,
+    });
+    const current = await fixture('male', measurements);
+    const result = await createMeasurementOpenReferenceBetaShapeRuntimeV1({
+      ...current,
+      loadTorsoBundle: async () => torsoBundle,
+    });
+    const tapeMm = (key: 'waistCircumferenceMm' | 'hipCircumferenceMm') =>
+      measureMeshHorizontalSectionTapeGirthMmV1({
+        positionsM: result.fkProxyRuntime.displayMesh.positions,
+        triangleIndices: result.fkProxyRuntime.displayMesh.indices,
+        originM: current.waistHipRuntime.sectionModes!.find(
+          ({ measurementKey }) => measurementKey === key,
+        )!.stationOriginM,
+      }) ?? Number.NaN;
+
+    expect(Math.abs(tapeMm('waistCircumferenceMm') - 720)).toBeGreaterThan(1);
+    expect(result.representedVisualControls).not.toContain('waistCircumferenceMm');
+    expect(result.limitedVisualControls).toContain('waistCircumferenceMm');
+    expect(result.chestShoulderDiagnostics).toContain(
+      'waistCircumferenceMm:final-tape-girth-limited',
+    );
+    // A girth whose tape still closes keeps its applied status.
+    expect(
+      Math.abs(tapeMm('hipCircumferenceMm') - measurements.hipCircumferenceMm),
+    ).toBeLessThanOrEqual(1);
+    expect(result.representedVisualControls).toContain('hipCircumferenceMm');
+  }, 60_000);
 
   it('uses the measured-base chest retry as not applied when the halfway retry stays unsafe', async () => {
     const measurements = Object.freeze({
@@ -474,8 +516,11 @@ describe('measurement open-reference beta shape runtime v1', () => {
     expect(result.chestShoulderDiagnostics).not.toContain('beta-final-global-quality-rollback');
     expect(result.chestShoulderDiagnostics).not.toContain('beta-final-chest-subset-rollback');
     expect(result.fkProxyRuntime.qualityGate?.safe).toBe(true);
+    // Re-baselined on purpose (tape-girth lane): the bust and waist/hip now close the typed
+    // girth on the tape (convex hull) instead of the raw skin loop, so the body moves; the
+    // test still pins one solve and a byte-stable result.
     expect(positionsSha256).toBe(
-      '49b7abe791a188ac7894c845259433d301cb5c5a399073baaa1a2847b56195da',
+      '53c494e02c892487a0243353947d983d557107b9de5794f85bd0bc9f7794ce62',
     );
   }, 60_000);
 

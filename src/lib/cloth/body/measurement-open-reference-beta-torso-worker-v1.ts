@@ -29,6 +29,7 @@ import {
   solveMeasurementOpenReferenceFemaleTorsoStageV1,
   type MeasurementOpenReferenceFemaleTorsoStageResultV1,
 } from './measurement-open-reference-female-torso-stage-v1';
+import { measureMeshHorizontalSectionTapeGirthMmV1 } from './mesh-plane-section-tape-girth-v1';
 
 export const MEASUREMENT_OPEN_REFERENCE_BETA_TORSO_WORKER_MEASURE_V1 =
   'measurement-open-reference-beta-torso-worker/v1' as const;
@@ -137,7 +138,20 @@ function femaleSectionDriftMm(options: {
   readonly afterM: Float32Array;
   readonly triangleIndices: Uint16Array | Uint32Array;
   readonly originM: readonly [number, number, number];
+  /** The bust is typed and solved as a tape (hull) girth, so its drift is measured as one. */
+  readonly tape?: boolean;
 }): number {
+  if (options.tape) {
+    const tape = (positionsM: Float32Array) =>
+      measureMeshHorizontalSectionTapeGirthMmV1({
+        positionsM,
+        triangleIndices: options.triangleIndices,
+        originM: options.originM,
+      });
+    const before = tape(options.beforeM);
+    const after = tape(options.afterM);
+    return before == null || after == null ? Number.POSITIVE_INFINITY : Math.abs(after - before);
+  }
   try {
     return Math.abs(
       measureFemaleTorsoSectionGirthMmV1({
@@ -164,12 +178,13 @@ function withFemaleDepthRecheck<T extends FemaleCommonFieldsV1>(options: {
   readonly underBustStationOriginM: readonly [number, number, number];
   readonly apexStationOriginM: readonly [number, number, number];
 }): T {
-  const drift = (originM: readonly [number, number, number]) =>
+  const drift = (originM: readonly [number, number, number], tape = false) =>
     femaleSectionDriftMm({
       beforeM: options.beforeM,
       afterM: options.afterM,
       triangleIndices: options.triangleIndices,
       originM,
+      tape,
     });
   const ribcageRepresented = [...options.common.ribcageRepresentedMeasurements];
   const ribcageLimited = [...(options.common.ribcageLimitedMeasurements ?? [])];
@@ -187,7 +202,7 @@ function withFemaleDepthRecheck<T extends FemaleCommonFieldsV1>(options: {
   }
   if (
     chestRepresented.includes('chestCircumferenceMm') &&
-    drift(options.apexStationOriginM) > FEMALE_DEPTH_CHEST_DRIFT_MM
+    drift(options.apexStationOriginM, true) > FEMALE_DEPTH_CHEST_DRIFT_MM
   ) {
     chestRepresented.splice(chestRepresented.indexOf('chestCircumferenceMm'), 1);
     chestLimited.push('chestCircumferenceMm');
