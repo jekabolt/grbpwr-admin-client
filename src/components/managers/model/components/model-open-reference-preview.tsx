@@ -3727,6 +3727,34 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
         </CalloutBox>
       ) : null}
 
+      {workbench && (bodyDisplayMessage || sideSeamCapability || measurementApplicationText) ? (
+        <details
+          className='shrink-0 border-b border-hairline bg-bgColor'
+          data-cad-workbench-model-status=''
+        >
+          <summary className='cursor-pointer px-2 py-1 text-micro font-bold'>
+            Model status{measurementApplicationPartial ? ' · limited measurements' : ''}
+          </summary>
+          <div className='space-y-1 border-t border-hairline px-2 py-1.5'>
+            {bodyDisplayMessage ? (
+              <Text component='p' size='micro' variant='label'>
+                {bodyDisplayMessage}
+              </Text>
+            ) : null}
+            {sideSeamCapability ? (
+              <Text component='p' size='micro' variant='label'>
+                {sideSeamCapability.message}
+              </Text>
+            ) : null}
+            {measurementApplicationText ? (
+              <Text component='p' size='micro' variant='label'>
+                {measurementApplicationText}
+              </Text>
+            ) : null}
+          </div>
+        </details>
+      ) : null}
+
       {!resolution.ok ? (
         <CalloutBox
           tone='warning'
@@ -3756,7 +3784,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
           size='micro'
           variant={bodyDisplayOwnership === 'retained-error' ? 'errorLabel' : 'label'}
           className={
-            headerOwned
+            headerOwned || workbench
               ? 'sr-only'
               : bodyDisplayOwnership === 'retained-error'
                 ? undefined
@@ -3794,7 +3822,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
           component='p'
           size='micro'
           variant='label'
-          className={card || headerOwned ? 'sr-only' : undefined}
+          className={card || headerOwned || workbench ? 'sr-only' : undefined}
           role='status'
           aria-live='polite'
           aria-atomic='true'
@@ -3881,7 +3909,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
               component='p'
               size='micro'
               variant={measurementApplicationPartial ? 'errorLabel' : 'label'}
-              className={card || headerOwned ? 'sr-only' : undefined}
+              className={card || headerOwned || workbench ? 'sr-only' : undefined}
               role={measurementApplicationPartial ? 'alert' : 'status'}
               aria-live='polite'
               data-testid='model-open-reference-measurement-application-status'
@@ -3903,7 +3931,9 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
           <Text
             component='p'
             size='micro'
-            className={editor.minimalViewportUi || bodyDisplayMessage ? 'sr-only' : undefined}
+            className={
+              editor.minimalViewportUi || bodyDisplayMessage || workbench ? 'sr-only' : undefined
+            }
             variant={status === 'error' ? 'errorLabel' : 'label'}
             role={bodyDisplayMessage ? undefined : status === 'error' ? 'alert' : 'status'}
             aria-live={bodyDisplayMessage ? undefined : status === 'error' ? 'assertive' : 'polite'}

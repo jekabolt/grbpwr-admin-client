@@ -1155,15 +1155,17 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
             <CadWorkbenchPhysicalHostPanelV1>{physicalHost.panel}</CadWorkbenchPhysicalHostPanelV1>
           ) : null}
           {stagingBlocked ? (
-            <Text
-              component='p'
-              size='micro'
-              variant='errorLabel'
-              role='alert'
-              className='shrink-0 border-t border-borderColor px-2 py-1'
+            <details
+              className='shrink-0 border-t border-hairline px-2 py-1'
+              data-cad-mannequin-pattern-status='partial'
             >
-              Some saved pattern sets could not be opened. Only the active set is shown.
-            </Text>
+              <summary className='cursor-pointer text-micro text-labelColor'>
+                Pattern display status · active set only
+              </summary>
+              <Text component='p' size='micro' variant='label' className='pt-1'>
+                Some saved pattern sets could not be opened. The active set remains available.
+              </Text>
+            </details>
           ) : null}
         </div>
       )}
