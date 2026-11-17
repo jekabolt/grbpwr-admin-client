@@ -192,6 +192,9 @@ export type ProductionRunCoverageSource =
   // and the two share an article. Silently picking one of the two sources would lie in the very
   // signature the field exists to carry. A CONTRIBUTION is never MIXED — a contribution is one slot.
   | "PRODUCTION_RUN_COVERAGE_SOURCE_MIXED";
+export type TechCardSavedAssemblySnapshotProfile =
+  | "TECH_CARD_SAVED_ASSEMBLY_SNAPSHOT_PROFILE_UNKNOWN"
+  | "TECH_CARD_SAVED_ASSEMBLY_SNAPSHOT_PROFILE_COMPLETE_SOURCE_V1";
 // AccessLevel is the level of access an account has to a section. WRITE implies READ.
 export type AccessLevel =
   | "ACCESS_LEVEL_UNSPECIFIED"
@@ -14939,6 +14942,35 @@ export type GetTechCardSavedAssemblySnapshotRequest = {
   selectedOperationNumber: number | undefined;
   expectedServerAssemblyRevision?: string;
   expectedAssemblyTopologySha256?: string;
+  profile?: TechCardSavedAssemblySnapshotProfile;
+  expectedCompleteSourceSha256?: string;
+};
+
+export type TechCardSavedAssemblySourceAliasV1 = {
+  scopeKey: string | undefined;
+  blockName: string | undefined;
+  pieceLineKey: string | undefined;
+};
+
+// Exact saved source data. Confirmed status, samples, POSE transforms, and missing anchor sizes
+// are persisted facts, not native DXF edge bindings or physical admission.
+export type TechCardSavedAssemblyCompleteSourceV1 = {
+  // Sorted by canonical scope and stable pattern line key. Download URLs are minted separately.
+  rows: TechCardSavedPatternRowIdentity[] | undefined;
+  // Same order as the top-level operations' seam_keys concatenated in operation order.
+  ownedSeams: common_TechCardSeam[] | undefined;
+  // Sorted by scope and stored block name. A scope can have several sheets.
+  aliases: TechCardSavedAssemblySourceAliasV1[] | undefined;
+  // SHA-256("tech-card-saved-assembly-complete-source/1" + NUL + canonical_json).
+  sourceSha256: string | undefined;
+  // Sorted-key JSON of serverAssemblyRevision, rows (without downloadUrl), full AO operations,
+  // ownedSeams, aliases and garmentLabels in their response order. The wire lists use lowerCamelCase and
+  // the same EmitUnpopulated protobuf JSON projection as the production gateway.
+  canonicalJson: string | undefined;
+  // Card-owned generated sources referenced by AO label keys or owned anchors, sorted by line key.
+  // The existing label wire preserves saved dimensions and fold/stitch settings. An unset dimension
+  // stays unknown here, and no label acquires DXF edge authority.
+  garmentLabels: common_TechCardGarmentLabel[] | undefined;
 };
 
 export type GetTechCardSavedAssemblySnapshotResponse = {
@@ -14950,6 +14982,8 @@ export type GetTechCardSavedAssemblySnapshotResponse = {
   assemblyTopologySha256: string | undefined;
   topologyCanonicalJson: string | undefined;
   semanticSidecar?: TechCardPatternSemanticSidecar;
+  // Present only for COMPLETE_SOURCE_V1, which leaves the selected-operation fields unset.
+  completeSourceV1?: TechCardSavedAssemblyCompleteSourceV1;
 };
 
 export type UpsertTechCardSeamsRequest = {
