@@ -48,7 +48,7 @@ type SourceReadOptions = Readonly<{
   expectedCompleteSourceSha256?: string;
 }>;
 
-function exactRowOf(row: ExactPatternRow): ExactPatternRow {
+export function completeSavedAssemblyRowIdentityV1(row: ExactPatternRow): ExactPatternRow {
   const {
     techCardId,
     scopeKey,
@@ -192,7 +192,7 @@ export async function readCompleteSavedAssemblySourceV1(
   signal: AbortSignal,
 ): Promise<CompleteSavedAssemblySourceV1> {
   signal.throwIfAborted();
-  const anchorRow = exactRowOf(expectedAnchor);
+  const anchorRow = completeSavedAssemblyRowIdentityV1(expectedAnchor);
   const options = { ...expectedSource };
   const request: GetTechCardSavedAssemblySnapshotRequest = {
     techCardId: anchorRow.techCardId,
@@ -281,7 +281,7 @@ export function createCompleteSavedAssemblyRowReaderV1(
     expectedCompleteSourceSha256: source.sourceSha256,
   };
   return async (expected: ExactPatternRow, signal: AbortSignal) => {
-    const currentExpected = exactRowOf(expected);
+    const currentExpected = completeSavedAssemblyRowIdentityV1(expected);
     const rowMatches = (row: SourcePatternRow) =>
       Object.entries(currentExpected).every(
         ([key, value]) => row[key as keyof ExactPatternRow] === value,
