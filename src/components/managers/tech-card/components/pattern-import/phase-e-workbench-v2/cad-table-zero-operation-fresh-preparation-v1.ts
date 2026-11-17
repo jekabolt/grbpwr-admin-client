@@ -172,10 +172,7 @@ function sessionCurrent(
     !Number.isSafeInteger(cardSession.importGeneration) ||
     cardSession.importGeneration <= 0
   )
-    return blocker(
-      'fresh-session-invalid',
-      'A current positive Phase-E card session and its detached draft are required.',
-    );
+    return blocker('fresh-session-invalid', 'The current DXF workspace is not ready yet.');
   if (
     !Number.isSafeInteger(expectedImportGeneration) ||
     expectedImportGeneration <= 0 ||

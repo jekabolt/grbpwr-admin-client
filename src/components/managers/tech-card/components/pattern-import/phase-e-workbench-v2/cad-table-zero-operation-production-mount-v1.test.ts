@@ -30,7 +30,9 @@ import { listPatternImportDxfPhaseECadTableZeroOperationSavedChoicesV1 } from '.
 import type { PatternImportDxfPhaseECadTableZeroOperationSavedPreparationResultV1 } from './cad-table-zero-operation-saved-preparation-v1';
 import { routePatternImportDxfPhaseECadTableZeroOperationSourceV1 } from './cad-table-zero-operation-source-routing-v1';
 
-const FRESH_DETAIL = 'A current positive Phase-E card session and its detached draft are required.';
+const FRESH_DETAIL = 'The current DXF workspace is not ready yet.';
+const INTERNAL_FRESH_DETAIL =
+  'A current positive Phase-E card session and its detached draft are required.';
 
 type SavedPrepared = Extract<
   PatternImportDxfPhaseECadTableZeroOperationSavedPreparationResultV1,
@@ -223,6 +225,7 @@ describe('zero-operation current saved-card gate', () => {
 
     expect(routed).toMatchObject({ mode: 'saved', choices: { ok: true } });
     expect(JSON.stringify(routed)).not.toContain(FRESH_DETAIL);
+    expect(JSON.stringify(routed)).not.toContain(INTERNAL_FRESH_DETAIL);
   });
 
   it('reports the authoritative saved-row blocker when the current card has no DXF', async () => {
@@ -255,6 +258,7 @@ describe('zero-operation current saved-card gate', () => {
       choices: { ok: false, blocker: { code: 'saved-pattern-unavailable' } },
     });
     expect(JSON.stringify(routed)).not.toContain(FRESH_DETAIL);
+    expect(JSON.stringify(routed)).not.toContain(INTERNAL_FRESH_DETAIL);
   });
 
   it('remaps the final fresh-session blocker to the authoritative saved-pattern blocker', () => {
@@ -267,7 +271,7 @@ describe('zero-operation current saved-card gate', () => {
     const blocker = resolvePatternImportDxfPhaseECadTableZeroOperationVisibleBlockerV1({
       techCardId,
       savedCardGateLoading: false,
-      preparationBlocker: { code: 'fresh-session-invalid', detail: FRESH_DETAIL },
+      preparationBlocker: { code: 'fresh-session-invalid', detail: INTERNAL_FRESH_DETAIL },
       currentSavedCardGate: {
         ok: true,
         techCard: cachedCardWithoutRow(techCardId),
@@ -278,6 +282,7 @@ describe('zero-operation current saved-card gate', () => {
 
     expect(blocker).toMatchObject({ code: 'saved-pattern-unavailable' });
     expect(JSON.stringify(blocker)).not.toContain(FRESH_DETAIL);
+    expect(JSON.stringify(blocker)).not.toContain(INTERNAL_FRESH_DETAIL);
   });
 
   it('never renders a fresh-session blocker after the current card proves a saved row exists', async () => {
