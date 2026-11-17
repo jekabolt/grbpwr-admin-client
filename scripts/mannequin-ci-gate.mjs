@@ -50,6 +50,8 @@ const unitFiles = Object.freeze([
   'src/lib/cloth/body/measurement-open-reference-high-hip-proxy-v1.test.ts',
   'src/lib/cloth/body/measurement-open-reference-knee-proxy-v1.test.ts',
   'src/lib/cloth/body/measurement-open-reference-knee-proxy-worker-v1.test.ts',
+  'src/lib/cloth/body/measurement-open-reference-neck-proxy-v1.test.ts',
+  'src/lib/cloth/body/measurement-open-reference-beta-neck-wiring-v1.test.ts',
   'src/lib/cloth/body/measurement-adapter.test.ts',
   'src/lib/cloth/body/measurement-open-reference-limb-final-closure-worker-v1.test.ts',
   'src/lib/cloth/body/measurement-open-reference-limb-subset-runtime-loader-v1.test.ts',
@@ -103,6 +105,7 @@ const browserSuites = Object.freeze([
       'rapid valid measurement edits coalesce while the quality gate leaves animation frames live',
       'real ModelForm admits female, male and neutral open-reference bases',
       'high hip and knee apply as bounded proxies on female, male and neutral bases',
+      'neck applies as a bounded proxy on female and neutral, and is honestly not applied on male',
     ].join('|'),
   }),
   Object.freeze({

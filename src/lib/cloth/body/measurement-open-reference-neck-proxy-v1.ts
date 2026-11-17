@@ -1,4 +1,6 @@
 import type { BodyPoseKind } from './contracts';
+import type { MakeHumanCoreRigBundleV1 } from './makehuman-core-rig-pose-research-v1';
+import type { MakeHumanOpenReferenceBasisV1 } from './measurement-open-reference-display-v1';
 import {
   evaluateMeasurementOpenReferenceDisplayQualityWithSelfIntersectionV1,
   type MeasurementOpenReferenceDisplayQualityGateResultV1,
@@ -347,6 +349,64 @@ function resolveStation(options: {
       ),
     });
   }
+}
+
+function rigBoneHeadDisplayM(options: {
+  readonly basis: MakeHumanOpenReferenceBasisV1;
+  readonly heightMm: number;
+  readonly rig: MakeHumanCoreRigBundleV1;
+  readonly boneName: string;
+}): MeshPlaneSectionVec3V1 {
+  const bone = options.rig.bones.findIndex(({ name }) => name === options.boneName);
+  if (bone < 0) throw new Error(`Core rig is missing ${options.boneName}.`);
+  const anchors = options.rig.bases.find(({ kind }) => kind === options.basis.kind);
+  if (!anchors) throw new Error(`Core rig is missing basis ${options.basis.kind}.`);
+  const sourceHeight = options.basis.sourceMaximumY - options.basis.sourceMinimumY;
+  if (!Number.isFinite(sourceHeight) || sourceHeight <= 0) {
+    throw new Error('Open-reference basis height is invalid.');
+  }
+  const scaleMPerSourceUnit = options.heightMm / 1000 / sourceHeight;
+  const offset = bone * 3;
+  return Object.freeze([
+    anchors.headsSourceUnits[offset] * scaleMPerSourceUnit,
+    (anchors.headsSourceUnits[offset + 1] - options.basis.sourceMinimumY) * scaleMPerSourceUnit,
+    anchors.headsSourceUnits[offset + 2] * scaleMPerSourceUnit,
+  ]);
+}
+
+/**
+ * Rest heads of core-rig neck01 / neck02 / head in the uniformly height-scaled display space.
+ * Rig-only (no mesh); the runtime feeds them to the solver.
+ */
+export function resolveMeasurementOpenReferenceNeckRigHeadsV1(options: {
+  readonly basis: MakeHumanOpenReferenceBasisV1;
+  readonly heightMm: number;
+  readonly rig: MakeHumanCoreRigBundleV1;
+}): MeasurementOpenReferenceNeckRigHeadsV1 {
+  if (!Number.isFinite(options.heightMm) || options.heightMm <= 0) {
+    throw new RangeError('heightMm must be finite and positive.');
+  }
+  return Object.freeze({
+    neck01: rigBoneHeadDisplayM({ ...options, boneName: 'neck01' }),
+    neck02: rigBoneHeadDisplayM({ ...options, boneName: 'neck02' }),
+    head: rigBoneHeadDisplayM({ ...options, boneName: 'head' }),
+  });
+}
+
+/**
+ * The solver's own mid-neck plane (origin neck02 head, normal neck01->head), resolved through the
+ * same station helper the solver uses. Shared by the measurement guide so the drawn ring and the
+ * proxy section cannot drift apart. Returns null when the rig station is invalid.
+ */
+export function resolveMeasurementOpenReferenceNeckSectionStationV1(
+  rigHeads: MeasurementOpenReferenceNeckRigHeadsV1,
+): MeasurementOpenReferenceNeckProtectedSectionV1 | null {
+  const resolved = resolveStation({
+    rigHeads,
+    policy: DEFAULT_MEASUREMENT_OPEN_REFERENCE_NECK_PROXY_POLICY_V1,
+  });
+  if (!resolved.ok) return null;
+  return Object.freeze({ originM: resolved.station.originM, normal: resolved.station.normal });
 }
 
 function signedDistance(

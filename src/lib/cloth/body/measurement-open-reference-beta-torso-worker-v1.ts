@@ -1,3 +1,4 @@
+import type { BodyPoseKind } from './contracts';
 import { createMakeHumanAnteriorChestShoulderModesResearchV1 } from './makehuman-anterior-chest-shoulder-modes-research-v1';
 import {
   loadMakeHumanTorsoShapeDeltaBundleV1,
@@ -14,6 +15,10 @@ import { solveOpenReferenceChestShoulderResearchV1 } from './measurement-open-re
 import { type MakeHumanOpenReferenceBasisV1 } from './measurement-open-reference-display-v1';
 import { applyOpenReferenceUnderBustRibcageResearchV1 } from './measurement-open-reference-underbust-ribcage-research-v1';
 import { solveMeasurementOpenReferenceHighHipProxyV1 } from './measurement-open-reference-high-hip-proxy-v1';
+import {
+  solveMeasurementOpenReferenceNeckProxyV1,
+  type MeasurementOpenReferenceNeckRigHeadsV1,
+} from './measurement-open-reference-neck-proxy-v1';
 import { solveMeasurementOpenReferenceTorsoDepthProxyV1 } from './measurement-open-reference-torso-depth-proxy-v1';
 
 export const MEASUREMENT_OPEN_REFERENCE_BETA_TORSO_WORKER_MEASURE_V1 =
@@ -63,6 +68,39 @@ function highHipNotApplied(message: string): HighHipWorkerFieldsV1 {
   });
 }
 
+type NeckWorkerFieldsV1 = Pick<
+  MeasurementOpenReferenceBetaTorsoWorkerResultV1,
+  | 'neckStatus'
+  | 'neckRepresented'
+  | 'neckLimited'
+  | 'neckBaselineCircumferenceMm'
+  | 'neckAchievedCircumferenceMm'
+  | 'neckDiagnostics'
+>;
+
+type TorsoBeforeNeckResultV1 = Omit<
+  MeasurementOpenReferenceBetaTorsoWorkerResultV1,
+  keyof NeckWorkerFieldsV1 | 'positionsBeforeNeckM'
+>;
+
+const UNREQUESTED_NECK_V1: NeckWorkerFieldsV1 = Object.freeze({
+  neckStatus: 'unrequested' as const,
+  neckRepresented: false,
+  neckLimited: false,
+  neckDiagnostics: Object.freeze([]),
+});
+
+function neckNotApplied(message: string): NeckWorkerFieldsV1 {
+  return Object.freeze({
+    neckStatus: 'notApplied' as const,
+    neckRepresented: false,
+    neckLimited: false,
+    neckDiagnostics: Object.freeze([Object.freeze({ code: 'station-invalid' as const, message })]),
+  });
+}
+
+type TorsoModesV1 = ReturnType<typeof createMakeHumanAnteriorChestShoulderModesResearchV1>;
+
 /** Shared pure torso pipeline used by both the module worker and the synchronous fallback. */
 export function solveMeasurementOpenReferenceBetaTorsoV1(options: {
   readonly basis: MakeHumanOpenReferenceBasisV1;
@@ -70,16 +108,87 @@ export function solveMeasurementOpenReferenceBetaTorsoV1(options: {
   readonly triangleIndices: Uint16Array | Uint32Array;
   readonly measurements: MeasurementOpenReferenceBetaTorsoWorkerOptionsV1['measurements'];
   readonly highHipCircumferenceMm?: number;
+  readonly neckCircumferenceMm?: number;
+  readonly neckRigHeads?: MeasurementOpenReferenceNeckRigHeadsV1;
+  readonly neckPose?: BodyPoseKind;
   readonly torsoBundle: MakeHumanTorsoShapeDeltaBundleV1;
   readonly solveDepthProxy?: typeof solveMeasurementOpenReferenceTorsoDepthProxyV1;
   readonly solveHighHipProxy?: typeof solveMeasurementOpenReferenceHighHipProxyV1;
+  readonly solveNeckProxy?: typeof solveMeasurementOpenReferenceNeckProxyV1;
 }): MeasurementOpenReferenceBetaTorsoWorkerResultV1 {
-  const { torsoBundle } = options;
   const modes = createMakeHumanAnteriorChestShoulderModesResearchV1({
     basis: options.basis,
     measurements: options.measurements,
-    bundle: torsoBundle,
+    bundle: options.torsoBundle,
   });
+  const beforeNeck = solveTorsoBeforeNeckV1(options, modes);
+  // Fast path: no neck request performs no neck mesh work and keeps array identity.
+  if (options.neckCircumferenceMm == null) {
+    return Object.freeze({ ...beforeNeck, ...UNREQUESTED_NECK_V1 });
+  }
+
+  // Order: ... -> depth -> high hip -> neck. Neck is the last torso stage and touches only the
+  // mid-neck band; chest station and shoulder chord are its protected neighbours.
+  let neckFields: NeckWorkerFieldsV1;
+  let positionsM = beforeNeck.positionsM;
+  let positionsBeforeNeckM: Float32Array | undefined;
+  try {
+    if (!options.neckRigHeads) throw new Error('Core-rig neck heads are unavailable.');
+    const shoulderMode = modes.modes.find(
+      ({ measurementKey }) => measurementKey === 'shoulderBreadthMm',
+    );
+    const neck = (options.solveNeckProxy ?? solveMeasurementOpenReferenceNeckProxyV1)({
+      sourcePositionsM: beforeNeck.positionsM,
+      triangleIndices: options.triangleIndices,
+      pose: options.neckPose ?? 'A',
+      targetCircumferenceMm: options.neckCircumferenceMm,
+      rigHeads: options.neckRigHeads,
+      ...(beforeNeck.chestStationOriginM
+        ? {
+            chestStation: Object.freeze({
+              originM: beforeNeck.chestStationOriginM,
+              normal: Object.freeze([0, 1, 0] as const),
+            }),
+          }
+        : {}),
+      ...(shoulderMode?.shoulderVertices
+        ? { shoulderVertices: shoulderMode.shoulderVertices }
+        : {}),
+    });
+    const applied = neck.status === 'represented' || neck.status === 'limited';
+    if (applied && neck.positionsM !== beforeNeck.positionsM) {
+      positionsBeforeNeckM = beforeNeck.positionsM;
+      positionsM = neck.positionsM;
+    }
+    neckFields = Object.freeze({
+      neckStatus: neck.status,
+      neckRepresented: neck.status === 'represented',
+      neckLimited: neck.status === 'limited',
+      ...(neck.baselineCircumferenceMm == null
+        ? {}
+        : { neckBaselineCircumferenceMm: neck.baselineCircumferenceMm }),
+      ...(neck.achievedCircumferenceMm == null
+        ? {}
+        : { neckAchievedCircumferenceMm: neck.achievedCircumferenceMm }),
+      neckDiagnostics: neck.diagnostics,
+    });
+  } catch (reason: unknown) {
+    // A failing neck never blanks the preview or rolls back the earlier torso stages.
+    neckFields = neckNotApplied(reason instanceof Error ? reason.message : String(reason));
+  }
+  return Object.freeze({
+    ...beforeNeck,
+    positionsM,
+    ...(positionsBeforeNeckM ? { positionsBeforeNeckM } : {}),
+    ...neckFields,
+  });
+}
+
+function solveTorsoBeforeNeckV1(
+  options: Parameters<typeof solveMeasurementOpenReferenceBetaTorsoV1>[0],
+  modes: TorsoModesV1,
+): TorsoBeforeNeckResultV1 {
+  const { torsoBundle } = options;
   const ribcage = applyOpenReferenceUnderBustRibcageResearchV1({
     sourcePositionsM: options.sourcePositionsM,
     triangleIndices: options.triangleIndices,
@@ -261,6 +370,11 @@ async function solveSynchronously(
     ...(options.highHipCircumferenceMm == null
       ? {}
       : { highHipCircumferenceMm: options.highHipCircumferenceMm }),
+    ...(options.neckCircumferenceMm == null
+      ? {}
+      : { neckCircumferenceMm: options.neckCircumferenceMm }),
+    ...(options.neckRigHeads ? { neckRigHeads: options.neckRigHeads } : {}),
+    ...(options.neckPose ? { neckPose: options.neckPose } : {}),
     torsoBundle,
   });
 }
@@ -282,6 +396,11 @@ function transferableRequest(
         ...(options.highHipCircumferenceMm == null
           ? {}
           : { highHipCircumferenceMm: options.highHipCircumferenceMm }),
+        ...(options.neckCircumferenceMm == null
+          ? {}
+          : { neckCircumferenceMm: options.neckCircumferenceMm }),
+        ...(options.neckRigHeads ? { neckRigHeads: options.neckRigHeads } : {}),
+        ...(options.neckPose ? { neckPose: options.neckPose } : {}),
       },
     },
     [sourcePositionsM.buffer, triangleIndices.buffer],

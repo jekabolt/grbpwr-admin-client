@@ -1,12 +1,12 @@
 {
   "schemaVersion": "grbpwr-project-body-measurement-protocol-extension/v1",
   "protocolId": "grbpwr-body-measurement-protocol-v1",
-  "protocolVersion": "1.1.0",
+  "protocolVersion": "1.2.0",
   "baseProtocolVersion": "1.0.0",
   "status": "PROJECT_OWNED_OPERATOR_PROTOCOL_NOT_EXTERNAL_STANDARD_COMPLIANCE",
   "effectiveDate": "2026-11-15",
   "scope": {
-    "fieldCount": 14,
+    "fieldCount": 15,
     "storedUnit": "mm",
     "unknownSentinelAllowed": false
   },
@@ -225,6 +225,27 @@
       "landmarks": ["high point shoulder at neck base", "same-side bust apex"],
       "posture": "Standing naturally with shoulders relaxed in the same base layer used to mark the bust apex.",
       "tapePath": "Follow the front body surface from high point shoulder to bust apex without suspending the tape or crossing to the opposite side."
+    },
+    {
+      "wireField": "BODY_MEASUREMENT_NAME_NECK",
+      "labelEn": "neck",
+      "labelRu": "обхват середины шеи",
+      "group": "torso",
+      "canonicalKey": "neckCircumferenceMm",
+      "geometryKind": "circumference",
+      "requiredForAnalyticalMannequin": false,
+      "allowedMissing": true,
+      "repeatToleranceMm": 5,
+      "definitionEn": "Circumference of the neck at mid-length, in the plane perpendicular to the neck axis; a separate field from neck base and never derived from it.",
+      "definitionRu": "Обхват шеи на середине её длины, в плоскости, перпендикулярной оси шеи; отдельная мерка, не выводится из обхвата основания шеи.",
+      "landmarks": ["mid-length of the neck between the neck base and the jaw line"],
+      "posture": "Head in a natural forward position, shoulders relaxed, jaw level.",
+      "tapePath": "Wrap the tape around the neck at mid-length, perpendicular to the neck axis and below the jaw; do not follow the sloped neck-base contour.",
+      "commonMistakes": [
+        "measuring at the neck base",
+        "tape touching the jaw",
+        "including collar ease"
+      ]
     }
   ],
   "claimBoundary": {

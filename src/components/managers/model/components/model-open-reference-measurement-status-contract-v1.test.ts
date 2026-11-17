@@ -24,6 +24,7 @@ const allMeasurements = Object.freeze({
   armLengthMm: 600,
   inseamMm: 800,
   neckBaseCircumferenceMm: 360,
+  neckCircumferenceMm: 340,
   bicepCircumferenceMm: 300,
   wristCircumferenceMm: 170,
   thighCircumferenceMm: 560,
@@ -51,16 +52,16 @@ const allMeasurements = Object.freeze({
 } as const satisfies CanonicalBodyMeasurementsMm);
 
 describe('model open-reference measurement status contract v1', () => {
-  it('exhaustively classifies all 34 canonical project fields', () => {
-    expect(MODEL_OPEN_REFERENCE_MEASUREMENT_STATUS_FIELDS_V1).toHaveLength(34);
+  it('exhaustively classifies all 35 canonical project fields', () => {
+    expect(MODEL_OPEN_REFERENCE_MEASUREMENT_STATUS_FIELDS_V1).toHaveLength(35);
     expect(
       new Set(MODEL_OPEN_REFERENCE_MEASUREMENT_STATUS_FIELDS_V1.map(({ fieldId }) => fieldId)).size,
-    ).toBe(34);
+    ).toBe(35);
 
     const canonical = MODEL_OPEN_REFERENCE_MEASUREMENT_STATUS_FIELDS_V1.filter(
       ({ source }) => source.kind === 'canonical',
     );
-    expect(canonical).toHaveLength(34);
+    expect(canonical).toHaveLength(35);
     expect(new Set(canonical.map(({ fieldId }) => fieldId))).toEqual(
       new Set(Object.keys(PROJECT_BODY_MEASUREMENT_ALIASES)),
     );
@@ -72,7 +73,7 @@ describe('model open-reference measurement status contract v1', () => {
         }),
         {},
       ),
-    ).toEqual({ exact: 1, boundedProxy: 16, unsupported: 14, modifierOnly: 3 });
+    ).toEqual({ exact: 1, boundedProxy: 17, unsupported: 14, modifierOnly: 3 });
     expect(
       MODEL_OPEN_REFERENCE_MEASUREMENT_STATUS_FIELDS_V1.filter(
         ({ capability }) => capability === 'exact' || capability === 'boundedProxy',
@@ -103,8 +104,8 @@ describe('model open-reference measurement status contract v1', () => {
     });
     const byId = new Map(fields.map((field) => [field.fieldId, field]));
 
-    expect(fields).toHaveLength(34);
-    expect(fields.filter(({ requested }) => requested)).toHaveLength(34);
+    expect(fields).toHaveLength(35);
+    expect(fields.filter(({ requested }) => requested)).toHaveLength(35);
     expect(fields.filter(({ directlyApplied }) => directlyApplied)).toHaveLength(11);
     expect(
       fields.some(({ status, directlyApplied }) => status === 'unsupported' && directlyApplied),
@@ -139,6 +140,40 @@ describe('model open-reference measurement status contract v1', () => {
       requested: true,
       directlyApplied: false,
     });
+    // A requested neck the runtime could not apply (e.g. male station-too-close) is notApplied;
+    // neck base stays unsupported and is never derived from neck.
+    expect(byId.get('neckCircumferenceMm')).toMatchObject({
+      capability: 'boundedProxy',
+      status: 'notApplied',
+      requested: true,
+      directlyApplied: false,
+    });
+    expect(byId.get('neckBaseCircumferenceMm')).toMatchObject({
+      capability: 'unsupported',
+      status: 'unsupported',
+      directlyApplied: false,
+    });
+  });
+
+  it('reports neck as applied when represented or limited and leaves neck base unsupported', () => {
+    for (const applied of ['represented', 'limited'] as const) {
+      const fields = resolveModelOpenReferenceMeasurementFieldStatusesV1({
+        measurements: allMeasurements,
+        rawMeasurements: {},
+        representedVisualControls:
+          applied === 'represented' ? ['heightMm', 'neckCircumferenceMm'] : ['heightMm'],
+        limitedVisualControls: applied === 'limited' ? ['neckCircumferenceMm'] : [],
+      });
+      const byId = new Map(fields.map((field) => [field.fieldId, field]));
+      expect(byId.get('neckCircumferenceMm')).toMatchObject({
+        status: 'boundedProxy',
+        directlyApplied: true,
+      });
+      expect(byId.get('neckBaseCircumferenceMm')).toMatchObject({
+        status: 'unsupported',
+        directlyApplied: false,
+      });
+    }
   });
 
   it('reports high hip and knee as applied when represented or limited', () => {

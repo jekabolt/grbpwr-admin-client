@@ -166,6 +166,7 @@ export function mapFormToModelInsert(data: ModelFormData): common_ModelInsert {
     measurements,
     thumbnailId: mediaIds[0] ?? 0,
     mediaIds,
-    bodyMeasurementSchemaVersion: 1,
+    // v2 knows NECK: a v2 writer that omits a stored measurement deletes it (v0/v1 keep neck).
+    bodyMeasurementSchemaVersion: 2,
   };
 }

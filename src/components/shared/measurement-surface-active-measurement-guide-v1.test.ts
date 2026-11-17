@@ -227,6 +227,45 @@ describe('active mannequin measurement guide v1', () => {
     }
   });
 
+  it('draws the neck guide only on the runtime neck station and keeps neck base separate', () => {
+    const neckSectionStation = { originM: [0, 0.6, 0] as const, normal: [0, 1, 0] as const };
+    const guide = buildMeasurementSurfaceActiveMeasurementGuideV1({
+      measurementName: 'BODY_MEASUREMENT_NAME_NECK',
+      frame,
+      mesh: cylinderMesh(),
+      neutralPose: true,
+      neckSectionStation,
+    });
+    expect(guide).toMatchObject({ status: 'visible', label: 'neck' });
+    const path = guide.paths[0];
+    expect(path?.source).toBe('fixed-points');
+    if (path?.source === 'fixed-points') {
+      for (const point of path.pointsM) expect(point[1]).toBeCloseTo(0.6, 5);
+    }
+    expect(
+      buildMeasurementSurfaceActiveMeasurementGuideV1({
+        measurementName: 'BODY_MEASUREMENT_NAME_NECK',
+        frame,
+        mesh: cylinderMesh(),
+        neutralPose: true,
+      }),
+    ).toMatchObject({ status: 'unavailable-section', paths: [] });
+    const neckBase = buildMeasurementSurfaceActiveMeasurementGuideV1({
+      measurementName: 'BODY_MEASUREMENT_NAME_NECK_BASE',
+      frame,
+      mesh: cylinderMesh(),
+      neutralPose: true,
+      neckSectionStation,
+    });
+    const neckBaseWithout = buildMeasurementSurfaceActiveMeasurementGuideV1({
+      measurementName: 'BODY_MEASUREMENT_NAME_NECK_BASE',
+      frame,
+      mesh: cylinderMesh(),
+      neutralPose: true,
+    });
+    expect(neckBase).toEqual(neckBaseWithout);
+  });
+
   it.each([
     'BODY_MEASUREMENT_NAME_HPS_HEIGHT',
     'BODY_MEASUREMENT_NAME_SHOULDER_LENGTH',

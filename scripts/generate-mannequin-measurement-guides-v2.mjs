@@ -22,6 +22,7 @@ const THREE_D_SURFACE_GUIDES = new Set([
   'BODY_MEASUREMENT_NAME_KNEE',
   'BODY_MEASUREMENT_NAME_CALF',
   'BODY_MEASUREMENT_NAME_ANKLE',
+  'BODY_MEASUREMENT_NAME_NECK',
 ]);
 
 const point = (x, y) => Object.freeze([x, y]);

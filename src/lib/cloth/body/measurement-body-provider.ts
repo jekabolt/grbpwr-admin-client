@@ -26,6 +26,7 @@ const REQUIRED_MEASUREMENT_KEYS = Object.freeze([
 const OPTIONAL_MEASUREMENT_KEYS = Object.freeze([
   'underBustCircumferenceMm',
   'neckBaseCircumferenceMm',
+  'neckCircumferenceMm',
   'highHipCircumferenceMm',
   'bicepCircumferenceMm',
   'wristCircumferenceMm',

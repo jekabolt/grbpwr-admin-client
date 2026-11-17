@@ -55,6 +55,7 @@ const DIRECT_BOUNDED_PROXY = new Set<CanonicalMeasurementKey>([
   'kneeCircumferenceMm',
   'calfCircumferenceMm',
   'ankleCircumferenceMm',
+  'neckCircumferenceMm',
 ]);
 
 const MODIFIER_ONLY = new Set<CanonicalMeasurementKey>([
@@ -77,6 +78,7 @@ const CANONICAL_FIELD_ORDER = Object.freeze([
   'armLengthMm',
   'inseamMm',
   'neckBaseCircumferenceMm',
+  'neckCircumferenceMm',
   'bicepCircumferenceMm',
   'wristCircumferenceMm',
   'thighCircumferenceMm',
@@ -133,7 +135,7 @@ function populated(value: number | undefined): boolean {
 }
 
 /**
- * Resolves all 34 canonical project fields on every build. A capability describes what the beta can do;
+ * Resolves all 35 canonical project fields on every build. A capability describes what the beta can do;
  * `notApplied` is reserved for a requested direct control that rolled back or was unavailable.
  * Modifier-only inputs may influence another proxy, but never claim their own measured closure.
  */
