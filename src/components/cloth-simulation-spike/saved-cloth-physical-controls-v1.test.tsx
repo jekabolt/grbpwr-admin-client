@@ -18,13 +18,13 @@ vi.mock('ui', () => ({
     value: string;
     disabled: boolean;
   }) => (
-    <select defaultValue={value} disabled={disabled}>
+    <div data-disabled={disabled ? 'true' : 'false'} data-value={value}>
       {items.map((item) => (
-        <option key={item.value} value={item.value}>
+        <span data-option={item.value} key={item.value}>
           {item.label}
-        </option>
+        </span>
       ))}
-    </select>
+    </div>
   ),
 }));
 type Props = ComponentProps<typeof SavedClothPhysicalControlsV1>;
@@ -54,15 +54,15 @@ describe('explicit cloth profile before source handoff', () => {
   it('starts with no implicit canonical or personalized source', () => {
     const state = host();
     const html = renderToStaticMarkup(<SavedClothPhysicalControlsV1 host={state} row={row} />);
-    expect(html).toContain('value="" selected=""');
+    expect(html).toContain('data-value=""');
     expect(html).toContain('Selected saved mannequin');
     expect(html).toContain('Canonical reference mannequin');
-    expect(html).not.toContain('disabled=""');
+    expect(html).toContain('data-disabled="false"');
     expect(state.setProfile).not.toHaveBeenCalled();
   });
   it('leaves mannequin viewing available when the assembly is not qualified', () => {
     const html = renderToStaticMarkup(<SavedClothPhysicalControlsV1 host={host()} row={null} />);
-    expect(html).toContain('disabled=""');
+    expect(html).toContain('data-disabled="true"');
     expect(html).toContain('You can still view the mannequin.');
     expect(html).not.toContain('Simulate 16 / 32');
   });
