@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import process from 'node:process';
@@ -83,6 +84,21 @@ function maximumCoordinateDeltaMm(left: Float32Array, right: Float32Array): numb
     maximumM = Math.max(maximumM, Math.abs(left[index] - right[index]));
   }
   return maximumM * 1000;
+}
+
+function bytesSha256(value: ArrayBufferView): string {
+  return createHash('sha256')
+    .update(new Uint8Array(value.buffer, value.byteOffset, value.byteLength))
+    .digest('hex');
+}
+
+function visualStatus(
+  result: Awaited<ReturnType<typeof createProductionBetaShapeRuntimeV1>>,
+  key: 'chestCircumferenceMm' | 'underBustCircumferenceMm' | 'shoulderBreadthMm' | 'armLengthMm',
+): 'represented' | 'limited' | 'notApplied' {
+  if (result.representedVisualControls.includes(key)) return 'represented';
+  if ((result.limitedVisualControls ?? []).includes(key)) return 'limited';
+  return 'notApplied';
 }
 
 async function fixture(
@@ -263,15 +279,14 @@ describe('measurement open-reference beta shape runtime v1', () => {
     const measurements = Object.freeze({
       ...CANONICAL_MEASUREMENT_SIZE_RECORDS[1].measurements,
       underBustCircumferenceMm: 800,
+      chestDepthMm: 240,
       bicepCircumferenceMm: 300,
     });
     const current = await fixture('female', measurements);
     const hostilePositions = current.waistHipRuntime.displayMesh.positions.slice();
     hostilePositions[0] += 10;
-    const result = await createMeasurementOpenReferenceBetaShapeRuntimeV1({
-      ...current,
-      loadTorsoBundle: async () => torsoBundle,
-      createLimbRuntime: async () =>
+    const createLimbRuntime = vi.fn(
+      async () =>
         ({
           status: 'represented',
           representedGeometricProxies: ['bicepCircumferenceMm'],
@@ -282,6 +297,11 @@ describe('measurement open-reference beta shape runtime v1', () => {
               hostilePositions.byteLength + current.waistHipRuntime.displayMesh.indices.byteLength,
           },
         }) as never,
+    );
+    const result = await createMeasurementOpenReferenceBetaShapeRuntimeV1({
+      ...current,
+      loadTorsoBundle: async () => torsoBundle,
+      createLimbRuntime,
     });
     const expectedGate = evaluateMeasurementOpenReferenceDisplayQualityWithSelfIntersectionV1({
       uniformPositionsM: current.waistHipRuntime.openReference.mesh.positions,
@@ -299,7 +319,9 @@ describe('measurement open-reference beta shape runtime v1', () => {
     expect(result.representedVisualControls).not.toContain('bicepCircumferenceMm');
     expect(result.limbStatus).toBe('unrepresented');
     expect(result.chestShoulderDiagnostics).toContain('beta-final-global-quality-rollback');
+    expect(result.chestShoulderDiagnostics).not.toContain('beta-final-chest-subset-rollback');
     expect(result.status).toBe('partial');
+    expect(createLimbRuntime).toHaveBeenCalledTimes(4);
   }, 30_000);
 
   it('hard-fails instead of publishing a basis whose self-intersection evaluation cannot complete', async () => {
@@ -316,6 +338,140 @@ describe('measurement open-reference beta shape runtime v1', () => {
       }),
     ).rejects.toEqual(expect.any(MeasurementOpenReferenceBetaShapeSafetyErrorV1));
   }, 30_000);
+
+  it.each([
+    ['female', 1_020, 760],
+    ['male', 800, 760],
+    ['male', 860, 760],
+    ['neutral', 1_100, 760],
+    ['female', 800, undefined],
+  ] as const)(
+    'limits only chest for %s chest %i under bust %s when the initial final gate fails',
+    async (kind, chestCircumferenceMm, underBustCircumferenceMm) => {
+      const measurements = Object.freeze({
+        ...CANONICAL_MEASUREMENT_SIZE_RECORDS[1].measurements,
+        shoulderBreadthMm: 400,
+        chestCircumferenceMm,
+        ...(underBustCircumferenceMm == null ? {} : { underBustCircumferenceMm }),
+        waistCircumferenceMm: 720,
+      });
+      const current = await fixture(kind, measurements);
+      const createTorsoShape = vi.fn(createMeasurementOpenReferenceBetaTorsoInWorkerV1);
+      const startedAt = performance.now();
+      const result = await createMeasurementOpenReferenceBetaShapeRuntimeV1({
+        ...current,
+        loadTorsoBundle: async () => torsoBundle,
+        createTorsoShape,
+      });
+      expect(visualStatus(result, 'chestCircumferenceMm')).toBe('limited');
+      expect(visualStatus(result, 'underBustCircumferenceMm')).toBe(
+        underBustCircumferenceMm == null ? 'notApplied' : 'represented',
+      );
+      expect(visualStatus(result, 'shoulderBreadthMm')).toBe('represented');
+      expect(visualStatus(result, 'armLengthMm')).toBe('limited');
+      expect(result.chestShoulderDiagnostics).toContain('beta-final-chest-subset-rollback');
+      expect(result.chestShoulderDiagnostics).toContain(
+        'chestCircumferenceMm:beta-final-target-halved',
+      );
+      expect(result.chestShoulderDiagnostics).not.toContain(
+        'chestCircumferenceMm:beta-final-target-removed',
+      );
+      expect(result.chestShoulderDiagnostics).not.toContain('beta-final-global-quality-rollback');
+      expect(result.status).toBe('partial');
+      expect(result.fkProxyRuntime.qualityGate?.safe).toBe(true);
+      expect(createTorsoShape).toHaveBeenCalledTimes(2);
+      expect(result.claims.torsoDepthFrontBackDistributionCalibrated).toBe(false);
+      console.info(
+        `CHEST_L0_AFTER=${JSON.stringify({
+          kind,
+          chestCircumferenceMm,
+          underBustCircumferenceMm,
+          status: result.status,
+          fields: {
+            chest: visualStatus(result, 'chestCircumferenceMm'),
+            underBust:
+              underBustCircumferenceMm == null
+                ? 'unrequested'
+                : visualStatus(result, 'underBustCircumferenceMm'),
+            shoulder: visualStatus(result, 'shoulderBreadthMm'),
+            armLength: visualStatus(result, 'armLengthMm'),
+          },
+          diagnostics: result.chestShoulderDiagnostics,
+          solves: createTorsoShape.mock.calls.length,
+          totalMs: Number((performance.now() - startedAt).toFixed(1)),
+        })}`,
+      );
+    },
+    60_000,
+  );
+
+  it('uses the measured-base chest retry as not applied when the halfway retry stays unsafe', async () => {
+    const measurements = Object.freeze({
+      ...CANONICAL_MEASUREMENT_SIZE_RECORDS[1].measurements,
+      shoulderBreadthMm: 400,
+      chestCircumferenceMm: 1_020,
+      underBustCircumferenceMm: 760,
+      waistCircumferenceMm: 720,
+    });
+    const current = await fixture('female', measurements);
+    const createTorsoShape = vi.fn(async (options) => {
+      const torso = await createMeasurementOpenReferenceBetaTorsoInWorkerV1(options);
+      if (createTorsoShape.mock.calls.length > 2) return torso;
+      const positionsM = torso.positionsM.slice();
+      positionsM[0] += 10;
+      return Object.freeze({ ...torso, positionsM });
+    });
+    const result = await createMeasurementOpenReferenceBetaShapeRuntimeV1({
+      ...current,
+      loadTorsoBundle: async () => torsoBundle,
+      createTorsoShape,
+    });
+
+    expect(createTorsoShape).toHaveBeenCalledTimes(3);
+    expect(visualStatus(result, 'chestCircumferenceMm')).toBe('notApplied');
+    expect(visualStatus(result, 'underBustCircumferenceMm')).toBe('represented');
+    expect(visualStatus(result, 'shoulderBreadthMm')).toBe('represented');
+    expect(visualStatus(result, 'armLengthMm')).toBe('limited');
+    expect(result.chestShoulderDiagnostics).toContain('beta-final-chest-subset-rollback');
+    expect(result.chestShoulderDiagnostics).toContain(
+      'chestCircumferenceMm:beta-final-target-removed',
+    );
+    expect(result.chestShoulderDiagnostics).not.toContain(
+      'chestCircumferenceMm:target-limited-to-bounded-endpoint',
+    );
+    expect(result.chestShoulderDiagnostics).not.toContain(
+      'chestCircumferenceMm:target-limited-to-quality-safe-endpoint',
+    );
+    expect(result.chestShoulderDiagnostics).not.toContain('beta-final-global-quality-rollback');
+    expect(result.status).toBe('partial');
+  }, 60_000);
+
+  it('keeps the passing female chest result byte-identical with exactly one solve', async () => {
+    const measurements = Object.freeze({
+      ...CANONICAL_MEASUREMENT_SIZE_RECORDS[1].measurements,
+      shoulderBreadthMm: 400,
+      chestCircumferenceMm: 880,
+      underBustCircumferenceMm: 760,
+      waistCircumferenceMm: 720,
+    });
+    const current = await fixture('female', measurements);
+    const createTorsoShape = vi.fn(createMeasurementOpenReferenceBetaTorsoInWorkerV1);
+    const result = await createMeasurementOpenReferenceBetaShapeRuntimeV1({
+      ...current,
+      loadTorsoBundle: async () => torsoBundle,
+      createTorsoShape,
+    });
+    const positionsSha256 = bytesSha256(result.fkProxyRuntime.displayMesh.positions);
+
+    expect(createTorsoShape).toHaveBeenCalledTimes(1);
+    expect(createTorsoShape.mock.calls[0][0].measurements).toBe(measurements);
+    expect(result.chestShoulderDiagnostics).not.toContain('beta-final-global-quality-rollback');
+    expect(result.chestShoulderDiagnostics).not.toContain('beta-final-chest-subset-rollback');
+    expect(result.fkProxyRuntime.qualityGate?.safe).toBe(true);
+    expect(positionsSha256).toBe(
+      '49b7abe791a188ac7894c845259433d301cb5c5a399073baaa1a2847b56195da',
+    );
+  }, 60_000);
 
   it('produces different female geometry when only chest changes', async () => {
     const baseline = CANONICAL_MEASUREMENT_SIZE_RECORDS[1].measurements;
