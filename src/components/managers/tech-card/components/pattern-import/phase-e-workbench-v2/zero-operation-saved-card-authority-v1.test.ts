@@ -115,6 +115,24 @@ describe('zero-operation saved card authority', () => {
     await expect(runtime.resolveLatestCard(row, signal)).rejects.toThrow(/saved DXF row changed/i);
   });
 
+  it('reads the captured lock before an existing operation seam write and rejects row or lock drift', async () => {
+    const reads = [card(), card(7, 14), card(8)];
+    const readTechCard = vi.fn(async () => reads.shift()!);
+    const runtime = createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1({
+      orderSizeIds,
+      sizeNameById,
+      readTechCard,
+    });
+    const signal = new AbortController().signal;
+
+    await expect(runtime.resolveExactCurrentCard(row, signal)).resolves.toMatchObject({ row });
+    await expect(runtime.resolveExactCurrentCard(row, signal)).rejects.toThrow(/lock moved/i);
+    await expect(runtime.resolveExactCurrentCard(row, signal)).rejects.toThrow(
+      /row identity moved/i,
+    );
+    expect(readTechCard).toHaveBeenCalledTimes(3);
+  });
+
   it.each([
     ['equal', 13],
     ['backward', 12],

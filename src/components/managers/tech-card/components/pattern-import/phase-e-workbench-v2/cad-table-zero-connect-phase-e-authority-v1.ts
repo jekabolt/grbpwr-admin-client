@@ -41,9 +41,12 @@ export type PatternImportDxfPhaseEZeroConnectPreparedAuthorityRefreshResultV1 =
       blocker: Readonly<{ code: 'fresh-saved-authority-unavailable'; detail: string }>;
     }>;
 
+export type PatternImportDxfPhaseEZeroConnectRefreshLockV1 = 'current' | 'advanced';
+
 export type PatternImportDxfPhaseEZeroConnectPreparedAuthorityRefreshOwnerV1 = Readonly<{
   refresh: (
     signal: AbortSignal,
+    lock?: PatternImportDxfPhaseEZeroConnectRefreshLockV1,
   ) => Promise<PatternImportDxfPhaseEZeroConnectPreparedAuthorityRefreshResultV1>;
 }>;
 

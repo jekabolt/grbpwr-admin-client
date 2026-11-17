@@ -51,6 +51,11 @@ export type PatternImportDxfPhaseEZeroOperationSavedCardAuthorityRuntimeV1 = Rea
     selector: DxfProductSavedRowIdentityV1,
     signal: AbortSignal,
   ) => Promise<PatternImportDxfPhaseESavedDxfAuthorityReadV1>;
+  /** Reads the exact row and card at the captured lock before editing an already saved operation. */
+  resolveExactCurrentCard: (
+    selector: DxfProductSavedRowIdentityV1,
+    signal: AbortSignal,
+  ) => Promise<Readonly<{ techCard: common_TechCard; row: DxfProductSavedRowIdentityV1 }>>;
   /** Independently re-reads the card after a confirmed import save before saved preparation. */
   resolveLatestCommittedCard: (
     expected: Readonly<{ techCardId: number; previousLockVersion: number }>,
@@ -243,6 +248,7 @@ export function createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1(
       const current = await readSelected(selector, signal);
       return Object.freeze({ row: current.row, downloadUrl: current.downloadUrl });
     },
+    resolveExactCurrentCard: readCurrent,
     async resolveLatestCommittedCard(expected, signal) {
       assertLive(signal);
       if (

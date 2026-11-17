@@ -8862,6 +8862,7 @@ export function OperationsField({
                     direction,
                   },
                   new AbortController().signal,
+                  'current',
                 );
                 if (!refreshed.ok)
                   return refuseBeforeWrite({
@@ -8994,8 +8995,13 @@ export function OperationsField({
               const refuseBeforeWrite = (
                 blocker: PatternImportDxfPhaseEZeroConnectExistingLinkedN1BlockerV1,
               ) => {
-                clearZeroConnectExistingLinkedN1Pending(pending);
-                return zeroConnectExistingLinkedN1Refused(blocker, pending);
+                if (clearZeroConnectExistingLinkedN1Pending(pending))
+                  refuseGesture(
+                    'CONNECTION',
+                    'Exact connection could not be saved',
+                    blocker.detail,
+                  );
+                return refuse(blocker);
               };
               if (zeroConnectExistingLinkedN1PendingRef.current !== pending)
                 return refuse({
@@ -9056,6 +9062,7 @@ export function OperationsField({
                     direction,
                   },
                   new AbortController().signal,
+                  'current',
                 );
                 if (!refreshed.ok)
                   return refuseBeforeWrite({

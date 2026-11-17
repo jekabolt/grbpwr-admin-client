@@ -1224,6 +1224,38 @@ describe('zero-operation production mount fresh-to-saved race failover', () => {
     });
   });
 
+  it('refreshes the same captured lock before an existing operation writes its seam', async () => {
+    const prepared = await genuineSavedPrepared(37, 12);
+    const refreshed = await genuineSavedPrepared(37, 12);
+    const expectation =
+      capturePatternImportDxfPhaseECadTableZeroOperationSavedRebindExpectationV1(prepared);
+    const resolveExactCurrentCard = vi.fn(async () => ({
+      techCard: savedCardWithRow(refreshed),
+      row: refreshed.authoringAuthority.row,
+    }));
+    const resolveLatestCard = vi.fn();
+    const prepareSaved = vi.fn(async () => refreshed);
+    const owner = createPatternImportDxfPhaseECadTableZeroOperationAuthoringRefreshV1({
+      prepared,
+      expectation,
+      savedAuthority: { resolveExactCurrentCard, resolveLatestCard } as never,
+      preparationKey: 'card:6:main:M',
+      orderSizeIds: (ids) => ids,
+      sizeNameById: new Map([[7, 'M']]),
+      sourceSurface: 'explicit-native-drawn-sewing',
+      prepareSaved: prepareSaved as never,
+    });
+    const signal = new AbortController().signal;
+
+    await expect(owner!.refresh(signal, 'current')).resolves.toMatchObject({
+      ok: true,
+      authority: refreshed.authoringAuthority,
+    });
+    expect(resolveExactCurrentCard).toHaveBeenCalledWith(prepared.authoringAuthority.row, signal);
+    expect(resolveLatestCard).not.toHaveBeenCalled();
+    expect(prepareSaved).toHaveBeenCalledOnce();
+  });
+
   it('fails closed before reading when refresh is aborted and rejects structural authority', async () => {
     const prepared = await genuineSavedPrepared(37, 12);
     const refreshed = await genuineSavedPrepared(37, 13);

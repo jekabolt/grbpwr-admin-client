@@ -371,7 +371,7 @@ export function createPatternImportDxfPhaseECadTableZeroOperationAuthoringRefres
     activeTicket === ticket &&
     isPatternImportDxfPhaseECadTableZeroOperationGenerationTicketCurrentV1(ticket);
   const refreshOwner = Object.freeze({
-    async refresh(signal: AbortSignal) {
+    async refresh(signal: AbortSignal, lock: 'current' | 'advanced' = 'advanced') {
       if (disposed || consumed)
         return failed('The saved DXF authoring authority capability is already consumed.');
       const attempt = nextAttempt + 1;
@@ -394,7 +394,9 @@ export function createPatternImportDxfPhaseECadTableZeroOperationAuthoringRefres
         activeTicket = generationTicket;
         if (!isCurrent(attempt, generationTicket, signal))
           return failed('The saved DXF authoring authority refresh was cancelled.');
-        const latest = await savedAuthority.resolveLatestCard(selector, signal);
+        const latest = await (lock === 'current'
+          ? savedAuthority.resolveExactCurrentCard(selector, signal)
+          : savedAuthority.resolveLatestCard(selector, signal));
         if (!isCurrent(attempt, generationTicket, signal))
           return failed('The saved DXF authoring authority refresh was cancelled or superseded.');
         const refreshed = await (
@@ -415,6 +417,8 @@ export function createPatternImportDxfPhaseECadTableZeroOperationAuthoringRefres
         if (!isCurrent(attempt, generationTicket, signal))
           return failed('The saved DXF authoring authority refresh was cancelled or superseded.');
         if (!refreshed.ok) return failed(refreshed.blocker.detail);
+        if (refreshed.authoringAuthority.row.cardLockVersion !== latest.row.cardLockVersion)
+          return failed('The saved card lock moved during the exact DXF authority refresh.');
         const verified = verifyPatternImportDxfPhaseECadTableZeroOperationSavedAuthorityRefreshV1(
           expectation,
           refreshed,
