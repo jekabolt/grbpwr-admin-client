@@ -12,6 +12,7 @@ import {
 } from 'components/managers/model/components/use-size-systems';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import {
+  posesOf,
   rowsOf,
   useSeamsStore,
 } from 'components/managers/tech-card/components/assembly-seams/seams-store';
@@ -85,6 +86,7 @@ import {
 } from '../phase-e-workbench-v2/zero-connect-durable-composite-v4';
 import { projectPatternImportDxfPhaseECadWorkbenchColorwaysV1 } from '../phase-e-workbench-v2/cad-workbench-bom-visual-authority-v1';
 import { PatternImportDxfPhaseECadTableZeroOperationProductionMountV1 } from '../phase-e-workbench-v2/cad-table-zero-operation-production-mount-v1';
+import { resolvePatternImportDxfPhaseEZeroConnectExistingLinkedN1TargetV1 } from '../phase-e-workbench-v2/cad-table-zero-connect-existing-linked-operation-rebind-v1';
 import { preparePatternImportDxfPhaseECadMannequinSavedAllScopeStagingV1 } from '../phase-e-workbench-v2/cad-mannequin-saved-all-scope-staging-v1';
 import {
   PATTERN_IMPORT_DXF_PHASE_E_CAD_SAVED_MATERIAL_SCOPE_EDITOR_PREPARATION_CLAIMS_V1,
@@ -150,6 +152,7 @@ export function shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
   selectedSeamKeys,
   savedOrderedSeamKeys,
   exactSavedEmptyOperation,
+  exactSavedLinkedN1Target = false,
 }: Readonly<{
   workbenchOpen: boolean;
   exactNSessionAvailable: boolean;
@@ -157,6 +160,7 @@ export function shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
   selectedSeamKeys: readonly string[];
   savedOrderedSeamKeys: readonly string[] | null;
   exactSavedEmptyOperation: boolean;
+  exactSavedLinkedN1Target?: boolean;
 }>): boolean {
   const exactSavedLegacyN1 =
     savedProjectionBlockerCode === null &&
@@ -169,7 +173,9 @@ export function shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
     selectedSeamKeys.length === 0 &&
     savedOrderedSeamKeys === null;
   return (
-    workbenchOpen && !exactNSessionAvailable && (exactSavedLegacyN1 || exactSavedEmptyFallback)
+    workbenchOpen &&
+    !exactNSessionAvailable &&
+    (exactSavedLinkedN1Target || exactSavedLegacyN1 || exactSavedEmptyFallback)
   );
 }
 
@@ -1483,7 +1489,12 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
   }) ?? '') as string;
   const server = useSeamsStore((value) => value.server);
   const pending = useSeamsStore((value) => value.pending);
+  const poses = useSeamsStore((value) => value.poses);
+  const posePending = useSeamsStore((value) => value.posePending);
+  const seamWriterCardId = useSeamsStore((value) => value.cardId);
+  const seamWriterLockVersion = useSeamsStore((value) => value.serverVersion);
   const seams = useMemo(() => rowsOf({ server, pending }), [pending, server]);
+  const placementRows = useMemo(() => posesOf({ poses, posePending }), [posePending, poses]);
   const source = useMemo(
     () => buildPatternImportDxfPhaseEAssemblyOrderSourceV1(operations, seams, selectedIndex),
     [operations, seams, selectedIndex],
@@ -1511,6 +1522,28 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
       savedOperations: currentSavedCard.techCard?.operations ?? [],
     });
   }, [savedCard.data, selected, techCardId]);
+  const exactSavedLinkedN1Target = useMemo(
+    () =>
+      resolvePatternImportDxfPhaseEZeroConnectExistingLinkedN1TargetV1({
+        techCardId,
+        selectedIndex,
+        liveOperations: operations,
+        savedCard: savedCard.data,
+        currentRows: [...seams, ...placementRows],
+        seamWriterCardId: seamWriterCardId ?? undefined,
+        seamWriterLockVersion,
+      }),
+    [
+      operations,
+      placementRows,
+      savedCard.data,
+      seamWriterCardId,
+      seamWriterLockVersion,
+      seams,
+      selectedIndex,
+      techCardId,
+    ],
+  );
   const stitchVisual = useMemo(
     () =>
       selected
@@ -2120,6 +2153,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
     selectedSeamKeys,
     savedOrderedSeamKeys: savedProjection.ok ? savedProjection.orderedSeamKeys : null,
     exactSavedEmptyOperation,
+    exactSavedLinkedN1Target: exactSavedLinkedN1Target.ok,
     savedProjectionBlockerCode: savedProjection.ok
       ? null
       : savedProjection.blockers[0]?.code ?? null,
@@ -2152,6 +2186,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
       exactSavedEmptyOperation &&
       !savedProjection.ok &&
       savedProjection.blockers[0]?.code === 'saved-operation-not-two-seam';
+    const savedLinkedN1 = exactSavedLinkedN1Target.ok;
     const fallbackResult: PatternImportDxfPhaseECadTableDraftOperationSessionBridgeResultV1 = {
       ok: false,
       plan: null,
@@ -2159,7 +2194,9 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
         code: 'exact-connection-incomplete',
         detail: savedEmptyOperation
           ? 'Choose two exact edges on the table, then confirm their seam direction to link this saved operation.'
-          : 'This legacy one-seam operation is available for inspection only. Remove it and rebuild it from the 2D table before using Direct Connect.',
+          : savedLinkedN1
+            ? 'Choose two exact edges and confirm their direction to update this seam. Its placement and Assembly Order stay unchanged.'
+            : 'This legacy one-seam operation is available for inspection only. Remove it and rebuild it from the 2D table before using Direct Connect.',
         operationNumber: source.selectedOperationNumber,
         processKind: 'connect',
       },
@@ -2168,8 +2205,9 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
       <PatternImportDxfPhaseECadTableZeroOperationProductionMountV1
         techCardId={techCardId}
         physicalHost={physicalHost}
+        sourceSurface={savedLinkedN1 ? 'explicit-native-drawn-sewing' : undefined}
         zeroConnectAuthoringHandoff={
-          savedEmptyOperation && zeroConnectAuthoringHandoff
+          (savedEmptyOperation || savedLinkedN1) && zeroConnectAuthoringHandoff
             ? zeroConnectAuthoringHandoff
             : EXISTING_OPERATION_REBUILD_ONLY_HANDOFF
         }
@@ -2178,7 +2216,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
         defaultOperationsMode='docked'
         operationsPanel={
           <>
-            {!savedEmptyOperation ? (
+            {!savedEmptyOperation && !savedLinkedN1 ? (
               <CalloutBox
                 tone='note'
                 className='mb-2'

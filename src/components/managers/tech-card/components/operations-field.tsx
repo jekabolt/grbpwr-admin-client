@@ -417,6 +417,19 @@ import {
   type PatternImportDxfPhaseEZeroConnectExistingOperationPendingV1,
 } from './pattern-import/phase-e-workbench-v2/cad-table-zero-connect-existing-operation-attach-v1';
 import {
+  PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_EXISTING_LINKED_N1_REBIND_CLAIMS_V1,
+  capturePatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1,
+  executePatternImportDxfPhaseEZeroConnectExistingLinkedN1WriteOnceV1,
+  preparePatternImportDxfPhaseEZeroConnectExistingLinkedN1RebindV1,
+  readPatternImportDxfPhaseEZeroConnectExistingLinkedN1WriteOnceV1,
+  revalidatePatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1,
+  verifyPatternImportDxfPhaseEZeroConnectExistingLinkedN1ReadbackV1,
+  type PatternImportDxfPhaseEZeroConnectExistingLinkedN1BlockerV1,
+  type PatternImportDxfPhaseEZeroConnectExistingLinkedN1OwnerResultV1,
+  type PatternImportDxfPhaseEZeroConnectExistingLinkedN1OwnerV1,
+  type PatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1,
+} from './pattern-import/phase-e-workbench-v2/cad-table-zero-connect-existing-linked-operation-rebind-v1';
+import {
   PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_POST_SAVE_OWNER_CLAIMS_V1,
   PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_POST_SAVE_OWNER_V1,
   activatePatternImportDxfPhaseEZeroConnectPostSaveLifecycleV1,
@@ -1154,6 +1167,114 @@ function zeroConnectExistingOperationRefused(
     blocker,
     claims: PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_EXISTING_OPERATION_ATTACH_CLAIMS_V1,
   });
+}
+
+function zeroConnectExistingLinkedN1Refused(
+  blocker: PatternImportDxfPhaseEZeroConnectExistingLinkedN1BlockerV1,
+  pending: PatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1 | null = null,
+): PatternImportDxfPhaseEZeroConnectExistingLinkedN1OwnerResultV1 {
+  return Object.freeze({
+    ok: false as const,
+    status: 'blocked' as const,
+    historyKey: pending?.target.historyKey ?? null,
+    operationNumber: pending?.target.operationNumber ?? null,
+    seamKey: pending?.target.seamKey ?? null,
+    blocker,
+    claims: PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_EXISTING_LINKED_N1_REBIND_CLAIMS_V1,
+  });
+}
+
+function ZeroConnectExistingLinkedN1Action({
+  pending,
+  owner,
+}: {
+  pending: PatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1;
+  owner: PatternImportDxfPhaseEZeroConnectExistingLinkedN1OwnerV1;
+}) {
+  const [direction, setDirection] = useState<'same' | 'reversed' | null>(null);
+  const [linking, setLinking] = useState(false);
+  const [result, setResult] =
+    useState<PatternImportDxfPhaseEZeroConnectExistingLinkedN1OwnerResultV1 | null>(null);
+
+  const rebind = async () => {
+    if (linking || result?.ok || !direction || owner.status !== 'available') return;
+    setLinking(true);
+    try {
+      setResult(await owner.rebind(pending, direction));
+    } finally {
+      setLinking(false);
+    }
+  };
+
+  return (
+    <div
+      className='mb-2 flex flex-wrap items-center gap-1 border border-borderColor bg-bgColor p-1.5'
+      data-zero-connect-existing-linked-n1={pending.target.seamKey}
+    >
+      <Text component='span' size='micro' className='mr-1 font-bold'>
+        Update exact connection
+      </Text>
+      {(['same', 'reversed'] as const).map((value) => (
+        <Button
+          key={value}
+          type='button'
+          size='xs'
+          variant='default'
+          className={cn(
+            'h-7 border px-2 text-micro',
+            direction === value
+              ? 'border-textColor bg-textColor text-bgColor'
+              : 'border-borderColor bg-bgColor text-textColor',
+          )}
+          aria-pressed={direction === value}
+          disabled={linking || Boolean(result)}
+          onClick={() => {
+            setDirection(value);
+            setResult(null);
+          }}
+        >
+          {value === 'same' ? 'Same direction' : 'Reversed'}
+        </Button>
+      ))}
+      <Button
+        type='button'
+        size='xs'
+        variant='main'
+        className='h-7 border border-textColor bg-textColor px-2 text-micro font-bold text-bgColor disabled:cursor-not-allowed disabled:opacity-40'
+        disabled={linking || Boolean(result?.ok) || !direction || owner.status !== 'available'}
+        onClick={() => void rebind()}
+      >
+        {linking
+          ? 'Updating…'
+          : result?.ok
+            ? 'Updated'
+            : result
+              ? 'Check saved seam'
+              : 'Update seam'}
+      </Button>
+      {!result && owner.status === 'available' ? (
+        <Button
+          type='button'
+          size='xs'
+          variant='underline'
+          className='h-7 px-2 text-micro'
+          disabled={linking}
+          onClick={() => owner.cancel(pending)}
+        >
+          Cancel
+        </Button>
+      ) : null}
+      <Text component='span' size='micro' variant='label' className='basis-full'>
+        {result?.ok
+          ? `Seam ${result.seamKey} now uses the selected exact edges. Durable pattern data still needs a saved carrier.`
+          : result?.blocker
+            ? result.blocker.detail
+            : owner.status === 'unavailable'
+              ? owner.blocker.detail
+              : 'Choose direction. The existing seam key and all Assembly Order operations stay unchanged.'}
+      </Text>
+    </div>
+  );
 }
 
 function ZeroConnectExistingOperationAction({
@@ -7034,7 +7155,10 @@ export function OperationsField({
     useState<PatternImportDxfPhaseEZeroConnectPendingHandoffV1 | null>(null);
   const [zeroConnectExistingOperationPending, setZeroConnectExistingOperationPending] =
     useState<PatternImportDxfPhaseEZeroConnectExistingOperationPendingV1 | null>(null);
+  const [zeroConnectExistingLinkedN1Pending, setZeroConnectExistingLinkedN1Pending] =
+    useState<PatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1 | null>(null);
   const zeroConnectExistingOperationPendingRef = useRef(zeroConnectExistingOperationPending);
+  const zeroConnectExistingLinkedN1PendingRef = useRef(zeroConnectExistingLinkedN1Pending);
   const zeroConnectPendingHandoffRef = useRef(zeroConnectPendingHandoff);
   const zeroConnectPostSaveLifecycleRef =
     useRef<PatternImportDxfPhaseEZeroConnectPostSaveLifecycleOwnerV1 | null>(null);
@@ -7050,17 +7174,36 @@ export function OperationsField({
   const autosaveLastSavedAtRef = useRef(autosave.lastSavedAt);
   zeroConnectPendingHandoffRef.current = zeroConnectPendingHandoff;
   zeroConnectExistingOperationPendingRef.current = zeroConnectExistingOperationPending;
+  zeroConnectExistingLinkedN1PendingRef.current = zeroConnectExistingLinkedN1Pending;
   zeroConnectDurableRetryRef.current = zeroConnectDurableRetry;
   autosaveLastSavedAtRef.current = autosave.lastSavedAt;
   useEffect(() => {
     zeroConnectExistingOperationPendingRef.current = null;
     setZeroConnectExistingOperationPending(null);
+    zeroConnectExistingLinkedN1PendingRef.current = null;
+    setZeroConnectExistingLinkedN1Pending(null);
   }, [techCardId]);
   const clearZeroConnectExistingOperationPending = useCallback(
     (pending: PatternImportDxfPhaseEZeroConnectExistingOperationPendingV1): boolean => {
       if (zeroConnectExistingOperationPendingRef.current !== pending) return false;
       zeroConnectExistingOperationPendingRef.current = null;
       setZeroConnectExistingOperationPending(null);
+      return true;
+    },
+    [],
+  );
+  const clearZeroConnectExistingLinkedN1Pending = useCallback(
+    (pending: PatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1): boolean => {
+      if (zeroConnectExistingLinkedN1PendingRef.current !== pending) return false;
+      if (
+        readPatternImportDxfPhaseEZeroConnectExistingLinkedN1WriteOnceV1(pending, 'same') !==
+          undefined ||
+        readPatternImportDxfPhaseEZeroConnectExistingLinkedN1WriteOnceV1(pending, 'reversed') !==
+          undefined
+      )
+        return false;
+      zeroConnectExistingLinkedN1PendingRef.current = null;
+      setZeroConnectExistingLinkedN1Pending(null);
       return true;
     },
     [],
@@ -8388,6 +8531,7 @@ export function OperationsField({
             const liveOperations = (getValues('operations') ?? []) as OperationFormValue[];
             if (
               zeroConnectExistingOperationPendingRef.current ||
+              zeroConnectExistingLinkedN1PendingRef.current ||
               blocksPatternImportDxfPhaseEZeroConnectNextConnectionV1(
                 zeroConnectPendingHandoff,
                 liveOperations,
@@ -8419,6 +8563,52 @@ export function OperationsField({
                   (key, index) => key.trim() === candidateInputKeys[index],
                 ),
             );
+            const targetsExistingLinkedN1Operation = Boolean(
+              selectedExistingOperation &&
+                Number.isSafeInteger(selectedExistingOperation.operationNumber) &&
+                (selectedExistingOperation.operationNumber ?? 0) > 0 &&
+                (selectedExistingOperation.seamKeys ?? []).length >= 1 &&
+                (selectedExistingOperation.inputKeys ?? []).length === candidateInputKeys.length &&
+                (selectedExistingOperation.inputKeys ?? []).every(
+                  (key, index) => key.trim() === candidateInputKeys[index],
+                ),
+            );
+            if (targetsExistingLinkedN1Operation) {
+              const captured = capturePatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1({
+                request,
+                techCardId,
+                selectedIndex,
+                liveOperations,
+                savedCard,
+                currentRows: [
+                  ...rowsOf(useSeamsStore.getState()),
+                  ...posesOf(useSeamsStore.getState()),
+                ],
+                seamWriterCardId: stepSeams?.cardId,
+                seamWriterLockVersion: useSeamsStore.getState().serverVersion,
+              });
+              if (!captured.ok)
+                return {
+                  ok: false,
+                  inserted: 0,
+                  historyKey: null,
+                  sessionRevision: request.session.revision,
+                  blocker: {
+                    code: 'zero-connect-authoring-write-refused',
+                    detail: captured.blocker.detail,
+                  },
+                };
+              zeroConnectExistingLinkedN1PendingRef.current = captured.pending;
+              setZeroConnectExistingLinkedN1Pending(captured.pending);
+              setSelected(captured.operationIndex);
+              return {
+                ok: true,
+                inserted: 0,
+                historyKey: captured.pending.target.historyKey,
+                sessionRevision: request.session.revision,
+                blocker: null,
+              };
+            }
             if (targetsExistingEmptyOperation) {
               const captured = capturePatternImportDxfPhaseEZeroConnectExistingOperationPendingV1({
                 request,
@@ -8707,6 +8897,170 @@ export function OperationsField({
                 seamKey: readback.seamKey,
                 blocker: null,
                 claims: PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_EXISTING_OPERATION_ATTACH_CLAIMS_V1,
+              });
+            },
+          };
+
+  const zeroConnectExistingLinkedN1Owner: PatternImportDxfPhaseEZeroConnectExistingLinkedN1OwnerV1 =
+    frozen
+      ? {
+          status: 'unavailable',
+          blocker: {
+            code: 'existing-linked-n1-writer-stale',
+            detail: FROZEN_REFUSAL,
+          },
+        }
+      : !stepSeams
+        ? {
+            status: 'unavailable',
+            blocker: {
+              code: 'existing-linked-n1-writer-stale',
+              detail: 'The existing saved-card seam writer is not mounted.',
+            },
+          }
+        : {
+            status: 'available',
+            cancel: clearZeroConnectExistingLinkedN1Pending,
+            rebind: async (pending, direction) => {
+              const refuse = (
+                blocker: PatternImportDxfPhaseEZeroConnectExistingLinkedN1BlockerV1,
+              ) => zeroConnectExistingLinkedN1Refused(blocker, pending);
+              const refuseBeforeWrite = (
+                blocker: PatternImportDxfPhaseEZeroConnectExistingLinkedN1BlockerV1,
+              ) => {
+                clearZeroConnectExistingLinkedN1Pending(pending);
+                return zeroConnectExistingLinkedN1Refused(blocker, pending);
+              };
+              if (zeroConnectExistingLinkedN1PendingRef.current !== pending)
+                return refuse({
+                  code: 'existing-linked-n1-selection-mismatch',
+                  detail: 'A newer exact connection replaced this seam update request.',
+                });
+              const revalidate = () =>
+                revalidatePatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1(pending, {
+                  techCardId,
+                  selectedIndex,
+                  liveOperations: (getValues('operations') ?? []) as OperationFormValue[],
+                  savedCard,
+                  currentRows: [
+                    ...rowsOf(useSeamsStore.getState()),
+                    ...posesOf(useSeamsStore.getState()),
+                  ],
+                  seamWriterCardId: stepSeams.cardId,
+                  seamWriterLockVersion: useSeamsStore.getState().serverVersion,
+                });
+              const prepared = preparePatternImportDxfPhaseEZeroConnectExistingLinkedN1RebindV1(
+                pending,
+                direction,
+                {
+                  nameOf: stepSeams.nameOf,
+                  grainDeg: stepSeams.geometry.grainDeg,
+                },
+              );
+              if (!prepared.ok)
+                return refuseBeforeWrite({
+                  code: prepared.blocker.code,
+                  detail: prepared.blocker.detail,
+                });
+              let atomicWrite = readPatternImportDxfPhaseEZeroConnectExistingLinkedN1WriteOnceV1(
+                pending,
+                direction,
+              );
+              if (atomicWrite === null)
+                return refuse({
+                  code: 'existing-linked-n1-request-invalid',
+                  detail: 'The seam direction cannot change after the exact update started.',
+                });
+              if (atomicWrite === undefined) {
+                const current = revalidate();
+                if (!current.ok) return refuseBeforeWrite(current.blocker);
+                const refreshed = await refreshPatternImportDxfPhaseEZeroConnectSeamLinkAuthorityV1(
+                  {
+                    schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_POST_SAVE_OWNER_V1,
+                    candidate: pending.request.candidate,
+                    catalog: pending.request.catalog,
+                    projection: pending.request.projection,
+                    authoringAuthority: pending.request.authoringAuthority,
+                    authoringAuthorityRefresh: pending.request.authoringAuthorityRefresh,
+                    direction,
+                  },
+                  new AbortController().signal,
+                );
+                if (!refreshed.ok)
+                  return refuseBeforeWrite({
+                    code: 'existing-linked-n1-writer-stale',
+                    detail: refreshed.blocker.detail,
+                  });
+                const beforeWrite = revalidate();
+                if (!beforeWrite.ok) return refuseBeforeWrite(beforeWrite.blocker);
+                atomicWrite =
+                  executePatternImportDxfPhaseEZeroConnectExistingLinkedN1WriteOnceV1(
+                    pending,
+                    direction,
+                    () =>
+                      stepSeams.writes.acceptSeamStrict(
+                        prepared.receipt.storedSeam,
+                        { historyKey: pending.target.historyKey },
+                        {
+                          expectedLockVersion: pending.target.capturedCardLockVersion,
+                          validate: () => {
+                            const late = revalidate();
+                            return late.ok
+                              ? { ok: true as const }
+                              : { ok: false as const, why: late.blocker.detail };
+                          },
+                        },
+                      ),
+                  ) ?? undefined;
+              }
+              if (!atomicWrite)
+                return refuse({
+                  code: 'existing-linked-n1-request-invalid',
+                  detail: 'The exact seam update could not retain this gesture.',
+                });
+              const accepted = await atomicWrite;
+              if (!accepted.ok && accepted.outcome === 'not-attempted')
+                return refuse({
+                  code: 'existing-linked-n1-writer-stale',
+                  detail: accepted.blocker.detail,
+                });
+              let fresh;
+              try {
+                fresh = await adminService.GetTechCard({
+                  id: pending.target.techCardId,
+                  vatCountryCode: undefined,
+                });
+              } catch (error) {
+                return refuse({
+                  code: 'existing-linked-n1-readback-mismatch',
+                  detail:
+                    error instanceof Error
+                      ? error.message
+                      : 'The exact seam update could not be read back.',
+                });
+              }
+              const readback = verifyPatternImportDxfPhaseEZeroConnectExistingLinkedN1ReadbackV1({
+                pending,
+                accepted,
+                expectedSeam: prepared.receipt.storedSeam,
+                freshCard: fresh.techCard,
+              });
+              if (!readback.ok) return refuse(readback.blocker);
+              if (zeroConnectExistingLinkedN1PendingRef.current !== pending)
+                return refuse({
+                  code: 'existing-linked-n1-selection-mismatch',
+                  detail: 'The selected operation changed while reading back the exact seam.',
+                });
+              zeroConnectExistingLinkedN1PendingRef.current = null;
+              setZeroConnectExistingLinkedN1Pending(null);
+              return Object.freeze({
+                ok: true as const,
+                status: 'existing-linked-n1-rebound-exact' as const,
+                historyKey: pending.target.historyKey,
+                operationNumber: readback.operationNumber,
+                seamKey: readback.seamKey,
+                blocker: null,
+                claims: PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_EXISTING_LINKED_N1_REBIND_CLAIMS_V1,
               });
             },
           };
@@ -11098,6 +11452,13 @@ export function OperationsField({
         ? zeroConnectExistingOperationPending
         : null
       : null;
+  const selectedZeroConnectExistingLinkedN1Pending =
+    zeroConnectExistingLinkedN1Pending && selectedIndex >= 0
+      ? (getValues('operations') ?? [])[selectedIndex]?.historyKey ===
+        zeroConnectExistingLinkedN1Pending.target.historyKey
+        ? zeroConnectExistingLinkedN1Pending
+        : null
+      : null;
   const selectedOperationEditor =
     selectedIndex >= 0 ? (
       <OperationEditor
@@ -11141,6 +11502,13 @@ export function OperationsField({
       >
         {selectedIndex >= 0 ? (
           <div className='min-w-0' data-selected-operation-cad-owner=''>
+            {selectedZeroConnectExistingLinkedN1Pending ? (
+              <ZeroConnectExistingLinkedN1Action
+                key={selectedZeroConnectExistingLinkedN1Pending.target.historyKey}
+                pending={selectedZeroConnectExistingLinkedN1Pending}
+                owner={zeroConnectExistingLinkedN1Owner}
+              />
+            ) : null}
             {selectedZeroConnectExistingOperationPending ? (
               <ZeroConnectExistingOperationAction
                 key={selectedZeroConnectExistingOperationPending.historyKey}
@@ -11561,6 +11929,13 @@ export function OperationsField({
                     key={selectedZeroConnectExistingOperationPending.historyKey}
                     pending={selectedZeroConnectExistingOperationPending}
                     owner={zeroConnectExistingOperationOwner}
+                  />
+                ) : null}
+                {selectedZeroConnectExistingLinkedN1Pending ? (
+                  <ZeroConnectExistingLinkedN1Action
+                    key={selectedZeroConnectExistingLinkedN1Pending.target.historyKey}
+                    pending={selectedZeroConnectExistingLinkedN1Pending}
+                    owner={zeroConnectExistingLinkedN1Owner}
                   />
                 ) : null}
                 {cadOperationEditorOwnership.renderInline ? selectedOperationEditor : null}

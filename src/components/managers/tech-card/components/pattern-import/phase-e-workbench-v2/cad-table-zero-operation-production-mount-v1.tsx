@@ -330,6 +330,7 @@ export function createPatternImportDxfPhaseECadTableZeroOperationAuthoringRefres
   preparationKey: string;
   orderSizeIds: (ids: number[]) => number[];
   sizeNameById: ReadonlyMap<number, string>;
+  sourceSurface?: 'explicit-native-drawn-sewing';
   prepareSaved?: typeof preparePatternImportDxfPhaseECadTableZeroOperationSavedV1;
 }): PatternImportDxfPhaseEZeroConnectAuthoringRefreshOwnerV1 | null {
   const { prepared, expectation, savedAuthority } = input;
@@ -407,6 +408,7 @@ export function createPatternImportDxfPhaseECadTableZeroOperationAuthoringRefres
             sizeToken: prepared.sizeToken,
             authority: savedAuthority,
             generation: generationTicket,
+            ...(input.sourceSurface ? { sourceSurface: input.sourceSurface } : {}),
           },
           signal,
         );
@@ -582,6 +584,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
   selection = Object.freeze({ operationNumber: null }),
   operationsPanel = null,
   defaultOperationsMode = 'collapsed',
+  sourceSurface,
 }: Readonly<{
   techCardId?: number;
   cardSession: PatternImportDxfPhaseECardSessionV1 | null;
@@ -595,6 +598,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
   selection?: PatternImportDxfPhaseECadWorkbenchSelectionV1;
   operationsPanel?: ReactNode;
   defaultOperationsMode?: PatternImportDxfPhaseECadWorkbenchOperationsModeV1;
+  sourceSurface?: 'explicit-native-drawn-sewing';
 }>) {
   const generation = cardSession?.importGeneration ?? 0;
   const freshChoices = useMemo(
@@ -692,8 +696,10 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
   );
   const effectiveSavedCard =
     !savedChoices.ok && currentSavedCardGate?.ok ? currentSavedCardGate.techCard : savedCard;
-  const { choices } = sourceRoute;
-  const useFreshSession = sourceRoute.mode === 'fresh';
+  const explicitSavedChoices =
+    !savedChoices.ok && currentSavedCardGate?.ok ? currentSavedCardGate.choices : savedChoices;
+  const choices = sourceSurface ? explicitSavedChoices : sourceRoute.choices;
+  const useFreshSession = !sourceSurface && sourceRoute.mode === 'fresh';
   const [chosenScopeKey, setChosenScopeKey] = useState('');
   const [chosenSizeToken, setChosenSizeToken] = useState('');
   const defaultScope = choices.ok ? choices.choices[0] : undefined;
@@ -708,7 +714,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
   const preparationKey =
     useFreshSession && cardSession
       ? `fresh:${cardSession.techCardId}:${generation}:${scopeKey}:${sizeToken}`
-      : `saved:${effectiveSavedCard?.id ?? 0}:${effectiveSavedCard?.lockVersion ?? -1}:${scopeKey}:${sizeToken}`;
+      : `saved:${effectiveSavedCard?.id ?? 0}:${effectiveSavedCard?.lockVersion ?? -1}:${scopeKey}:${sizeToken}:${sourceSurface ?? 'default'}`;
   const [preparation, setPreparation] = useState<PreparationState>(() => ({
     status: 'idle',
     key: '',
@@ -798,6 +804,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
           sizeToken,
           authority: savedAuthority!,
           generation: generationTicket,
+          ...(sourceSurface ? { sourceSurface } : {}),
         },
         controller.signal,
       );
@@ -841,6 +848,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
     scopeKey,
     sizeNameById,
     sizeToken,
+    sourceSurface,
     useFreshSession,
   ]);
 
@@ -873,6 +881,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
         preparationKey,
         orderSizeIds,
         sizeNameById,
+        sourceSurface,
       }),
     [
       authoringPrepared,
@@ -881,6 +890,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
       rebindExpectation,
       savedAuthority,
       sizeNameById,
+      sourceSurface,
     ],
   );
   const authoringReady =
@@ -1097,6 +1107,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
   selection,
   operationsPanel,
   defaultOperationsMode,
+  sourceSurface,
 }: Readonly<{
   techCardId?: number;
   physicalHost?: CadWorkbenchPhysicalHostV1;
@@ -1105,6 +1116,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
   selection?: PatternImportDxfPhaseECadWorkbenchSelectionV1;
   operationsPanel?: ReactNode;
   defaultOperationsMode?: PatternImportDxfPhaseECadWorkbenchOperationsModeV1;
+  sourceSurface?: 'explicit-native-drawn-sewing';
 }>) {
   const subscribe = useCallback(
     (listener: () => void) => subscribePatternImportDxfPhaseECardSessionV1(techCardId, listener),
@@ -1137,6 +1149,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
       selection={selection}
       operationsPanel={operationsPanel}
       defaultOperationsMode={defaultOperationsMode}
+      sourceSurface={sourceSurface}
       mannequin={({ sources, activeScopeKey, stagingBlocked }) => (
         <div className='flex h-full min-h-0 flex-col'>
           <div className='min-h-0 flex-1'>

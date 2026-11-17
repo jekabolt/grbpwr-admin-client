@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   isPatternImportDxfPhaseEExactSavedEmptyOperationV1,
@@ -5,6 +6,11 @@ import {
   routePatternImportDxfPhaseEAssemblyOrderEntryV2,
   shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1,
 } from './assembly-order-entry';
+
+const assemblyOrderEntrySource = readFileSync(
+  new URL('./assembly-order-entry.tsx', import.meta.url),
+  'utf8',
+);
 
 describe('saved Assembly Order workbench routing', () => {
   it('treats the visible Assembly Table tab as an open request on the first render', () => {
@@ -36,6 +42,43 @@ describe('saved Assembly Order workbench routing', () => {
         exactSavedEmptyOperation: false,
       }),
     ).toBe(false);
+  });
+
+  it('opens zero-connect only for a separately proven linked one-physical-seam target', () => {
+    expect(
+      shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
+        workbenchOpen: true,
+        exactNSessionAvailable: false,
+        savedProjectionBlockerCode: 'saved-operation-not-two-seam',
+        selectedSeamKeys: ['existing-edge', 'existing-pose'],
+        savedOrderedSeamKeys: null,
+        exactSavedEmptyOperation: false,
+        exactSavedLinkedN1Target: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
+        workbenchOpen: true,
+        exactNSessionAvailable: true,
+        savedProjectionBlockerCode: 'saved-operation-not-two-seam',
+        selectedSeamKeys: ['existing-edge', 'existing-pose'],
+        savedOrderedSeamKeys: null,
+        exactSavedEmptyOperation: false,
+        exactSavedLinkedN1Target: true,
+      }),
+    ).toBe(false);
+  });
+
+  it('mounts the proven linked target on the native sewing source and the existing handoff', () => {
+    expect(assemblyOrderEntrySource).toContain(
+      "sourceSurface={savedLinkedN1 ? 'explicit-native-drawn-sewing' : undefined}",
+    );
+    expect(assemblyOrderEntrySource).toContain(
+      '(savedEmptyOperation || savedLinkedN1) && zeroConnectAuthoringHandoff',
+    );
+    expect(assemblyOrderEntrySource).toContain(
+      'resolvePatternImportDxfPhaseEZeroConnectExistingLinkedN1TargetV1',
+    );
   });
 
   it.each([
