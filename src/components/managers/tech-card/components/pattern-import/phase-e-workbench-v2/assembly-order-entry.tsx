@@ -2485,6 +2485,7 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
                         previewScope,
                         source.selectedOperationNumber,
                         focusSelection,
+                        selection,
                       ),
                     )}
                   </CadWorkbenchPhysicalHostPanelV1>
@@ -2763,6 +2764,7 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
                           : null,
                         source.selectedOperationNumber,
                         focusSelection,
+                        selection,
                       ),
                     )}
                   </CadWorkbenchPhysicalHostPanelV1>

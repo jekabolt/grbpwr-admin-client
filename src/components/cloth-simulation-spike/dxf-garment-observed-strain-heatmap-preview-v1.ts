@@ -1,4 +1,7 @@
 import * as THREE from 'three';
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
+import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
 import {
   getDxfGarmentObservedWebgpuReplayLifetimeV1,
   projectDxfGarmentObservedWebgpuRenderV1,
@@ -92,6 +95,37 @@ export async function projectDxfGarmentObservedStrainHeatmapV1(
   return Object.freeze({ ...input, heatmap });
 }
 
+function deformedPieceBoundary(
+  positions: Float32Array,
+  triangles: Uint32Array,
+  range: Readonly<{ triangleOffset: number; triangleCount: number }>,
+): Float32Array {
+  const vertexCount = positions.length / 3;
+  const edges = new Map<number, { from: number; to: number; incidence: number }>();
+  const lastIndex = (range.triangleOffset + range.triangleCount) * 3;
+  for (let firstIndex = range.triangleOffset * 3; firstIndex < lastIndex; firstIndex += 3) {
+    for (let corner = 0; corner < 3; corner++) {
+      const a = triangles[firstIndex + corner]!;
+      const b = triangles[firstIndex + ((corner + 1) % 3)]!;
+      const from = Math.min(a, b);
+      const to = Math.max(a, b);
+      const key = from * vertexCount + to;
+      const previous = edges.get(key);
+      if (previous) previous.incidence++;
+      else edges.set(key, { from, to, incidence: 1 });
+    }
+  }
+  const segments: number[] = [];
+  for (const { from, to, incidence } of edges.values()) {
+    if (incidence !== 1) continue;
+    for (const vertex of [from, to]) {
+      const offset = vertex * 3;
+      segments.push(positions[offset]!, positions[offset + 1]!, positions[offset + 2]!);
+    }
+  }
+  return Float32Array.from(segments);
+}
+
 export type DxfGarmentObservedPreviewHitV1 = Readonly<{
   frameReportSha256: string;
   triangleIndex: number;
@@ -122,6 +156,20 @@ export async function createDxfGarmentObservedStrainHeatmapPreviewV1(
   const lifetime = new AbortController();
   const resources: { dispose(): void }[] = [];
   let renderer: THREE.WebGLRenderer | null = null;
+  let outline: LineSegments2 | null = null;
+  let outlinedPieceId: string | null = null;
+  const clearOutline = () => {
+    const old = outline;
+    outline = null;
+    outlinedPieceId = null;
+    if (!old) return;
+    old.removeFromParent();
+    try {
+      old.geometry.dispose();
+    } finally {
+      old.material.dispose();
+    }
+  };
   let disposed = false;
   const dispose = () => {
     if (disposed) return;
@@ -129,6 +177,11 @@ export async function createDxfGarmentObservedStrainHeatmapPreviewV1(
     for (const link of attached) remove.call(link, 'abort', dispose);
     attached.length = 0;
     remove.call(canvas, 'webglcontextlost', contextLost);
+    try {
+      clearOutline();
+    } catch {
+      /* Release the original display even if a selection resource has failed. */
+    }
     try {
       renderer?.clear(true, true, true);
     } catch {
@@ -248,8 +301,68 @@ export async function createDxfGarmentObservedStrainHeatmapPreviewV1(
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.02;
     current();
-    renderer.render(scene, camera);
+    const display = renderer;
+    display.render(scene, camera);
     current();
+    const setSelectedPiece = (pieceId: string | null): boolean => {
+      try {
+        current();
+        const range = input.pieceRanges.find((piece) => piece.pieceId === pieceId);
+        const nextPieceId = range?.pieceId ?? null;
+        if (nextPieceId === outlinedPieceId) return nextPieceId === pieceId;
+        clearOutline();
+        if (range) {
+          const segments = deformedPieceBoundary(
+            input.finalPositions3M,
+            input.garmentTriangles,
+            range,
+          );
+          if (segments.length > 0) {
+            // Use a depth-tested screen-space stroke, as in the mannequin measurement stage.
+            const material = new LineMaterial({
+              color: 0x311eee,
+              linewidth: 3,
+              depthWrite: false,
+              polygonOffset: true,
+              polygonOffsetFactor: -1,
+              polygonOffsetUnits: -1,
+              toneMapped: false,
+            });
+            const geometry = new LineSegmentsGeometry();
+            try {
+              outline = new LineSegments2(geometry, material);
+              geometry.setPositions(segments);
+              material.resolution.set(width, height);
+              outline.name = 'generic-observed-selected-piece-outline';
+              outline.renderOrder = 1;
+              scene.add(outline);
+              outlinedPieceId = nextPieceId;
+            } catch (error) {
+              if (outline) clearOutline();
+              else {
+                try {
+                  geometry.dispose();
+                } finally {
+                  material.dispose();
+                }
+              }
+              throw error;
+            }
+          }
+        }
+        current();
+        try {
+          display.render(scene, camera);
+        } catch {
+          dispose();
+          return false;
+        }
+        current();
+        return outlinedPieceId === pieceId;
+      } catch {
+        return false;
+      }
+    };
     const frameReportSha256 = input.report.reportSha256!;
     canvas.dataset.genericObservedStrainFrameSha256 = frameReportSha256;
     const raycaster = new THREE.Raycaster();
@@ -320,6 +433,7 @@ export async function createDxfGarmentObservedStrainHeatmapPreviewV1(
       }),
       lifetime: lifetime.signal,
       pick,
+      setSelectedPiece,
       dispose,
     });
   } catch (error) {

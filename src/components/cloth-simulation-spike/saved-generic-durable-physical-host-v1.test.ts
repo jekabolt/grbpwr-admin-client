@@ -7,6 +7,7 @@ import {
   type ComponentProps,
   type ReactElement,
   type ReactNode,
+  type RefObject,
   type PointerEvent,
 } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -113,6 +114,7 @@ const ports = vi.hoisted(() => ({
   previewEvents: [] as string[],
   previewSignals: [] as AbortSignal[],
   previewPick: null as ((x: number, y: number) => DxfGarmentObservedPreviewHitV1 | null) | null,
+  previewSelect: null as ((pieceId: string | null) => boolean) | null,
 }));
 vi.mock('./dxf-garment-observed-webgpu-replay-v1', () => {
   const run = async (
@@ -194,6 +196,7 @@ vi.mock('./dxf-garment-observed-strain-heatmap-preview-v1', () => ({
       receipt: { declaredSyntheticPreview: true, frameReportSha256: '2'.repeat(64) },
       lifetime: controller.signal,
       pick: (x: number, y: number) => ports.previewPick?.(x, y) ?? null,
+      setSelectedPiece: (pieceId: string | null) => ports.previewSelect?.(pieceId) ?? true,
       dispose,
     };
   },
@@ -221,6 +224,7 @@ beforeEach(() => {
   ports.previewEvents.length = 0;
   ports.previewSignals.length = 0;
   ports.previewPick = null;
+  ports.previewSelect = null;
   vi.mocked(abortableAdminService).mockImplementation(
     () =>
       ({
@@ -1869,7 +1873,9 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
     expect(f.host.pickPreview(canvas, scope, 100, 200)).toBeNull();
 
     const focusSelection = vi.fn();
-    const interaction = bindCadWorkbenchPhysicalPreviewSelectionV1(scope, 120, focusSelection)!;
+    const selectOutline = vi.fn<(pieceId: string | null) => boolean>(() => true);
+    ports.previewSelect = selectOutline;
+    let interaction = bindCadWorkbenchPhysicalPreviewSelectionV1(scope, 120, focusSelection);
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     vi.stubGlobal('window', { event: undefined });
     const route = createRoot(reactMountContainer() as never);
@@ -1886,6 +1892,12 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
         durableSnapshot: f.host.getSnapshot(),
       } as ComponentProps<typeof CadWorkbenchPhysicalHostControlsV1>['state'];
       controls = CadWorkbenchPhysicalHostControlsV1({ state, interaction });
+      const props = visitMountedTree(
+        controls,
+        (item) => item['aria-label'] === 'Cloth simulation on the selected mannequin',
+      );
+      const ref = props?.ref as RefObject<HTMLCanvasElement | null> | undefined;
+      if (ref) ref.current = canvas;
       return null;
     }
     await act(async () => route.render(createElement(Controls)));
@@ -1934,8 +1946,37 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
     pick.mockReturnValueOnce(body);
     const bodyHit = f.host.pickPreview(canvas, scope, 100, 200);
     expect(bodyHit).toEqual(body);
-    interaction.onPick(bodyHit!);
+    interaction?.onPick(bodyHit!);
     expect(focusSelection).toHaveBeenCalledTimes(1);
+
+    const selected = {
+      scopeKey: row.scopeKey,
+      pieceId: piece.pieceId,
+      pieceLineKey: piece.pieceLineKey,
+    };
+    interaction = bindCadWorkbenchPhysicalPreviewSelectionV1(scope, 120, focusSelection, {
+      ...selected,
+      operationNumber: 120,
+    });
+    await act(async () => route.render(createElement(Controls)));
+    expect(selectOutline).toHaveBeenLastCalledWith(piece.pieceId);
+    expect(readCount).toBe(readCountBeforeClick);
+    expect(f.host.setPreviewSelectedPiece({} as HTMLCanvasElement, scope, selected)).toBe(false);
+    expect(selectOutline).toHaveBeenLastCalledWith(piece.pieceId);
+
+    expect(
+      f.host.setPreviewSelectedPiece(canvas, scope, { ...selected, pieceLineKey: 'wrong-line' }),
+    ).toBe(false);
+    expect(selectOutline).toHaveBeenLastCalledWith(null);
+    expect(f.host.setPreviewSelectedPiece(canvas, scope, selected)).toBe(true);
+    expect(
+      f.host.setPreviewSelectedPiece(canvas, { ...scope, sizeToken: 'wrong-size' }, selected),
+    ).toBe(false);
+    expect(selectOutline).toHaveBeenLastCalledWith(null);
+    expect(f.host.setPreviewSelectedPiece(canvas, scope, selected)).toBe(true);
+    interaction = null;
+    await act(async () => route.render(createElement(Controls)));
+    expect(selectOutline).toHaveBeenLastCalledWith(null);
 
     pick.mockImplementationOnce(() => {
       caller.abort();
@@ -1943,6 +1984,9 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
     });
     expect(f.host.pickPreview(canvas, scope, 100, 200)).toBeNull();
     expect(f.host.pickPreview(canvas, scope, 100, 200)).toBeNull();
+    selectOutline.mockClear();
+    expect(f.host.setPreviewSelectedPiece(canvas, scope, selected)).toBe(false);
+    expect(selectOutline).not.toHaveBeenCalled();
     expect(f.host.getSnapshot()).toMatchObject({
       status: 'frame32-ready',
       binding: { sourceGeneration: 1 },

@@ -49,6 +49,15 @@ export function CadWorkbenchPhysicalHostControlsV1({
   const ready = state.sourceStatus === 'ready' && state.host !== null;
   const previewReady = state.durableSnapshot?.status === 'preview-ready';
   const receipt = state.durableSnapshot?.numeric.previewReceipt;
+  useLayoutEffect(() => {
+    const canvas = previewCanvas.current;
+    if (!host || !canvas || !previewReady || !receipt) return;
+    host.setPreviewSelectedPiece(
+      canvas,
+      interaction?.scope ?? null,
+      interaction?.selectedPiece ?? null,
+    );
+  }, [host, interaction, previewReady, receipt]);
   const physicalPointer = useRef<{
     id: number;
     x: number;

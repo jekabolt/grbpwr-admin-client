@@ -1061,6 +1061,33 @@ export function createSavedGenericObservedPhysicalHostV1(
       return failed(error);
     }
   };
+  const withMountedPreview = <T>(
+    canvas: HTMLCanvasElement,
+    apply: (view: Preview) => T,
+  ): T | null => {
+    const mounted = preview;
+    if (!mounted || mounted.canvas !== canvas) return null;
+    const { frame, view } = mounted;
+    const current = () => {
+      if (
+        disposed ||
+        preview !== mounted ||
+        frame32 !== frame ||
+        snapshot.status !== 'preview-ready' ||
+        snapshot.previewReceipt !== view.receipt
+      )
+        throw new DOMException('Observed preview changed.', 'AbortError');
+      checkSignal(view.lifetime);
+    };
+    try {
+      frameLifetime(frame, current);
+      const result = apply(view);
+      frameLifetime(frame, current);
+      return result;
+    } catch {
+      return null;
+    }
+  };
   const host = {
     getSnapshot: () => snapshot,
     subscribe(listener: () => void) {
@@ -1325,28 +1352,13 @@ export function createSavedGenericObservedPhysicalHostV1(
       }
     },
     pickPreview(canvas: HTMLCanvasElement, clientX: number, clientY: number) {
-      const mounted = preview;
-      if (!mounted || mounted.canvas !== canvas) return null;
-      const { frame } = mounted;
-      const current = () => {
-        if (
-          disposed ||
-          preview !== mounted ||
-          frame32 !== frame ||
-          snapshot.status !== 'preview-ready' ||
-          snapshot.previewReceipt !== mounted.view.receipt
-        )
-          throw new DOMException('Observed preview changed.', 'AbortError');
-        checkSignal(mounted.view.lifetime);
-      };
-      try {
-        frameLifetime(frame, current);
-        const hit = mounted.view.pick(clientX, clientY);
-        frameLifetime(frame, current);
-        return hit && hit.frameReportSha256 === mounted.view.receipt.frameReportSha256 ? hit : null;
-      } catch {
-        return null;
-      }
+      return withMountedPreview(canvas, (view) => {
+        const hit = view.pick(clientX, clientY);
+        return hit && hit.frameReportSha256 === view.receipt.frameReportSha256 ? hit : null;
+      });
+    },
+    setPreviewSelectedPiece(canvas: HTMLCanvasElement, pieceId: string | null): boolean {
+      return withMountedPreview(canvas, (view) => view.setSelectedPiece(pieceId)) ?? false;
     },
     async stopPreview() {
       if (operation?.kind === 'physical') {

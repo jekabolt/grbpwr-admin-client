@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
+import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
 
 // Synthetic display/lifecycle ports only. No GPU kernels, genuine body or product admission is
 // claimed here. The separate encoder suite exercises the real private projection registry.
@@ -12,10 +14,14 @@ const ports = vi.hoisted(() => ({
   renderers: [] as { renders: number; clears: number; disposals: number }[],
   throwDispose: false,
   clothZ: 0,
+  onePanel: false,
+  outline: null as number[] | null,
+  garmentColors: null as number[] | null,
+  projectionReads: 0,
   frustumViolations: 0,
 }));
 const positions = (z = 0) => new Float32Array([0, 0, z, 1, 0, z, 0, 1, z, 1, 1, z]);
-const input = () => ({
+const splitInput = () => ({
   finalPositions3M: new Float32Array([
     ...positions(ports.clothZ).slice(0, 9),
     1,
@@ -52,6 +58,17 @@ const input = () => ({
     renderTriangleIndices: new Uint32Array([1, 0]),
   },
 });
+const input = () => {
+  const split = splitInput();
+  return ports.onePanel
+    ? {
+        ...split,
+        finalPositions3M: positions(ports.clothZ),
+        garmentTriangles: new Uint32Array([0, 1, 2, 1, 3, 2]),
+        pieceRanges: [{ ...split.pieceRanges[0]!, vertexCount: 4, triangleCount: 2 }],
+      }
+    : split;
+};
 vi.mock('./dxf-garment-observed-webgpu-replay-v1', () => ({
   getDxfGarmentObservedWebgpuReplayLifetimeV1: (owner: unknown) => {
     ports.onLifetimeRead?.();
@@ -59,31 +76,38 @@ vi.mock('./dxf-garment-observed-webgpu-replay-v1', () => ({
       ? ports.controller.signal
       : null;
   },
-  projectDxfGarmentObservedWebgpuRenderV1: async () => ({
-    ...input(),
-    frameCount: 32,
-    report: {
-      status: 'diagnostic-completed',
-      reportSha256: 'a'.repeat(64),
-      sourceBindingSha256: 'b'.repeat(64),
-      finalStateSha256: 'c'.repeat(64),
-      finalValidation: { ok: true },
-      checkpoint16Matched: true,
-      bodyBinding: {
-        persistedModel: Object.freeze({ id: 5, updatedAt: '2026-11-01T12:00:00Z', revision: 'r1' }),
-        observedBodyContentSha256: 'e'.repeat(64),
+  projectDxfGarmentObservedWebgpuRenderV1: async () => {
+    ports.projectionReads++;
+    return {
+      ...input(),
+      frameCount: 32,
+      report: {
+        status: 'diagnostic-completed',
+        reportSha256: 'a'.repeat(64),
+        sourceBindingSha256: 'b'.repeat(64),
+        finalStateSha256: 'c'.repeat(64),
+        finalValidation: { ok: true },
+        checkpoint16Matched: true,
+        bodyBinding: {
+          persistedModel: Object.freeze({
+            id: 5,
+            updatedAt: '2026-11-01T12:00:00Z',
+            revision: 'r1',
+          }),
+          observedBodyContentSha256: 'e'.repeat(64),
+        },
       },
-    },
-    bodyPositionsM: positions(),
-    bodyTriangles: new Uint32Array([0, 1, 2, 1, 3, 2]),
-    strain: {
-      ...input().strain,
-      passed: true,
-      units: 'dimensionless',
-      stressPaComputed: false,
-      renderMappingSha256: 'd'.repeat(64),
-    },
-  }),
+      bodyPositionsM: positions(),
+      bodyTriangles: new Uint32Array([0, 1, 2, 1, 3, 2]),
+      strain: {
+        ...input().strain,
+        passed: true,
+        units: 'dimensionless',
+        stressPaComputed: false,
+        renderMappingSha256: 'd'.repeat(64),
+      },
+    };
+  },
 }));
 vi.mock('three', async (original) => {
   const actual = await original<typeof import('three')>();
@@ -101,8 +125,18 @@ vi.mock('three', async (original) => {
       scene.updateMatrixWorld(true);
       camera.updateMatrixWorld(true);
       ports.currentCamera = camera;
+      ports.outline = null;
       scene.traverse((node) => {
         if (!(node instanceof actual.Mesh)) return;
+        if (node.name === 'generic-observed-selected-piece-outline') {
+          const segmentStart = node.geometry.getAttribute('instanceStart');
+          if (!(segmentStart instanceof actual.InterleavedBufferAttribute))
+            throw new Error('Outline did not retain exact start/end segment coordinates.');
+          ports.outline = Array.from(segmentStart.data.array);
+          return;
+        }
+        if (node.name.endsWith('-strain-utilization'))
+          ports.garmentColors = Array.from(node.geometry.getAttribute('color').array);
         const attribute = node.geometry.getAttribute('position');
         for (let index = 0; index < attribute.count; index++) {
           const v = new actual.Vector3()
@@ -154,6 +188,10 @@ beforeEach(() => {
   ports.renderers = [];
   ports.throwDispose = false;
   ports.clothZ = 0;
+  ports.onePanel = false;
+  ports.outline = null;
+  ports.garmentColors = null;
+  ports.projectionReads = 0;
   ports.frustumViolations = 0;
   vi.stubGlobal('HTMLCanvasElement', SyntheticCanvas);
 });
@@ -217,6 +255,46 @@ describe('synthetic renderer lifecycle (not visual or physical acceptance)', () 
       top + ((1 - projected.y) * height) / 2,
     ] as const;
   }
+
+  it('outlines the selected deformed boundary with the same camera and untouched strain colors', async () => {
+    ports.clothZ = 0.25;
+    ports.onePanel = true;
+    const { view } = await open();
+    const color = ports.garmentColors;
+    const camera = ports.currentCamera;
+    const material = vi.spyOn(LineMaterial.prototype, 'dispose');
+    const geometry = vi.spyOn(LineSegmentsGeometry.prototype, 'dispose');
+    expect(view.setSelectedPiece('first-panel')).toBe(true);
+    // Four outside edges of two exact deformed triangles. The shared diagonal is absent.
+    expect(ports.outline).toEqual([
+      0, 0, 0.25, 1, 0, 0.25, 0, 0, 0.25, 0, 1, 0.25, 1, 0, 0.25, 1, 1, 0.25, 0, 1, 0.25, 1, 1,
+      0.25,
+    ]);
+    expect(ports.garmentColors).toEqual(color);
+    expect(ports.currentCamera).toBe(camera);
+    expect(view.setSelectedPiece('first-panel')).toBe(true);
+    expect(ports.renderers[0]?.renders).toBe(2);
+    expect(view.setSelectedPiece('another-panel')).toBe(false);
+    expect(ports.outline).toBeNull();
+    expect(ports.garmentColors).toEqual(color);
+    expect(material).toHaveBeenCalledTimes(1);
+    expect(geometry).toHaveBeenCalledTimes(1);
+    expect(ports.projectionReads).toBe(1);
+  });
+
+  it('clears outline geometry/material and rejects future selection when its frame revokes', async () => {
+    const { view } = await open();
+    const material = vi.spyOn(LineMaterial.prototype, 'dispose');
+    const geometry = vi.spyOn(LineSegmentsGeometry.prototype, 'dispose');
+    ports.onRender = () => ports.controller.abort();
+    expect(view.setSelectedPiece('first-panel')).toBe(false);
+    expect(view.lifetime.aborted).toBe(true);
+    expect(view.setSelectedPiece('second-panel')).toBe(false);
+    expect(ports.renderers[0]?.renders).toBe(2);
+    expect(material).toHaveBeenCalledTimes(1);
+    expect(geometry).toHaveBeenCalledTimes(1);
+    expect(ports.projectionReads).toBe(1);
+  });
 
   it('picks visible garments by exact render triangle instead of strain schedule order', async () => {
     ports.clothZ = 0.15;

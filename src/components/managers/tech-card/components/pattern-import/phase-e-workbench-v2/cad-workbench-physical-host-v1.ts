@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import type {
   SavedGenericDurablePhysicalPreviewHitV1,
+  SavedGenericDurablePhysicalPreviewPieceV1,
   SavedGenericDurablePhysicalPreviewScopeV1,
 } from 'components/cloth-simulation-spike/saved-generic-durable-physical-host-v1';
 import type { PatternImportDxfPhaseECadWorkbenchSlotContextV1 } from './cad-workbench-split-shell-v1';
@@ -21,6 +22,7 @@ export type CadWorkbenchMannequinArrangementSaveV1 = Readonly<{
 
 export type CadWorkbenchPhysicalPreviewInteractionV1 = Readonly<{
   scope: SavedGenericDurablePhysicalPreviewScopeV1;
+  selectedPiece: SavedGenericDurablePhysicalPreviewPieceV1 | null;
   onPick: (hit: SavedGenericDurablePhysicalPreviewHitV1) => void;
 }>;
 
@@ -28,10 +30,19 @@ export function bindCadWorkbenchPhysicalPreviewSelectionV1(
   scope: SavedGenericDurablePhysicalPreviewScopeV1 | null,
   operationNumber: number,
   focusSelection: PatternImportDxfPhaseECadWorkbenchSlotContextV1['focusSelection'],
+  selection: PatternImportDxfPhaseECadWorkbenchSlotContextV1['selection'] = null,
 ): CadWorkbenchPhysicalPreviewInteractionV1 | null {
   if (!scope) return null;
   return {
     scope,
+    selectedPiece:
+      selection?.scopeKey && selection.pieceId && selection.pieceLineKey
+        ? {
+            scopeKey: selection.scopeKey,
+            pieceId: selection.pieceId,
+            pieceLineKey: selection.pieceLineKey,
+          }
+        : null,
     onPick(hit) {
       if (hit.kind === 'garment')
         focusSelection({

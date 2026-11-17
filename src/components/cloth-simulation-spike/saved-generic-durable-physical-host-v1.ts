@@ -33,6 +33,12 @@ export type SavedGenericDurablePhysicalPreviewScopeV1 = Readonly<{
   sizeToken: string;
 }>;
 
+export type SavedGenericDurablePhysicalPreviewPieceV1 = Readonly<{
+  scopeKey: string;
+  pieceId: string;
+  pieceLineKey: string;
+}>;
+
 export type SavedGenericDurablePhysicalPreviewHitV1 =
   | (Extract<DxfGarmentObservedPreviewHitV1, { kind: 'garment' }> &
       Readonly<{ scopeKey: string; pieceLineKey: string }>)
@@ -267,6 +273,42 @@ export function createSavedGenericDurablePhysicalHostV1(
     operation: Operation | null = null;
   let lease16: XpbdDeviceLease | null = null;
   const bridges = new Map<'16' | '32' | 'preview', Operation>();
+  const previewAdmission = () => {
+    const a = admission;
+    const bridge = bridges.get('preview');
+    if (!a || !bridge) return null;
+    const current = () =>
+      !disposed &&
+      !stopping &&
+      admission === a &&
+      epoch === a.epoch &&
+      sourceLife === a.sourceLife &&
+      !aborted.call(sourceLife.signal) &&
+      !aborted.call(bridge.controller.signal) &&
+      bridges.get('preview') === bridge &&
+      snapshot.status === 'preview-ready' &&
+      snapshot.binding === a.publicBinding &&
+      snapshot.numeric.sourceGeneration === a.generation &&
+      snapshot.numeric.initializationSha256 === a.durable.physicalInitializationCanonicalSha256 &&
+      snapshot.numeric.previewReceipt !== null;
+    return current() ? { durable: a.durable, current } : null;
+  };
+  const matchesPreviewScope = (
+    scope: SavedGenericDurablePhysicalPreviewScopeV1 | null,
+    durable: Durable,
+  ): boolean => {
+    try {
+      const requested = capture(record(scope, ['row', 'sizeToken', 'sourceFileId']));
+      const { source } = durable.graph;
+      return (
+        canonical(requested.row) === canonical(durable.row) &&
+        requested.sizeToken === source.sizeToken &&
+        requested.sourceFileId === source.sourceFileId
+      );
+    } catch {
+      return false;
+    }
+  };
   const listeners = new Set<() => void>();
   let snapshot: SavedGenericDurablePhysicalHostSnapshotV1 = Object.freeze({
     version: SAVED_GENERIC_DURABLE_PHYSICAL_HOST_V1,
@@ -735,47 +777,47 @@ export function createSavedGenericDurablePhysicalHostV1(
       clientX: number,
       clientY: number,
     ): SavedGenericDurablePhysicalPreviewHitV1 | null {
-      const a = admission;
-      const bridge = bridges.get('preview');
-      if (!a || !bridge) return null;
-      const current = () =>
-        !disposed &&
-        !stopping &&
-        admission === a &&
-        epoch === a.epoch &&
-        sourceLife === a.sourceLife &&
-        !aborted.call(sourceLife.signal) &&
-        !aborted.call(bridge.controller.signal) &&
-        bridges.get('preview') === bridge &&
-        snapshot.status === 'preview-ready' &&
-        snapshot.binding === a.publicBinding &&
-        snapshot.numeric.sourceGeneration === a.generation &&
-        snapshot.numeric.initializationSha256 === a.durable.physicalInitializationCanonicalSha256 &&
-        snapshot.numeric.previewReceipt !== null;
-      try {
-        const requested = capture(record(scope, ['row', 'sizeToken', 'sourceFileId']));
-        const { source, pieces } = a.durable.graph;
-        if (
-          !current() ||
-          canonical(requested.row) !== canonical(a.durable.row) ||
-          requested.sizeToken !== source.sizeToken ||
-          requested.sourceFileId !== source.sourceFileId
-        )
-          return null;
-        const hit = host.pickPreview(canvas, clientX, clientY);
-        if (!hit || !current()) return null;
-        if (hit.kind === 'body') return hit;
-        const piece = pieces.find(({ pieceId }) => pieceId === hit.pieceId);
-        return piece
-          ? Object.freeze({
-              ...hit,
-              scopeKey: a.durable.row.scopeKey,
-              pieceLineKey: piece.pieceLineKey,
-            })
-          : null;
-      } catch {
+      const preview = previewAdmission();
+      if (!preview || !matchesPreviewScope(scope, preview.durable) || !preview.current())
         return null;
+      const hit = host.pickPreview(canvas, clientX, clientY);
+      if (!hit || !preview.current()) return null;
+      if (hit.kind === 'body') return hit;
+      const piece = preview.durable.graph.pieces.find(({ pieceId }) => pieceId === hit.pieceId);
+      return piece
+        ? Object.freeze({
+            ...hit,
+            scopeKey: preview.durable.row.scopeKey,
+            pieceLineKey: piece.pieceLineKey,
+          })
+        : null;
+    },
+    setPreviewSelectedPiece(
+      canvas: HTMLCanvasElement,
+      scope: SavedGenericDurablePhysicalPreviewScopeV1 | null,
+      selection: SavedGenericDurablePhysicalPreviewPieceV1 | null,
+    ): boolean {
+      const preview = previewAdmission();
+      if (!preview) return false;
+      const { durable } = preview;
+      let selectedPieceId: string | null = null;
+      try {
+        if (selection && matchesPreviewScope(scope, durable)) {
+          const requested = capture(record(selection, ['scopeKey', 'pieceId', 'pieceLineKey']));
+          if (requested.scopeKey === durable.row.scopeKey) {
+            const piece = durable.graph.pieces.find(
+              ({ pieceId, pieceLineKey }) =>
+                pieceId === requested.pieceId && pieceLineKey === requested.pieceLineKey,
+            );
+            selectedPieceId = piece?.pieceId ?? null;
+          }
+        }
+      } catch {
+        // A stale or malformed selection also clears a previously visible outline.
       }
+      if (!preview.current()) return false;
+      const rendered = host.setPreviewSelectedPiece(canvas, selectedPieceId);
+      return rendered && preview.current() && (selection === null || selectedPieceId !== null);
     },
     async stopPreview() {
       // Preview effect cleanup must not cancel the separately owned source restore/compile.
