@@ -72,7 +72,7 @@ export function CadWorkbenchPhysicalHostControlsV1({
         );
       await stop();
     } finally {
-      if (!controller.signal.aborted) setPending(false);
+      setPending(false);
     }
   };
 
