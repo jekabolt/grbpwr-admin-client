@@ -60,8 +60,8 @@ it.each([
     expect(resolved.row.scopeKey).toBe(expected);
     expect(context.scopes.map((scope) => scope.scopeKey)).toEqual([expected]);
     expect(context.scopes[0].fabricPurpose).toBe(purpose);
-    expect(context.existingPatterns.map((pattern) => pattern.scopeKey)).toEqual([expected]);
-    expect(context.existingAliases.map((alias) => alias.scopeKey)).toEqual([expected, expected]);
+    expect(context.existingPatterns?.map((pattern) => pattern.scopeKey)).toEqual([expected]);
+    expect(context.existingAliases?.map((alias) => alias.scopeKey)).toEqual([expected, expected]);
   },
 );
 

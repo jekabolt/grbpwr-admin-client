@@ -1,4 +1,7 @@
-import type { common_TechCard } from 'api/proto-http/admin';
+import {
+  PATTERN_IMPORT_DXF_PHASE_E_GOLDEN_SAVED_CARD_FIXTURES_V1,
+  clonePatternImportDxfPhaseEGoldenSavedCardV1,
+} from './golden-card-6-11-saved-card-fixtures-v1';
 import { buildPatternImportDxfPhaseESavedCardContextV1 } from './saved-card-production-projection-v1';
 import { resolvePatternImportDxfPhaseESavedPatternRowV1 } from './saved-pattern-row-resolver-v1';
 import { rollGoodsScopes } from 'components/managers/tech-card/components/piece-block-refs';
@@ -100,37 +103,55 @@ async function nativeDrawnSource() {
     row: { ...seed.row, sizeBytes: bytes.length, sha256: await digestFullAssemblyFixture(bytes) },
   };
   // Exercise the production enum-to-domain scope boundary before genuine native replay.
-  const savedCard = {
-    id: seed.row.techCardId,
-    lockVersion: seed.row.cardLockVersion,
-    techCard: {
-      sizeIds: [7],
-      bomItems: [
-        {
-          lineKey: 'bom-main',
-          section: 'TECH_CARD_BOM_SECTION_FABRIC',
-          purpose: 'TECH_CARD_BOM_PURPOSE_MAIN',
-        },
-      ],
-      pieces: seed.card.existingPieces,
-      pieceDxfAliases: {
-        items: seed.card.existingAliases.map((alias) => ({
-          ...alias,
-          fabricPurpose: 'TECH_CARD_BOM_PURPOSE_MAIN',
-        })),
-      },
-      patterns: [
-        {
-          lineKey: seed.row.patternLineKey,
-          fabricPurpose: 'TECH_CARD_BOM_PURPOSE_MAIN',
-          url: seed.row.url,
-          sizeBytes: seed.row.sizeBytes,
-          sha256: seed.row.sha256,
-          savedRowRevision: seed.row.revision,
-        },
-      ],
+  const savedCard = clonePatternImportDxfPhaseEGoldenSavedCardV1(
+    PATTERN_IMPORT_DXF_PHASE_E_GOLDEN_SAVED_CARD_FIXTURES_V1[0].card,
+  );
+  savedCard.id = seed.row.techCardId;
+  savedCard.lockVersion = seed.row.cardLockVersion;
+  const savedInsert = savedCard.techCard;
+  if (!savedInsert || !seed.card.existingAliases)
+    throw new Error('Complete saved-card fixture required');
+  const bomTemplate = savedInsert.bomItems?.[0];
+  const pieceTemplate = savedInsert.pieces?.[0];
+  const aliasTemplate = savedInsert.pieceDxfAliases?.items?.[0];
+  const patternTemplate = savedInsert.patterns?.[0];
+  if (!bomTemplate || !pieceTemplate || !aliasTemplate || !patternTemplate)
+    throw new Error('Complete saved-card row templates required');
+  savedInsert.sizeIds = [7];
+  savedInsert.bomItems = [
+    {
+      ...bomTemplate,
+      lineKey: 'bom-main',
+      section: 'TECH_CARD_BOM_SECTION_FABRIC',
+      purpose: 'TECH_CARD_BOM_PURPOSE_MAIN',
     },
-  } as common_TechCard;
+  ];
+  savedInsert.pieces = seed.card.existingPieces.map((piece) => ({
+    ...pieceTemplate,
+    lineKey: piece.lineKey,
+    name: piece.name,
+  }));
+  savedInsert.pieceDxfAliases = {
+    items: seed.card.existingAliases.map((alias) => ({
+      ...aliasTemplate,
+      blockName: alias.blockName,
+      pieceLineKey: alias.pieceLineKey,
+      fabricPurpose: 'TECH_CARD_BOM_PURPOSE_MAIN',
+      bomLineKey: 'bom-main',
+    })),
+  };
+  savedInsert.patterns = [
+    {
+      ...patternTemplate,
+      lineKey: seed.row.patternLineKey,
+      fabricPurpose: 'TECH_CARD_BOM_PURPOSE_MAIN',
+      bomLineKey: 'bom-main',
+      url: seed.row.url,
+      sizeBytes: seed.row.sizeBytes,
+      sha256: seed.row.sha256,
+      savedRowRevision: seed.row.revision,
+    },
+  ];
   const insert = savedCard.techCard!;
   const resolved = resolvePatternImportDxfPhaseESavedPatternRowV1({
     techCardId: savedCard.id!,
