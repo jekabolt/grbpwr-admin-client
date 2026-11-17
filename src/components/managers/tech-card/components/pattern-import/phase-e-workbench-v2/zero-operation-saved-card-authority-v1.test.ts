@@ -391,9 +391,7 @@ describe('zero-operation saved card authority', () => {
 
       expect(fresh).toMatchObject({ ok: false, blocker: { code: freshCode } });
       expect(routed).toMatchObject({ mode: 'saved', choices: { ok: true } });
-      expect(JSON.stringify(routed)).not.toContain(
-        'A current positive Phase-E card session and its detached draft are required.',
-      );
+      expect(JSON.stringify(routed)).not.toContain('The current DXF workspace is not ready yet.');
     },
   );
 
@@ -420,9 +418,7 @@ describe('zero-operation saved card authority', () => {
       mode: 'saved',
       choices: { ok: false, blocker: { code: 'saved-pattern-unavailable' } },
     });
-    expect(JSON.stringify(routed)).not.toContain(
-      'A current positive Phase-E card session and its detached draft are required.',
-    );
+    expect(JSON.stringify(routed)).not.toContain('The current DXF workspace is not ready yet.');
   });
 
   it('resolves a server-relative DXF capability before fetching its presigned object', async () => {
