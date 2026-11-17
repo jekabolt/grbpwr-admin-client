@@ -61,6 +61,7 @@ export type DxfProductSavedForeignReprocessResultV1 =
       sourceFileId: string;
       canonicalWriterSha256: string;
       draft: CardDraft;
+      nativeSewingReplay?: DxfNativeSewingReplayStageOutputV1;
       blockers: readonly [];
     }>
   | Readonly<{
@@ -549,6 +550,9 @@ export function createDxfProductSavedForeignReprocessOwnerV1(
         sourceFileId,
         canonicalWriterSha256: validated.canonicalWriterSha256,
         draft: validated.draft,
+        ...(rebuilt.nativeSewingReplay
+          ? { nativeSewingReplay: deepFreezeOwned(structuredClone(rebuilt.nativeSewingReplay)) }
+          : {}),
         blockers: Object.freeze([]) as readonly [],
       });
     } finally {

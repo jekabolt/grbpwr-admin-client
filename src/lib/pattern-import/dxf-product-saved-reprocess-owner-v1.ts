@@ -86,6 +86,7 @@ export type DxfProductSavedReprocessResultV1 =
       sourceFileId: string;
       /** Exact carrier draft with every raw DXF text field removed. */
       draft: CardDraft;
+      nativeSewingReplay?: DxfNativeSewingReplayStageOutputV1;
       blockers: readonly [];
     }>
   | Readonly<{
@@ -698,6 +699,9 @@ export function createDxfProductSavedReprocessOwnerV1(host: DxfProductSavedRepro
         row,
         sourceFileId,
         draft: validated.draft,
+        ...(rebuilt.nativeSewingReplay
+          ? { nativeSewingReplay: deepFreezeOwned(structuredClone(rebuilt.nativeSewingReplay)) }
+          : {}),
         blockers: Object.freeze([]) as readonly [],
       });
     } finally {

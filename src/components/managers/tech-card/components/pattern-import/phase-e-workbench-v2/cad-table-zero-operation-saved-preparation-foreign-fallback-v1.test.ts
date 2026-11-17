@@ -142,9 +142,10 @@ function card(): common_TechCard {
 const exactDraft = { techCardId: 156, marker: 'exact' } as unknown as CardDraft;
 const foreignDraft = { techCardId: 156, marker: 'foreign' } as unknown as CardDraft;
 
-function request() {
+function request(sourceSurface?: 'explicit-native-drawn-sewing') {
   const generationOwner = createPatternImportDxfPhaseECadTableZeroOperationGenerationOwnerV1();
   return {
+    ...(sourceSurface ? { sourceSurface } : {}),
     techCard: card(),
     orderSizeIds: (ids: number[]) => [...ids],
     sizeNameById: new Map([[2, 'M']]),
@@ -221,10 +222,9 @@ describe('zero-operation saved preparation foreign fallback', () => {
   it('requests native sewing explicitly and refuses absent replay without selecting cut geometry', async () => {
     mocks.exactRun.mockResolvedValue(exactFailure('foreign-saved-dxf-detected'));
     mocks.foreignRun.mockResolvedValue({ ok: true, draft: foreignDraft, blockers: [] });
-    const result = await preparePatternImportDxfPhaseECadTableZeroOperationSavedV1({
-      ...request(),
-      sourceSurface: 'explicit-native-drawn-sewing',
-    });
+    const result = await preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
+      request('explicit-native-drawn-sewing'),
+    );
     expect(result.ok).toBe(false);
     expect(mocks.createForeignHost).toHaveBeenCalledWith(
       expect.objectContaining({ nativeSewingReplay: true }),

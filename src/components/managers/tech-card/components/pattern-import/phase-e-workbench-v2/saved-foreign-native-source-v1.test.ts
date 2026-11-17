@@ -23,7 +23,10 @@ import {
   consumeDxfProductSavedNativeCompilerSourceV1,
   DXF_PRODUCT_SAVED_NATIVE_COMPILER_SOURCE_REQUEST_V1,
 } from 'lib/pattern-import/dxf-product-saved-native-reprocess-owner-v1';
-import { DXF_PRODUCT_SAVED_FOREIGN_REPROCESS_REQUEST_V1 } from 'lib/pattern-import/dxf-product-saved-foreign-reprocess-owner-v1';
+import {
+  createDxfProductSavedForeignReprocessOwnerV1,
+  DXF_PRODUCT_SAVED_FOREIGN_REPROCESS_REQUEST_V1,
+} from 'lib/pattern-import/dxf-product-saved-foreign-reprocess-owner-v1';
 import { writeDxfDetailed } from 'lib/pattern-import/write';
 import { Session } from 'lib/pattern-import/worker/session';
 import type { PatternImportOpenFile, StageName, StageIO } from 'lib/pattern-import/types';
@@ -152,6 +155,19 @@ describe('foreign native source capability', () => {
             headers: { 'content-length': String(bytes.length) },
           })) as typeof fetch,
       });
+      const tableOwner = createDxfProductSavedForeignReprocessOwnerV1({
+        ...host,
+        dispose: () => {},
+      });
+      const tableSource = await tableOwner.run({
+        schemaVersion: DXF_PRODUCT_SAVED_FOREIGN_REPROCESS_REQUEST_V1,
+        row,
+      });
+      tableOwner.dispose();
+      expect(tableSource.ok, JSON.stringify(tableSource.blockers)).toBe(true);
+      if (!tableSource.ok) throw new Error('Ordinary table replay required');
+      expect(tableSource.nativeSewingReplay?.replayReady).toBe(true);
+      expect(Object.isFrozen(tableSource.nativeSewingReplay)).toBe(true);
       let rebuilt: Awaited<ReturnType<typeof host.reprocess>> | undefined;
       const owner = createDxfProductSavedForeignNativeReprocessOwnerV1({
         ...host,
@@ -237,8 +253,8 @@ describe('foreign native source capability', () => {
         };
         const originalDraft = JSON.stringify(fresh.draft);
         const authoringView = createSavedNativeSewingAuthoringViewV1(
-          fresh.draft,
-          fresh.nativeSewingReplay,
+          tableSource.draft,
+          tableSource.nativeSewingReplay,
           row.sha256,
         );
         const sizeToken = fresh.draft.scopes[0].writerReplay!.job.pieces[0].sizes[0].sizeToken;
