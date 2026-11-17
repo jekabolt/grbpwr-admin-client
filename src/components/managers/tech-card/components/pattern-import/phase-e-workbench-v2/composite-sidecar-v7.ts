@@ -772,6 +772,29 @@ function outerIdentity(snapshot: SavedFullAssemblySnapshotProjectionV1): string 
   });
 }
 
+function requirePersistedOuterMatchesCandidate(
+  snapshot: SavedFullAssemblySnapshotProjectionV1,
+  candidate: PatternImportDxfProductCompositeSidecarOwnerV7,
+  candidateBytes: Uint8Array<ArrayBuffer>,
+): void {
+  if (
+    snapshot.outer.status !== 'present' ||
+    snapshot.outer.mediaType !== PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7 ||
+    snapshot.outer.currentRowBound !== true ||
+    snapshot.outer.sha256 !== candidate.seal.canonicalSha256 ||
+    snapshot.outer.byteLength !== candidate.seal.canonicalByteLength ||
+    snapshot.outer.byteLength !== candidateBytes.byteLength ||
+    snapshot.outer.persistedCardLockVersion !== candidate.document.bindings.row.cardLockVersion ||
+    snapshot.outer.persistedSavedRowRevision !== candidate.document.bindings.row.revision ||
+    !sameBytes(snapshot.outer.bytes, candidateBytes)
+  )
+    fail(
+      'persisted-outer-mismatch',
+      'snapshotReceipt.outer',
+      'Fresh saved outer media, row binding, SHA, length, or exact V7 bytes differ from the candidate owner.',
+    );
+}
+
 /**
  * The only durable V7 verification lane. Structural decode above remains usable by legacy
  * transition routes and never authenticates the embedded graph/physical document.
@@ -787,6 +810,7 @@ export async function verifyPatternImportDxfProductCompositeSidecarV7PhysicalAut
     if (!state) fail('invalid-owner', 'owner', 'A genuine Composite V7 owner is required.');
     const outer = candidate as PatternImportDxfProductCompositeSidecarOwnerV7;
     const initialSnapshot = projectSavedFullAssemblySnapshotV1(snapshotReceipt);
+    requirePersistedOuterMatchesCandidate(initialSnapshot, outer, state.bytes);
     const expectedSnapshotIdentity = snapshotIdentity(initialSnapshot);
     const expectedOuterIdentity = outerIdentity(initialSnapshot);
     const physicalBytes = state.components.get(SAVED_FULL_ASSEMBLY_PHYSICAL_COMPONENT_KIND_V1);
@@ -813,6 +837,7 @@ export async function verifyPatternImportDxfProductCompositeSidecarV7PhysicalAut
         'Verified Full Assembly physical authority differs from Composite V7.',
       );
     const currentSnapshot = projectSavedFullAssemblySnapshotV1(snapshotReceipt);
+    requirePersistedOuterMatchesCandidate(currentSnapshot, outer, state.bytes);
     if (
       snapshotIdentity(currentSnapshot) !== expectedSnapshotIdentity ||
       outerIdentity(currentSnapshot) !== expectedOuterIdentity
@@ -870,9 +895,12 @@ export function isSavedFullAssemblyPhysicalAuthorityReceiptV1(
 ): candidate is SavedFullAssemblyPhysicalAuthorityReceiptV1 {
   if (!candidate || typeof candidate !== 'object') return false;
   const state = physicalAuthorityReceipts.get(candidate);
-  if (!state || !ownerStates.has(state.outerOwner)) return false;
+  if (!state) return false;
+  const outerState = ownerStates.get(state.outerOwner);
+  if (!outerState) return false;
   try {
     const current = projectSavedFullAssemblySnapshotV1(state.borrowedSnapshotReceipt);
+    requirePersistedOuterMatchesCandidate(current, state.outerOwner, outerState.bytes);
     return (
       snapshotIdentity(current) === state.expectedSnapshotIdentity &&
       outerIdentity(current) === state.expectedOuterIdentity

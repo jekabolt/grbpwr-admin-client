@@ -32,6 +32,7 @@ import {
   isSavedFullAssemblyPhysicalAuthorityReceiptV1,
   readPatternImportDxfProductCompositeComponentBytesV7,
   verifyPatternImportDxfProductCompositeSidecarV7PhysicalAuthority,
+  type PatternImportDxfProductCompositeSidecarOwnerV7,
 } from './composite-sidecar-v7';
 import { SAVED_FULL_ASSEMBLY_PHYSICAL_COMPONENT_KIND_V1 } from './saved-full-assembly-physical-component-v1';
 import type { SavedFullAssemblySnapshotProjectionV1 } from './saved-full-assembly-snapshot-production-v1';
@@ -71,6 +72,7 @@ const snapshot = Object.freeze({
   snapshotSha256: sha('9'),
   outer: Object.freeze({ status: 'absent' }),
 }) as unknown as SavedFullAssemblySnapshotProjectionV1;
+let activeSnapshot: SavedFullAssemblySnapshotProjectionV1 = snapshot;
 const snapshotReceipt = Object.freeze({
   version: 'saved-full-assembly-snapshot/1',
   opaque: 'module-private-ao-read-receipt',
@@ -79,13 +81,37 @@ let snapshotLive = true;
 
 function acceptSnapshotReceipt() {
   snapshotLive = true;
+  activeSnapshot = snapshot;
   projectSnapshotMock.mockImplementation((candidate) => {
     if (candidate !== snapshotReceipt || !snapshotLive) throw new Error('forged-receipt');
-    return structuredClone(snapshot);
+    return structuredClone(activeSnapshot);
   });
   disposeSnapshotMock.mockImplementation((candidate) => {
     if (candidate === snapshotReceipt) snapshotLive = false;
   });
+}
+
+function bindSnapshotToOwner(
+  owner: PatternImportDxfProductCompositeSidecarOwnerV7,
+  overrides: Record<string, unknown> = {},
+) {
+  const encoded = encodePatternImportDxfProductCompositeSidecarV7(owner);
+  if (!encoded.ok) throw new Error('fixture owner could not be encoded');
+  activeSnapshot = {
+    ...snapshot,
+    outer: {
+      status: 'present',
+      mediaType: 'application/vnd.grbpwr.pattern-dxf-product-composite.v7+json',
+      sha256: owner.seal.canonicalSha256,
+      byteLength: encoded.canonicalByteLength,
+      bytes: encoded.bytes,
+      persistedCardLockVersion: row.cardLockVersion,
+      persistedSavedRowRevision: row.revision,
+      currentRowBound: true,
+      ...overrides,
+    },
+  } as SavedFullAssemblySnapshotProjectionV1;
+  return encoded.bytes;
 }
 
 function acceptStructural() {
@@ -191,6 +217,8 @@ describe('Composite sidecar V7', () => {
       document: physicalDocument,
       blockers: [],
     });
+    bindSnapshotToOwner(built.owner);
+    const expectedSnapshot = structuredClone(activeSnapshot);
     const verified = await verifyPatternImportDxfProductCompositeSidecarV7PhysicalAuthority(
       built.owner,
       snapshotReceipt,
@@ -199,11 +227,12 @@ describe('Composite sidecar V7', () => {
     if (!verified.ok) return;
     expect(isSavedFullAssemblyPhysicalAuthorityReceiptV1(verified.receipt)).toBe(true);
     expect(isSavedFullAssemblyPhysicalAuthorityReceiptV1({ ...verified.receipt })).toBe(false);
-    expect(decodePhysicalMock).toHaveBeenCalledWith(expect.any(Uint8Array), snapshot);
+    expect(decodePhysicalMock).toHaveBeenCalledWith(expect.any(Uint8Array), expectedSnapshot);
     disposeSavedFullAssemblySnapshotV1(snapshotReceipt);
     expect(isSavedFullAssemblyPhysicalAuthorityReceiptV1(verified.receipt)).toBe(false);
 
     acceptSnapshotReceipt();
+    bindSnapshotToOwner(built.owner);
     const verifiedAgain = await verifyPatternImportDxfProductCompositeSidecarV7PhysicalAuthority(
       built.owner,
       snapshotReceipt,
@@ -213,6 +242,60 @@ describe('Composite sidecar V7', () => {
     disposeSavedFullAssemblyPhysicalAuthorityReceiptV1(verifiedAgain.receipt);
     expect(isSavedFullAssemblyPhysicalAuthorityReceiptV1(verifiedAgain.receipt)).toBe(false);
     expect(() => projectSnapshotMock(snapshotReceipt)).not.toThrow();
+  });
+
+  it.each([
+    ['absent', { status: 'absent' }],
+    ['wrong media', { mediaType: 'application/vnd.grbpwr.pattern-dxf-product-composite.v6+json' }],
+    ['wrong SHA', { sha256: sha('0') }],
+    ['wrong length', { byteLength: 1 }],
+    ['wrong bytes', { bytes: encoder.encode('{"different":true}') }],
+    ['not current-row bound', { currentRowBound: false }],
+  ])('rejects a persisted outer with %s', async (_label, override) => {
+    const built = await build();
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    decodePhysicalMock.mockClear();
+    bindSnapshotToOwner(built.owner, override);
+    if ('status' in override && override.status === 'absent')
+      activeSnapshot = {
+        ...snapshot,
+        outer: { status: 'absent' },
+      } as SavedFullAssemblySnapshotProjectionV1;
+    const result = await verifyPatternImportDxfProductCompositeSidecarV7PhysicalAuthority(
+      built.owner,
+      snapshotReceipt,
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.blocker.code).toBe('persisted-outer-mismatch');
+    expect(decodePhysicalMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects the receipt when persisted outer identity moves during async physical decode', async () => {
+    const built = await build();
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    bindSnapshotToOwner(built.owner);
+    decodePhysicalMock.mockImplementation(async () => {
+      activeSnapshot = {
+        ...activeSnapshot,
+        outer: { ...activeSnapshot.outer, sha256: sha('0') },
+      } as SavedFullAssemblySnapshotProjectionV1;
+      return {
+        ok: true,
+        owner: Object.freeze({ canonicalSha256: sha('d') }),
+        document: physicalDocument,
+        blockers: [],
+      };
+    });
+    const result = await verifyPatternImportDxfProductCompositeSidecarV7PhysicalAuthority(
+      built.owner,
+      snapshotReceipt,
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.blocker.code).toBe('persisted-outer-mismatch');
   });
 
   it('rejects a fabricated projection DTO and a disposed snapshot receipt', async () => {
