@@ -1674,6 +1674,39 @@ function buildGuide(options: {
         : measurementName === 'BODY_MEASUREMENT_NAME_HIP_DEPTH'
           ? hip
           : null;
+  if (depthStation && measurementName !== 'BODY_MEASUREMENT_NAME_CHEST_DEPTH') {
+    // Waist / hip depth: the caliper spans the torso's own section on the same plane as the
+    // waist / hip ring, from its front-most to its back-most point. Snapping the analytic
+    // [0, y, ±halfDepth] to the nearest vertex picked a thigh or a hanging hand below the hip.
+    const depthY = measurementName === 'BODY_MEASUREMENT_NAME_HIP_DEPTH' ? hipY : waistY;
+    const loop =
+      depthY === undefined
+        ? null
+        : sectionLoop({ mesh, originM: [0, depthY, 0], normal: [0, 1, 0] });
+    if (loop && loop.pointsM.length >= 3) {
+      let front = loop.pointsM[0];
+      let back = loop.pointsM[0];
+      for (const point of loop.pointsM) {
+        if (point[2] > front[2]) front = point;
+        if (point[2] < back[2]) back = point;
+      }
+      const frontVertex = nearestVertex(mesh.positions, front);
+      const backVertex = nearestVertex(mesh.positions, back);
+      if (frontVertex !== backVertex) {
+        return result(measurementName, 'limited', [
+          airPath(
+            Object.freeze({
+              id: measurementName,
+              closed: false,
+              source: 'mesh-vertices' as const,
+              vertexIndices: Object.freeze([frontVertex, backVertex]),
+            }),
+            'caliper',
+          ),
+        ]);
+      }
+    }
+  }
   if (depthStation) {
     return drawnOrUnavailable(measurementName, 'limited', [
       airPath(
