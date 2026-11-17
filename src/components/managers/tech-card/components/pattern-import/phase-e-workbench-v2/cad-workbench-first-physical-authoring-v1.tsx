@@ -181,8 +181,7 @@ function CompileAuthoring({ state, disabled }: { state: HostState; disabled: boo
                 ({ pieceLineKey }) => pieceLineKey === pieceLineKeys[index],
               );
               const piece = pieces.find(({ pieceId }) => pieceId === side.pieceId);
-              const contours =
-                piece?.contours.filter(({ role }) => role === 'sewing-boundary') ?? [];
+              const contours = piece?.contours.filter(({ role }) => role === 'cut-boundary') ?? [];
               const contour = contours.find(({ contourId }) => contourId === side.contourId);
               const vertices = contour?.boundaryVertices ?? [];
               return (

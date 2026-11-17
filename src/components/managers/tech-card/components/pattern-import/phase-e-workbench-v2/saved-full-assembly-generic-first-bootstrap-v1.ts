@@ -221,7 +221,7 @@ function existingExactSeamChoices(
           pieceId === side.pieceId && pieceLineKey === side.pieceLineKey,
       );
       const contour = piece?.contours.find(
-        ({ contourId, role }) => contourId === side.contourId && role === 'sewing-boundary',
+        ({ contourId, role }) => contourId === side.contourId && role === 'cut-boundary',
       );
       if (
         !contour ||
@@ -316,7 +316,7 @@ function validateSide(
     ({ pieceId, pieceLineKey }) => pieceId === side.pieceId && pieceLineKey === side.pieceLineKey,
   );
   const contour = piece[0]?.contours.filter(
-    ({ contourId, role }) => contourId === side.contourId && role === 'sewing-boundary',
+    ({ contourId, role }) => contourId === side.contourId && role === 'cut-boundary',
   );
   const vertices = contour?.[0]?.boundaryVertices ?? [];
   if (
@@ -326,7 +326,7 @@ function validateSide(
   )
     fail(
       'invalid-authoring-choices',
-      'A seam side must select exact sewing contour and boundary vertex identities.',
+      'A seam side must select exact cut contour and boundary vertex identities.',
     );
 }
 

@@ -61,8 +61,8 @@ function fixture() {
           contours: [
             {
               contourId: 'front-shell',
-              role: 'sewing-boundary',
-              geometry: { kind: 'seam' },
+              role: 'cut-boundary',
+              geometry: { kind: 'cut' },
               closed: true,
               boundaryVertices: [
                 { ordinal: 0, vertexId: 'front-v0', normalizedArc: 0 },
@@ -77,8 +77,8 @@ function fixture() {
           contours: [
             {
               contourId: 'back-shell',
-              role: 'sewing-boundary',
-              geometry: { kind: 'seam' },
+              role: 'cut-boundary',
+              geometry: { kind: 'cut' },
               closed: true,
               boundaryVertices: [
                 { ordinal: 0, vertexId: 'back-v0', normalizedArc: 0 },
@@ -223,6 +223,27 @@ describe('saved full assembly first physical bootstrap', () => {
 
     expect(() => buildSavedFullAssemblyGenericFirstCompileRequestV1(bootstrap, missing)).toThrow(
       SavedFullAssemblyGenericFirstBootstrapErrorV1,
+    );
+  });
+
+  it('rejects a sewing-surface role even when its contour and vertex IDs look exact', () => {
+    const { bootstrap, choices } = fixture();
+    const sewingOnly: SavedFullAssemblyGenericFirstBootstrapV1 = {
+      ...bootstrap,
+      catalog: {
+        ...bootstrap.catalog,
+        pieces: bootstrap.catalog.pieces.map((piece) => ({
+          ...piece,
+          contours: piece.contours.map((contour) => ({
+            ...contour,
+            role: 'sewing-boundary' as const,
+          })),
+        })),
+      },
+    };
+
+    expect(() => buildSavedFullAssemblyGenericFirstCompileRequestV1(sewingOnly, choices)).toThrow(
+      /exact cut contour/,
     );
   });
 
