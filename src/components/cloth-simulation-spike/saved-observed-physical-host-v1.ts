@@ -468,11 +468,14 @@ export function createSavedObservedPhysicalHostV1(
         );
         if ('owner' in result && result.owner) frame16 = result.owner;
         check();
+        const terminalReport = 'report' in result ? result.report ?? null : frame16?.report ?? null;
+        const sourceReport = state.runtimeReport;
         if (!result.ok) releaseRuntime();
         publish({
           status: result.ok ? 'frame16-ready' : 'blocked',
           detail: result.ok ? null : result.detail,
-          frame16Report: frame16?.report ?? null,
+          runtimeReport: sourceReport,
+          frame16Report: terminalReport,
         });
         // Only detached results leave the host; private runtime and renderer lifetimes stay here.
         return {
@@ -505,10 +508,17 @@ export function createSavedObservedPhysicalHostV1(
         if ('owner' in result && result.owner) frame32 = result.owner;
         check();
         if (!result.ok || !frame32) {
+          const sourceReport = state.runtimeReport;
+          const previousReport = state.frame16Report;
+          const terminalReport =
+            'report' in result ? result.report ?? null : frame32?.report ?? null;
           releaseRuntime();
           publish({
             status: 'blocked',
             detail: result.ok ? 'The 32-frame owner is unavailable.' : result.detail,
+            runtimeReport: sourceReport,
+            frame16Report: previousReport,
+            frame32Report: terminalReport,
           });
           return { ok: false, receipt: null };
         }

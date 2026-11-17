@@ -18,6 +18,13 @@ import {
 } from 'lib/cloth/domain/saved-model-observed-placement-target-codec-v1';
 import { projectSavedModelObservedPlacementTargetV1 } from './saved-model-observed-placement-target-v1';
 import {
+  buildObservedBoundedRadialInitializationV1,
+  assertObservedBoundedRadialInitializationPolicyV1,
+  isObservedBoundedRadialInitializationPolicyV1,
+  type ObservedBoundedRadialInitializationInputV1,
+  type ObservedBoundedRadialInitializationReportV1,
+} from 'lib/cloth/domain/observed-bounded-radial-initialization-v1';
+import {
   getSavedModelDisplayedTriangleBodyLifetimeV2,
   projectSavedModelDisplayedTriangleBodyV2,
   type SavedModelDisplayedTriangleBodyBindingV2,
@@ -258,6 +265,26 @@ const OBSERVED_ANNULAR_CLAIMS = Object.freeze({
   observedBodyTargetConfirmed: true,
   hostCompileGenerationAuthenticatedByGarment: false,
 } as const);
+type ObservedPlacementClaims =
+  | typeof OBSERVED_ANNULAR_CLAIMS
+  | Readonly<
+      Omit<typeof OBSERVED_ANNULAR_CLAIMS, 'rigidTranslationOnly' | 'garmentScaleChanged'> & {
+        rigidTranslationOnly: false;
+        garmentScaleChanged: boolean;
+        explicitBoundedRadialInitialization: true;
+      }
+    >;
+type ObservedPlacementCandidate =
+  | BetaSkirtPersonalizedDisplayedBodyProductPlacementReportV2['candidate']
+  | Readonly<
+      Omit<
+        BetaSkirtPersonalizedDisplayedBodyProductPlacementReportV2['candidate'],
+        'uniformScale' | 'maximumFloat32TranslationResidualM'
+      > & {
+        uniformScale: null;
+        boundedRadialInitialization: ObservedBoundedRadialInitializationReportV1;
+      }
+    >;
 export interface BetaSkirtSavedAnnularObservedPlacementDisplayedBodyProductPlacementRequestV1 {
   readonly schemaVersion: typeof BETA_SKIRT_SAVED_ANNULAR_OBSERVED_PLACEMENT_DISPLAYED_BODY_PRODUCT_PLACEMENT_V1;
   readonly savedAnnularObservedPlacementGarmentOwner: PatternImportDxfProductSavedAnnularObservedPlacementGarmentOwnerV1;
@@ -282,12 +309,13 @@ type ObservedAnnularSourceBinding = Omit<
 export interface BetaSkirtSavedAnnularObservedPlacementDisplayedBodyProductPlacementReportV1
   extends Omit<
     BetaSkirtSavedAnnularDisplayedBodyProductPlacementReportV1,
-    'version' | 'status' | 'source' | 'claims'
+    'version' | 'status' | 'source' | 'claims' | 'candidate'
   > {
   readonly version: typeof BETA_SKIRT_SAVED_ANNULAR_OBSERVED_PLACEMENT_DISPLAYED_BODY_PRODUCT_PLACEMENT_V1;
   readonly status: 'diagnostic-placement-clear' | 'diagnostic-placement-blocked';
   readonly source: ObservedAnnularSourceBinding;
-  readonly claims: typeof OBSERVED_ANNULAR_CLAIMS;
+  readonly candidate: ObservedPlacementCandidate;
+  readonly claims: ObservedPlacementClaims;
 }
 declare const observedAnnularBrand: unique symbol;
 export type BetaSkirtSavedAnnularObservedPlacementDisplayedBodyProductPlacementOwnerV1 = Readonly<{
@@ -300,7 +328,7 @@ export interface BetaSkirtSavedAnnularObservedPlacementDisplayedBodyProductPlace
     'report' | 'claims'
   > {
   readonly report: BetaSkirtSavedAnnularObservedPlacementDisplayedBodyProductPlacementReportV1;
-  readonly claims: typeof OBSERVED_ANNULAR_CLAIMS;
+  readonly claims: ObservedPlacementClaims;
 }
 export type BetaSkirtSavedAnnularObservedPlacementDisplayedBodyProductPlacementResultV1 =
   | Readonly<{
@@ -349,6 +377,10 @@ interface GarmentSource {
   canonicalPlacementSha256: string | null;
   annularBinding: AnnularSourceBinding | ObservedAnnularSourceBinding | null;
   observedTarget?: ObservedAnnularSourceBinding['observedTarget'];
+  boundedInitialization?: Pick<
+    ObservedBoundedRadialInitializationInputV1,
+    'acceptance' | 'triangleRestFrames'
+  >;
   lifetime: AbortSignal | null;
   assertCurrent: () => void;
   fresh: (signal?: AbortSignal) => Promise<void>;
@@ -696,6 +728,22 @@ async function savedAnnularSource(
   );
   initialCurrent();
   const spec = report.mappingSpec;
+  const persistedPolicy = report.persistedPlacement.authoring.semantics.policy;
+  if (
+    kind === 'saved-annular-observed' &&
+    isObservedBoundedRadialInitializationPolicyV1(persistedPolicy)
+  )
+    assertObservedBoundedRadialInitializationPolicyV1(persistedPolicy);
+  const boundedInitialization =
+    kind === 'saved-annular-observed' &&
+    isObservedBoundedRadialInitializationPolicyV1(
+      report.persistedPlacement.authoring.semantics.policy,
+    )
+      ? {
+          acceptance: report.persistedPlacement.authoring.annular.parameters.acceptance,
+          triangleRestFrames: material.normalizedV5.simulation.material.triangleRestFrames,
+        }
+      : undefined;
   const axialSlope = Math.sqrt(1 - (spec.sectorSpanRadPerPiece / Math.PI) ** 2);
   const axialLength = (axialSlope * (spec.hemSlantRadiusMm - spec.waistSlantRadiusMm)) / 1_000;
   if (!Number.isFinite(axialLength) || axialLength <= 0)
@@ -703,6 +751,7 @@ async function savedAnnularSource(
   return {
     kind,
     ...(observedTarget ? { observedTarget } : {}),
+    ...(boundedInitialization ? { boundedInitialization } : {}),
     positions: projection.mapping.positions3M,
     triangles: projection.mapping.normalizedTriangles,
     seams: projection.mapping.seamPairs,
@@ -767,6 +816,7 @@ async function savedAnnularSource(
       material.normalizedTriangles.fill(0);
       material.seamPairs.fill(0);
       material.pinnedWaistVertexIndices.fill(0);
+      if (boundedInitialization) new Uint8Array(boundedInitialization.triangleRestFrames).fill(0);
     },
   };
 }
@@ -1063,6 +1113,21 @@ async function buildPair(
       positions[i] = Math.fround(source + translation[i % 3]);
       residual = Math.max(residual, Math.abs(positions[i] - source - translation[i % 3]));
     }
+    // A separately confirmed, persisted recipe may deform only initial world XYZ. The genuine
+    // local annular mapping and its normalized V5 rest/material package remain untouched.
+    const boundedInitialization = garment.boundedInitialization
+      ? buildObservedBoundedRadialInitializationV1({
+          ...garment.boundedInitialization,
+          localPositions3M: garment.positions,
+          garmentTriangles: garment.triangles,
+          bodyPositions3M: body.bodyPositionsM,
+          bodyTriangles: body.bodyTriangles,
+          translationM: translation,
+          garmentWaistYM: target[1],
+          garmentHemYM: target[1] - garment.authoredFrame.authoredAxialLengthM,
+        })
+      : null;
+    if (boundedInitialization) positions.set(boundedInitialization.positions3M);
     const [positionsHash, trianglesHash, seamsHash, pinsHash] = await Promise.all([
       hash(bytes(positions)),
       hash(bytes(garment.triangles)),
@@ -1149,6 +1214,8 @@ async function buildPair(
       }
     }
     const blockers: string[] = [];
+    if (boundedInitialization && !boundedInitialization.report.passed)
+      blockers.push(...boundedInitialization.report.blockers);
     if (!section.ok || section.status !== 'compatible-with-authored-clearance')
       blockers.push('section-authored-clearance-not-met');
     if (
@@ -1200,8 +1267,15 @@ async function buildPair(
         assemblyOrderSeamsUint32LeSha256: seamsHash,
         waistPinsUint32LeSha256: pinsHash,
         translationM: translation,
-        uniformScale: 1 as const,
-        maximumFloat32TranslationResidualM: residual,
+        ...(boundedInitialization
+          ? {
+              uniformScale: null,
+              boundedRadialInitialization: boundedInitialization.report,
+            }
+          : {
+              uniformScale: 1 as const,
+              maximumFloat32TranslationResidualM: residual,
+            }),
       },
       worldFrame: frame,
       sectionCompatibility: section,
@@ -1216,7 +1290,14 @@ async function buildPair(
           ? CLAIMS
           : kind === 'saved-annular'
             ? ANNULAR_CLAIMS
-            : OBSERVED_ANNULAR_CLAIMS,
+            : boundedInitialization
+              ? {
+                  ...OBSERVED_ANNULAR_CLAIMS,
+                  rigidTranslationOnly: false as const,
+                  garmentScaleChanged: boundedInitialization.report.radialScale !== 1,
+                  explicitBoundedRadialInitialization: true as const,
+                }
+              : OBSERVED_ANNULAR_CLAIMS,
     };
     const reportSha256 = await hash(
       new TextEncoder().encode(JSON.stringify([payload.version, payload])),
