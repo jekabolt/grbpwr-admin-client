@@ -1,3 +1,4 @@
+import type { SavedGenericDurablePhysicalPreviewScopeV1 } from 'components/cloth-simulation-spike/saved-generic-durable-physical-host-v1';
 import type { ReactNode } from 'react';
 import type { PatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
@@ -88,7 +89,10 @@ export type PatternImportDxfProductExactNSeamProductionSceneOverlayInputV2 = Pic
 
 export type PatternImportDxfProductExactNSeamProductionMannequinContextV2 =
   PatternImportDxfPhaseECadWorkbenchSlotContextV1 &
-    Readonly<{ sceneOverlay: PatternImportDxfPhaseECadMannequinSceneOverlayCapabilityV1 }>;
+    Readonly<{
+      sceneOverlay: PatternImportDxfPhaseECadMannequinSceneOverlayCapabilityV1;
+      previewScope: SavedGenericDurablePhysicalPreviewScopeV1 | null;
+    }>;
 
 export type PatternImportDxfProductExactNSeamProductionMannequinSlotV2 =
   | ReactNode
@@ -261,9 +265,16 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
           sceneOverlayBlocker,
           selection,
         );
+  const previewScope = exactDesktop
+    ? {
+        row: session.current.row,
+        sourceFileId: exactDesktop.projection.sourceFileId,
+        sizeToken: exactDesktop.projection.sizeToken,
+      }
+    : null;
   const mannequinSlot: PatternImportDxfPhaseECadWorkbenchSlotV1 =
     typeof mannequin === 'function'
-      ? (context) => mannequin(Object.freeze({ ...context, sceneOverlay }))
+      ? (context) => mannequin(Object.freeze({ ...context, sceneOverlay, previewScope }))
       : mannequin;
 
   return (

@@ -397,7 +397,11 @@ export function createSavedGenericObservedPhysicalHostV1(
   let frame16: DxfGarmentObservedWebgpuReplayOwnerV1 | null = null,
     frame32: DxfGarmentObservedWebgpuReplayOwnerV1 | null = null,
     lease16: XpbdDeviceLease | null = null;
-  let preview: Preview | null = null;
+  let preview: {
+    view: Preview;
+    canvas: HTMLCanvasElement;
+    frame: DxfGarmentObservedWebgpuReplayOwnerV1;
+  } | null = null;
   let unlinkPreview: (() => void) | null = null;
   const childUnlinks = new Map<DxfGarmentObservedWebgpuReplayOwnerV1, () => void>();
   let pendingDrain: Promise<void> | null = null;
@@ -441,7 +445,7 @@ export function createSavedGenericObservedPhysicalHostV1(
     preview = null;
     unlinkPreview?.();
     unlinkPreview = null;
-    old?.dispose();
+    old?.view.dispose();
   };
   const releaseFrame = (owner: DxfGarmentObservedWebgpuReplayOwnerV1 | null) => {
     if (!owner) return;
@@ -1261,7 +1265,8 @@ export function createSavedGenericObservedPhysicalHostV1(
     async mountPreview(canvas: HTMLCanvasElement, signal?: AbortSignal) {
       try {
         return await work('physical', signal, async (s, current, retainUntil) => {
-          if (!frame32 || !initialization) throw new Error('A current32 frame is required.');
+          const frame = frame32;
+          if (!frame || !initialization) throw new Error('A current32 frame is required.');
           await fresh(s, current);
           await matchTarget(initialization.document, s, current);
           current();
@@ -1271,7 +1276,7 @@ export function createSavedGenericObservedPhysicalHostV1(
           current();
           const made = await renderer.createDxfGarmentObservedStrainHeatmapPreviewV1(
             canvas,
-            frame32,
+            frame,
             s,
           );
           try {
@@ -1281,9 +1286,10 @@ export function createSavedGenericObservedPhysicalHostV1(
             check(s);
             await matchTarget(initialization.document, s, current);
             current();
-            preview = made;
+            const mounted = { view: made, canvas, frame };
+            preview = mounted;
             const invalidated = () => {
-              if (preview !== made) return;
+              if (preview !== mounted) return;
               preview = null;
               unlinkPreview?.();
               unlinkPreview = null;
@@ -1306,16 +1312,40 @@ export function createSavedGenericObservedPhysicalHostV1(
             publish({ status: 'preview-ready', previewReceipt: made.receipt });
             current();
             checkSignal(made.lifetime);
-            frameLifetime(frame32!, current);
+            frameLifetime(frame, current);
             return { ok: true as const, receipt: made.receipt, claims: CLAIMS };
           } catch (e) {
-            if (preview === made) releasePreview();
+            if (preview?.view === made) releasePreview();
             else made.dispose();
             throw e;
           }
         });
       } catch (e) {
         return failed(e);
+      }
+    },
+    pickPreview(canvas: HTMLCanvasElement, clientX: number, clientY: number) {
+      const mounted = preview;
+      if (!mounted || mounted.canvas !== canvas) return null;
+      const { frame } = mounted;
+      const current = () => {
+        if (
+          disposed ||
+          preview !== mounted ||
+          frame32 !== frame ||
+          snapshot.status !== 'preview-ready' ||
+          snapshot.previewReceipt !== mounted.view.receipt
+        )
+          throw new DOMException('Observed preview changed.', 'AbortError');
+        checkSignal(mounted.view.lifetime);
+      };
+      try {
+        frameLifetime(frame, current);
+        const hit = mounted.view.pick(clientX, clientY);
+        frameLifetime(frame, current);
+        return hit && hit.frameReportSha256 === mounted.view.receipt.frameReportSha256 ? hit : null;
+      } catch {
+        return null;
       }
     },
     async stopPreview() {

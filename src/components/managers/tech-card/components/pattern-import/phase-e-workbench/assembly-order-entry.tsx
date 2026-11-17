@@ -2234,8 +2234,12 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
         signal,
       );
     },
-    viewport: (
-      <CadWorkbenchPhysicalHostProductionMountV1 state={savedClothPhysicalHost} disabled={frozen} />
+    viewport: (interaction) => (
+      <CadWorkbenchPhysicalHostProductionMountV1
+        state={savedClothPhysicalHost}
+        disabled={frozen}
+        interaction={interaction}
+      />
     ),
   };
   const prepareSavedAllMaterialScopeStaging = useCallback<

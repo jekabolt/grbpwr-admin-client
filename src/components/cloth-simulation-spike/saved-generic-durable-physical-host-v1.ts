@@ -25,6 +25,19 @@ import {
   type SavedGenericObservedPhysicalHostPersistenceContextV1,
 } from './saved-generic-observed-physical-host-v1';
 
+import type { DxfGarmentObservedPreviewHitV1 } from './dxf-garment-observed-strain-heatmap-preview-v1';
+
+export type SavedGenericDurablePhysicalPreviewScopeV1 = Readonly<{
+  row: DxfProductSavedRowIdentityV1;
+  sourceFileId: string;
+  sizeToken: string;
+}>;
+
+export type SavedGenericDurablePhysicalPreviewHitV1 =
+  | (Extract<DxfGarmentObservedPreviewHitV1, { kind: 'garment' }> &
+      Readonly<{ scopeKey: string; pieceLineKey: string }>)
+  | Extract<DxfGarmentObservedPreviewHitV1, { kind: 'body' }>;
+
 export const SAVED_GENERIC_DURABLE_PHYSICAL_HOST_V1 =
   'saved-generic-durable-physical-host/1' as const;
 const CLAIMS = Object.freeze({
@@ -714,6 +727,54 @@ export function createSavedGenericDurablePhysicalHostV1(
         return failAccepted(accepted, ticket, error, signal);
       } finally {
         releaseReads(ticket);
+      }
+    },
+    pickPreview(
+      canvas: HTMLCanvasElement,
+      scope: SavedGenericDurablePhysicalPreviewScopeV1,
+      clientX: number,
+      clientY: number,
+    ): SavedGenericDurablePhysicalPreviewHitV1 | null {
+      const a = admission;
+      const bridge = bridges.get('preview');
+      if (!a || !bridge) return null;
+      const current = () =>
+        !disposed &&
+        !stopping &&
+        admission === a &&
+        epoch === a.epoch &&
+        sourceLife === a.sourceLife &&
+        !aborted.call(sourceLife.signal) &&
+        !aborted.call(bridge.controller.signal) &&
+        bridges.get('preview') === bridge &&
+        snapshot.status === 'preview-ready' &&
+        snapshot.binding === a.publicBinding &&
+        snapshot.numeric.sourceGeneration === a.generation &&
+        snapshot.numeric.initializationSha256 === a.durable.physicalInitializationCanonicalSha256 &&
+        snapshot.numeric.previewReceipt !== null;
+      try {
+        const requested = capture(record(scope, ['row', 'sizeToken', 'sourceFileId']));
+        const { source, pieces } = a.durable.graph;
+        if (
+          !current() ||
+          canonical(requested.row) !== canonical(a.durable.row) ||
+          requested.sizeToken !== source.sizeToken ||
+          requested.sourceFileId !== source.sourceFileId
+        )
+          return null;
+        const hit = host.pickPreview(canvas, clientX, clientY);
+        if (!hit || !current()) return null;
+        if (hit.kind === 'body') return hit;
+        const piece = pieces.find(({ pieceId }) => pieceId === hit.pieceId);
+        return piece
+          ? Object.freeze({
+              ...hit,
+              scopeKey: a.durable.row.scopeKey,
+              pieceLineKey: piece.pieceLineKey,
+            })
+          : null;
+      } catch {
+        return null;
       }
     },
     async stopPreview() {

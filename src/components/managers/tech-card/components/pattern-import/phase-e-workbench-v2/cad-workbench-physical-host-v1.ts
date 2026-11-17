@@ -1,4 +1,9 @@
 import type { ReactNode } from 'react';
+import type {
+  SavedGenericDurablePhysicalPreviewHitV1,
+  SavedGenericDurablePhysicalPreviewScopeV1,
+} from 'components/cloth-simulation-spike/saved-generic-durable-physical-host-v1';
+import type { PatternImportDxfPhaseECadWorkbenchSlotContextV1 } from './cad-workbench-split-shell-v1';
 import type { ModelDisplayedTriangleBodyOwnedInputV1 } from 'components/cloth-simulation-spike/model-displayed-triangle-body-input-v1';
 import type {
   CadMannequinArrangementBindingsV1,
@@ -14,6 +19,31 @@ export type CadWorkbenchMannequinArrangementSaveV1 = Readonly<{
   annotationSource?: Readonly<{ identity: string; revision: string; sha256: string }>;
 }>;
 
+export type CadWorkbenchPhysicalPreviewInteractionV1 = Readonly<{
+  scope: SavedGenericDurablePhysicalPreviewScopeV1;
+  onPick: (hit: SavedGenericDurablePhysicalPreviewHitV1) => void;
+}>;
+
+export function bindCadWorkbenchPhysicalPreviewSelectionV1(
+  scope: SavedGenericDurablePhysicalPreviewScopeV1 | null,
+  operationNumber: number,
+  focusSelection: PatternImportDxfPhaseECadWorkbenchSlotContextV1['focusSelection'],
+): CadWorkbenchPhysicalPreviewInteractionV1 | null {
+  if (!scope) return null;
+  return {
+    scope,
+    onPick(hit) {
+      if (hit.kind === 'garment')
+        focusSelection({
+          operationNumber,
+          scopeKey: hit.scopeKey,
+          pieceId: hit.pieceId,
+          pieceLineKey: hit.pieceLineKey,
+        });
+    },
+  };
+}
+
 /** One mounted CAD route supplies the current picker input and its in-viewport cloth preview. */
 export type CadWorkbenchPhysicalHostV1 = Readonly<{
   onDisplayedBodyInputV1: (input: ModelDisplayedTriangleBodyOwnedInputV1 | null) => void;
@@ -27,7 +57,7 @@ export type CadWorkbenchPhysicalHostV1 = Readonly<{
     input: Omit<CadWorkbenchMannequinArrangementSaveV1, 'pieces'>,
     signal: AbortSignal,
   ) => Promise<readonly CadMannequinArrangementPieceV1[] | null>;
-  viewport?: ReactNode;
+  viewport?: (interaction: CadWorkbenchPhysicalPreviewInteractionV1 | null) => ReactNode;
   /** Transitional read-only compatibility for the separate zero-operation route. */
   panel?: ReactNode;
 }>;

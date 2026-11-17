@@ -78,7 +78,10 @@ import type {
 } from './cad-command-draft-authoring-handoff-v1';
 import { confirmPatternImportDxfPhaseECadSemanticFreshReimportV1 } from './cad-command-semantic-reimport-session-owner-v1';
 import { PatternImportDxfPhaseECadWorkbenchSplitShellV1 } from './cad-workbench-split-shell-v1';
-import type { CadWorkbenchPhysicalHostV1 } from './cad-workbench-physical-host-v1';
+import {
+  bindCadWorkbenchPhysicalPreviewSelectionV1,
+  type CadWorkbenchPhysicalHostV1,
+} from './cad-workbench-physical-host-v1';
 import { CadWorkbenchPhysicalHostPanelV1 } from './cad-workbench-physical-host-panel-v1';
 import { findCadWorkbenchScopedPieceIndexV1 } from './cad-workbench-piece-selection-v1';
 import {
@@ -2415,7 +2418,7 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
               </>
             ) : null
           }
-          mannequin={({ selection, focusSelection, sceneOverlay }) => (
+          mannequin={({ selection, focusSelection, sceneOverlay, previewScope }) => (
             <div className='flex h-full min-h-0 flex-col'>
               <div className='relative min-h-0 flex-1'>
                 <PatternImportDxfPhaseECadMannequinModelPickerV1
@@ -2474,7 +2477,13 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
                 />
                 {physicalHost?.viewport ? (
                   <CadWorkbenchPhysicalHostPanelV1>
-                    {physicalHost.viewport}
+                    {physicalHost.viewport(
+                      bindCadWorkbenchPhysicalPreviewSelectionV1(
+                        previewScope,
+                        source.selectedOperationNumber,
+                        focusSelection,
+                      ),
+                    )}
                   </CadWorkbenchPhysicalHostPanelV1>
                 ) : null}
               </div>
@@ -2738,7 +2747,21 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
                 </PatternImportDxfPhaseECadMannequinSavedTwoSeamProductionMountV1>
                 {physicalHost?.viewport ? (
                   <CadWorkbenchPhysicalHostPanelV1>
-                    {physicalHost.viewport}
+                    {physicalHost.viewport(
+                      bindCadWorkbenchPhysicalPreviewSelectionV1(
+                        effectiveDesktopMode === 'assembly' &&
+                          savedPreparedResult?.ok &&
+                          prepared === savedPreparedResult.prepared
+                          ? {
+                              row: savedPreparedResult.prepared.row,
+                              sourceFileId: prepared.projection.sourceFileId,
+                              sizeToken: prepared.projection.sizeToken,
+                            }
+                          : null,
+                        source.selectedOperationNumber,
+                        focusSelection,
+                      ),
+                    )}
                   </CadWorkbenchPhysicalHostPanelV1>
                 ) : null}
               </div>

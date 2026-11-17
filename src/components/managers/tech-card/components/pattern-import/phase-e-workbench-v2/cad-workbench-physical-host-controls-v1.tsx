@@ -1,6 +1,7 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState, type PointerEvent } from 'react';
 import { Button, Text } from 'ui';
 
+import type { CadWorkbenchPhysicalPreviewInteractionV1 } from './cad-workbench-physical-host-v1';
 import type { useSavedClothPhysicalHostV1 } from './use-saved-cloth-physical-host-v1';
 import { CadWorkbenchFirstPhysicalAuthoringV1 } from './cad-workbench-first-physical-authoring-v1';
 import {
@@ -14,9 +15,11 @@ type HostState = ReturnType<typeof useSavedClothPhysicalHostV1>;
 export function CadWorkbenchPhysicalHostControlsV1({
   state,
   disabled = false,
+  interaction = null,
 }: Readonly<{
   state: HostState;
   disabled?: boolean;
+  interaction?: CadWorkbenchPhysicalPreviewInteractionV1 | null;
 }>) {
   const computeCanvas = useRef<HTMLCanvasElement>(null);
   const previewCanvas = useRef<HTMLCanvasElement>(null);
@@ -45,6 +48,67 @@ export function CadWorkbenchPhysicalHostControlsV1({
 
   const ready = state.sourceStatus === 'ready' && state.host !== null;
   const previewReady = state.durableSnapshot?.status === 'preview-ready';
+  const receipt = state.durableSnapshot?.numeric.previewReceipt;
+  const physicalPointer = useRef<{
+    id: number;
+    x: number;
+    y: number;
+    host: HostState['host'];
+    receipt: typeof receipt;
+    interaction: CadWorkbenchPhysicalPreviewInteractionV1;
+  } | null>(null);
+  const startPick = (event: PointerEvent<HTMLCanvasElement>) => {
+    if (
+      !event.isPrimary ||
+      event.button !== 0 ||
+      !host ||
+      !receipt ||
+      !previewReady ||
+      !interaction
+    )
+      return;
+    physicalPointer.current = {
+      id: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      host,
+      receipt,
+      interaction,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const cancelPick = (event: PointerEvent<HTMLCanvasElement>) => {
+    if (physicalPointer.current?.id === event.pointerId) physicalPointer.current = null;
+  };
+  const movePick = (event: PointerEvent<HTMLCanvasElement>) => {
+    const start = physicalPointer.current;
+    if (
+      start?.id === event.pointerId &&
+      Math.hypot(event.clientX - start.x, event.clientY - start.y) > 4
+    )
+      cancelPick(event);
+  };
+  const finishPick = (event: PointerEvent<HTMLCanvasElement>) => {
+    movePick(event);
+    const start = physicalPointer.current;
+    if (start?.id !== event.pointerId) return;
+    cancelPick(event);
+    if (
+      !previewReady ||
+      !host ||
+      start.host !== host ||
+      start.receipt !== receipt ||
+      start.interaction !== interaction
+    )
+      return;
+    const hit = host.pickPreview(
+      event.currentTarget,
+      interaction.scope,
+      event.clientX,
+      event.clientY,
+    );
+    if (hit) interaction.onPick(hit);
+  };
   const displayedBody = state.bodySession?.getSnapshot();
   return (
     <div
@@ -59,10 +123,15 @@ export function CadWorkbenchPhysicalHostControlsV1({
         ref={previewCanvas}
         width={640}
         height={720}
-        className={`pointer-events-none absolute inset-0 h-full w-full bg-transparent object-contain ${
-          previewReady ? 'block' : 'hidden'
+        className={`absolute inset-0 h-full w-full bg-transparent object-contain ${
+          previewReady ? 'pointer-events-auto block' : 'pointer-events-none hidden'
         }`}
         aria-label='Cloth simulation on the selected mannequin'
+        onPointerDown={startPick}
+        onPointerMove={movePick}
+        onPointerUp={finishPick}
+        onPointerCancel={cancelPick}
+        onLostPointerCapture={cancelPick}
       />
       <div className='pointer-events-auto absolute top-2 right-2 flex max-w-[min(24rem,calc(100%-1rem))] items-center gap-2 border border-borderColor bg-bgColor/95 px-2 py-1'>
         {ready ? (

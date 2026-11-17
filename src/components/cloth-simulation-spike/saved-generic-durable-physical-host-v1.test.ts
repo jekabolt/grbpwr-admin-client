@@ -1,6 +1,14 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Buffer } from 'node:buffer';
-import { act, createElement, isValidElement, type ReactElement, type ReactNode } from 'react';
+import {
+  act,
+  createElement,
+  isValidElement,
+  type ComponentProps,
+  type ReactElement,
+  type ReactNode,
+  type PointerEvent,
+} from 'react';
 import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { abortableAdminService } from 'api/api';
@@ -49,6 +57,9 @@ import {
   projectSavedGenericObservedPhysicalHostPersistenceContextV1,
 } from './saved-generic-observed-physical-host-v1';
 import { createSavedGenericDurablePhysicalHostV1 } from './saved-generic-durable-physical-host-v1';
+import type { DxfGarmentObservedPreviewHitV1 } from './dxf-garment-observed-strain-heatmap-preview-v1';
+import { bindCadWorkbenchPhysicalPreviewSelectionV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/cad-workbench-physical-host-v1';
+import { CadWorkbenchPhysicalHostControlsV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/cad-workbench-physical-host-controls-v1';
 import {
   PATTERN_IMPORT_DXF_PRODUCT_PHASE_E_AUTHORING_CATALOG_V1,
   computePatternImportDxfProductPhaseEAuthoringCatalogSha256V1,
@@ -99,6 +110,7 @@ const ports = vi.hoisted(() => ({
   previewDisposed: 0,
   previewEvents: [] as string[],
   previewSignals: [] as AbortSignal[],
+  previewPick: null as ((x: number, y: number) => DxfGarmentObservedPreviewHitV1 | null) | null,
 }));
 vi.mock('./dxf-garment-observed-webgpu-replay-v1', () => {
   const run = async (
@@ -176,7 +188,12 @@ vi.mock('./dxf-garment-observed-strain-heatmap-preview-v1', () => ({
     };
     signal.addEventListener('abort', dispose, { once: true });
     if (signal.aborted) dispose();
-    return { receipt: { declaredSyntheticPreview: true }, lifetime: controller.signal, dispose };
+    return {
+      receipt: { declaredSyntheticPreview: true, frameReportSha256: '2'.repeat(64) },
+      lifetime: controller.signal,
+      pick: (x: number, y: number) => ports.previewPick?.(x, y) ?? null,
+      dispose,
+    };
   },
 }));
 
@@ -201,6 +218,7 @@ beforeEach(() => {
   ports.previewDisposed = 0;
   ports.previewEvents.length = 0;
   ports.previewSignals.length = 0;
+  ports.previewPick = null;
   vi.mocked(abortableAdminService).mockImplementation(
     () =>
       ({
@@ -1497,15 +1515,124 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
     expect((await f.host.run16(lease)).ok).toBe(true);
   }, 120000);
 
-  it('preview-only caller abort clears the published view while preserving numeric frames and durable binding', async () => {
+  it('routes current preview face identity through the saved graph and refuses stale or mismatched views', async () => {
     const f = await fixture();
     requireOk(await f.host.restore(f.request));
     const { lease } = await borrowedLease();
     requireOk(await f.host.run16(lease));
     requireOk(await f.host.run32(lease));
+    const saved = physicalReader.projectSavedFullAssemblyPhysicalSnapshotV1(f.reader);
+    if (!saved) throw new Error('Current saved physical projection missing.');
+    const { row, graph } = saved;
+    const scope = {
+      row,
+      sourceFileId: graph.source.sourceFileId,
+      sizeToken: graph.source.sizeToken,
+    };
+    const piece = graph.pieces[0]!;
+    const canvas = { setPointerCapture: vi.fn() } as unknown as HTMLCanvasElement;
     const caller = new AbortController();
-    requireOk(await f.host.mountPreview({} as HTMLCanvasElement, caller.signal));
-    caller.abort();
+    const mounted = requireOk(await f.host.mountPreview(canvas, caller.signal));
+    const frameReportSha256 = mounted.receipt.frameReportSha256;
+    const garment = {
+      kind: 'garment',
+      frameReportSha256,
+      triangleIndex: 7,
+      pieceId: piece.pieceId,
+    } as const;
+    const pick = vi.fn<(x: number, y: number) => DxfGarmentObservedPreviewHitV1 | null>(
+      () => garment,
+    );
+    ports.previewPick = pick;
+    for (const wrongScope of [
+      { ...scope, row: { ...row, scopeKey: 'different-scope' } },
+      { ...scope, row: { ...row, cardLockVersion: row.cardLockVersion + 1 } },
+      { ...scope, sourceFileId: 'different-source' },
+      { ...scope, sizeToken: 'different-size' },
+    ])
+      expect(f.host.pickPreview(canvas, wrongScope, 100, 200)).toBeNull();
+    expect(f.host.pickPreview({} as HTMLCanvasElement, scope, 100, 200)).toBeNull();
+    expect(pick).not.toHaveBeenCalled();
+    pick.mockReturnValueOnce({ ...garment, frameReportSha256: '1'.repeat(64) });
+    expect(f.host.pickPreview(canvas, scope, 100, 200)).toBeNull();
+    pick.mockReturnValueOnce({ ...garment, pieceId: 'another-piece' });
+    expect(f.host.pickPreview(canvas, scope, 100, 200)).toBeNull();
+
+    const focusSelection = vi.fn();
+    const interaction = bindCadWorkbenchPhysicalPreviewSelectionV1(scope, 120, focusSelection)!;
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    vi.stubGlobal('window', { event: undefined });
+    const route = createRoot(reactMountContainer() as never);
+    cleanup.push(async () => {
+      await act(async () => route.unmount());
+      vi.unstubAllGlobals();
+    });
+    let controls: ReactNode;
+    function Controls() {
+      // Run the actual React control hooks in the same CPU-only harness as the saved route test.
+      const state = {
+        host: f.host,
+        sourceStatus: 'ready',
+        durableSnapshot: f.host.getSnapshot(),
+      } as ComponentProps<typeof CadWorkbenchPhysicalHostControlsV1>['state'];
+      controls = CadWorkbenchPhysicalHostControlsV1({ state, interaction });
+      return null;
+    }
+    await act(async () => route.render(createElement(Controls)));
+    const canvasProps = visitMountedTree(
+      controls,
+      (props) => props['aria-label'] === 'Cloth simulation on the selected mannequin',
+    ) as ComponentProps<'canvas'> | null;
+    if (!canvasProps) throw new Error('Mounted physical preview canvas is absent.');
+    const pointer = (clientX: number, button = 0) =>
+      ({
+        isPrimary: true,
+        button,
+        pointerId: 1,
+        clientX,
+        clientY: 200,
+        currentTarget: canvas,
+      }) as PointerEvent<HTMLCanvasElement>;
+
+    canvasProps.onPointerDown?.(pointer(100, 2));
+    canvasProps.onPointerUp?.(pointer(100, 2));
+    canvasProps.onPointerDown?.(pointer(100));
+    canvasProps.onPointerMove?.(pointer(120));
+    canvasProps.onPointerUp?.(pointer(100));
+    expect(focusSelection).not.toHaveBeenCalled();
+
+    const readCountBeforeClick = readCount;
+    const hit = f.host.pickPreview(canvas, scope, 100, 200);
+    expect(hit).toEqual({ ...garment, scopeKey: row.scopeKey, pieceLineKey: piece.pieceLineKey });
+    expect(readCount).toBe(readCountBeforeClick);
+    canvasProps.onPointerDown?.(pointer(100));
+    canvasProps.onPointerUp?.(pointer(100));
+    expect(focusSelection).toHaveBeenCalledExactlyOnceWith({
+      operationNumber: 120,
+      scopeKey: row.scopeKey,
+      pieceId: piece.pieceId,
+      pieceLineKey: piece.pieceLineKey,
+    });
+
+    const body = {
+      kind: 'body',
+      frameReportSha256,
+      triangleIndex: 3,
+      persistedModel: { id: 11, updatedAt: '2026-11-01T00:00:00Z', revision: 'r1' },
+      observedBodyContentSha256: 'a'.repeat(64),
+    } as const;
+    pick.mockReturnValueOnce(body);
+    const bodyHit = f.host.pickPreview(canvas, scope, 100, 200);
+    expect(bodyHit).toEqual(body);
+    interaction.onPick(bodyHit!);
+    expect(focusSelection).toHaveBeenCalledTimes(1);
+
+    pick.mockImplementationOnce(() => {
+      caller.abort();
+      return garment;
+    });
+    expect(f.host.pickPreview(canvas, scope, 100, 200)).toBeNull();
+    expect(f.host.pickPreview(canvas, scope, 100, 200)).toBeNull();
     expect(f.host.getSnapshot()).toMatchObject({
       status: 'frame32-ready',
       binding: { sourceGeneration: 1 },

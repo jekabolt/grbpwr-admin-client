@@ -48,7 +48,7 @@ describe('physical host production receivers', () => {
         'physicalHost?.onDisplayedBodyInputV1',
       );
     expect(entry.text.match(/physicalHost\?\.viewport \?/gu)).toHaveLength(2);
-    expect(entry.text.match(/\{physicalHost\.viewport\}/gu)).toHaveLength(2);
+    expect(entry.text.match(/\{physicalHost\.viewport\(/gu)).toHaveLength(2);
     expect(entry.text).not.toContain('physicalHost?.panel ?');
     expect(elements(entry.tree, 'CadWorkbenchPhysicalHostPanelV1')).toHaveLength(2);
   });
