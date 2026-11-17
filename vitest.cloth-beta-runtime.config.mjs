@@ -28,6 +28,11 @@ export default {
       'src/components/cloth-simulation-spike/beta-skirt-saved-annular-observed-bounded-initialization-v1.test.ts',
       'src/components/cloth-simulation-spike/qualified-two-panel-observed-placement-authoring-v1.test.ts',
       'src/components/cloth-simulation-spike/saved-observed-physical-host-v1.diagnostic-retention.test.ts',
+      'src/lib/cloth/runtime/webgpu/xpbd-embedded-scalar-bend-kernel-v2.test.ts',
+      'src/components/cloth-simulation-spike/beta-skirt-observed16-safeguarded-diagnostic-abi-v1.test.ts',
+      'src/components/cloth-simulation-spike/saved-cloth-bend-executor-trace-v2.test.ts',
+      'src/components/cloth-simulation-spike/beta-skirt-observed32-static-carrier-state-audit-v1.test.ts',
+      'src/components/cloth-simulation-spike/beta-skirt-observed32-static-carrier-integration-v1.test.ts',
     ],
   },
 };
