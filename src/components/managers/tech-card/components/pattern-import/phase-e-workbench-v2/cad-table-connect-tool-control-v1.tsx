@@ -49,7 +49,7 @@ export function PatternImportDxfPhaseECadTableConnectToolControlV1({
   return (
     <div data-cad-connect-tool-phase={phase} aria-live='polite'>
       <PatternImportDxfPhaseECadWorkbenchToolButtonV1
-        icon='dart'
+        icon='connect'
         label={labelPatternImportDxfPhaseECadTableConnectToolV1(phase)}
         active={active}
         pressed={active}

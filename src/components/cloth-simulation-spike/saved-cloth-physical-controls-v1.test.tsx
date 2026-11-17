@@ -62,8 +62,10 @@ describe('explicit cloth profile before source handoff', () => {
   });
   it('leaves mannequin viewing available when the assembly is not qualified', () => {
     const html = renderToStaticMarkup(<SavedClothPhysicalControlsV1 host={host()} row={null} />);
-    expect(html).toContain('data-disabled="true"');
-    expect(html).toContain('You can still view the mannequin.');
+    expect(html).toContain('data-saved-cloth-unavailable=""');
+    expect(html).toContain('Cloth preview unavailable');
+    expect(html).toContain('The mannequin remains available.');
+    expect(html).not.toContain('data-option=');
     expect(html).not.toContain('Simulate 16 / 32');
   });
   it('shows source loading or failure without fabricating a compiled selection', () => {

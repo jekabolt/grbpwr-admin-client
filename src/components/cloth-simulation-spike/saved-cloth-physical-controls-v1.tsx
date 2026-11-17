@@ -43,6 +43,20 @@ export function SavedClothPhysicalControlsV1({
   row: DxfProductSavedRowIdentityV1 | null;
   disabled?: boolean;
 }) {
+  if (!row) {
+    return (
+      <details data-saved-cloth-profile-v1='' data-saved-cloth-unavailable=''>
+        <summary className='cursor-pointer text-micro text-labelColor'>
+          Cloth preview unavailable
+        </summary>
+        <Text component='p' size='micro' variant='label' className='pt-1'>
+          Save a supported assembly before starting cloth simulation. The mannequin remains
+          available.
+        </Text>
+      </details>
+    );
+  }
+
   return (
     <div className='flex min-w-0 flex-col gap-stack' data-saved-cloth-profile-v1=''>
       <GroupLabel>Cloth simulation</GroupLabel>
@@ -53,7 +67,7 @@ export function SavedClothPhysicalControlsV1({
         <Select
           name='cloth-body-profile'
           value={host.profile}
-          disabled={disabled || !row}
+          disabled={disabled}
           fullWidth
           items={[
             { value: '', label: 'Choose a mannequin profile…' },
@@ -67,9 +81,8 @@ export function SavedClothPhysicalControlsV1({
         />
       </label>
       <Text variant='label'>
-        {row
-          ? 'Choose the profile before confirming Assembly seams. Changing it requires a fresh confirmation of the saved assembly.'
-          : 'A saved two-panel, two-seam assembly is required for this cloth preview. You can still view the mannequin.'}
+        Choose the profile before confirming Assembly seams. Changing it requires a fresh
+        confirmation of the saved assembly.
       </Text>
       {host.sourceStatus === 'loading' ? <Text role='status'>Preparing cloth source…</Text> : null}
       {host.sourceError ? (

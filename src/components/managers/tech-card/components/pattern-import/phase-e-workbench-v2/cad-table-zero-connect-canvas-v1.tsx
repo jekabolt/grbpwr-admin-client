@@ -12,6 +12,9 @@ import {
   compactPatternImportDxfPhaseECadTablePieceOffsetsV1,
   createPatternImportDxfPhaseECadTablePieceLayoutSessionV1,
   fitPatternImportDxfPhaseECadTablePieceBoundsV1,
+  selectPatternImportDxfPhaseECadTablePiecesInLassoV1,
+  selectPatternImportDxfPhaseECadTablePiecesV1,
+  translateSelectedPatternImportDxfPhaseECadTablePiecesV1,
   type PatternImportDxfPhaseECadTablePieceLayoutSessionV1,
 } from './cad-table-piece-layout-session-v1';
 import type {
@@ -29,6 +32,7 @@ import {
   startPatternImportDxfPhaseECadTableZeroConnectControllerV1,
 } from './cad-table-zero-connect-controller-v1';
 import { PatternImportDxfPhaseEDraftCadGridRulersV1 } from './draft-cad-grid-rulers-v1';
+import { PatternImportDxfPhaseECadWorkbenchToolButtonV1 } from './cad-workbench-tool-button-v1';
 
 export const PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_CONNECT_CANVAS_V1 =
   'pattern-import-dxf-phase-e-cad-table-zero-connect-canvas/1' as const;
@@ -94,7 +98,10 @@ export function PatternImportDxfPhaseECadTableZeroConnectCanvasV1({
     () => ({ catalog, projection, authoringAuthority, authoringAuthorityRefresh }) as const,
     [authoringAuthority, authoringAuthorityRefresh, catalog, projection],
   );
-  const layout = useMemo(() => layoutFor(projection), [projection]);
+  const [layout, setLayout] = useState(() => layoutFor(projection));
+  const [activeTool, setActiveTool] = useState<'select' | 'pan' | 'move' | 'connect'>('select');
+  const [fitRequest, setFitRequest] = useState(0);
+  const [hoveredPieceKey, setHoveredPieceKey] = useState<string | null>(null);
   const segments = useMemo(
     () =>
       derivePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1(projection).filter(
@@ -106,10 +113,12 @@ export function PatternImportDxfPhaseECadTableZeroConnectCanvasV1({
     createPatternImportDxfPhaseECadTableZeroConnectControllerStateV1(),
   );
   const sourceIdentity = `${catalog.canonicalSha256}|${catalog.sizeSelectionCanonicalSha256}|${projection.expectedCatalogCanonicalSha256}|${projection.sizeSelectionCanonicalSha256}|${projection.sourceFileId}|${projection.sizeToken}`;
-  useEffect(
-    () => setController(createPatternImportDxfPhaseECadTableZeroConnectControllerStateV1()),
-    [sourceIdentity],
-  );
+  useEffect(() => {
+    setController(createPatternImportDxfPhaseECadTableZeroConnectControllerStateV1());
+    setLayout(layoutFor(projection));
+    setActiveTool('select');
+    setHoveredPieceKey(null);
+  }, [projection, sourceIdentity]);
 
   const bounds = fitPatternImportDxfPhaseECadTablePieceBoundsV1(layout, 20) ?? {
     minX: 0,
@@ -153,34 +162,125 @@ export function PatternImportDxfPhaseECadTableZeroConnectCanvasV1({
               ? 'blocked'
               : undefined
       }
-      className='grid min-h-[30rem] min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden bg-bgColor'
+      className='grid min-h-[30rem] min-w-0 grid-rows-[minmax(0,1fr)_auto] overflow-hidden bg-bgColor'
     >
-      <div className='flex min-h-11 items-center border-b border-borderColor px-1'>
-        <PatternImportDxfPhaseECadTableConnectToolControlV1
-          phase={phase}
-          disabled={connectDisabled}
-          onStart={() =>
-            setController((current) =>
-              startPatternImportDxfPhaseECadTableZeroConnectControllerV1(current, authority),
-            )
-          }
-          onCancel={() =>
-            setController((current) =>
-              cancelPatternImportDxfPhaseECadTableZeroConnectControllerV1(current),
-            )
-          }
-        />
-      </div>
-
       <div className='relative min-h-0 overflow-hidden'>
+        <div
+          className='absolute left-2 top-2 z-20 flex flex-col gap-0.5 border border-borderColor bg-bgColor p-0.5'
+          role='toolbar'
+          aria-label='2D table tools'
+          data-cad-zero-connect-toolbar=''
+        >
+          <PatternImportDxfPhaseECadWorkbenchToolButtonV1
+            icon='select'
+            label='Select pieces'
+            active={activeTool === 'select'}
+            pressed={activeTool === 'select'}
+            dataAttributes={{ 'data-cad-zero-connect-select-tool': '' }}
+            onClick={() => {
+              if (phase !== 'idle')
+                setController((current) =>
+                  cancelPatternImportDxfPhaseECadTableZeroConnectControllerV1(current),
+                );
+              setActiveTool('select');
+            }}
+          />
+          <PatternImportDxfPhaseECadWorkbenchToolButtonV1
+            icon='hand'
+            label='Pan canvas'
+            active={activeTool === 'pan'}
+            pressed={activeTool === 'pan'}
+            dataAttributes={{ 'data-cad-zero-connect-pan-tool': '' }}
+            onClick={() => {
+              if (phase !== 'idle')
+                setController((current) =>
+                  cancelPatternImportDxfPhaseECadTableZeroConnectControllerV1(current),
+                );
+              setActiveTool('pan');
+            }}
+          />
+          <PatternImportDxfPhaseECadWorkbenchToolButtonV1
+            icon='move'
+            label='Move selected pieces'
+            active={activeTool === 'move'}
+            pressed={activeTool === 'move'}
+            dataAttributes={{ 'data-cad-zero-connect-move-tool': '' }}
+            onClick={() => {
+              if (phase !== 'idle')
+                setController((current) =>
+                  cancelPatternImportDxfPhaseECadTableZeroConnectControllerV1(current),
+                );
+              setActiveTool('move');
+            }}
+          />
+          <PatternImportDxfPhaseECadTableConnectToolControlV1
+            phase={phase}
+            disabled={connectDisabled}
+            onStart={() => {
+              setActiveTool('connect');
+              setController((current) =>
+                startPatternImportDxfPhaseECadTableZeroConnectControllerV1(current, authority),
+              );
+            }}
+            onCancel={() => {
+              setController((current) =>
+                cancelPatternImportDxfPhaseECadTableZeroConnectControllerV1(current),
+              );
+              setActiveTool('select');
+            }}
+          />
+          <PatternImportDxfPhaseECadWorkbenchToolButtonV1
+            icon='fit'
+            label='Fit all pieces'
+            dataAttributes={{ 'data-cad-zero-connect-fit-tool': '' }}
+            onClick={() => setFitRequest((current) => current + 1)}
+          />
+          <PatternImportDxfPhaseECadWorkbenchToolButtonV1
+            icon='reset-layout'
+            label='Reset piece layout'
+            dataAttributes={{ 'data-cad-zero-connect-reset-layout': '' }}
+            onClick={() => {
+              setLayout(layoutFor(projection));
+              setFitRequest((current) => current + 1);
+            }}
+          />
+        </div>
         <SheetViewport
           bbox={bounds}
-          tool='pan'
+          tool={activeTool === 'select' ? 'lasso' : activeTool === 'move' ? 'move' : 'pan'}
+          fitRequest={fitRequest}
           className='min-h-0'
           onPick={(viewKey, modifiers) => {
+            if (activeTool === 'select' || activeTool === 'move') {
+              setLayout((current) =>
+                selectPatternImportDxfPhaseECadTablePiecesV1(
+                  current,
+                  viewKey ? [viewKey] : [],
+                  modifiers.shiftKey ? 'toggle' : 'replace',
+                ),
+              );
+              return;
+            }
             if (!controller.session || controller.session.status === 'ready') return;
             const segment = segments.find((candidate) => candidate.viewKey === viewKey);
             if (segment) selectEdge(segment, modifiers.shiftKey ? 'reverse' : 'forward');
+          }}
+          onLasso={(points, modifiers) =>
+            setLayout((current) =>
+              selectPatternImportDxfPhaseECadTablePiecesInLassoV1(
+                current,
+                points,
+                modifiers.shiftKey ? 'toggle' : 'replace',
+              ),
+            )
+          }
+          onMove={(pieceKey, deltaMm) => {
+            setLayout((current) => {
+              const selected = current.selectedPieceKeys.includes(pieceKey)
+                ? current
+                : selectPatternImportDxfPhaseECadTablePiecesV1(current, [pieceKey], 'replace');
+              return translateSelectedPatternImportDxfPhaseECadTablePiecesV1(selected, deltaMm);
+            });
           }}
         >
           {({ box, unit }) => (
@@ -193,13 +293,30 @@ export function PatternImportDxfPhaseECadTableZeroConnectCanvasV1({
                     identity.pieceLineKey === piece.pieceLineKey,
                 );
                 if (!pieceLayout) return null;
+                const selected = layout.selectedPieceKeys.includes(pieceLayout.identity.key);
+                const hovered = hoveredPieceKey === pieceLayout.identity.key;
                 return (
                   <g
                     key={pieceLayout.identity.key}
+                    data-key={pieceLayout.identity.key}
                     data-cad-zero-connect-piece={piece.pieceId}
                     data-cad-zero-connect-piece-line={piece.pieceLineKey}
+                    data-cad-zero-connect-piece-selected={selected || undefined}
+                    data-cad-zero-connect-piece-hovered={hovered || undefined}
                     transform={`translate(${pieceLayout.offsetMm.x} ${vy(pieceLayout.offsetMm.y)})`}
                   >
+                    <rect
+                      x={pieceLayout.sourceBounds.minX}
+                      y={vy(pieceLayout.sourceBounds.maxY)}
+                      width={pieceLayout.sourceBounds.maxX - pieceLayout.sourceBounds.minX}
+                      height={pieceLayout.sourceBounds.maxY - pieceLayout.sourceBounds.minY}
+                      fill='transparent'
+                      pointerEvents={
+                        activeTool === 'select' || activeTool === 'move' ? 'all' : 'none'
+                      }
+                      onPointerEnter={() => setHoveredPieceKey(pieceLayout.identity.key)}
+                      onPointerLeave={() => setHoveredPieceKey(null)}
+                    />
                     {piece.contours.map((contour) => {
                       const points = contour.vertices.map(({ pointMm }) => pointMm);
                       const closed =
@@ -209,14 +326,23 @@ export function PatternImportDxfPhaseECadTableZeroConnectCanvasV1({
                           key={contour.contourId}
                           data-cad-zero-connect-contour={contour.contourId}
                           points={ptsAttr(closed)}
-                          fill='none'
+                          fill={
+                            contour.closed
+                              ? contour.role === 'hole'
+                                ? 'var(--color-bgColor)'
+                                : selected
+                                  ? SHEET_INK.pick
+                                  : SHEET_INK.fill
+                              : 'none'
+                          }
                           stroke={
-                            contour.role === 'sewing-boundary' ? SHEET_INK.ink : SHEET_INK.mut
+                            contour.role === 'hole'
+                              ? SHEET_INK.mut
+                              : selected || hovered
+                                ? SHEET_INK.ink
+                                : SHEET_INK.mut
                           }
-                          strokeWidth={1.1}
-                          strokeDasharray={
-                            contour.role === 'cut-boundary' ? `${unit * 6} ${unit * 3}` : undefined
-                          }
+                          strokeWidth={selected ? 1.6 : hovered ? 1.4 : 1.2}
                           vectorEffect='non-scaling-stroke'
                           pointerEvents='none'
                         />
@@ -293,7 +419,14 @@ export function PatternImportDxfPhaseECadTableZeroConnectCanvasV1({
         data-cad-zero-connect-status={controller.session?.status ?? 'idle'}
         className='min-h-8 border-t border-borderColor px-2 py-1 text-micro text-labelColor'
       >
-        {status ?? 'Connect two exact edges to create the first Assembly Order draft.'}
+        {status ??
+          (activeTool === 'select'
+            ? `${layout.selectedPieceKeys.length} selected · click or drag to select; Shift toggles. Wheel zooms and double-click fits.`
+            : activeTool === 'pan'
+              ? 'Drag to pan. Wheel zooms at the pointer; double-click or use Fit to show all pieces.'
+              : activeTool === 'move'
+                ? `${layout.selectedPieceKeys.length} selected · drag a piece to move the selection.`
+                : 'Choose two exact edges to create the first Assembly Order draft.')}
       </div>
     </section>
   );
