@@ -26,7 +26,10 @@ import {
   encodePatternImportDxfProductCompositeSidecarV7,
   readPatternImportDxfProductCompositeComponentBytesV7,
   type PatternImportDxfProductCompositeSidecarOwnerV7,
+  type PatternImportDxfProductCompositeSidecarResultV7,
 } from './composite-sidecar-v7';
+import { readPatternImportDxfProductCompositeComponentBytesV5 } from './composite-sidecar-v5';
+import type { SavedFullAssemblySnapshotProjectionV1 } from './saved-full-assembly-snapshot-production-v1';
 import { SAVED_FULL_ASSEMBLY_PHYSICAL_COMPONENT_KIND_V1 } from './saved-full-assembly-physical-component-v1';
 
 export const PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_REQUEST_V7 =
@@ -39,7 +42,55 @@ export type PatternImportDxfProductCompositeSidecarTransportAnchorV7 = Readonly<
   serverTopologySha256: string;
 }>;
 
-export type PatternImportDxfProductCompositeSidecarTransitionIntentV7 = 'physical' | 'arrangement';
+export function requireSavedCompositeSidecarTransportAnchorV7(
+  current: Extract<PatternImportDxfProductCompositeSidecarResultV7, { ok: true }>,
+  snapshot: SavedFullAssemblySnapshotProjectionV1,
+): PatternImportDxfProductCompositeSidecarTransportAnchorV7 {
+  const graph = current.fullAssemblyPhysicalEnvelope.document.graph;
+  const operation = graph.operations.find(
+    (candidate) =>
+      candidate.kind === 'stitch' &&
+      Number.isSafeInteger(candidate.sourceOperationNumber) &&
+      candidate.sourceOperationNumber > 0 &&
+      candidate.seamIds.length > 0,
+  );
+  if (!operation)
+    throw new Error('The saved physical graph has no genuine seam-bearing stitch operation.');
+  const graphSeams = operation.seamIds.map((seamId) => {
+    const matches = graph.seams.filter(
+      (seam) => seam.id === seamId && seam.clientOperationId === operation.clientOperationId,
+    );
+    if (matches.length !== 1)
+      throw new Error('The saved physical graph stitch no longer owns every seam exactly once.');
+    return matches[0].sourceSeamKey;
+  });
+  const savedOperation = snapshot.operations.find(
+    (candidate) => candidate.operationNumber === operation.sourceOperationNumber,
+  );
+  if (
+    !savedOperation ||
+    savedOperation.seamKeys.length !== graphSeams.length ||
+    !savedOperation.seamKeys.every((seamKey, index) => seamKey === graphSeams[index])
+  )
+    throw new Error('The saved physical graph stitch differs from the current Assembly Order.');
+  const receipts = snapshot.selectedTopologyReceipts.filter(
+    (receipt) => receipt.sourceOperationNumber === operation.sourceOperationNumber,
+  );
+  if (
+    receipts.length !== 1 ||
+    receipts[0].sha256 !== current.document.bindings.assemblyTopologySha256
+  )
+    throw new Error('The saved physical graph stitch differs from the current topology receipt.');
+  return Object.freeze({
+    sourceOperationNumber: operation.sourceOperationNumber,
+    serverTopologySha256: receipts[0].sha256,
+  });
+}
+
+export type PatternImportDxfProductCompositeSidecarTransitionIntentV7 =
+  | 'physical'
+  | 'arrangement'
+  | 'annotations';
 
 export type PatternImportDxfProductCompositeSidecarStorageRequestV7 = Readonly<{
   schemaVersion: typeof PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_REQUEST_V7;
@@ -174,7 +225,7 @@ async function arrangementComponentsV6(
   );
   if (!nestedV5 || !arrangement)
     fail('Nested Composite V6 arrangement components are unavailable.');
-  return Object.freeze({ nestedV5, arrangement });
+  return Object.freeze({ nestedV5, arrangement, annotations: decoded.nestedCompositeV5 });
 }
 
 async function prepareV7(
@@ -211,17 +262,40 @@ async function prepareV7(
   if (request.transitionIntent === 'physical') {
     if (!sameBytes(previous.nestedV6, nextNestedV6))
       fail('Exact nested Composite V6 bytes changed during the physical transition.');
-  } else if (request.transitionIntent === 'arrangement') {
+  } else if (
+    request.transitionIntent === 'arrangement' ||
+    request.transitionIntent === 'annotations'
+  ) {
     if (current.mediaType !== PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7)
-      fail('Arrangement transition requires current Composite V7.');
+      fail('A presentation transition requires current Composite V7.');
     if (!previous.physical || !sameBytes(previous.physical, nextPhysical))
-      fail('Exact physical component bytes changed during the arrangement transition.');
+      fail('Exact physical component bytes changed during the presentation transition.');
     const [previousV6, nextV6] = await Promise.all([
       arrangementComponentsV6(previous.nestedV6, crypto),
       arrangementComponentsV6(nextNestedV6, crypto),
     ]);
-    if (!sameBytes(previousV6.nestedV5, nextV6.nestedV5))
-      fail('Exact nested Composite V5 bytes changed during the arrangement transition.');
+    if (request.transitionIntent === 'arrangement') {
+      if (!sameBytes(previousV6.nestedV5, nextV6.nestedV5))
+        fail('Exact nested Composite V5 bytes changed during the arrangement transition.');
+    } else {
+      if (!sameBytes(previousV6.arrangement, nextV6.arrangement))
+        fail('Exact arrangement bytes changed during the annotation transition.');
+      const previousV4 = readPatternImportDxfProductCompositeComponentBytesV5(
+        previousV6.annotations.owner,
+        'composite-v4',
+      );
+      const nextV4 = readPatternImportDxfProductCompositeComponentBytesV5(
+        nextV6.annotations.owner,
+        'composite-v4',
+      );
+      if (!previousV4 || !nextV4 || !sameBytes(previousV4, nextV4))
+        fail('Exact nested Composite V4 bytes changed during the annotation transition.');
+      if (
+        canonical(previousV6.annotations.topologyAnnotations.bindings) !==
+        canonical(nextV6.annotations.topologyAnnotations.bindings)
+      )
+        fail('Exact annotation source bindings changed during the annotation transition.');
+    }
   } else {
     fail('Composite V7 transition intent is invalid.');
   }
@@ -247,7 +321,8 @@ function createStorageAdapterV7(
         host: unknown;
         context: SavedGenericObservedPhysicalHostPersistenceContextV1;
       }>
-    | Readonly<{ intent: 'arrangement' }>,
+    | Readonly<{ intent: 'arrangement' }>
+    | Readonly<{ intent: 'annotations'; verifyCurrent: (signal: AbortSignal) => Promise<void> }>,
 ): PatternImportDxfProductCompositeSidecarStorageAdapterV7 {
   return createPatternImportDxfProductCompositeSidecarStorageWriterV3(deps, {
     requestSchemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_REQUEST_V7,
@@ -262,6 +337,7 @@ function createStorageAdapterV7(
     beforeRequest: async (request, _planned, signal) => {
       if (request.transitionIntent !== guard.intent)
         fail('Composite V7 adapter transition intent differs.');
+      if (guard.intent === 'annotations') await guard.verifyCurrent(signal);
       if (
         guard.intent === 'physical' &&
         !isCurrentSavedGenericObservedPhysicalHostPersistenceContextV1(
@@ -289,6 +365,13 @@ export function createPatternImportDxfProductCompositeSidecarArrangementStorageA
   deps: PatternImportDxfProductCompositeSidecarStorageDepsV3,
 ): PatternImportDxfProductCompositeSidecarStorageAdapterV7 {
   return createStorageAdapterV7(deps, { intent: 'arrangement' });
+}
+
+export function createPatternImportDxfProductCompositeSidecarAnnotationStorageAdapterV7(
+  deps: PatternImportDxfProductCompositeSidecarStorageDepsV3,
+  verifyCurrent: (signal: AbortSignal) => Promise<void>,
+): PatternImportDxfProductCompositeSidecarStorageAdapterV7 {
+  return createStorageAdapterV7(deps, { intent: 'annotations', verifyCurrent });
 }
 
 export function createPatternImportDxfProductCompositeSidecarProductionStorageAdapterV7(

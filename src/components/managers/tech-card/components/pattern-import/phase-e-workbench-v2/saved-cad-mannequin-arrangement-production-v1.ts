@@ -40,6 +40,7 @@ import {
 } from './composite-sidecar-persistence-v6';
 import {
   createPatternImportDxfProductCompositeSidecarProductionArrangementStorageAdapterV7,
+  requireSavedCompositeSidecarTransportAnchorV7,
   PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_REQUEST_V7,
 } from './composite-sidecar-persistence-v7';
 import { SAVED_FULL_ASSEMBLY_PHYSICAL_COMPONENT_KIND_V1 } from './saved-full-assembly-physical-component-v1';
@@ -83,54 +84,6 @@ function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
   return (
     left.byteLength === right.byteLength && left.every((value, index) => value === right[index])
   );
-}
-
-function arrangementTransportAnchor(
-  current: Extract<
-    Awaited<ReturnType<typeof decodePatternImportDxfProductCompositeSidecarV7>>,
-    { ok: true }
-  >,
-  snapshot: Awaited<ReturnType<typeof readCurrent>>,
-) {
-  const graph = current.fullAssemblyPhysicalEnvelope.document.graph;
-  const operation = graph.operations.find(
-    (candidate) =>
-      candidate.kind === 'stitch' &&
-      Number.isSafeInteger(candidate.sourceOperationNumber) &&
-      candidate.sourceOperationNumber > 0 &&
-      candidate.seamIds.length > 0,
-  );
-  if (!operation)
-    throw new Error('The saved physical graph has no genuine seam-bearing stitch operation.');
-  const graphSeams = operation.seamIds.map((seamId) => {
-    const matches = graph.seams.filter(
-      (seam) => seam.id === seamId && seam.clientOperationId === operation.clientOperationId,
-    );
-    if (matches.length !== 1)
-      throw new Error('The saved physical graph stitch no longer owns every seam exactly once.');
-    return matches[0].sourceSeamKey;
-  });
-  const savedOperation = snapshot.operations.find(
-    (candidate) => candidate.operationNumber === operation.sourceOperationNumber,
-  );
-  if (
-    !savedOperation ||
-    savedOperation.seamKeys.length !== graphSeams.length ||
-    !savedOperation.seamKeys.every((seamKey, index) => seamKey === graphSeams[index])
-  )
-    throw new Error('The saved physical graph stitch differs from the current Assembly Order.');
-  const receipts = snapshot.selectedTopologyReceipts.filter(
-    (receipt) => receipt.sourceOperationNumber === operation.sourceOperationNumber,
-  );
-  if (
-    receipts.length !== 1 ||
-    receipts[0].sha256 !== current.document.bindings.assemblyTopologySha256
-  )
-    throw new Error('The saved physical graph stitch differs from the current topology receipt.');
-  return Object.freeze({
-    sourceOperationNumber: operation.sourceOperationNumber,
-    serverTopologySha256: receipts[0].sha256,
-  });
 }
 
 async function readCurrentArrangement(
@@ -358,7 +311,7 @@ export async function saveSavedCadMannequinArrangementV1(
       fullAssemblyPhysicalBytes: physicalBytes,
     });
     if (!nextV7.ok) throw new Error(nextV7.blockers[0].detail);
-    const anchor = arrangementTransportAnchor(currentV7, snapshot);
+    const anchor = requireSavedCompositeSidecarTransportAnchorV7(currentV7, snapshot);
     const saved =
       await createPatternImportDxfProductCompositeSidecarProductionArrangementStorageAdapterV7().persist(
         {

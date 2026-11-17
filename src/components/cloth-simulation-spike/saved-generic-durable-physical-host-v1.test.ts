@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { abortableAdminService } from 'api/api';
 import type {
   GetTechCardSavedAssemblySnapshotRequest,
+  PutTechCardPatternSemanticSidecarRequest,
   TechCardPatternSemanticSidecar,
 } from 'api/proto-http/admin';
 import { createXpbdDeviceSession } from 'lib/cloth/runtime/webgpu/xpbd-device-session';
@@ -83,6 +84,8 @@ import {
 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/cad-table-zero-connect-canvas-v1';
 import { createPatternImportDxfPhaseERestoredTopologyAnnotationReaderV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/restored-topology-annotation-reader-v1';
 import { createPatternImportDxfPhaseESavedAssemblySnapshotProductionRpcV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-assembly-snapshot-production-rpc-v1';
+
+import { createPatternImportDxfPhaseEWrappedTopologyAnnotationSaveV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/wrapped-topology-annotation-save-v1';
 
 // Real native DXF/worker/compiler, V3→V7 encoders, fixed fresh reader and genuine body session.
 // HTTP storage, declared synthetic observed triangle geometry, and GPU/preview lifecycle ports are fixtures.
@@ -436,7 +439,9 @@ async function encodedStorage(
       scopeKey: seed.row.scopeKey,
       pieceId: p.pieceId,
       pieceLineKey: p.pieceLineKey,
-      transform: { offsetM: [0, 0, 0], rotationRad: 0 },
+      transform: withAnnotations
+        ? { offsetM: [0.125, -0.0625, 0.25], rotationRad: 0.5 }
+        : { offsetM: [0, 0, 0], rotationRad: 0 },
     })),
   });
   const v6 = requireOk(
@@ -727,6 +732,217 @@ function reactMountContainer() {
     ...listeners,
   };
 }
+
+async function wrappedAnnotationSaveFixture(version: 'v6' | 'v7') {
+  const { storage } = await fixture(true);
+  const session = await openExactAnnotationFixture(storage, version);
+  const current = {
+    ...storage[version],
+    postSaveReceiptSha256: semanticDocument(seed.row).persistence.receiptSealSha256,
+  };
+  outer = current;
+  const get = vi.fn(async (): Promise<{ semanticSidecar: TechCardPatternSemanticSidecar }> => {
+    return { semanticSidecar: structuredClone(outer!) };
+  });
+  const put = vi.fn(async (request: PutTechCardPatternSemanticSidecarRequest) => {
+    expect(request).toMatchObject({
+      techCardId: current.techCardId,
+      patternLineKey: current.patternLineKey,
+      expectedCardLockVersion: current.cardLockVersion,
+      expectedSavedRowRevision: current.savedRowRevision,
+      expectedDxfSha256: current.dxfSha256,
+      expectedPreviousSidecarSha256: outer!.sidecarSha256,
+      expectedServerAssemblyRevision: session.current.serverAssemblyRevision,
+      expectedAssemblyTopologySha256:
+        version === 'v6' ? session.current.assemblyTopologySha256 : storage.v7TopologySha256,
+      selectedOperationNumber: version === 'v6' ? 20 : 10,
+      mediaType: current.mediaType,
+    });
+    outer = {
+      ...current,
+      sidecarBytes: request.sidecarBytes,
+      sidecarSha256: request.sidecarSha256,
+      byteLength: Buffer.from(request.sidecarBytes!, 'base64').length,
+    };
+    return { semanticSidecar: structuredClone(outer) };
+  });
+  const save = createPatternImportDxfPhaseEWrappedTopologyAnnotationSaveV1({
+    createClient: () => ({
+      GetTechCardPatternSemanticSidecar: get,
+      PutTechCardPatternSemanticSidecar: put,
+    }),
+  });
+  const anchor = {
+    pieceId: 'piece:0:front',
+    pieceLineKey: 'line:0:front',
+    contourId: 'contour:0:front',
+    vertexId: 'vertex:0:front:0',
+  };
+  const input = {
+    session,
+    geometry: {
+      catalog: storage.catalog,
+      projection: storage.source.projection,
+      annotationSource: storage.source,
+    },
+    expectedPreviousSidecarSha256: current.sidecarSha256!,
+    draft: {
+      measurements: [
+        {
+          id: 'measurement:1',
+          kind: 'point' as const,
+          anchors: [anchor],
+          valueMm: null,
+          label: 'Point',
+        },
+      ],
+      callouts: [
+        {
+          schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_CALLOUT_SESSION_V1,
+          id: 'callout:1',
+          anchor,
+          text: 'Misura aggiornata',
+        },
+      ],
+    },
+  };
+  const signal = new AbortController().signal;
+  return { current, get, input, put, save, signal };
+}
+
+async function unwrapAnnotationSaveFixture(
+  version: 'v6' | 'v7',
+  row: TechCardPatternSemanticSidecar,
+) {
+  const bytes = new Uint8Array(Buffer.from(row.sidecarBytes!, 'base64'));
+  const v7 =
+    version === 'v7'
+      ? requireOk(await V7.decodePatternImportDxfProductCompositeSidecarV7(bytes))
+      : null;
+  const v6 =
+    v7?.nestedCompositeV6 ??
+    requireOk(await V6.decodePatternImportDxfProductCompositeSidecarV6(bytes));
+  return {
+    v5: v6.nestedCompositeV5,
+    v6,
+    v7,
+    exactV4: V5.readPatternImportDxfProductCompositeComponentBytesV5(
+      v6.nestedCompositeV5.owner,
+      'composite-v4',
+    ),
+    arrangement: V6.readPatternImportDxfProductCompositeComponentBytesV6(
+      v6.owner,
+      'cad-mannequin-arrangement-v1',
+    ),
+    physical:
+      v7 &&
+      V7.readPatternImportDxfProductCompositeComponentBytesV7(
+        v7.owner,
+        component.SAVED_FULL_ASSEMBLY_PHYSICAL_COMPONENT_KIND_V1,
+      ),
+  };
+}
+
+function advanceAssemblyRevision(wire: Awaited<ReturnType<typeof fullAssemblyFixtureWireV1>>) {
+  wire.serverAssemblyRevision += ':advanced';
+}
+function advanceSavedRowRevision(wire: Awaited<ReturnType<typeof fullAssemblyFixtureWireV1>>) {
+  wire.row.savedRowRevision += 1;
+}
+
+describe('same-row wrapped annotation CAS', () => {
+  it.each(['v6', 'v7'] as const)(
+    'updates only the annotation chain through the existing CAS for %s',
+    async (version) => {
+      const { current, input, put, save, signal } = await wrappedAnnotationSaveFixture(version);
+      const before = await unwrapAnnotationSaveFixture(version, current);
+      const saved = requireOk(await save(input, signal));
+      expect(saved.readback.callouts[0].text).toBe('Misura aggiornata');
+      expect(saved.sidecarSha256).not.toBe(current.sidecarSha256);
+      expect(put).toHaveBeenCalledTimes(1);
+      const after = await unwrapAnnotationSaveFixture(version, outer!);
+      expect(after.exactV4).toEqual(before.exactV4);
+      expect(after.arrangement).toEqual(before.arrangement);
+      expect(after.v6.mannequinArrangement.pieces[0].transform).toEqual({
+        offsetM: [0.125, -0.0625, 0.25],
+        rotationRad: 0.5,
+      });
+      expect(after.v5.document.writeCas.expectedPreviousSidecarSha256).toBe(
+        before.v5.seal.canonicalSha256,
+      );
+      expect(after.v6.document.writeCas.expectedPreviousSidecarSha256).toBe(
+        before.v6.seal.canonicalSha256,
+      );
+      expect(after.v5.seal.canonicalSha256).not.toBe(before.v5.seal.canonicalSha256);
+      expect(after.v6.seal.canonicalSha256).not.toBe(before.v6.seal.canonicalSha256);
+      expect(after.v5.topologyAnnotations.bindings).toEqual(before.v5.topologyAnnotations.bindings);
+      expect(after.physical).toEqual(before.physical);
+      if (version === 'v7') {
+        expect(after.v7!.fullAssemblyPhysicalEnvelope.document.physicalInitialization).toEqual(
+          before.v7!.fullAssemblyPhysicalEnvelope.document.physicalInitialization,
+        );
+        expect(after.v7!.fullAssemblyPhysicalEnvelope.document.bindings.aoContentSha256).toBe(
+          before.v7!.fullAssemblyPhysicalEnvelope.document.bindings.aoContentSha256,
+        );
+        expect(after.v7!.document.writeCas.expectedPreviousSidecarSha256).toBe(
+          before.v7!.seal.canonicalSha256,
+        );
+      }
+    },
+  );
+
+  it.each(['v6', 'v7'] as const)(
+    'refuses a stale baseline or an invalidation during %s pre-PUT planning',
+    async (version) => {
+      const { current, get, input, put, save, signal } =
+        await wrappedAnnotationSaveFixture(version);
+      expect(
+        await save({ ...input, expectedPreviousSidecarSha256: '9'.repeat(64) }, signal),
+      ).toMatchObject({
+        ok: false,
+        writeOutcome: 'not-attempted',
+        detail: expect.stringContaining('envelope changed'),
+      });
+      for (const invalidate of [advanceAssemblyRevision, advanceSavedRowRevision]) {
+        get.mockImplementationOnce(async () => {
+          editWire = invalidate;
+          return { semanticSidecar: current };
+        });
+        expect(await save(input, signal)).toMatchObject({
+          ok: false,
+          writeOutcome: 'not-attempted',
+          detail: expect.stringContaining('pre-PUT currentness check failed'),
+        });
+        editWire = null;
+      }
+      expect(put).not.toHaveBeenCalled();
+      expect(outer!.sidecarSha256).toBe(current.sidecarSha256);
+    },
+  );
+
+  it.each([
+    ['v6', 'row', advanceSavedRowRevision],
+    ['v6', 'operation', advanceAssemblyRevision],
+    ['v7', 'row', advanceSavedRowRevision],
+    ['v7', 'operation', advanceAssemblyRevision],
+  ] as const)(
+    'withholds verified readback after %s %s drift without retrying PUT',
+    async (version, _authority, invalidate) => {
+      const { current, get, input, put, save, signal } =
+        await wrappedAnnotationSaveFixture(version);
+      get.mockImplementationOnce(async () => ({ semanticSidecar: current }));
+      get.mockImplementationOnce(async () => {
+        editWire = invalidate;
+        return { semanticSidecar: structuredClone(outer!) };
+      });
+      expect(await save(input, signal)).toMatchObject({
+        ok: false,
+        writeOutcome: 'acknowledged-unverified',
+      });
+      expect(put).toHaveBeenCalledTimes(1);
+    },
+  );
+});
 
 describe('exact saved annotations in durable Composite envelopes', () => {
   it('renders genuine saved V6 annotations on the restored exact desktop and keeps visibility local', async () => {

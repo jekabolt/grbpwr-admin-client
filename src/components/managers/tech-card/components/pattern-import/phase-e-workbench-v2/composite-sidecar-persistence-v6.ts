@@ -849,6 +849,7 @@ async function prepareV6(
 
 export function createPatternImportDxfProductCompositeSidecarStorageAdapterV6(
   deps: PatternImportDxfProductCompositeSidecarStorageDepsV3,
+  beforeAnnotationWrite?: (signal: AbortSignal) => Promise<void>,
 ): PatternImportDxfProductCompositeSidecarStorageAdapterV6 {
   return createPatternImportDxfProductCompositeSidecarStorageWriterV3(deps, {
     requestSchemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_REQUEST_V6,
@@ -860,6 +861,9 @@ export function createPatternImportDxfProductCompositeSidecarStorageAdapterV6(
     ]),
     label: 'Composite V6 two-lane transition',
     prepare: prepareV6,
+    beforeRequest: async (request, _planned, signal) => {
+      if (request.transitionIntent === 'annotations') await beforeAnnotationWrite?.(signal);
+    },
     verifyCanonical: async (bytes, crypto) =>
       (await decodePatternImportDxfProductCompositeSidecarV6(bytes, crypto)).ok,
   });

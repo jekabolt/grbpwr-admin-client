@@ -203,6 +203,36 @@ function resolvedAnchor(
   return Object.freeze({ ...anchor, pointMm: resolved.pointMm });
 }
 
+export function encodePatternImportDxfPhaseETopologyAnnotationDraftV5(
+  authority: PatternImportDxfProductCompositeSidecarBindingsV3,
+  source: PatternImportDxfPhaseETopologyAnnotationSourceV5,
+  annotations: Readonly<{
+    measurements: readonly PatternImportDxfPhaseEMeasurementV1[];
+    callouts: readonly PatternImportDxfPhaseECalloutV1[];
+  }>,
+  crypto?: Pick<Crypto, 'subtle'>,
+) {
+  return encodePatternImportDxfPhaseETopologyAnnotationsV1(
+    {
+      schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_TOPOLOGY_ANNOTATIONS_REQUEST_V1,
+      bindings: derivePatternImportDxfPhaseETopologyAnnotationsBindingsV1(authority, {
+        identity: source.identity,
+        revision: source.revision,
+        sha256: source.sha256,
+      }),
+      measurements: annotations.measurements.map((measurement) => ({
+        ...measurement,
+        anchors: measurement.anchors.map((anchor) => resolvedAnchor(source.projection, anchor)),
+      })),
+      callouts: annotations.callouts.map((callout) => ({
+        ...callout,
+        anchor: resolvedAnchor(source.projection, callout.anchor),
+      })),
+    },
+    crypto,
+  );
+}
+
 export function createPatternImportDxfPhaseETopologyAnnotationApplicationTransactionV5(
   deps: PatternImportDxfPhaseETopologyAnnotationApplicationTransactionDepsV5,
 ) {
@@ -362,19 +392,10 @@ export function createPatternImportDxfPhaseETopologyAnnotationApplicationTransac
           'Composite V6/V7 annotations require the versioned rewrap lane; the V5 writer will not overwrite arrangement or fullgraph bytes.',
         );
       const authority = authorityFromSession(session);
-      const encodedAnnotations = await encodePatternImportDxfPhaseETopologyAnnotationsV1(
-        {
-          schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_TOPOLOGY_ANNOTATIONS_REQUEST_V1,
-          bindings: derivePatternImportDxfPhaseETopologyAnnotationsBindingsV1(authority, source),
-          measurements: annotations.measurements.map((measurement) => ({
-            ...measurement,
-            anchors: measurement.anchors.map((anchor) => resolvedAnchor(source.projection, anchor)),
-          })),
-          callouts: annotations.callouts.map((callout) => ({
-            ...callout,
-            anchor: resolvedAnchor(source.projection, callout.anchor),
-          })),
-        },
+      const encodedAnnotations = await encodePatternImportDxfPhaseETopologyAnnotationDraftV5(
+        authority,
+        source,
+        annotations,
         deps.crypto,
       );
       if (!encodedAnnotations.ok) throw new TypeError(encodedAnnotations.blocker.detail);

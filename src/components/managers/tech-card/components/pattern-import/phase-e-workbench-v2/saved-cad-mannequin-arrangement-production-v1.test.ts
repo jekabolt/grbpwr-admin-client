@@ -69,7 +69,8 @@ vi.mock('./composite-sidecar-persistence-v6', () => ({
   }),
   PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_REQUEST_V6: 'store-v6',
 }));
-vi.mock('./composite-sidecar-persistence-v7', () => ({
+vi.mock('./composite-sidecar-persistence-v7', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./composite-sidecar-persistence-v7')>()),
   createPatternImportDxfProductCompositeSidecarProductionArrangementStorageAdapterV7: () => ({
     persist: mocks.saveV7,
   }),
