@@ -289,14 +289,14 @@ describe('zero-connect durable Composite V4 single-operation policy', () => {
     expect(codec.publish).not.toHaveBeenCalled();
   });
 
-  it('never overwrites an unknown newer carrier such as Composite V6', async () => {
+  it('never overwrites a corrupt Composite V6 carrier', async () => {
     const test = rig('application/vnd.grbpwr.pattern-dxf-product-composite.v6+json');
 
     const result = await persist(test);
 
     expect(result).toMatchObject({
       ok: false,
-      blocker: { code: 'durable-existing-carrier-unsupported' },
+      blocker: { code: 'durable-existing-composite-invalid' },
     });
     expect(test.execute).not.toHaveBeenCalled();
     expect(codec.restore).not.toHaveBeenCalled();

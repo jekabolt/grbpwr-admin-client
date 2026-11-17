@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V4 } from './composite-sidecar-v4';
 import { createPatternImportDxfProductCompositeSidecarProductionPersistenceV5 } from './composite-sidecar-persistence-v5';
+import { PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7 } from './composite-sidecar-v7';
 import { createPatternImportDxfPhaseEDraftCadTopologyScopeV1 } from './draft-cad-topology-scope-v1';
 import { resolvePatternImportDxfPhaseETopologyAnnotationPersistenceCapabilityV1 } from './topology-annotation-persistence-capability-v1';
 
@@ -74,6 +75,23 @@ describe('topology annotation production persistence capability', () => {
       saveActionAllowed: false,
       persistence: null,
       blocker: { code: 'production-v5-writer-unavailable' },
+    });
+  });
+
+  it('does not expose the V5 writer over Composite V7 fullgraph bytes', () => {
+    const capability = resolvePatternImportDxfPhaseETopologyAnnotationPersistenceCapabilityV1({
+      scope,
+      expected,
+      current,
+      currentCompositeMediaType: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7,
+      productionPersistence: createPatternImportDxfProductCompositeSidecarProductionPersistenceV5(),
+    });
+
+    expect(capability).toMatchObject({
+      status: 'unavailable',
+      saveActionAllowed: false,
+      persistence: null,
+      blocker: { code: 'versioned-rewrap-required' },
     });
   });
 

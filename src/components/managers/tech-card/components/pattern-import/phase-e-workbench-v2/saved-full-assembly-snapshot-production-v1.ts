@@ -194,8 +194,8 @@ async function outer(value: unknown, row: DxfProductSavedRowIdentityV1): Promise
   if (value === undefined) return Object.freeze({ status: 'absent' });
   const v = object(value);
   const mediaType = text(v.mediaType);
-  if (!/^application\/vnd\.grbpwr\.pattern-dxf-product-composite\.v[3456]\+json$/.test(mediaType))
-    fail('unsupported-sidecar', 'Only existing Composite V3–V6 byte envelopes are supported.');
+  if (!/^application\/vnd\.grbpwr\.pattern-dxf-product-composite\.v[34567]\+json$/.test(mediaType))
+    fail('unsupported-sidecar', 'Only existing Composite V3–V7 byte envelopes are supported.');
   const byteLength = int(v.byteLength, 1);
   if (byteLength > maxBytes) fail('bounds', 'Sidecar exceeds the backend 4 MiB bound.');
   const bytes = decode(v.sidecarBytes, byteLength);

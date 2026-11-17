@@ -282,6 +282,21 @@ describe('fixed full AO production reader — mocked RPC, no backend or DXF auth
     });
     disposeSavedFullAssemblySnapshotV1(owner);
   });
+  it('admits Composite V7 only as opaque outer bytes; durable authority stays false here', async () => {
+    transport((wire) => {
+      wire.semanticSidecar.mediaType =
+        'application/vnd.grbpwr.pattern-dxf-product-composite.v7+json';
+    });
+    const owner = await readSavedFullAssemblySnapshotV1({ row, seedOperationNumber: 10 });
+    const projection = projectSavedFullAssemblySnapshotV1(owner);
+    expect(projection.outer).toMatchObject({
+      status: 'present',
+      mediaType: 'application/vnd.grbpwr.pattern-dxf-product-composite.v7+json',
+      currentRowBound: true,
+    });
+    expect(projection.claims.durableFullGraphAvailable).toBe(false);
+    disposeSavedFullAssemblySnapshotV1(owner);
+  });
   it('captures request before await and rejects getters without calling them', async () => {
     const get = vi.fn(() => row);
     const input = { seedOperationNumber: 10 };

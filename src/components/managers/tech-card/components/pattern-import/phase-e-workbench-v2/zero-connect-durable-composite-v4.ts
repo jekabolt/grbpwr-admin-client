@@ -37,6 +37,14 @@ import {
   decodePatternImportDxfProductCompositeSidecarV5,
 } from './composite-sidecar-v5';
 import {
+  PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6,
+  decodePatternImportDxfProductCompositeSidecarV6,
+} from './composite-sidecar-v6';
+import {
+  PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7,
+  decodePatternImportDxfProductCompositeSidecarV7,
+} from './composite-sidecar-v7';
+import {
   PATTERN_IMPORT_DXF_PRODUCT_EXACT_N_SEAM_UI_SELECTION_REQUEST_V2,
   applyPatternImportDxfProductExactNSeamUiSelectionV2,
   createPatternImportDxfProductExactNSeamInitialUiStateV2,
@@ -515,7 +523,9 @@ export function createPatternImportDxfPhaseEZeroConnectDurableBridgeV1(
         const currentSidecar = await readCurrentSidecar(deps, request.row, signal);
         if (
           currentSidecar.mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V4 ||
-          currentSidecar.mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V5
+          currentSidecar.mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V5 ||
+          currentSidecar.mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6 ||
+          currentSidecar.mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7
         ) {
           let decodedV4: Extract<
             Awaited<ReturnType<typeof decodePatternImportDxfProductCompositeSidecarV4>>,
@@ -531,7 +541,9 @@ export function createPatternImportDxfPhaseEZeroConnectDurableBridgeV1(
             if (!decoded.ok)
               return blocked('durable-existing-composite-invalid', decoded.blockers[0].detail);
             decodedV4 = decoded;
-          } else {
+          } else if (
+            currentSidecar.mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V5
+          ) {
             const decoded = await decodePatternImportDxfProductCompositeSidecarV5(
               currentSidecar.bytes,
               crypto,
@@ -539,6 +551,24 @@ export function createPatternImportDxfPhaseEZeroConnectDurableBridgeV1(
             if (!decoded.ok)
               return blocked('durable-existing-composite-invalid', decoded.blockers[0].detail);
             decodedV4 = decoded.nestedCompositeV4;
+          } else if (
+            currentSidecar.mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6
+          ) {
+            const decoded = await decodePatternImportDxfProductCompositeSidecarV6(
+              currentSidecar.bytes,
+              crypto,
+            );
+            if (!decoded.ok)
+              return blocked('durable-existing-composite-invalid', decoded.blockers[0].detail);
+            decodedV4 = decoded.nestedCompositeV5.nestedCompositeV4;
+          } else {
+            const decoded = await decodePatternImportDxfProductCompositeSidecarV7(
+              currentSidecar.bytes,
+              crypto,
+            );
+            if (!decoded.ok)
+              return blocked('durable-existing-composite-invalid', decoded.blockers[0].detail);
+            decodedV4 = decoded.nestedCompositeV6.nestedCompositeV5.nestedCompositeV4;
           }
           const existingSides = decodedV4.exactNSeam.carrier.seams.flatMap(
             ({ sides: seamSides }) => seamSides,
@@ -552,7 +582,7 @@ export function createPatternImportDxfPhaseEZeroConnectDurableBridgeV1(
           )
             return blocked(
               'durable-existing-operation-conflict',
-              'This saved DXF row already carries a different durable exact operation. The single-operation Composite V4/V5 carrier is never overwritten; a lossless multi-operation codec is required.',
+              'This saved DXF row already carries a different durable exact operation. Composite V4–V7 is never overwritten by the legacy single-operation writer; a fresh fullgraph reissue is required.',
             );
           const restored = await restorePatternImportDxfProductCompositeSidecarDurableV4(
             {
@@ -686,10 +716,30 @@ export function createPatternImportDxfPhaseEZeroConnectDurableBridgeV1(
           if (!decoded.ok)
             return blocked('durable-restore-codec-blocked', decoded.blockers[0].detail);
           decodedV4 = decoded.nestedCompositeV4;
+        } else if (
+          currentSidecar.mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6
+        ) {
+          const decoded = await decodePatternImportDxfProductCompositeSidecarV6(
+            currentSidecar.bytes,
+            crypto,
+          );
+          if (!decoded.ok)
+            return blocked('durable-restore-codec-blocked', decoded.blockers[0].detail);
+          decodedV4 = decoded.nestedCompositeV5.nestedCompositeV4;
+        } else if (
+          currentSidecar.mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7
+        ) {
+          const decoded = await decodePatternImportDxfProductCompositeSidecarV7(
+            currentSidecar.bytes,
+            crypto,
+          );
+          if (!decoded.ok)
+            return blocked('durable-restore-codec-blocked', decoded.blockers[0].detail);
+          decodedV4 = decoded.nestedCompositeV6.nestedCompositeV5.nestedCompositeV4;
         } else {
           return blocked(
             'durable-restore-sidecar-missing',
-            'The current saved row has no durable Composite V4/V5 exact connection.',
+            'The current saved row has no durable Composite V4–V7 exact connection.',
           );
         }
         const carrier = decodedV4.exactNSeam.carrier;
@@ -701,7 +751,7 @@ export function createPatternImportDxfPhaseEZeroConnectDurableBridgeV1(
         )
           return blocked(
             'durable-restore-binding-mismatch',
-            'Composite V4/V5 no longer matches the saved operation or current DXF catalog.',
+            'Composite V4–V7 no longer matches the saved operation or current DXF catalog.',
           );
         const derived = await durableBindings(
           {
