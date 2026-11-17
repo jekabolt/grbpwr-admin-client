@@ -21,6 +21,19 @@ export const DXF_GARMENT_PHYSICAL_INITIALIZATION_MEDIA_TYPE_V1 =
   'application/vnd.grbpwr.dxf-garment-physical-initialization.v1+json' as const;
 export const SAVED_FULL_ASSEMBLY_PHYSICAL_AO_CONTENT_DOMAIN_V1 =
   'saved-full-assembly-physical-ao-content/1' as const;
+export const SAVED_FULL_ASSEMBLY_PHYSICAL_ZERO_ALLOWANCE_PROFILE_V1 =
+  'saved-full-assembly-physical/sewing-surface-zero-allowance/1' as const;
+export const SAVED_FULL_ASSEMBLY_PHYSICAL_NATIVE_SEWING_PROFILE_V1 =
+  'saved-full-assembly-physical/native-drawn-sewing/1' as const;
+
+function physicalProfileForGraph(graph: DxfExactAssemblyGraphV1) {
+  const source = graph.source?.handoffSource;
+  if (source?.exporterId !== 'grbpwr.saved-native-drawn-sewing')
+    return SAVED_FULL_ASSEMBLY_PHYSICAL_ZERO_ALLOWANCE_PROFILE_V1;
+  if (source.exportSha256 !== graph.row.sha256 || graph.source.nativeDxfSha256 !== graph.row.sha256)
+    fail('native-sewing-source-mismatch', 'Native sewing source must bind the original saved DXF.');
+  return SAVED_FULL_ASSEMBLY_PHYSICAL_NATIVE_SEWING_PROFILE_V1;
+}
 
 export const SAVED_FULL_ASSEMBLY_PHYSICAL_COMPONENT_CLAIMS_V1 = Object.freeze({
   completeGraphPersisted: true,
@@ -47,7 +60,9 @@ export type SavedFullAssemblyPhysicalComponentDocumentV1 = Readonly<{
   schemaVersion: typeof SAVED_FULL_ASSEMBLY_PHYSICAL_COMPONENT_V1;
   mediaType: typeof SAVED_FULL_ASSEMBLY_PHYSICAL_COMPONENT_MEDIA_TYPE_V1;
   encoding: 'canonical-json-utf8';
-  profile: 'saved-full-assembly-physical/sewing-surface-zero-allowance/1';
+  profile:
+    | typeof SAVED_FULL_ASSEMBLY_PHYSICAL_ZERO_ALLOWANCE_PROFILE_V1
+    | typeof SAVED_FULL_ASSEMBLY_PHYSICAL_NATIVE_SEWING_PROFILE_V1;
   bindings: SavedFullAssemblyPhysicalComponentBindingsV1;
   graph: DxfExactAssemblyGraphV1;
   graphCanonicalSha256: string;
@@ -329,7 +344,8 @@ function validateDocumentShape(value: unknown): SavedFullAssemblyPhysicalCompone
     document.schemaVersion !== SAVED_FULL_ASSEMBLY_PHYSICAL_COMPONENT_V1 ||
     document.mediaType !== SAVED_FULL_ASSEMBLY_PHYSICAL_COMPONENT_MEDIA_TYPE_V1 ||
     document.encoding !== 'canonical-json-utf8' ||
-    document.profile !== 'saved-full-assembly-physical/sewing-surface-zero-allowance/1' ||
+    (document.profile !== SAVED_FULL_ASSEMBLY_PHYSICAL_ZERO_ALLOWANCE_PROFILE_V1 &&
+      document.profile !== SAVED_FULL_ASSEMBLY_PHYSICAL_NATIVE_SEWING_PROFILE_V1) ||
     !SHA256.test(String(document.graphCanonicalSha256)) ||
     !SHA256.test(String(document.compileInputSha256)) ||
     !same(document.claims, SAVED_FULL_ASSEMBLY_PHYSICAL_COMPONENT_CLAIMS_V1)
@@ -341,6 +357,8 @@ function validateDocumentShape(value: unknown): SavedFullAssemblyPhysicalCompone
     'document.bindings',
   );
   validateRow(bindings.row, 'document.bindings.row');
+  if (document.profile !== physicalProfileForGraph(document.graph as DxfExactAssemblyGraphV1))
+    fail('physical-profile-mismatch', 'Physical profile differs from the saved graph source.');
   if (
     typeof bindings.serverAssemblyRevision !== 'string' ||
     !bindings.serverAssemblyRevision ||
@@ -379,7 +397,7 @@ function validateDocumentShape(value: unknown): SavedFullAssemblyPhysicalCompone
     replay.support !== 'none' ||
     replay.replayProfile !== 'garment-material-contact-replay/1'
   )
-    fail('invalid-physical-policy', 'Only sewing-surface zero-allowance replay is supported.');
+    fail('invalid-physical-policy', 'Only the declared sewing-surface replay policy is supported.');
   return document as SavedFullAssemblyPhysicalComponentDocumentV1;
 }
 
@@ -496,7 +514,7 @@ export async function buildSavedFullAssemblyPhysicalComponentV1(
       schemaVersion: SAVED_FULL_ASSEMBLY_PHYSICAL_COMPONENT_V1,
       mediaType: SAVED_FULL_ASSEMBLY_PHYSICAL_COMPONENT_MEDIA_TYPE_V1,
       encoding: 'canonical-json-utf8' as const,
-      profile: 'saved-full-assembly-physical/sewing-surface-zero-allowance/1' as const,
+      profile: physicalProfileForGraph(input.graph),
       bindings: {
         row: structuredClone(validateRow(input.bindings.row, 'request.bindings.row')),
         serverAssemblyRevision: input.bindings.serverAssemblyRevision,

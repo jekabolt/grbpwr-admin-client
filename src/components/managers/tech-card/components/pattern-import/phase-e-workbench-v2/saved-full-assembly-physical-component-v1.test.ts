@@ -76,7 +76,7 @@ const snapshot = Object.freeze({
   claims: {},
 }) as unknown as SavedFullAssemblySnapshotProjectionV1;
 
-async function build() {
+async function build(inputGraph = graph) {
   const physicalBytes = encoder.encode('{"physical":"fixture"}');
   const physicalSha = await digest(physicalBytes);
   const expectAoOnly = (value: unknown) => {
@@ -90,7 +90,7 @@ async function build() {
   };
   fingerprintMock.mockImplementation(({ assemblySnapshot }) => {
     expectAoOnly(assemblySnapshot);
-    return Promise.resolve({ graph, canonicalSha256: sha('b'), claims: {} });
+    return Promise.resolve({ graph: inputGraph, canonicalSha256: sha('b'), claims: {} });
   });
   physicalDecodeMock.mockImplementation(({ assemblySnapshot }) => {
     expectAoOnly(assemblySnapshot);
@@ -106,7 +106,7 @@ async function build() {
   });
   return buildSavedFullAssemblyPhysicalComponentV1({
     bindings: { row, serverAssemblyRevision: 'asm:r4' },
-    graph,
+    graph: inputGraph,
     graphCanonicalSha256: sha('b'),
     compileInputSha256: sha('c'),
     physicalInitializationBytes: physicalBytes,
@@ -115,10 +115,65 @@ async function build() {
 }
 
 describe('Saved Full Assembly physical component V1', () => {
+  const nativeGraph = {
+    ...graph,
+    source: {
+      nativeDxfSha256: row.sha256,
+      handoffSource: {
+        exporterId: 'grbpwr.saved-native-drawn-sewing',
+        exportSha256: row.sha256,
+      },
+    },
+  } as DxfExactAssemblyGraphV1;
+
+  it('derives the additive native sewing profile and preserves it through reload', async () => {
+    const result = await build(nativeGraph);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.document.profile).toBe('saved-full-assembly-physical/native-drawn-sewing/1');
+    const encoded = encodeSavedFullAssemblyPhysicalComponentV1(result.owner);
+    if (!encoded.ok) throw new Error('Encoding failed');
+    const decoded = await decodeSavedFullAssemblyPhysicalComponentV1(encoded.bytes, snapshot);
+    expect(decoded.ok).toBe(true);
+    if (decoded.ok) expect(decoded.document.profile).toBe(result.document.profile);
+  });
+
+  it.each(['exportSha256', 'nativeDxfSha256'] as const)(
+    'rejects native sewing with a different original %s',
+    async (field) => {
+      const changed = structuredClone(nativeGraph);
+      if (field === 'exportSha256')
+        Object.assign(changed.source.handoffSource, { exportSha256: sha('9') });
+      else Object.assign(changed.source, { nativeDxfSha256: sha('9') });
+      const result = await build(changed);
+      expect(result).toMatchObject({
+        ok: false,
+        blockers: [{ code: 'native-sewing-source-mismatch' }],
+      });
+    },
+  );
+
+  it('rejects relabelling native sewing as zero allowance', async () => {
+    const result = await build(nativeGraph);
+    if (!result.ok) throw new Error('Build failed');
+    const encoded = encodeSavedFullAssemblyPhysicalComponentV1(result.owner);
+    if (!encoded.ok) throw new Error('Encoding failed');
+    const changed = JSON.parse(new TextDecoder().decode(encoded.bytes));
+    changed.profile = 'saved-full-assembly-physical/sewing-surface-zero-allowance/1';
+    const decoded = await decodeSavedFullAssemblyPhysicalComponentV1(
+      encoder.encode(JSON.stringify(changed)),
+      snapshot,
+    );
+    expect(decoded).toMatchObject({ ok: false, blockers: [{ code: 'physical-profile-mismatch' }] });
+  });
+
   it('registers deterministic canonical graph and all-piece physical bytes', async () => {
     const result = await build();
     expect(result.ok).toBe(true);
     if (!result.ok) return;
+    expect(result.document.profile).toBe(
+      'saved-full-assembly-physical/sewing-surface-zero-allowance/1',
+    );
     expect(result.document.mediaType).toBe(SAVED_FULL_ASSEMBLY_PHYSICAL_COMPONENT_MEDIA_TYPE_V1);
     const encoded = encodeSavedFullAssemblyPhysicalComponentV1(result.owner);
     expect(encoded.ok).toBe(true);
