@@ -15,6 +15,7 @@ import {
 import {
   PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V5,
   decodePatternImportDxfProductCompositeSidecarV5,
+  readPatternImportDxfProductCompositeComponentBytesV5,
 } from './composite-sidecar-v5';
 import { CAD_MANNEQUIN_ARRANGEMENT_LIMITS_V1 } from './cad-mannequin-arrangement-document-v1';
 import {
@@ -38,11 +39,15 @@ export const PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_RESTORE_V6 =
 
 export const PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_PERSISTENCE_CLAIMS_V6 = Object.freeze({
   explicitUserActionRequired: true,
+  explicitTransitionIntentRequired: true,
   autosaveAllowed: false,
   localStorageAllowed: false,
   genericSemanticSidecarRpcReused: true,
   freshCurrentGetBeforePut: true,
-  exactNestedV5BytesPreserved: true,
+  exactNestedV5BytesPreservedOnArrangementTransition: true,
+  exactArrangementBytesPreservedOnAnnotationsTransition: true,
+  exactNestedV4BytesPreservedOnAnnotationsTransition: true,
+  simultaneousComponentChangeRejected: true,
   currentAuthorityAndArrangementTargetBound: true,
   putEchoAndFreshGetVerified: true,
   unknownOutcomeFreshGetRecovery: true,
@@ -56,7 +61,10 @@ const BLOCKED_CLAIMS_V6 = Object.freeze({
   ...PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_PERSISTENCE_CLAIMS_V6,
   genericSemanticSidecarRpcReused: false as const,
   freshCurrentGetBeforePut: false as const,
-  exactNestedV5BytesPreserved: false as const,
+  exactNestedV5BytesPreservedOnArrangementTransition: false as const,
+  exactArrangementBytesPreservedOnAnnotationsTransition: false as const,
+  exactNestedV4BytesPreservedOnAnnotationsTransition: false as const,
+  simultaneousComponentChangeRejected: false as const,
   currentAuthorityAndArrangementTargetBound: false as const,
   putEchoAndFreshGetVerified: false as const,
   unknownOutcomeFreshGetRecovery: false as const,
@@ -92,8 +100,17 @@ export type PatternImportDxfProductCompositeSidecarArrangementTargetV6 = Readonl
   poseCanonicalKey: string;
 }>;
 
+export type PatternImportDxfProductCompositeSidecarTransitionIntentV6 =
+  | 'arrangement'
+  | 'annotations';
+
+/**
+ * A fresh-GET/CAS transaction. `arrangement` preserves the current nested V5 byte-for-byte;
+ * `annotations` requires current V6 and preserves its arrangement plus nested V4 byte-for-byte.
+ */
 export type PatternImportDxfProductCompositeSidecarStorageRequestV6 = Readonly<{
   schemaVersion: typeof PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_REQUEST_V6;
+  transitionIntent: PatternImportDxfProductCompositeSidecarTransitionIntentV6;
   currentAuthority: PatternImportDxfProductCompositeSidecarBindingsV3;
   arrangementTarget: PatternImportDxfProductCompositeSidecarArrangementTargetV6;
   nextOwner: PatternImportDxfProductCompositeSidecarOwnerV6;
@@ -394,7 +411,7 @@ function authoritySnapshot(value: unknown): PatternImportDxfProductCompositeSide
 function captureRequest(value: unknown): PatternImportDxfProductCompositeSidecarStorageRequestV6 {
   const request = exactRecord(
     value,
-    ['schemaVersion', 'currentAuthority', 'arrangementTarget', 'nextOwner'],
+    ['schemaVersion', 'transitionIntent', 'currentAuthority', 'arrangementTarget', 'nextOwner'],
     'request',
   );
   if (request.schemaVersion !== PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_REQUEST_V6) {
@@ -403,8 +420,12 @@ function captureRequest(value: unknown): PatternImportDxfProductCompositeSidecar
   if (!request.nextOwner || typeof request.nextOwner !== 'object') {
     fail('readback-invalid', 'Composite V6 owner is missing.');
   }
+  if (request.transitionIntent !== 'arrangement' && request.transitionIntent !== 'annotations') {
+    fail('readback-invalid', 'Composite V6 transition intent is invalid.');
+  }
   return Object.freeze({
     schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_REQUEST_V6,
+    transitionIntent: request.transitionIntent,
     currentAuthority: authoritySnapshot(request.currentAuthority),
     arrangementTarget: arrangementTarget(request.arrangementTarget),
     nextOwner: request.nextOwner as PatternImportDxfProductCompositeSidecarOwnerV6,
@@ -699,21 +720,33 @@ async function transportFromDecoded(
   return Object.freeze({ ...receipt, selectedOperationNumber });
 }
 
-async function nestedV5FromCurrent(
+type CurrentTransitionStateV6 = Readonly<{
+  mediaType:
+    | typeof PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V5
+    | typeof PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6;
+  nestedCompositeV5Bytes: Uint8Array<ArrayBuffer>;
+  mannequinArrangementBytes: Uint8Array<ArrayBuffer> | null;
+}>;
+
+async function transitionStateFromCurrent(
   current: Extract<
     PatternImportDxfProductCompositeSidecarStorageVerifiedGetV3,
     { status: 'present' }
   >,
   authority: PatternImportDxfProductCompositeSidecarBindingsV3,
   crypto: Pick<Crypto, 'subtle'> | undefined,
-): Promise<Uint8Array<ArrayBuffer>> {
+): Promise<CurrentTransitionStateV6> {
   if (current.sha256 !== (await sha256(current.bytes, crypto)))
     fail('readback-invalid', 'Current sidecar SHA differs from its bytes.');
   if (current.mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V5) {
     const decoded = await decodePatternImportDxfProductCompositeSidecarV5(current.bytes, crypto);
     if (!decoded.ok || !sameAuthority(decoded.document.bindings, authority))
       fail('readback-drift', 'Current Composite V5 authority differs.');
-    return current.bytes.slice();
+    return Object.freeze({
+      mediaType: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V5,
+      nestedCompositeV5Bytes: current.bytes.slice(),
+      mannequinArrangementBytes: null,
+    });
   }
   if (current.mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6) {
     const decoded = await decodePatternImportDxfProductCompositeSidecarV6(current.bytes, crypto);
@@ -724,9 +757,37 @@ async function nestedV5FromCurrent(
       'composite-v5',
     );
     if (!nested) fail('readback-invalid', 'Current Composite V6 has no nested V5 bytes.');
-    return nested;
+    const arrangement = readPatternImportDxfProductCompositeComponentBytesV6(
+      decoded.owner,
+      'cad-mannequin-arrangement-v1',
+    );
+    if (!arrangement)
+      fail('readback-invalid', 'Current Composite V6 has no mannequin arrangement bytes.');
+    return Object.freeze({
+      mediaType: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6,
+      nestedCompositeV5Bytes: nested,
+      mannequinArrangementBytes: arrangement,
+    });
   }
   fail('readback-invalid', 'Current sidecar is not Composite V5 or V6.');
+}
+
+async function exactNestedV4Bytes(
+  compositeV5Bytes: Uint8Array<ArrayBuffer>,
+  crypto: Pick<Crypto, 'subtle'> | undefined,
+): Promise<Uint8Array<ArrayBuffer>> {
+  const decoded = await decodePatternImportDxfProductCompositeSidecarV5(
+    compositeV5Bytes.slice(),
+    crypto,
+  );
+  if (!decoded.ok)
+    fail('readback-invalid', 'Composite V5 is invalid during annotation transition validation.');
+  const nested = readPatternImportDxfProductCompositeComponentBytesV5(
+    decoded.owner,
+    'composite-v4',
+  );
+  if (!nested) fail('readback-invalid', 'Composite V5 has no verified nested V4 bytes.');
+  return nested;
 }
 
 async function prepareV6(
@@ -744,13 +805,36 @@ async function prepareV6(
     fail('readback-drift', 'Arrangement target differs from Composite V6 bindings.');
   if (next.decoded.document.writeCas.expectedPreviousSidecarSha256 !== current.sha256)
     fail('readback-drift', 'Composite V6 CAS differs from the fresh current GET.');
-  const currentNestedV5 = await nestedV5FromCurrent(current, request.currentAuthority, crypto);
+  const currentState = await transitionStateFromCurrent(current, request.currentAuthority, crypto);
   const nextNestedV5 = readPatternImportDxfProductCompositeComponentBytesV6(
     next.decoded.owner,
     'composite-v5',
   );
-  if (!nextNestedV5 || !sameBytes(currentNestedV5, nextNestedV5))
-    fail('readback-drift', 'Nested Composite V5 bytes changed during arrangement save.');
+  const nextArrangement = readPatternImportDxfProductCompositeComponentBytesV6(
+    next.decoded.owner,
+    'cad-mannequin-arrangement-v1',
+  );
+  if (!nextNestedV5 || !nextArrangement)
+    fail('readback-invalid', 'Composite V6 transition components are unavailable.');
+  if (request.transitionIntent === 'arrangement') {
+    if (!sameBytes(currentState.nestedCompositeV5Bytes, nextNestedV5))
+      fail('readback-drift', 'Nested Composite V5 bytes changed during arrangement transition.');
+  } else {
+    if (
+      currentState.mediaType !== PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6 ||
+      currentState.mannequinArrangementBytes === null
+    ) {
+      fail('readback-drift', 'Annotation transition requires current Composite V6.');
+    }
+    if (!sameBytes(currentState.mannequinArrangementBytes, nextArrangement))
+      fail('readback-drift', 'Mannequin arrangement bytes changed during annotation transition.');
+    const [currentNestedV4, nextNestedV4] = await Promise.all([
+      exactNestedV4Bytes(currentState.nestedCompositeV5Bytes, crypto),
+      exactNestedV4Bytes(nextNestedV5, crypto),
+    ]);
+    if (!sameBytes(currentNestedV4, nextNestedV4))
+      fail('readback-drift', 'Nested Composite V4 bytes changed during annotation transition.');
+  }
   const transport = await transportFromDecoded(next.decoded);
   return Object.freeze({
     authority: request.currentAuthority,
@@ -774,7 +858,7 @@ export function createPatternImportDxfProductCompositeSidecarStorageAdapterV6(
       PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V5,
       PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6,
     ]),
-    label: 'Composite V6 mannequin arrangement',
+    label: 'Composite V6 two-lane transition',
     prepare: prepareV6,
     verifyCanonical: async (bytes, crypto) =>
       (await decodePatternImportDxfProductCompositeSidecarV6(bytes, crypto)).ok,
