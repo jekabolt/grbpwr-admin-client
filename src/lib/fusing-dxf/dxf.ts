@@ -1,5 +1,6 @@
 import { aliasNames, normBlock } from 'lib/pattern-import/fabrics/draft';
 import type {
+  Affine,
   DraftScopeTarget,
   GrainFeature,
   ManifestSize,
@@ -104,6 +105,14 @@ export type GeneratedFusingSheet = {
   filename: string;
   dxfText: string;
   blocks: string[];
+  /** Exact writer frame per part and size, in millimetres from the host pattern's local frame. */
+  blockPlacements: {
+    blockName: string;
+    sourceIdentity: string;
+    sizeId: number;
+    sizeToken: string;
+    hostLocalToBlock: Affine;
+  }[];
   /**
    * How the card links this sheet's blocks to pieces: one row per block identity, spelled as the
    * importer spells its own converted sheets (`aliasNames`: the identity, or the raw `_UNI` block);
@@ -722,6 +731,15 @@ export function buildFusingSheets(input: BuildFusingSheetsInput): BuildFusingShe
       filename: fusingSheetFilename(input.style, line.code),
       dxfText: markGeneratedFusing(written.detail.bareText),
       blocks: written.detail.plan.blocks.map((block) => block.name),
+      blockPlacements: written.detail.plan.blocks.map(
+        ({ name, identity, sizeId, sizeToken, transform }) => ({
+          blockName: name,
+          sourceIdentity: sourceOfPart.get(normBlock(identity).toLowerCase()) ?? identity,
+          sizeId,
+          sizeToken,
+          hostLocalToBlock: { ...transform },
+        }),
+      ),
       aliases: [...aliasNames(written.detail.manifest)].map(([identity, blockName]) => ({
         identity: sourceOfPart.get(normBlock(identity).toLowerCase()) ?? identity,
         blockName,
