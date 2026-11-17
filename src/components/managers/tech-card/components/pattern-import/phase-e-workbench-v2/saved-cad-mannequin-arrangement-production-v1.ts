@@ -237,7 +237,13 @@ export async function saveSavedCadMannequinArrangementV1(
   const request = {
     ...input,
     row: { ...input.row },
-    source: input.source ? { ...input.source } : undefined,
+    source: input.source
+      ? {
+          identity: input.source.identity,
+          revision: input.source.revision,
+          sha256: input.source.sha256,
+        }
+      : undefined,
   };
   const { bindings } = arrangement;
   if (

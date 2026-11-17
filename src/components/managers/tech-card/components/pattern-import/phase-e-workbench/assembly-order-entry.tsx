@@ -79,7 +79,11 @@ import type { PatternImportDxfPhaseECadTablePressAuthoringOwnerV1 } from '../pha
 import type { PatternImportDxfPhaseECadOperationNavigationV1 } from '../phase-e-workbench-v2/cad-operation-navigation-v1';
 import type { PatternImportDxfPhaseECadWorkbenchStitchEditorFieldV1 } from '../phase-e-workbench-v2/cad-workbench-stitch-editor-handoff-v1';
 import type { PatternImportDxfPhaseECadWorkbenchStitchEditCapabilitiesV1 } from '../phase-e-workbench-v2/cad-workbench-stitch-route-intent-v1';
-import type { PatternImportDxfPhaseEExactNAssemblyOrderSessionV2 } from '../phase-e-workbench-v2/exact-n-seam-production-mount-v2';
+import type {
+  PatternImportDxfPhaseEExactNAssemblyOrderSessionV2,
+  PatternImportDxfProductExactNDesktopGeometryV2,
+} from '../phase-e-workbench-v2/exact-n-seam-production-mount-v2';
+import { bindPatternImportDxfPhaseECadMannequinAnnotationSourceV1 } from '../phase-e-workbench-v2/cad-mannequin-exact-n-production-staging-v1';
 import { clearPatternImportDxfProductExactNSeamProductionSessionV2 } from '../phase-e-workbench-v2/exact-n-seam-production-session-v2';
 import type { PatternImportDxfProductCompositeSidecarApplicationTransactionV4 } from '../phase-e-workbench-v2/composite-sidecar-production-transaction-v4';
 import {
@@ -114,10 +118,7 @@ import {
   matchesPatternImportDxfProductExactNSessionSavedBindingV1,
   patternImportDxfProductExactNSessionValidationKeyV1,
 } from '../phase-e-workbench-v2/durable-exact-session-current-v1';
-import {
-  preparePatternImportDxfPhaseECadTableZeroOperationSavedV1,
-  type PatternImportDxfPhaseECadTableZeroOperationSavedPreparationResultV1,
-} from '../phase-e-workbench-v2/cad-table-zero-operation-saved-preparation-v1';
+import { preparePatternImportDxfPhaseECadTableZeroOperationSavedV1 } from '../phase-e-workbench-v2/cad-table-zero-operation-saved-preparation-v1';
 import { createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1 } from '../phase-e-workbench-v2/zero-operation-saved-card-authority-v1';
 import { PatternImportDxfPhaseECadTableDraftOperationsPanelV1 } from '../phase-e-workbench-v2/cad-table-draft-operations-panel-v1';
 import type { PatternImportDxfPhaseECadTableDraftOperationSessionBridgeResultV1 } from '../phase-e-workbench-v2/cad-table-draft-operation-session-bridge-v1';
@@ -1869,10 +1870,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
   ]);
   const [durableDesktop, setDurableDesktop] = useState<Readonly<{
     key: string;
-    geometry: Pick<
-      Extract<PatternImportDxfPhaseECadTableZeroOperationSavedPreparationResultV1, { ok: true }>,
-      'catalog' | 'projection'
-    >;
+    geometry: PatternImportDxfProductExactNDesktopGeometryV2;
   }> | null>(null);
   const currentDurableDesktop =
     durableDesktop &&
@@ -2010,7 +2008,16 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
           );
           setDurableDesktop({
             key: durableReloadBinding.key,
-            geometry: { catalog: prepared.catalog, projection: prepared.projection },
+            geometry: {
+              catalog: prepared.catalog,
+              projection: prepared.projection,
+              annotationSource: bindPatternImportDxfPhaseECadMannequinAnnotationSourceV1(
+                prepared.selection,
+                prepared.catalog,
+                prepared.projection,
+                savedProjection.row.revision,
+              ),
+            },
           });
           durableRestoredValidationKeyRef.current = restoredValidationKey;
           setValidatedExactNSessionKey(restoredValidationKey);

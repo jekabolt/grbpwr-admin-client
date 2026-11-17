@@ -1,4 +1,5 @@
 import type { PatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
+import type { DxfProductPhaseDSizeSelectionResultV1 } from 'lib/pattern-import/dxf-product-phase-d-size-selection-v1';
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 
 import type { PatternImportDxfPhaseECardSessionV1 } from '../phase-e-workbench-card-session-v1';
@@ -157,6 +158,39 @@ function activePreparationMatches(
   );
 }
 
+export function bindPatternImportDxfPhaseECadMannequinAnnotationSourceV1(
+  selection: Extract<DxfProductPhaseDSizeSelectionResultV1, { ok: true }>,
+  catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1,
+  projection: PatternImportDxfProductPhaseEAssemblyProjectionV1,
+  revision: number,
+) {
+  const draft = createPatternImportDxfPhaseEBoundDraftCadSessionV1({
+    source: {
+      phaseD: {
+        sourceFileId: selection.phaseD.source.sourceFileId,
+        sourceSha256: selection.phaseD.sourceSha256,
+        selectedGeometrySha256: selection.selection.selectedGeometrySha256,
+      },
+      catalog: {
+        canonicalSha256: catalog.canonicalSha256,
+        sizeSelectionCanonicalSha256: catalog.sizeSelectionCanonicalSha256,
+        pieces: catalog.pieces,
+      },
+      revision,
+    },
+    projection,
+  });
+  if (!draft.ok) return null;
+  return Object.freeze({
+    identity: derivePatternImportDxfPhaseEDraftCadTopologySourceIdentityV1(
+      draft.session,
+      projection,
+    ),
+    revision: String(revision),
+    sha256: selection.phaseD.sourceSha256,
+  });
+}
+
 /**
  * Reopens the current card's existing raw-free Phase-D preparation owner and finds the one scope /
  * size whose catalog exactly matches the verified Exact-N production snapshot. Snapshot topology
@@ -278,23 +312,13 @@ export async function preparePatternImportDxfPhaseECadMannequinExactNProductionS
       'staging-binding-stale',
       'The prepared all-scope set no longer contains the exact restored scope/catalog/source binding.',
     );
-  const draft = createPatternImportDxfPhaseEBoundDraftCadSessionV1({
-    source: {
-      phaseD: {
-        sourceFileId: active.selection.selection.phaseD.source.sourceFileId,
-        sourceSha256: active.selection.selection.phaseD.sourceSha256,
-        selectedGeometrySha256: active.selection.selection.selection.selectedGeometrySha256,
-      },
-      catalog: {
-        canonicalSha256: active.catalog.canonicalSha256,
-        sizeSelectionCanonicalSha256: active.catalog.sizeSelectionCanonicalSha256,
-        pieces: active.catalog.pieces,
-      },
-      revision: active.importGeneration,
-    },
-    projection: active.projection,
-  });
-  if (!draft.ok)
+  const annotationSource = bindPatternImportDxfPhaseECadMannequinAnnotationSourceV1(
+    active.selection.selection,
+    active.catalog,
+    active.projection,
+    active.importGeneration,
+  );
+  if (!annotationSource)
     return blocked(
       'staging-binding-stale',
       'The exact reconstructed projection cannot open its existing Draft source owner.',
@@ -308,15 +332,7 @@ export async function preparePatternImportDxfPhaseECadMannequinExactNProductionS
       activeScopeKey: session.current.row.scopeKey,
       sizeToken: active.sizeToken,
       sources: allScopes.sources,
-      annotationSource: Object.freeze({
-        identity: derivePatternImportDxfPhaseEDraftCadTopologySourceIdentityV1(
-          draft.session,
-          active.projection,
-        ),
-        revision: String(active.importGeneration),
-        sha256: active.selection.selection.phaseD.sourceSha256,
-        projection: active.projection,
-      }),
+      annotationSource: Object.freeze({ ...annotationSource, projection: active.projection }),
     }),
     blocker: null,
     claims: PATTERN_IMPORT_DXF_PHASE_E_CAD_MANNEQUIN_EXACT_N_PRODUCTION_STAGING_CLAIMS_V1,

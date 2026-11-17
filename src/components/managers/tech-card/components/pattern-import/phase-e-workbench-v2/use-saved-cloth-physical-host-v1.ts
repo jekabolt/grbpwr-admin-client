@@ -533,7 +533,11 @@ export function useSavedClothPhysicalHostV1({
     host,
     durableSnapshot,
     sourceStatus,
-    sourceError: current?.error ?? null,
+    sourceError:
+      sourceStatus === 'awaiting-mannequin'
+        ? bodySnapshot.blocker?.detail ??
+          (bodySnapshot.status === 'binding' ? 'Verifying displayed mannequin…' : null)
+        : current?.error ?? null,
     retry,
     firstAuthoring,
     startFirstAuthoring,

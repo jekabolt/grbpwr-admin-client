@@ -77,6 +77,7 @@ export type PatternImportDxfProductExactNSeamProductionMannequinSlotV2 =
 export type PatternImportDxfProductExactNDesktopGeometryV2 = Readonly<{
   catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1;
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
+  annotationSource: Readonly<{ identity: string; revision: string; sha256: string }> | null;
 }>;
 
 export function matchesPatternImportDxfProductExactNDesktopGeometryV2(

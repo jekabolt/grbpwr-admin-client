@@ -2423,7 +2423,12 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
                   patternPieceScene={{
                     annotationSource: exactNMannequinStaging?.ok
                       ? exactNMannequinStaging.staging.annotationSource
-                      : undefined,
+                      : matchesPatternImportDxfProductExactNDesktopGeometryV2(
+                          exactNDesktop,
+                          exactNSession,
+                        )
+                        ? exactNDesktop.annotationSource ?? undefined
+                        : undefined,
                     sources: mannequinDxfSources,
                     sceneOverlay: sceneOverlay,
                     activeScopeKey: exactNMannequinStaging?.ok

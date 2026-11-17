@@ -186,8 +186,14 @@ describe('explicit production mannequin arrangement transaction', () => {
   });
   it('adds empty annotations only for V4 and requires fresh verified V5 before V6', async () => {
     mocks.read.mockResolvedValueOnce(snapshot(4)).mockResolvedValueOnce(snapshot(5, 'saved-v5'));
-    await saveSavedCadMannequinArrangementV1(request(), new AbortController().signal);
+    const input = request();
+    const sourceFromDesktop = { ...input.source, projection: { sizeToken: 'M' } };
+    await saveSavedCadMannequinArrangementV1(
+      { ...input, source: sourceFromDesktop },
+      new AbortController().signal,
+    );
     expect(mocks.annotations.mock.calls[0][0]).toMatchObject({ measurements: [], callouts: [] });
+    expect(mocks.annotations.mock.calls[0][0].bindings.source).toEqual(input.source);
     expect(mocks.saveV5).toHaveBeenCalledOnce();
     expect(mocks.saveV6).toHaveBeenCalledOnce();
     expect(mocks.read).toHaveBeenCalledTimes(2);

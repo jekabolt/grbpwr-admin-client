@@ -79,11 +79,14 @@ export function CadWorkbenchPhysicalHostControlsV1({
 
   const ready = state.sourceStatus === 'ready' && state.host !== null;
   const previewReady = state.durableSnapshot?.status === 'preview-ready';
+  const displayedBody = state.bodySession?.getSnapshot();
   return (
     <div
       className='pointer-events-none absolute inset-0 z-20 overflow-hidden'
       data-cad-physical-host-viewport=''
       data-cad-physical-host-status={state.sourceStatus}
+      data-cad-physical-body-status={displayedBody?.status}
+      data-cad-physical-body-blocker={displayedBody?.blocker?.code}
     >
       <canvas ref={computeCanvas} width={64} height={64} hidden aria-hidden='true' />
       <canvas
@@ -135,7 +138,7 @@ export function CadWorkbenchPhysicalHostControlsV1({
           {state.sourceStatus === 'idle'
             ? 'Save the assembly to preview cloth.'
             : state.sourceStatus === 'awaiting-mannequin'
-              ? 'Select a mannequin.'
+              ? state.sourceError ?? 'Select a mannequin.'
               : state.sourceStatus === 'loading'
                 ? 'Restoring cloth…'
                 : state.sourceStatus === 'placement-required'
