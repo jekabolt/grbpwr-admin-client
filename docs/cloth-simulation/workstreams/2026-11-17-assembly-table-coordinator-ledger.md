@@ -75,6 +75,21 @@ The Table integration consumes those exports; it does not implement a second map
 physical host, solver or runtime. No component version is reserved before both owners freeze the
 shared payload contract.
 
+The outer snapshot SHA is never persisted inside that component. A successful CAS invalidates the
+pre-save full compile session; reload must use a fresh saved-source reprocess/native owner and a
+new private compile generation, then replay the persisted intent and recover the exact
+`compileInputSha256`. Durable intent preserves the source `documentId`, revision and `sizeToken`
+and declares the sewing-surface profile, including `seamAllowancePhysical: false` when that is the
+contract.
+
+The AO-only content digest binds the domain, row identity, server revision, canonical operations
+payload and all selected topology receipts/seams. It excludes outer/CAS digests and transport
+counters. A graph fingerprint validates the graph against the full AO snapshot and hashes the
+domain plus canonical graph; it is not evidence that the AO snapshot is still fresh. Product
+admission additionally requires the future fixed verified-component reader/issuer. Codec hashes
+alone do not grant admission. The required reload test proves that the outer SHA changes across
+the first save/read boundary while the graph fingerprint and compile-input SHA remain exact.
+
 ## Completion rule
 
 Toolbar presence, session preview, compile receipts, blocker-only tests, status panels, codec
