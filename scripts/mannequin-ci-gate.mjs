@@ -107,6 +107,7 @@ const browserSuites = Object.freeze([
       'real ModelForm admits female, male and neutral open-reference bases',
       'high hip and knee apply as bounded proxies on female, male and neutral bases',
       'female chest and under bust reshape the bust; male keeps its chest path',
+      'hidden measurement lines read through the body and from their own view',
     ].join('|'),
   }),
   Object.freeze({
