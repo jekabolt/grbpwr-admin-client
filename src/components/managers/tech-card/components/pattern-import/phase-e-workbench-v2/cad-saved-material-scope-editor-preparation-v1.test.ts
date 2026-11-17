@@ -59,6 +59,7 @@ function prepared(scopeKey: string, sourceRevision = 1) {
       selection: Object.freeze({
         scopeKey,
         sizeToken: 'M',
+        fullSelectedGeometrySha256: 'f'.repeat(64),
         canonicalSha256: selectionSha,
         selectedGeometrySha256: SHA,
       }),
@@ -225,6 +226,41 @@ describe('saved material-scope editor preparation', () => {
         code: 'saved-editor-scope-preparation-blocked',
         detail: expect.stringContaining('identity moved'),
       },
+    });
+  });
+
+  it('rejects an active compile source whose retained Phase-D hashes moved', async () => {
+    const input = request();
+    const active = prepared('main');
+    const result = await preparePatternImportDxfPhaseECadSavedMaterialScopeEditorsV1({
+      ...input,
+      active: {
+        ...active,
+        compileSource: {
+          ...active.compileSource,
+          dxfProvenance: {
+            contentBinding: {
+              sourceFileId: active.selection.phaseD.source.sourceFileId,
+              sourceSha256: '0'.repeat(64),
+              selectedGeometrySha256: active.selection.selection.fullSelectedGeometrySha256,
+            },
+          },
+          dxfPhaseDReplay: {
+            replayReady: true,
+            carrier: {
+              sourceFileId: active.selection.phaseD.source.sourceFileId,
+              sourceSha256: active.selection.phaseD.sourceSha256,
+              selectedGeometrySha256: active.selection.selection.fullSelectedGeometrySha256,
+            },
+          },
+        },
+      } as never,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      scopes: [],
+      blocker: { code: 'saved-editor-active-binding-stale' },
     });
   });
 

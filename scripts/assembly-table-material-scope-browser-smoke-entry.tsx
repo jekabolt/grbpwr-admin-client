@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { TooltipProvider } from 'ui';
 
@@ -41,6 +41,12 @@ import {
   updatePatternImportDxfPhaseEDraftCadTopologyScopeMapV1,
   type PatternImportDxfPhaseEDraftCadTopologyByScopeV1,
 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/draft-cad-topology-scope-v1';
+import {
+  PATTERN_IMPORT_DXF_PHASE_E_CAD_COMMAND_COMPILED_REIMPORT_HANDOFF_V1,
+  requestPatternImportDxfPhaseECadCommandCompiledReimportV1,
+} from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/cad-command-compiled-reimport-handoff-v1';
+import type { PatternImportDxfPhaseEDraftCadGeometryCompileArtifactV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/draft-cad-geometry-compile-v1';
+import { registerPatternImportDxfPhaseEPatternsFieldCompiledReimportOwnerV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/patterns-field-compiled-reimport-owner-v1';
 
 const TECH_CARD_ID = 6;
 const IMPORT_GENERATION = 12;
@@ -48,6 +54,31 @@ const MAIN = 'TECH_CARD_BOM_PURPOSE_MAIN';
 const POCKETING = 'TECH_CARD_BOM_PURPOSE_POCKETING';
 const LINING = 'TECH_CARD_BOM_PURPOSE_LINING';
 const SHA = 'a'.repeat(64);
+
+const secondaryCompiledArtifact = Object.freeze({
+  schemaVersion: 'pattern-import-dxf-phase-e-draft-cad-geometry-compile/1',
+  status: 'compiled-reimport-required',
+  source: Object.freeze({
+    revision: 7,
+    sourceFileId: 'card11-LINING.dxf',
+    sourceSha256: SHA,
+    selectedGeometrySha256: 'b'.repeat(64),
+    catalogCanonicalSha256: 'c'.repeat(64),
+    sizeSelectionCanonicalSha256: 'd'.repeat(64),
+  }),
+  scope: Object.freeze({ techCardId: TECH_CARD_ID, scopeKey: LINING, sizeToken: 'M' }),
+  compiledJob: Object.freeze({}) as never,
+  dxfText: '0\nSECTION\n2\nENTITIES\n0\nENDSEC\n0\nEOF\n',
+  manifest: Object.freeze({}) as never,
+  warnings: Object.freeze([]),
+  compiledFeatures: Object.freeze([]),
+  reimport: Object.freeze({
+    required: true,
+    boundary: 'ordinary-import-semantics-phase-d-phase-e',
+    applyEligible: false,
+  }),
+  claims: Object.freeze({}) as never,
+}) as PatternImportDxfPhaseEDraftCadGeometryCompileArtifactV1;
 
 const piece = (pieceId: string, pieceLineKey: string, x: number) => ({
   pieceId,
@@ -222,8 +253,28 @@ function MaterialScopeBrowserSmoke() {
   const [arrangements, setArrangements] =
     useState<PatternImportDxfPhaseEDraftCadArrangementByScopeV1>({});
   const [topology, setTopology] = useState<PatternImportDxfPhaseEDraftCadTopologyByScopeV1>({});
+  const [compiledReview, setCompiledReview] = useState<{
+    scopeKey: string;
+    fileName: string;
+  } | null>(null);
+  const compiledReviewOpen = useRef(false);
   const activeProjection = projectionByScope[activeScopeKey as keyof typeof projectionByScope];
   const activeSession = draftSessions[activeScopeKey as keyof typeof draftSessions];
+
+  useEffect(
+    () =>
+      registerPatternImportDxfPhaseEPatternsFieldCompiledReimportOwnerV1({
+        techCardId: TECH_CARD_ID,
+        readConfirmedImportGeneration: () => 0,
+        scopeAvailable: (scopeKey) => [MAIN, POCKETING, LINING].includes(scopeKey),
+        reviewAlreadyOpen: () => compiledReviewOpen.current,
+        openExistingImportReview: ({ scopeKey, files }) => {
+          compiledReviewOpen.current = true;
+          setCompiledReview({ scopeKey, fileName: files[0].name });
+        },
+      }),
+    [],
+  );
 
   const recordActiveEdit = () => {
     const target = activeSession.source.catalog.pieces[0];
@@ -325,6 +376,8 @@ function MaterialScopeBrowserSmoke() {
           arrangements[LINING]?.transforms.lining?.quarterTurns ?? 0
         }
         data-lining-topology-callouts={topology[LINING]?.session.callouts.length ?? 0}
+        data-compiled-review-scope={compiledReview?.scopeKey ?? undefined}
+        data-compiled-review-file={compiledReview?.fileName ?? undefined}
       >
         <section className='flex h-full min-h-0 flex-col border border-borderColor bg-bgColor'>
           <header className='border-b border-borderColor p-2'>
@@ -343,6 +396,21 @@ function MaterialScopeBrowserSmoke() {
               </button>
               <button type='button' data-smoke-topology-active='' onClick={annotateActive}>
                 Annotate active
+              </button>
+              <button
+                type='button'
+                data-smoke-compile-secondary=''
+                onClick={() =>
+                  requestPatternImportDxfPhaseECadCommandCompiledReimportV1({
+                    schemaVersion:
+                      PATTERN_IMPORT_DXF_PHASE_E_CAD_COMMAND_COMPILED_REIMPORT_HANDOFF_V1,
+                    artifact: secondaryCompiledArtifact,
+                    confirmedImportGenerationAtCompile: 0,
+                    cadSessionCursorAtCompile: 1,
+                  })
+                }
+              >
+                Compile secondary saved scope
               </button>
             </div>
           </header>

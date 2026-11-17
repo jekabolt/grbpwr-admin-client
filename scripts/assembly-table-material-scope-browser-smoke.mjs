@@ -208,6 +208,13 @@ check(
     (await root.getAttribute('data-lining-topology-callouts')) === '1',
   'MAIN, POCKETING and LINING caller-owned Draft CAD state survives switching without transfer',
 );
+await page.locator('[data-smoke-compile-secondary]').click();
+check(
+  (await root.getAttribute('data-compiled-review-scope')) === 'TECH_CARD_BOM_PURPOSE_LINING' &&
+    (await root.getAttribute('data-compiled-review-file')) ===
+      'TECH_CARD_BOM_PURPOSE_LINING-cad-compiled.dxf',
+  'secondary saved scope compile opens the existing pattern import review route',
+);
 check(pageErrors.length === 0, 'browser reports no runtime exceptions', pageErrors.join(' | '));
 
 await browser.close();

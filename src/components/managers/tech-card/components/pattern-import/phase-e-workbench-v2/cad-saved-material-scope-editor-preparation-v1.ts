@@ -146,6 +146,23 @@ function preparedBindingCurrent(
   const compileScopes = prepared.compileSource.scopes.filter(
     ({ target }) => target.scopeKey === prepared.scopeKey,
   );
+  const sourceFileId = prepared.selection.phaseD.source.sourceFileId;
+  const sourceSha256 = prepared.selection.phaseD.sourceSha256;
+  const fullSelectedGeometrySha256 = prepared.selection.selection.fullSelectedGeometrySha256;
+  const publicBinding = prepared.compileSource.dxfProvenance?.contentBinding;
+  const replayCarrier = prepared.compileSource.dxfPhaseDReplay?.replayReady
+    ? prepared.compileSource.dxfPhaseDReplay.carrier
+    : null;
+  const publicBindingCurrent =
+    !publicBinding ||
+    (publicBinding.sourceFileId === sourceFileId &&
+      publicBinding.sourceSha256 === sourceSha256 &&
+      publicBinding.selectedGeometrySha256 === fullSelectedGeometrySha256);
+  const replayCarrierCurrent =
+    !replayCarrier ||
+    (replayCarrier.sourceFileId === sourceFileId &&
+      replayCarrier.sourceSha256 === sourceSha256 &&
+      replayCarrier.selectedGeometrySha256 === fullSelectedGeometrySha256);
   return (
     Number.isSafeInteger(prepared.sourceRevision) &&
     prepared.sourceRevision > 0 &&
@@ -161,14 +178,16 @@ function preparedBindingCurrent(
     prepared.catalog.techCardId === techCardId &&
     prepared.catalog.scopeKey === prepared.scopeKey &&
     prepared.catalog.sizeToken === sizeToken &&
-    prepared.catalog.sourceFileId === prepared.selection.phaseD.source.sourceFileId &&
+    prepared.catalog.sourceFileId === sourceFileId &&
     prepared.catalog.sizeSelectionCanonicalSha256 ===
       prepared.selection.selection.canonicalSha256 &&
     prepared.projection.sourceFileId === prepared.catalog.sourceFileId &&
     prepared.projection.sizeToken === sizeToken &&
     prepared.projection.expectedCatalogCanonicalSha256 === prepared.catalog.canonicalSha256 &&
     prepared.projection.sizeSelectionCanonicalSha256 ===
-      prepared.selection.selection.canonicalSha256
+      prepared.selection.selection.canonicalSha256 &&
+    publicBindingCurrent &&
+    replayCarrierCurrent
   );
 }
 

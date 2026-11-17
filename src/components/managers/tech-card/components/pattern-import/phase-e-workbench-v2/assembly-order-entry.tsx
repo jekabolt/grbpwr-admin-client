@@ -1903,6 +1903,10 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
           setSavedMaterialScopePreparation(result);
           setDraftCadSession(null);
           setMaterialScopeDraftSessions({});
+          setDraftCadBlocker({
+            code: 'invalid-source-binding',
+            detail: `${result.blocker.detail} [${result.blocker.code}]`,
+          });
           return;
         }
         const sessions: Record<string, PatternImportDxfPhaseEDraftCadSessionV1> = {};
