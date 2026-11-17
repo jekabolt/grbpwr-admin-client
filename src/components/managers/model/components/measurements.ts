@@ -22,6 +22,7 @@ export const BODY_MEASUREMENT_GROUPS: BodyMeasurementGroup[] = [
       { name: 'BODY_MEASUREMENT_NAME_HIGH_HIP', label: 'high hip' },
       { name: 'BODY_MEASUREMENT_NAME_HIP', label: 'hip' },
       { name: 'BODY_MEASUREMENT_NAME_NECK_BASE', label: 'neck base' },
+      { name: 'BODY_MEASUREMENT_NAME_NECK', label: 'neck' },
     ],
   },
   {

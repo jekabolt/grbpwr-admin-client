@@ -998,3 +998,123 @@ test('high hip and knee apply as bounded proxies on female, male and neutral bas
   }
   await exerciseHighHipAndKnee(page, 'neutral');
 });
+
+const NECK_SHOTS_DIR = '../tmp/plans/mannequin-beta/shots';
+
+async function exerciseNeck(page: import('@playwright/test').Page, basisKind: string) {
+  const preview = page.getByTestId('model-open-reference-preview');
+  const status = page.getByTestId('model-open-reference-preview-status');
+  const canvas = page.getByTestId('measurement-watertight-surface-v1-canvas');
+  const measurementApplication = page.getByTestId(
+    'model-open-reference-measurement-application-status',
+  );
+  const inseam = measurementField(page, 'inseam');
+  await expect(status).toContainText('Preview partial: A-rest', { timeout: 180_000 });
+  await expect(canvas).toHaveAttribute(
+    'data-source-revision',
+    new RegExp(`basisKind=${basisKind}`),
+  );
+  // The inseam guide draws no path, so canvas screenshots compare body geometry only.
+  const bodyScreenshot = async () => {
+    await revealMeasurement(page, inseam);
+    await inseam.focus();
+    await expect(canvas).toHaveAttribute('data-measurement-guide-path-count', '0');
+    await page.mouse.move(0, 0);
+    return canvas.screenshot();
+  };
+  const edit = async (label: 'neck' | 'neck base', value: string) => {
+    const before = await canvas.getAttribute('data-source-revision');
+    const keysBefore = await appliedOrLimitedKeys(measurementApplication);
+    const input = measurementField(page, label);
+    await revealMeasurement(page, input);
+    await input.fill(value);
+    await input.blur();
+    await expect
+      .poll(() => canvas.getAttribute('data-source-revision'), { timeout: 180_000 })
+      .not.toBe(before);
+    await expect(status).toContainText('Preview partial: A-rest', { timeout: 180_000 });
+    await expect(preview).toHaveAttribute('data-body-display-ownership', 'current');
+    const keysAfter = await appliedOrLimitedKeys(measurementApplication);
+    for (const key of keysBefore) expect(keysAfter.has(key), `${label} kept ${key}`).toBe(true);
+    return { revision: await canvas.getAttribute('data-source-revision'), keysAfter };
+  };
+
+  // Neck base stays honestly unsupported (listed by label) and is never derived from neck.
+  await edit('neck base', '370');
+  await expect(measurementApplication).toHaveAttribute(
+    'data-unsupported',
+    /neck base circumference/u,
+  );
+  const baselineShape = await bodyScreenshot();
+
+  const neck = await edit('neck', '310');
+  await expect(measurementApplication).toHaveAttribute(
+    'data-unsupported',
+    /neck base circumference/u,
+  );
+  const neckShape = await bodyScreenshot();
+  const neckField = measurementField(page, 'neck');
+  await revealMeasurement(page, neckField);
+  await neckField.focus();
+  await expect(canvas).toHaveAttribute(
+    'data-active-measurement-guide',
+    'BODY_MEASUREMENT_NAME_NECK',
+  );
+  await page.mouse.move(0, 0);
+  const guideStatus = await canvas.getAttribute('data-measurement-guide-status');
+  await canvas.screenshot({ path: `${NECK_SHOTS_DIR}/neck-client-${basisKind}.png` });
+
+  if (basisKind === 'male') {
+    // Male neck station is too close to the head joint: honest notApplied, unchanged neck.
+    expect(neck.keysAfter.has('neckCircumferenceMm')).toBe(false);
+    await expect(measurementApplication).toHaveAttribute(
+      'data-not-applied',
+      /neckCircumferenceMm/u,
+    );
+    expect(neckShape.equals(baselineShape)).toBe(true);
+  } else {
+    expect(neck.revision).toMatch(/(?:represented|limited)=[^;]*neckCircumferenceMm/u);
+    expect(neck.keysAfter.has('neckCircumferenceMm')).toBe(true);
+    await expect(measurementApplication).not.toHaveAttribute(
+      'data-not-applied',
+      /neckCircumferenceMm/u,
+    );
+    expect(neckShape.equals(baselineShape)).toBe(false);
+    expect(guideStatus).toBe('visible');
+  }
+  await expect(status).not.toContainText('Preview failed');
+  console.info(
+    `MANNEQUIN_NECK_V1=${JSON.stringify({
+      basisKind,
+      applied: neck.keysAfter.has('neckCircumferenceMm'),
+      limited: ((await measurementApplication.getAttribute('data-limited')) ?? '').includes(
+        'neckCircumferenceMm',
+      ),
+      guideStatus,
+    })}`,
+  );
+}
+
+test('neck applies as a bounded proxy on female and neutral, and is honestly not applied on male', async ({
+  page,
+}) => {
+  test.setTimeout(900_000);
+  await prewarmDevRuntime(page);
+  await page.goto(DEV_ROUTE);
+  await exerciseNeck(page, 'female');
+
+  await page.getByRole('button', { name: 'switch to model beta' }).click();
+  await expect(page.getByTestId('model-form-smoke-model-id')).toHaveText('8402');
+  await exerciseNeck(page, 'male');
+
+  await page.getByRole('button', { name: 'show create form' }).click();
+  await page.getByRole('combobox', { name: 'select' }).click();
+  await page.getByRole('option', { name: 'unisex' }).click();
+  for (const [label, value] of REQUIRED_CREATE_MEASUREMENTS) {
+    const input = measurementField(page, label);
+    await revealMeasurement(page, input);
+    await input.fill(value);
+    await input.blur();
+  }
+  await exerciseNeck(page, 'neutral');
+});

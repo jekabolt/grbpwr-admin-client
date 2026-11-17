@@ -182,7 +182,7 @@ test('mobile touch edits wrist and ankle live while empty canvas stays camera-ow
   await expect(page.getByTestId('measurements-guided-entry')).toHaveCount(0);
   await expect(page.getByRole('radio', { name: 'guided', exact: true })).toHaveCount(0);
   await expect(page.getByRole('radio', { name: 'table', exact: true })).toHaveCount(0);
-  await expect(form.locator('[data-model-measurement]')).toHaveCount(34);
+  await expect(form.locator('[data-model-measurement]')).toHaveCount(35);
   await expect(page.getByRole('textbox', { name: 'chest', exact: true })).toHaveValue('920');
   await expect(page.getByTestId('model-open-reference-direct-pose-control-v9')).toBeVisible();
   await expect(canvas).toBeVisible({ timeout: 180_000 });
@@ -287,7 +287,7 @@ test('mobile touch edits wrist and ankle live while empty canvas stays camera-ow
   // Leaving edit pose hands the canvas back to the camera; the form keeps every field and value.
   await editPose.tap();
   await expect(canvas).toHaveAttribute('data-joint-editor-mode', 'off');
-  await expect(form.locator('[data-model-measurement]')).toHaveCount(34);
+  await expect(form.locator('[data-model-measurement]')).toHaveCount(35);
   await expect(page.getByRole('textbox', { name: 'chest', exact: true })).toHaveValue('920');
   await expect(page.getByTestId('model-open-reference-direct-pose-control-v9')).toBeVisible();
 

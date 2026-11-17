@@ -2,6 +2,7 @@ import type { common_BodyMeasurementName } from 'api/proto-http/admin';
 import type { MeasurementBodyFrameV2 } from 'lib/cloth/body/measurement-body-frame-v2';
 import { MEASUREMENT_OPEN_REFERENCE_HIGH_HIP_PROTOCOL_WAIST_DROP_MM_V1 } from 'lib/cloth/body/measurement-open-reference-high-hip-proxy-v1';
 import type { MeasurementOpenReferenceKneeRigStationV1 } from 'lib/cloth/body/measurement-open-reference-knee-proxy-v1';
+import type { MeasurementOpenReferenceNeckProtectedSectionV1 } from 'lib/cloth/body/measurement-open-reference-neck-proxy-v1';
 import type {
   OpenReferenceLimbCircumferenceKeyV1,
   OpenReferenceLimbCircumferenceModeV1,
@@ -63,6 +64,7 @@ const LABELS = Object.freeze({
   BODY_MEASUREMENT_NAME_HIGH_HIP: 'high hip',
   BODY_MEASUREMENT_NAME_HIP: 'hip',
   BODY_MEASUREMENT_NAME_NECK_BASE: 'neck base',
+  BODY_MEASUREMENT_NAME_NECK: 'neck',
   BODY_MEASUREMENT_NAME_ACROSS_SHOULDER: 'across shoulder',
   BODY_MEASUREMENT_NAME_SLEEVE_LENGTH: 'sleeve length',
   BODY_MEASUREMENT_NAME_BICEP: 'bicep',
@@ -313,6 +315,8 @@ export function buildMeasurementSurfaceActiveMeasurementGuideV1(options: {
   }>;
   /** Rig knee stations from the beta runtime; the guide draws the positive (left) side. */
   readonly kneeSectionStations?: readonly MeasurementOpenReferenceKneeRigStationV1[];
+  /** The neck proxy's rig mid-neck plane from the beta runtime (same helper as the solver). */
+  readonly neckSectionStation?: MeasurementOpenReferenceNeckProtectedSectionV1;
 }): MeasurementSurfaceActiveMeasurementGuideV1 {
   const { measurementName, frame, mesh } = options;
   if (!LABELS[measurementName as keyof typeof LABELS]) {
@@ -419,6 +423,24 @@ export function buildMeasurementSurfaceActiveMeasurementGuideV1(options: {
         select: 'minimum',
         bindToMesh: !options.neutralPose,
       }),
+    ]);
+  }
+
+  if (measurementName === 'BODY_MEASUREMENT_NAME_NECK') {
+    // Mid-neck ring on the proxy's own station; no analytical fallback, so the guide never shows a
+    // line the neck proxy does not solve. Neck base above stays its own band and is not derived.
+    const neckStation = options.neckSectionStation;
+    return visibleOrUnavailable(measurementName, [
+      neckStation
+        ? sectionPath({
+            id: measurementName,
+            mesh,
+            originM: neckStation.originM,
+            normal: neckStation.normal,
+            seedM: neckStation.originM,
+            bindToMesh: !options.neutralPose,
+          })
+        : null,
     ]);
   }
 
