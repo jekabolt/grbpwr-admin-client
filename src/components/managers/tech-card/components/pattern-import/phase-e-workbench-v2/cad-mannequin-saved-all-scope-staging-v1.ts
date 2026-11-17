@@ -1,8 +1,6 @@
+import { savedWorkbenchBindingScopeKeyV1 } from './saved-workbench-scope-v1';
 import type { common_TechCard } from 'api/proto-http/admin';
-import {
-  bindingScopes,
-  scopeKeyOfBinding,
-} from 'components/managers/tech-card/components/bom-purpose';
+import { bindingScopes } from 'components/managers/tech-card/components/bom-purpose';
 import { rollGoodsScopes } from 'components/managers/tech-card/components/piece-block-refs';
 
 import type { PatternImportDxfPhaseECadMannequinDxfStagingSourceV1 } from './cad-mannequin-dxf-staging-v1';
@@ -92,7 +90,7 @@ export async function preparePatternImportDxfPhaseECadMannequinSavedAllScopeStag
   const expectedScopeKeys = Array.from(
     new Set(
       patterns.map((pattern) =>
-        scopeKeyOfBinding(pattern.fabricPurpose, pattern.bomLineKey, bindings),
+        savedWorkbenchBindingScopeKeyV1(pattern.fabricPurpose, pattern.bomLineKey, bindings),
       ),
     ),
   );

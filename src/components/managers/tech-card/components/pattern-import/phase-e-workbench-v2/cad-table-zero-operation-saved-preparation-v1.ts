@@ -1,8 +1,6 @@
+import { savedWorkbenchBindingScopeKeyV1 } from './saved-workbench-scope-v1';
 import type { common_TechCard } from 'api/proto-http/admin';
-import {
-  bindingScopes,
-  scopeKeyOfBinding,
-} from 'components/managers/tech-card/components/bom-purpose';
+import { bindingScopes } from 'components/managers/tech-card/components/bom-purpose';
 import { rollGoodsScopes } from 'components/managers/tech-card/components/piece-block-refs';
 import {
   buildPatternImportDxfProductPhaseEAuthoringCatalogV1,
@@ -197,8 +195,8 @@ export function listPatternImportDxfPhaseECadTableZeroOperationSavedChoicesV1(
   const choices = card.scopes.flatMap((scope) => {
     const rows = patterns.filter(
       (pattern) =>
-        scopeKeyOfBinding(pattern.fabricPurpose, pattern.bomLineKey, bindings) === scope.scopeKey &&
-        Boolean(pattern.lineKey && pattern.url && pattern.downloadUrl),
+        savedWorkbenchBindingScopeKeyV1(pattern.fabricPurpose, pattern.bomLineKey, bindings) ===
+          scope.scopeKey && Boolean(pattern.lineKey && pattern.url && pattern.downloadUrl),
     );
     if (rows.length !== 1) return [];
     return [

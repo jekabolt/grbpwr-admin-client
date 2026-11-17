@@ -98,7 +98,7 @@ const SELECTION_SHA = 'b'.repeat(64);
 const CATALOG_SHA = 'c'.repeat(64);
 const ROW = Object.freeze({
   techCardId: 156,
-  scopeKey: MAIN,
+  scopeKey: 'main',
   patternLineKey: 'pattern-main',
   revision: 1,
   cardLockVersion: 3,
@@ -148,7 +148,7 @@ function request() {
     techCard: card(),
     orderSizeIds: (ids: number[]) => [...ids],
     sizeNameById: new Map([[2, 'M']]),
-    scopeKey: MAIN,
+    scopeKey: 'main',
     sizeToken: 'M',
     authority: {
       authority: { kind: 'authority' },
@@ -191,7 +191,7 @@ beforeEach(() => {
     ok: true,
     selection: {
       ok: true,
-      selection: { scopeKey: MAIN, sizeToken: 'M', canonicalSha256: SELECTION_SHA },
+      selection: { scopeKey: 'main', sizeToken: 'M', canonicalSha256: SELECTION_SHA },
       pipeline: { contentBinding: { sourceSha256: SHA, sourceFileId: 'source' } },
       phaseD: { source: { sourceFileId: 'source' } },
     },
@@ -200,7 +200,7 @@ beforeEach(() => {
     ok: true,
     catalog: {
       techCardId: 156,
-      scopeKey: MAIN,
+      scopeKey: 'main',
       sizeToken: 'M',
       sourceFileId: 'source',
       sizeSelectionCanonicalSha256: SELECTION_SHA,
@@ -225,12 +225,12 @@ describe('zero-operation saved preparation foreign fallback', () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.selection.selection.scopeKey).toBe(MAIN);
+    expect(result.selection.selection.scopeKey).toBe('main');
     expect(result.draftCadCompileSource).toMatchObject({ techCardId: 156 });
     expect(mocks.createForeignHost).not.toHaveBeenCalled();
     expect(mocks.createForeignOwner).not.toHaveBeenCalled();
-    expect(mocks.select).toHaveBeenCalledWith(exactDraft, MAIN, 'M');
-    expect(mocks.catalog).toHaveBeenCalledWith(exactDraft, MAIN, 'M');
+    expect(mocks.select).toHaveBeenCalledWith(exactDraft, 'main', 'M');
+    expect(mocks.catalog).toHaveBeenCalledWith(exactDraft, 'main', 'M');
     expect(mocks.compileSource).toHaveBeenCalledWith(exactDraft);
     expect(mocks.exactDispose).toHaveBeenCalledOnce();
   });
@@ -247,8 +247,8 @@ describe('zero-operation saved preparation foreign fallback', () => {
       schemaVersion: 'dxf-product-saved-foreign-reprocess-request/1',
       row: ROW,
     });
-    expect(mocks.select).toHaveBeenCalledWith(foreignDraft, MAIN, 'M');
-    expect(mocks.catalog).toHaveBeenCalledWith(foreignDraft, MAIN, 'M');
+    expect(mocks.select).toHaveBeenCalledWith(foreignDraft, 'main', 'M');
+    expect(mocks.catalog).toHaveBeenCalledWith(foreignDraft, 'main', 'M');
     expect(mocks.foreignDispose).toHaveBeenCalledOnce();
   });
 

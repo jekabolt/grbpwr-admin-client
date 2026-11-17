@@ -1,8 +1,6 @@
+import { savedWorkbenchBindingScopeKeyV1 } from './saved-workbench-scope-v1';
 import type { common_TechCard } from 'api/proto-http/admin';
-import {
-  bindingScopes,
-  scopeKeyOfBinding,
-} from 'components/managers/tech-card/components/bom-purpose';
+import { bindingScopes } from 'components/managers/tech-card/components/bom-purpose';
 import { rollGoodsScopes } from 'components/managers/tech-card/components/piece-block-refs';
 import type { PatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import type { DxfProductPhaseDSizeSelectionResultV1 } from 'lib/pattern-import/dxf-product-phase-d-size-selection-v1';
@@ -246,7 +244,7 @@ export async function preparePatternImportDxfPhaseECadSavedMaterialScopeEditorsV
   const expectedScopeKeys = Array.from(
     new Set(
       patterns.map((pattern) =>
-        scopeKeyOfBinding(pattern.fabricPurpose, pattern.bomLineKey, bindings),
+        savedWorkbenchBindingScopeKeyV1(pattern.fabricPurpose, pattern.bomLineKey, bindings),
       ),
     ),
   );
@@ -258,7 +256,7 @@ export async function preparePatternImportDxfPhaseECadSavedMaterialScopeEditorsV
   const choiceKeys = choices.ok ? choices.choices.map(({ scopeKey }) => scopeKey) : [];
   const filenameByScope = new Map(
     patterns.map((pattern) => [
-      scopeKeyOfBinding(pattern.fabricPurpose, pattern.bomLineKey, bindings),
+      savedWorkbenchBindingScopeKeyV1(pattern.fabricPurpose, pattern.bomLineKey, bindings),
       pattern.filename?.trim() ?? '',
     ]),
   );

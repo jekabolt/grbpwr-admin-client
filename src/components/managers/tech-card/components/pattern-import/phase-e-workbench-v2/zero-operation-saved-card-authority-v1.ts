@@ -1,9 +1,10 @@
+import {
+  savedWorkbenchBindingScopeKeyV1,
+  savedWorkbenchScopeKeyV1,
+} from './saved-workbench-scope-v1';
 import { adminService } from 'api/api';
 import type { common_TechCard } from 'api/proto-http/admin';
-import {
-  bindingScopes,
-  scopeKeyOfBinding,
-} from 'components/managers/tech-card/components/bom-purpose';
+import { bindingScopes } from 'components/managers/tech-card/components/bom-purpose';
 import { rollGoodsScopes } from 'components/managers/tech-card/components/piece-block-refs';
 import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 
@@ -117,14 +118,15 @@ function selectedCurrentRow(
 
   const insert = techCard.techCard;
   const scopes = rollGoodsScopes(insert.bomItems ?? []);
-  if (!scopes.some(({ key }) => key === selector.scopeKey))
+  if (!scopes.some((scope) => savedWorkbenchScopeKeyV1(scope) === selector.scopeKey))
     throw new Error('The saved DXF material scope is absent from the current card.');
   const patterns = insert.patterns ?? [];
   const bindings = bindingScopes(scopes, patterns);
   const matches = patterns.filter(
     (pattern) =>
       pattern.lineKey?.trim() === selector.patternLineKey &&
-      scopeKeyOfBinding(pattern.fabricPurpose, pattern.bomLineKey, bindings) === selector.scopeKey,
+      savedWorkbenchBindingScopeKeyV1(pattern.fabricPurpose, pattern.bomLineKey, bindings) ===
+        selector.scopeKey,
   );
   if (matches.length !== 1)
     throw new Error('The current card has no unique exact saved DXF row for this scope and key.');

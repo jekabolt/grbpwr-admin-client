@@ -1,3 +1,7 @@
+import type { common_TechCard } from 'api/proto-http/admin';
+import { buildPatternImportDxfPhaseESavedCardContextV1 } from './saved-card-production-projection-v1';
+import { resolvePatternImportDxfPhaseESavedPatternRowV1 } from './saved-pattern-row-resolver-v1';
+import { rollGoodsScopes } from 'components/managers/tech-card/components/piece-block-refs';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { abortableAdminService } from 'api/api';
 import type { GetTechCardSavedAssemblySnapshotRequest } from 'api/proto-http/admin';
@@ -94,6 +98,58 @@ async function nativeDrawnSource() {
     ...seed,
     bytes,
     row: { ...seed.row, sizeBytes: bytes.length, sha256: await digestFullAssemblyFixture(bytes) },
+  };
+  // Exercise the production enum-to-domain scope boundary before genuine native replay.
+  const savedCard = {
+    id: seed.row.techCardId,
+    lockVersion: seed.row.cardLockVersion,
+    techCard: {
+      sizeIds: [7],
+      bomItems: [
+        {
+          lineKey: 'bom-main',
+          section: 'TECH_CARD_BOM_SECTION_FABRIC',
+          purpose: 'TECH_CARD_BOM_PURPOSE_MAIN',
+        },
+      ],
+      pieces: seed.card.existingPieces,
+      pieceDxfAliases: {
+        items: seed.card.existingAliases.map((alias) => ({
+          ...alias,
+          fabricPurpose: 'TECH_CARD_BOM_PURPOSE_MAIN',
+        })),
+      },
+      patterns: [
+        {
+          lineKey: seed.row.patternLineKey,
+          fabricPurpose: 'TECH_CARD_BOM_PURPOSE_MAIN',
+          url: seed.row.url,
+          sizeBytes: seed.row.sizeBytes,
+          sha256: seed.row.sha256,
+          savedRowRevision: seed.row.revision,
+        },
+      ],
+    },
+  } as common_TechCard;
+  const insert = savedCard.techCard!;
+  const resolved = resolvePatternImportDxfPhaseESavedPatternRowV1({
+    techCardId: savedCard.id!,
+    cardLockVersion: savedCard.lockVersion!,
+    scopes: rollGoodsScopes(insert.bomItems!),
+    patterns: insert.patterns!,
+    aliases: insert.pieceDxfAliases!.items!,
+    pieceLineKeys: ['line-FRONT', 'line-BACK'],
+  });
+  if (!resolved.ok) throw new Error(JSON.stringify(resolved.blockers));
+  expect(resolved.row).toEqual(seed.row);
+  seed = {
+    ...seed,
+    row: resolved.row,
+    card: buildPatternImportDxfPhaseESavedCardContextV1(
+      savedCard,
+      (ids) => ids,
+      new Map([[7, 'M']]),
+    ),
   };
   const host = createPatternImportDxfPhaseEForeignSavedDxfReprocessHostV1({
     nativeSewingReplay: true,

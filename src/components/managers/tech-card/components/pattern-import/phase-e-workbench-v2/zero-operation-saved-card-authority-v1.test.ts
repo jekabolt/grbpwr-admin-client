@@ -66,7 +66,7 @@ function cardWithSavedRow(
 
 const row: DxfProductSavedRowIdentityV1 = Object.freeze({
   techCardId: 6,
-  scopeKey: 'TECH_CARD_BOM_PURPOSE_MAIN',
+  scopeKey: 'main',
   patternLineKey: 'pattern-main',
   revision: 7,
   cardLockVersion: 13,
@@ -306,7 +306,7 @@ describe('zero-operation saved card authority', () => {
     if (!result.ok) return;
     expect(result.choices).toEqual([
       expect.objectContaining({
-        scopeKey: 'TECH_CARD_BOM_PURPOSE_MAIN',
+        scopeKey: 'main',
         sizes: [expect.objectContaining({ sizeToken: 'M', sizeId: 2 })],
       }),
     ]);
@@ -781,7 +781,7 @@ describe('zero-operation saved card authority', () => {
         techCard: card(),
         orderSizeIds,
         sizeNameById,
-        scopeKey: 'TECH_CARD_BOM_PURPOSE_MAIN',
+        scopeKey: 'main',
         sizeToken: 'M',
         authority,
         generation: generationOwner.beginSaved('cancelled-saved-preparation'),
@@ -808,7 +808,7 @@ describe('zero-operation saved card authority', () => {
       techCard: card(),
       orderSizeIds,
       sizeNameById,
-      scopeKey: 'TECH_CARD_BOM_PURPOSE_MAIN',
+      scopeKey: 'main',
       sizeToken: 'M',
       authority,
       generation: generationOwner.beginSaved('failed-saved-preparation'),

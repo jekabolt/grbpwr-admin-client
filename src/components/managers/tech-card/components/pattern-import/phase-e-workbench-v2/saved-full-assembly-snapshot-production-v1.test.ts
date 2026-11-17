@@ -1,3 +1,7 @@
+import type { common_TechCard } from 'api/proto-http/admin';
+import { buildPatternImportDxfPhaseESavedCardContextV1 } from './saved-card-production-projection-v1';
+import { resolvePatternImportDxfPhaseESavedPatternRowV1 } from './saved-pattern-row-resolver-v1';
+import { rollGoodsScopes } from 'components/managers/tech-card/components/piece-block-refs';
 import { Buffer } from 'node:buffer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { abortableAdminService } from 'api/api';
@@ -347,4 +351,70 @@ describe('fixed full AO production reader — mocked RPC, no backend or DXF auth
     ).rejects.toThrow();
     expect(rpc).not.toHaveBeenCalled();
   });
+});
+
+it('keeps the canonical saved scope from typed GetTechCard through fixed RPC and replay projection', async () => {
+  const card = {
+    id: row.techCardId,
+    lockVersion: row.cardLockVersion,
+    techCard: {
+      sizeIds: [1],
+      bomItems: [
+        {
+          lineKey: 'fabric',
+          section: 'TECH_CARD_BOM_SECTION_FABRIC',
+          purpose: 'TECH_CARD_BOM_PURPOSE_MAIN',
+        },
+      ],
+      patterns: [
+        {
+          lineKey: row.patternLineKey,
+          fabricPurpose: 'TECH_CARD_BOM_PURPOSE_MAIN',
+          url: row.url,
+          sizeBytes: row.sizeBytes,
+          sha256: row.sha256,
+          savedRowRevision: row.revision,
+        },
+      ],
+      pieces: [{ lineKey: 'piece-a' }, { lineKey: 'piece-b' }],
+      pieceDxfAliases: {
+        items: ['piece-a', 'piece-b'].map((pieceLineKey) => ({
+          fabricPurpose: 'TECH_CARD_BOM_PURPOSE_MAIN',
+          pieceLineKey,
+          blockName: pieceLineKey,
+        })),
+      },
+    },
+  } as common_TechCard;
+  const insert = card.techCard!;
+  const resolved = resolvePatternImportDxfPhaseESavedPatternRowV1({
+    techCardId: card.id!,
+    cardLockVersion: card.lockVersion!,
+    scopes: rollGoodsScopes(insert.bomItems!),
+    patterns: insert.patterns!,
+    aliases: insert.pieceDxfAliases!.items!,
+    pieceLineKeys: ['piece-a', 'piece-b'],
+  });
+  expect(resolved.ok).toBe(true);
+  if (!resolved.ok) throw new Error('saved row required');
+  expect(resolved.row).toEqual(row);
+  const rpc = transport();
+  const owner = await readSavedFullAssemblySnapshotV1({
+    row: resolved.row,
+    seedOperationNumber: 10,
+  });
+  try {
+    expect(rpc.mock.calls.every(([request]) => request.expectedScopeKey === 'main')).toBe(true);
+    const context = buildPatternImportDxfPhaseESavedCardContextV1(
+      card,
+      (ids) => ids,
+      new Map([[1, 'M']]),
+    );
+    expect(
+      context.scopes.find((scope) => scope.scopeKey === resolved.row.scopeKey)?.fabricPurpose,
+    ).toBe('TECH_CARD_BOM_PURPOSE_MAIN');
+    expect(projectSavedFullAssemblySnapshotV1(owner).row).toEqual(resolved.row);
+  } finally {
+    disposeSavedFullAssemblySnapshotV1(owner);
+  }
 });
