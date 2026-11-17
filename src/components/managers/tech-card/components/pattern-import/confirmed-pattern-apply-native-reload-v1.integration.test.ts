@@ -22,6 +22,10 @@ import {
 import { cardPresegmentedIdentities } from './entry';
 import { createPatternsConfirmedSessionLifecycleV1 } from './patterns-confirmed-session-lifecycle-v1';
 import { readPatternImportDxfPhaseECardSessionV1 } from './phase-e-workbench-card-session-v1';
+import { preparePatternImportDxfPhaseECadTableZeroOperationFreshV1 } from './phase-e-workbench-v2/cad-table-zero-operation-fresh-preparation-v1';
+import { createPatternImportDxfPhaseECadTableZeroOperationGenerationOwnerV1 } from './phase-e-workbench-v2/cad-table-zero-operation-generation-owner-v1';
+import { preparePatternImportDxfPhaseECadTableZeroOperationSavedFailoverV1 } from './phase-e-workbench-v2/cad-table-zero-operation-production-mount-v1';
+import { createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1 } from './phase-e-workbench-v2/zero-operation-saved-card-authority-v1';
 import { verifyLinkedN1FromGenuineImportFixture } from './phase-e-workbench-v2/cad-table-existing-linked-n1-finalize-v1.test-fixture';
 import { buildPatternImportDxfPhaseESavedCardContextV1 } from './phase-e-workbench-v2/saved-card-production-projection-v1';
 import {
@@ -356,6 +360,51 @@ it.each([[['M']], [['XS', 'S', 'M', 'L', 'XL']]])(
           dxfSha256: savedSha,
         },
       });
+      const fresh = await preparePatternImportDxfPhaseECadTableZeroOperationFreshV1({
+        cardSession: session,
+        expectedImportGeneration: session!.importGeneration,
+        scopeKey: 'main',
+        sizeToken: 'M',
+      });
+      expect(fresh.ok, fresh.blocker?.detail).toBe(true);
+      const orderSizeIds = (ids: number[]) => ids;
+      const sizeNameById = new Map(sizes.map(({ sizeId, name }) => [sizeId, name]));
+      const savedAuthority = createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1({
+        orderSizeIds,
+        sizeNameById,
+        readTechCard: async () => (await service.GetTechCard()).techCard,
+      });
+      const generationOwner = createPatternImportDxfPhaseECadTableZeroOperationGenerationOwnerV1();
+      const selectGeometry = () =>
+        preparePatternImportDxfPhaseECadTableZeroOperationSavedFailoverV1({
+          fresh,
+          expectedCommit: session!.confirmedApply.commitReceipt,
+          loadDocumentEvidence: session!.loadDocumentEvidence,
+          savedAuthority,
+          orderSizeIds,
+          sizeNameById,
+          scopeKey: 'main',
+          sizeToken: 'M',
+          generation: generationOwner.beginFresh(
+            'fresh-through-confirmed-save',
+            session!.importGeneration,
+          ),
+          signal: new AbortController().signal,
+        });
+      try {
+        const exact = await selectGeometry();
+        expect(exact?.resolvedSource, exact?.result.blocker?.detail).toBe('fresh');
+        const originalVersion = saved.version!;
+        saved.version = originalVersion + 1;
+        card.lockVersion!++;
+        const replaced = await selectGeometry();
+        expect(replaced?.resolvedSource, replaced?.result.blocker?.detail).toBe('saved');
+        expect(replaced?.result.ok).toBe(true);
+        saved.version = originalVersion;
+        card.lockVersion!++;
+      } finally {
+        generationOwner.dispose();
+      }
       await verifyLinkedN1FromGenuineImportFixture(
         card,
         session!,

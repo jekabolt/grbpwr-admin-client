@@ -84,6 +84,7 @@ import type {
   PatternImportDxfProductExactNDesktopGeometryV2,
 } from '../phase-e-workbench-v2/exact-n-seam-production-mount-v2';
 import { bindPatternImportDxfPhaseECadMannequinAnnotationSourceV1 } from '../phase-e-workbench-v2/cad-mannequin-exact-n-production-staging-v1';
+import { projectCadTablePieceFeatures } from '../phase-e-workbench-v2/cad-table-piece-features-v1';
 import { clearPatternImportDxfProductExactNSeamProductionSessionV2 } from '../phase-e-workbench-v2/exact-n-seam-production-session-v2';
 import type { PatternImportDxfProductCompositeSidecarApplicationTransactionV4 } from '../phase-e-workbench-v2/composite-sidecar-production-transaction-v4';
 import {
@@ -2016,6 +2017,11 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
                 prepared.catalog,
                 prepared.projection,
                 savedProjection.row.revision,
+              ),
+              pieceFeatures: projectCadTablePieceFeatures(
+                prepared.catalog,
+                prepared.projection,
+                prepared.draftCadCompileSource.scopes,
               ),
             },
           });

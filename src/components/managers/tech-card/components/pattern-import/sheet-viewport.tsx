@@ -98,8 +98,8 @@ export function SheetViewport({
 }: {
   bbox: BoxMm;
   tool?: ViewTool;
-  /** Pointer released on an element carrying `data-key` without dragging. */
-  onPick?: (key: string, modifiers: ViewModifiers) => void;
+  /** Pointer released without dragging. Lasso clicks include the existing sheet-space point. */
+  onPick?: (key: string, modifiers: ViewModifiers & Readonly<{ pointMm?: PtMm }>) => void;
   /** 'point' tool: a click on the sheet, in mm. */
   onPoint?: (pt: PtMm) => void;
   /** 'lasso' tool: the closed polygon the operator drew, in mm. */
@@ -345,6 +345,7 @@ export function SheetViewport({
           else
             onPick?.(gesture.current?.key ?? '', {
               shiftKey: gesture.current?.shiftKey ?? false,
+              pointMm: done?.[0],
             });
           setLasso(null);
         } else if (st && !st.moved) {

@@ -13,7 +13,12 @@ import { CARD6_SEAMS } from '../step-seams/card6.fixture';
 import type { TechCardFormData } from '../schema';
 import { createAutosaveMachine, type SaveResult } from '../useTechCardAutosave';
 import { linksByOperation, type SeamChange } from './seam-change-plan';
-import { NOT_SAVED, runSeamChange, type SeamChangeDeps } from './seam-change';
+import {
+  capturedSeamWriteOptions,
+  NOT_SAVED,
+  runSeamChange,
+  type SeamChangeDeps,
+} from './seam-change';
 import {
   adoptStepLinks,
   stepNumberOf,
@@ -404,6 +409,68 @@ describe('lock_version_moved', () => {
     });
     expect(call).not.toHaveBeenCalled();
     expect(f.log).toEqual(['release']);
+  });
+
+  it.each(['lock', 'operation'] as const)(
+    'never writes a detached exact seam when the captured %s moves during the form flush',
+    async (moved) => {
+      const f = fakeBridge();
+      let operationCurrent = true;
+      f.bridge.flush = async () => {
+        if (moved === 'lock') f.setVersion(8);
+        else operationCurrent = false;
+        return { ok: true };
+      };
+      const call = vi.fn();
+      const result = await runSeamChange(
+        CARD,
+        { upsert: [b] },
+        {
+          verb: 'decision',
+          ...capturedSeamWriteOptions({
+            expectedLockVersion: 7,
+            validate: () =>
+              operationCurrent
+                ? { ok: true }
+                : { ok: false, why: 'The selected exact operation changed.' },
+          }),
+        },
+        depsOf(f.bridge, call),
+      );
+      expect(result).toEqual({
+        ok: false,
+        why:
+          moved === 'lock'
+            ? 'The saved card moved after the exact operation was captured.'
+            : 'The selected exact operation changed.',
+        outcome: 'not-attempted',
+      });
+      expect(call).not.toHaveBeenCalled();
+      expect(useSeamsStore.getState().pending).toEqual({});
+      expect(f.log).toEqual(['hold', 'release']);
+    },
+  );
+
+  it('writes one detached exact seam against the pinned lock and never replays it on a CAS conflict', async () => {
+    const f = fakeBridge();
+    const reread = vi.spyOn(f.bridge, 'reread');
+    const call = vi.fn(async () => {
+      throw lockMoved();
+    });
+    const result = await runSeamChange(
+      CARD,
+      { upsert: [b] },
+      {
+        verb: 'decision',
+        ...capturedSeamWriteOptions({ expectedLockVersion: 7, validate: () => ({ ok: true }) }),
+      },
+      depsOf(f.bridge, call),
+    );
+    expect(call).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ expectedLockVersion: 7, upsert: wire([b]), link: [] }),
+    );
+    expect(result).toMatchObject({ ok: false, outcome: 'not-attempted' });
+    expect(reread).not.toHaveBeenCalled();
   });
 
   it('a late live-operation guard refuses after hold and sends no request', async () => {

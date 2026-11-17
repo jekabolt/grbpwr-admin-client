@@ -12,8 +12,8 @@ export const PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_PIECE_LAYOUT_SESSION_CLAIMS_V1
   placementOffsetsAreDisplayOnly: true,
   multiSelection: true,
   shiftToggle: true,
-  boxSelectionByDisplayedPieceBounds: true,
-  lassoSelectionByDisplayedPieceBounds: true,
+  boxSelectionByDisplayedMaterial: true,
+  lassoSelectionByDisplayedMaterial: true,
   groupTranslation: true,
   resetOffsets: true,
   fitDisplayedBounds: true,
@@ -31,6 +31,8 @@ export type PatternImportDxfPhaseECadTablePieceLayoutV1 = Readonly<{
   identity: PatternImportDxfPhaseECadTablePieceIdentityV1;
   /** Exact source bounds copied from the projection; never rewritten by table placement. */
   sourceBounds: BoxMm;
+  /** Closed outer contour and holes in source coordinates, shared by selection and rendering. */
+  sourceMaterialRings: readonly (readonly PtMm[])[];
   /** Session-only display translation. It is not part of Phase-D or card geometry. */
   offsetMm: PtMm;
 }>;
@@ -74,6 +76,19 @@ function projectionBounds(piece: ProjectedPieceV1): BoxMm {
   });
 }
 
+function materialRings(piece: ProjectedPieceV1): readonly (readonly PtMm[])[] {
+  const closed = piece.contours.filter(({ closed, vertices }) => closed && vertices.length >= 3);
+  const outerRole = closed.some(({ role }) => role === 'cut-boundary')
+    ? 'cut-boundary'
+    : 'sewing-boundary';
+  if (!closed.some(({ role }) => role === outerRole)) return Object.freeze([]);
+  return Object.freeze(
+    closed
+      .filter(({ role }) => role === outerRole || role === 'hole')
+      .map(({ vertices }) => Object.freeze(vertices.map(({ pointMm }) => pointMm))),
+  );
+}
+
 export function patternImportDxfPhaseECadTablePieceKeyV1(
   pieceId: string,
   pieceLineKey: string,
@@ -101,6 +116,7 @@ function freezePiece(
   return Object.freeze({
     identity: Object.freeze({ ...piece.identity }),
     sourceBounds: normalizeBounds(piece.sourceBounds),
+    sourceMaterialRings: piece.sourceMaterialRings,
     offsetMm: Object.freeze({ ...piece.offsetMm }),
   });
 }
@@ -134,6 +150,7 @@ function validatedPieces(
       return freezePiece({
         identity,
         sourceBounds: projectionBounds(piece),
+        sourceMaterialRings: materialRings(piece),
         offsetMm: ZERO_OFFSET,
       });
     }),
@@ -208,21 +225,16 @@ export function selectPatternImportDxfPhaseECadTablePiecesInBoxV1(
   box: BoxMm,
   mode: PatternImportDxfPhaseECadTablePieceSelectionModeV1 = 'replace',
 ): PatternImportDxfPhaseECadTablePieceLayoutSessionV1 {
-  const normalized = normalizeBounds(box);
-  const candidates = session.pieces
-    .filter((piece) =>
-      boundsIntersect(displayedPatternImportDxfPhaseECadTablePieceBoundsV1(piece), normalized),
-    )
-    .map(({ identity }) => identity.key);
-  return selectPatternImportDxfPhaseECadTablePiecesV1(session, candidates, mode);
-}
-
-function pointInBounds(point: PtMm, bounds: BoxMm): boolean {
-  return (
-    point.x >= bounds.minX &&
-    point.x <= bounds.maxX &&
-    point.y >= bounds.minY &&
-    point.y <= bounds.maxY
+  const { minX, minY, maxX, maxY } = normalizeBounds(box);
+  return selectPatternImportDxfPhaseECadTablePiecesInLassoV1(
+    session,
+    [
+      { x: minX, y: minY },
+      { x: maxX, y: minY },
+      { x: maxX, y: maxY },
+      { x: minX, y: maxY },
+    ],
+    mode,
   );
 }
 
@@ -241,6 +253,35 @@ function pointInPolygon(point: PtMm, polygon: readonly PtMm[]): boolean {
     if (crosses) inside = !inside;
   }
   return inside;
+}
+
+function pointInMaterial(point: PtMm, rings: readonly (readonly PtMm[])[]): boolean {
+  return rings.reduce((inside, ring) => inside !== pointInPolygon(point, ring), false);
+}
+
+/** The first click follows SVG paint order. A repeated click can reach pieces underneath. */
+export function nextPatternImportDxfPhaseECadTablePieceHitV1(
+  session: PatternImportDxfPhaseECadTablePieceLayoutSessionV1,
+  pointedKey: string,
+  point: PtMm,
+): string {
+  if (!pointedKey || session.selectedPieceKeys.length !== 1) return pointedKey;
+  const bounds = { minX: point.x, maxX: point.x, minY: point.y, maxY: point.y };
+  const hits = session.pieces
+    .filter(
+      (piece) =>
+        boundsIntersect(displayedPatternImportDxfPhaseECadTablePieceBoundsV1(piece), bounds) &&
+        pointInMaterial(
+          { x: point.x - piece.offsetMm.x, y: point.y - piece.offsetMm.y },
+          piece.sourceMaterialRings,
+        ),
+    )
+    .map(({ identity }) => identity.key)
+    .reverse();
+  const currentIndex = hits.indexOf(session.selectedPieceKeys[0]!);
+  return currentIndex >= 0 && hits.includes(pointedKey)
+    ? hits[(currentIndex + 1) % hits.length]!
+    : pointedKey;
 }
 
 function orientation(a: PtMm, b: PtMm, c: PtMm): number {
@@ -270,25 +311,28 @@ function segmentsIntersect(a: PtMm, b: PtMm, c: PtMm, d: PtMm): boolean {
   );
 }
 
-function polygonIntersectsBounds(polygon: readonly PtMm[], bounds: BoxMm): boolean {
-  const corners = [
-    { x: bounds.minX, y: bounds.minY },
-    { x: bounds.maxX, y: bounds.minY },
-    { x: bounds.maxX, y: bounds.maxY },
-    { x: bounds.minX, y: bounds.maxY },
-  ] as const;
-  if (corners.some((corner) => pointInPolygon(corner, polygon))) return true;
-  if (polygon.some((point) => pointInBounds(point, bounds))) return true;
-  const rectangleEdges = corners.map(
-    (corner, index) => [corner, corners[(index + 1) % 4]!] as const,
+function polygonIntersectsMaterial(
+  polygon: readonly PtMm[],
+  piece: PatternImportDxfPhaseECadTablePieceLayoutV1,
+): boolean {
+  const { sourceMaterialRings: rings, offsetMm } = piece;
+  const local = polygon.map(({ x, y }) => ({ x: x - offsetMm.x, y: y - offsetMm.y }));
+  if (local.some((point) => pointInMaterial(point, rings))) return true;
+
+  return rings.some((ring) =>
+    ring.some(
+      (start, index) =>
+        pointInPolygon(start, local) ||
+        local.some((from, edgeIndex) =>
+          segmentsIntersect(
+            start,
+            ring[(index + 1) % ring.length]!,
+            from,
+            local[(edgeIndex + 1) % local.length]!,
+          ),
+        ),
+    ),
   );
-  for (let index = 0; index < polygon.length; index += 1) {
-    const from = polygon[index];
-    const to = polygon[(index + 1) % polygon.length];
-    if (!from || !to) continue;
-    if (rectangleEdges.some(([a, b]) => segmentsIntersect(from, to, a, b))) return true;
-  }
-  return false;
 }
 
 export function selectPatternImportDxfPhaseECadTablePiecesInLassoV1(
@@ -298,9 +342,20 @@ export function selectPatternImportDxfPhaseECadTablePiecesInLassoV1(
 ): PatternImportDxfPhaseECadTablePieceLayoutSessionV1 {
   if (polygon.length < 3 || polygon.some((point) => !finitePoint(point)))
     throw new TypeError('CAD table lasso requires at least three finite points.');
+  const bounds = polygon.reduce(
+    ({ minX, minY, maxX, maxY }, { x, y }) => ({
+      minX: Math.min(minX, x),
+      minY: Math.min(minY, y),
+      maxX: Math.max(maxX, x),
+      maxY: Math.max(maxY, y),
+    }),
+    { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity },
+  );
   const candidates = session.pieces
-    .filter((piece) =>
-      polygonIntersectsBounds(polygon, displayedPatternImportDxfPhaseECadTablePieceBoundsV1(piece)),
+    .filter(
+      (piece) =>
+        boundsIntersect(bounds, displayedPatternImportDxfPhaseECadTablePieceBoundsV1(piece)) &&
+        polygonIntersectsMaterial(polygon, piece),
     )
     .map(({ identity }) => identity.key);
   return selectPatternImportDxfPhaseECadTablePiecesV1(session, candidates, mode);

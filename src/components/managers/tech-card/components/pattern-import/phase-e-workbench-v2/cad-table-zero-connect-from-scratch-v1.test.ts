@@ -11,7 +11,10 @@ import {
 
 import { resolvePatternImportDxfPhaseEZeroConnectSavedOperationV1 } from './cad-table-zero-connect-post-save-owner-v1';
 import { preparePatternImportDxfPhaseEZeroConnectCardOperationRowV1 } from './cad-table-zero-connect-row-adapter-v1';
-import { derivePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1 } from './cad-table-connect-edge-segments-v1';
+import {
+  derivePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1,
+  visiblePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1,
+} from './cad-table-connect-edge-segments-v1';
 import {
   createPatternImportDxfPhaseECadTableZeroConnectControllerStateV1,
   selectPatternImportDxfPhaseECadTableZeroConnectControllerEdgeV1,
@@ -160,6 +163,46 @@ function readySession(
 }
 
 describe('zero-connect from-scratch Assembly Order route', () => {
+  it('offers exact edges only from the visible cut or sewing layers', () => {
+    const { projection } = authority();
+    const front = projection.pieces[0]!;
+    const cut = front.contours[0]!;
+    const withLayers: PatternImportDxfProductPhaseEAssemblyProjectionV1 = {
+      ...projection,
+      pieces: [
+        {
+          ...front,
+          contours: [
+            cut,
+            { ...cut, contourId: 'front-sewing', role: 'sewing-boundary' },
+            { ...cut, contourId: 'front-hole', role: 'hole' },
+          ],
+        },
+      ],
+    };
+    const all = derivePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1(withLayers);
+    const cutOnly = { 'cut-boundary': true, 'sewing-boundary': false };
+    const sewingOnly = { 'cut-boundary': false, 'sewing-boundary': true };
+    expect(visiblePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1(withLayers, cutOnly)).toEqual(
+      all.filter(({ contourId }) => contourId === 'front-cut'),
+    );
+    expect(
+      visiblePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1(withLayers, sewingOnly),
+    ).toEqual(all.filter(({ contourId }) => contourId === 'front-sewing'));
+    expect(
+      visiblePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1(withLayers, {
+        'cut-boundary': false,
+        'sewing-boundary': false,
+      }),
+    ).toEqual([]);
+    expect(
+      visiblePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1(withLayers, {
+        'cut-boundary': true,
+        'sewing-boundary': true,
+      }),
+    ).toHaveLength(6);
+  });
+
   it('prepares the first real form row without requiring an existing Assembly Order operation', () => {
     const currentAuthority = authority();
     const session = readySession(currentAuthority);

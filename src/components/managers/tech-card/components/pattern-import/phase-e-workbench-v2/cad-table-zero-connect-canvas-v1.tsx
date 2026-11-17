@@ -10,9 +10,17 @@ import {
 } from './cad-table-connect-edge-segments-v1';
 import { PatternImportDxfPhaseECadTableConnectToolControlV1 } from './cad-table-connect-tool-control-v1';
 import {
+  CAD_TABLE_PIECE_FEATURE_LAYERS,
+  hasCadTablePieceFeature,
+  type CadTablePieceFeatureLayer,
+  type CadTablePieceFeaturesByKey,
+} from './cad-table-piece-features-v1';
+import { CadTablePieceFeatureMarks } from './cad-table-piece-feature-marks-v1';
+import {
   compactPatternImportDxfPhaseECadTablePieceOffsetsV1,
   createPatternImportDxfPhaseECadTablePieceLayoutSessionV1,
   fitPatternImportDxfPhaseECadTablePieceBoundsV1,
+  nextPatternImportDxfPhaseECadTablePieceHitV1,
   selectPatternImportDxfPhaseECadTablePiecesInLassoV1,
   selectPatternImportDxfPhaseECadTablePiecesV1,
   translateSelectedPatternImportDxfPhaseECadTablePiecesV1,
@@ -39,6 +47,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_CONNECT_CANVAS_V1 =
   'pattern-import-dxf-phase-e-cad-table-zero-connect-canvas/1' as const;
 
 export const PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_CONNECT_CANVAS_CLAIMS_V1 = Object.freeze({
+  // Connect reads topology only from these owners. Retained piece features are display-only.
   exactCatalogAndProjectionOnly: true,
   proposalRequired: false,
   selectedOperationRequired: false,
@@ -59,6 +68,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_CONNECT_CANVAS_CLAIMS_V1 
 export type PatternImportDxfPhaseECadTableZeroConnectCanvasPropsV1 = Readonly<{
   catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1;
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
+  pieceFeatures?: CadTablePieceFeaturesByKey;
   authoringAuthority?: PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1 | null;
   authoringAuthorityRefresh?: PatternImportDxfPhaseEZeroConnectAuthoringRefreshOwnerV1 | null;
   zeroConnectAuthoringHandoff?: PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1;
@@ -130,12 +140,17 @@ export function activatePatternImportDxfPhaseECadTableZeroCanvasPieceV1(
   session: PatternImportDxfPhaseECadTableZeroCanvasSessionV1,
   pieceKey: string,
   toggle: boolean,
+  pointMm?: PtMm,
 ): PatternImportDxfPhaseECadTableZeroCanvasSessionV1 {
+  const resolvedKey =
+    pointMm && !toggle
+      ? nextPatternImportDxfPhaseECadTablePieceHitV1(session.layout, pieceKey, pointMm)
+      : pieceKey;
   return Object.freeze({
     ...session,
     layout: selectPatternImportDxfPhaseECadTablePiecesV1(
       session.layout,
-      [pieceKey],
+      resolvedKey ? [resolvedKey] : [],
       toggle ? 'toggle' : 'replace',
     ),
   });
@@ -177,6 +192,7 @@ function pieceLayout(
 export function PatternImportDxfPhaseECadTableZeroConnectCanvasV1({
   catalog,
   projection,
+  pieceFeatures,
   authoringAuthority = null,
   authoringAuthorityRefresh = null,
   zeroConnectAuthoringHandoff,
@@ -193,6 +209,18 @@ export function PatternImportDxfPhaseECadTableZeroConnectCanvasV1({
   const { layout, viewportBounds } = tableSession;
   const [activeTool, setActiveTool] = useState<'select' | 'pan' | 'move' | 'connect'>('select');
   const [fitRequest, setFitRequest] = useState(0);
+  const [hiddenFeatureLayers, setHiddenFeatureLayers] = useState<
+    ReadonlySet<CadTablePieceFeatureLayer>
+  >(() => new Set());
+  const availableFeatureLayers = useMemo(
+    () =>
+      CAD_TABLE_PIECE_FEATURE_LAYERS.filter(({ key }) =>
+        [...(pieceFeatures?.values() ?? [])].some((features) =>
+          hasCadTablePieceFeature(features, key),
+        ),
+      ),
+    [pieceFeatures],
+  );
   const [hoveredPieceKey, setHoveredPieceKey] = useState<string | null>(null);
   const [focusedPieceKey, setFocusedPieceKey] = useState<string | null>(null);
   const segments = useMemo(
@@ -341,6 +369,23 @@ export function PatternImportDxfPhaseECadTableZeroConnectCanvasV1({
               setFitRequest((current) => current + 1);
             }}
           />
+          {availableFeatureLayers.map(({ key, label, icon }) => (
+            <PatternImportDxfPhaseECadWorkbenchToolButtonV1
+              key={key}
+              icon={icon}
+              label={label}
+              active={!hiddenFeatureLayers.has(key)}
+              pressed={!hiddenFeatureLayers.has(key)}
+              onClick={() =>
+                setHiddenFeatureLayers((current) => {
+                  const next = new Set(current);
+                  if (next.has(key)) next.delete(key);
+                  else next.add(key);
+                  return next;
+                })
+              }
+            />
+          ))}
         </div>
         <SheetViewport
           bbox={viewportBounds}
@@ -349,14 +394,14 @@ export function PatternImportDxfPhaseECadTableZeroConnectCanvasV1({
           className='min-h-0'
           onPick={(viewKey, modifiers) => {
             if (activeTool === 'select' || activeTool === 'move') {
-              setTableSession((current) => ({
-                ...current,
-                layout: selectPatternImportDxfPhaseECadTablePiecesV1(
-                  current.layout,
-                  viewKey ? [viewKey] : [],
-                  modifiers.shiftKey ? 'toggle' : 'replace',
+              setTableSession((current) =>
+                activatePatternImportDxfPhaseECadTableZeroCanvasPieceV1(
+                  current,
+                  viewKey,
+                  modifiers.shiftKey,
+                  activeTool === 'select' ? modifiers.pointMm : undefined,
                 ),
-              }));
+              );
               return;
             }
             if (!controller.session || controller.session.status === 'ready') return;
@@ -393,6 +438,7 @@ export function PatternImportDxfPhaseECadTableZeroConnectCanvasV1({
                 const hovered = hoveredPieceKey === pieceLayout.identity.key;
                 const focused = focusedPieceKey === pieceLayout.identity.key;
                 const keyboardEnabled = activeTool === 'select' || activeTool === 'move';
+                const features = pieceFeatures?.get(pieceLayout.identity.key);
                 return (
                   <g
                     key={pieceLayout.identity.key}
@@ -409,6 +455,8 @@ export function PatternImportDxfPhaseECadTableZeroConnectCanvasV1({
                     aria-pressed={selected}
                     aria-label={`${piece.pieceLineKey} pattern piece`}
                     aria-keyshortcuts='Enter Space ArrowUp ArrowDown ArrowLeft ArrowRight'
+                    onPointerEnter={() => setHoveredPieceKey(pieceLayout.identity.key)}
+                    onPointerLeave={() => setHoveredPieceKey(null)}
                     onFocus={() => setFocusedPieceKey(pieceLayout.identity.key)}
                     onBlur={() => setFocusedPieceKey(null)}
                     onKeyDown={(event) => {
@@ -440,18 +488,17 @@ export function PatternImportDxfPhaseECadTableZeroConnectCanvasV1({
                       );
                     }}
                   >
-                    <rect
-                      x={pieceLayout.sourceBounds.minX}
-                      y={vy(pieceLayout.sourceBounds.maxY)}
-                      width={pieceLayout.sourceBounds.maxX - pieceLayout.sourceBounds.minX}
-                      height={pieceLayout.sourceBounds.maxY - pieceLayout.sourceBounds.minY}
-                      fill='transparent'
-                      pointerEvents={
-                        activeTool === 'select' || activeTool === 'move' ? 'all' : 'none'
-                      }
-                      onPointerEnter={() => setHoveredPieceKey(pieceLayout.identity.key)}
-                      onPointerLeave={() => setHoveredPieceKey(null)}
-                    />
+                    {pieceLayout.sourceMaterialRings.length ? (
+                      <path
+                        data-cad-zero-connect-material=''
+                        fillRule='evenodd'
+                        d={pieceLayout.sourceMaterialRings
+                          .map((ring) => `M ${ptsAttr(ring)} Z`)
+                          .join(' ')}
+                        fill={selected ? SHEET_INK.pick : SHEET_INK.fill}
+                        pointerEvents={keyboardEnabled ? 'fill' : 'none'}
+                      />
+                    ) : null}
                     {piece.contours.map((contour) => {
                       const points = contour.vertices.map(({ pointMm }) => pointMm);
                       const closed =
@@ -461,15 +508,7 @@ export function PatternImportDxfPhaseECadTableZeroConnectCanvasV1({
                           key={contour.contourId}
                           data-cad-zero-connect-contour={contour.contourId}
                           points={ptsAttr(closed)}
-                          fill={
-                            contour.closed
-                              ? contour.role === 'hole'
-                                ? 'var(--color-bgColor)'
-                                : selected
-                                  ? SHEET_INK.pick
-                                  : SHEET_INK.fill
-                              : 'none'
-                          }
+                          fill='none'
                           stroke={
                             focused
                               ? SHEET_INK.blue
@@ -481,10 +520,23 @@ export function PatternImportDxfPhaseECadTableZeroConnectCanvasV1({
                           }
                           strokeWidth={focused || selected ? 1.6 : hovered ? 1.4 : 1.2}
                           vectorEffect='non-scaling-stroke'
-                          pointerEvents='none'
+                          pointerEvents={
+                            keyboardEnabled &&
+                            !contour.closed &&
+                            !pieceLayout.sourceMaterialRings.length
+                              ? 'stroke'
+                              : 'none'
+                          }
                         />
                       );
                     })}
+                    {features ? (
+                      <CadTablePieceFeatureMarks
+                        features={features}
+                        hiddenLayers={hiddenFeatureLayers}
+                        unit={unit}
+                      />
+                    ) : null}
                   </g>
                 );
               })}

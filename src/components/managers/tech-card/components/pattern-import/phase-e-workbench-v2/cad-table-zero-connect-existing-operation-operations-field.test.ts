@@ -13,6 +13,23 @@ function between(start: string, end: string): string {
   return operationsFieldSource.slice(startAt, endAt);
 }
 
+describe('newly saved zero-operation seam link', () => {
+  it('forwards the refreshed card lock and revalidates the same operation at the strict writer', () => {
+    const owner = between('const zeroConnectPostSaveOwner:', 'const crossScopeOperation =');
+    const gate = between('const guardedStepWrites =', 'if (stepSeams && guardedStepWrites)');
+    expect(owner).toContain('expectedLockVersion = refreshed.authority.row.cardLockVersion');
+    expect(owner).toContain('beforeWrite.techCard.lockVersion !== expectedLockVersion');
+    expect(owner.indexOf('beforeWrite = await adminService.GetTechCard(')).toBeGreaterThan(
+      owner.indexOf('await executePatternImportDxfPhaseEZeroConnectStrictSeamWriteOnceV1('),
+    );
+    expect(owner).toContain('stepSeams.writes.upsertWithReceipt([...rows], undefined, {');
+    expect(owner).toMatch(
+      /expectedLockVersion,\s+validate: \(\) =>\s+currentCapturedOperation\(\)/,
+    );
+    expect(gate).toContain('sourceStepWrites.upsertWithReceipt(rows, errorAt, guard)');
+  });
+});
+
 describe('existing empty operation OperationsField owner', () => {
   it('captures the existing row without appending another Assembly Order operation', () => {
     const routing = between(

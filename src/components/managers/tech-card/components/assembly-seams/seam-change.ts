@@ -78,6 +78,29 @@ export type SeamChangeOpts = {
   ) => string | null;
 };
 
+export type CapturedSeamWriteGuard = Readonly<{
+  /** Exact saved-card version captured with the target operation. */
+  expectedLockVersion: number;
+  /** Re-check the live selected operation at the final request boundary. */
+  validate: () => Readonly<{ ok: true } | { ok: false; why: string }>;
+}>;
+
+export function capturedSeamWriteOptions(
+  guard?: CapturedSeamWriteGuard,
+): Pick<SeamChangeOpts, 'retryLockMoved' | 'beforeRequest'> {
+  return {
+    retryLockMoved: false,
+    beforeRequest: guard
+      ? ({ expectedLockVersion }) => {
+          if (expectedLockVersion !== guard.expectedLockVersion)
+            return 'The saved card moved after the exact operation was captured.';
+          const validation = guard.validate();
+          return validation.ok ? null : validation.why;
+        }
+      : undefined,
+  };
+}
+
 export type SeamChangeDeps = {
   call: (req: ChangeTechCardSeamsRequest) => Promise<ChangeTechCardSeamsResponse>;
   /** The card's form bridge; the page's registry by default. */

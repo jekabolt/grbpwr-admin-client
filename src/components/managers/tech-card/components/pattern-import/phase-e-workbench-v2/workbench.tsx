@@ -10,7 +10,7 @@ import {
   type PatternImportDxfProductPhaseEMultiseamProposalV2,
   type PatternImportDxfProductPhaseEMultiseamWorkbenchStateV2,
 } from 'lib/pattern-import/dxf-product-phase-e-multiseam-workbench-v2';
-import type { BoxMm } from 'lib/pattern-import/types';
+import type { BoxMm, PtMm } from 'lib/pattern-import/types';
 import {
   useEffect,
   useId,
@@ -65,7 +65,8 @@ import {
 } from './cad-workbench-bom-visual-authority-v1';
 import { PatternImportDxfPhaseECadTableConnectToolControlV1 } from './cad-table-connect-tool-control-v1';
 import {
-  derivePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1,
+  visiblePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1,
+  type PatternImportDxfPhaseECadTableBoundaryVisibilityV1,
   type PatternImportDxfPhaseECadTableConnectEdgeSegmentV1,
 } from './cad-table-connect-edge-segments-v1';
 import { type PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1 } from './cad-table-zero-connect-authoring-handoff-v1';
@@ -82,6 +83,7 @@ import {
   compactPatternImportDxfPhaseECadTablePieceOffsetsV1,
   createPatternImportDxfPhaseECadTablePieceLayoutSessionV1,
   fitPatternImportDxfPhaseECadTablePieceBoundsV1,
+  nextPatternImportDxfPhaseECadTablePieceHitV1,
   patternImportDxfPhaseECadTablePieceKeyV1,
   reconcilePatternImportDxfPhaseECadTablePieceLayoutSessionV1,
   selectPatternImportDxfPhaseECadTablePiecesInBoxV1,
@@ -383,8 +385,7 @@ function ProjectedPiece({
   colorwayPreview,
   showProposals,
   showVertices,
-  showSewingBoundaries,
-  showCutBoundaries,
+  boundaryVisibility,
   showMeasurementLabels,
   showCalloutText,
   measurementUnit,
@@ -395,7 +396,9 @@ function ProjectedPiece({
   callouts,
   layoutKey,
   sourceBounds,
+  sourceMaterialRings,
   displayOffset,
+  pieceSelectActive,
   unit,
   disabled,
   onSelect,
@@ -417,8 +420,7 @@ function ProjectedPiece({
   colorwayPreview: PatternImportDxfPhaseECadWorkbenchColorwayPreviewV1 | null;
   showProposals: boolean;
   showVertices: boolean;
-  showSewingBoundaries: boolean;
-  showCutBoundaries: boolean;
+  boundaryVisibility: PatternImportDxfPhaseECadTableBoundaryVisibilityV1;
   showMeasurementLabels: boolean;
   showCalloutText: boolean;
   measurementUnit: PatternImportDxfPhaseEMeasurementUnitV1;
@@ -428,11 +430,13 @@ function ProjectedPiece({
   measurements: readonly PatternImportDxfPhaseEMeasurementV1[];
   callouts: readonly PatternImportDxfPhaseECalloutV1[];
   layoutKey: string;
-  sourceBounds: Readonly<{ minX: number; minY: number; maxX: number; maxY: number }>;
-  displayOffset: Readonly<{ x: number; y: number }>;
+  sourceBounds: BoxMm;
+  sourceMaterialRings: readonly (readonly PtMm[])[];
+  displayOffset: PtMm;
+  pieceSelectActive: boolean;
   unit: number;
   disabled?: boolean;
-  onSelect: (toggle?: boolean) => void;
+  onSelect: () => void;
   onArrangePointerDown?: (event: ReactPointerEvent<SVGGElement>) => void;
   onArrangePointerMove?: (event: ReactPointerEvent<SVGGElement>) => void;
   onArrangePointerUp?: (event: ReactPointerEvent<SVGGElement>) => void;
@@ -457,6 +461,14 @@ function ProjectedPiece({
   const measurementEnabled = !disabled && measurementTool !== null;
   const calloutEnabled = !disabled && calloutToolActive;
   const topologyToolEnabled = measurementEnabled || calloutEnabled;
+  const closedCut = boundaryVisibility['cut-boundary']
+    ? piece.contours.find(
+        ({ role, closed, vertices }) => role === 'cut-boundary' && closed && vertices.length >= 3,
+      )
+    : undefined;
+  const materialPreview = closedCut
+    ? resolvePatternImportDxfPhaseECadWorkbenchColorwayContourPreviewV1(colorwayPreview, closedCut)
+    : null;
 
   return (
     <g
@@ -469,7 +481,6 @@ function ProjectedPiece({
       data-v2-piece-layout-key={layoutKey}
       data-v2-piece-seam-authority={editableSideIndex === null ? 'read-only' : 'bounded-pair'}
       data-v2-piece-colorway-swatch={colorwayPreview?.swatchHex ?? undefined}
-      onClick={(event) => !disabled && onSelect(event.shiftKey)}
       onPointerDown={onArrangePointerDown}
       onPointerMove={onArrangePointerMove}
       onPointerUp={onArrangePointerUp}
@@ -487,12 +498,22 @@ function ProjectedPiece({
         stroke={active ? 'var(--color-textColor)' : 'transparent'}
         strokeDasharray='6 4'
         vectorEffect='non-scaling-stroke'
-        pointerEvents='all'
-        data-v2-piece-hit-area=''
+        pointerEvents='none'
       />
+      {sourceMaterialRings.length ? (
+        <path
+          d={sourceMaterialRings
+            .map((ring) => `M ${ring.map(({ x, y }) => `${x},${y}`).join(' ')} Z`)
+            .join(' ')}
+          fillRule='evenodd'
+          fill={materialPreview?.fill ?? 'none'}
+          fillOpacity={materialPreview?.fillOpacity}
+          pointerEvents={pieceSelectActive ? 'fill' : 'none'}
+          data-v2-piece-hit-area=''
+        />
+      ) : null}
       {piece.contours.map((contour) => {
-        if (contour.role === 'sewing-boundary' && !showSewingBoundaries) return null;
-        if (contour.role === 'cut-boundary' && !showCutBoundaries) return null;
+        if (contour.role !== 'hole' && !boundaryVisibility[contour.role]) return null;
         const catalogContour = catalogPiece.contours.find(
           ({ contourId }) => contourId === contour.contourId,
         );
@@ -531,17 +552,14 @@ function ProjectedPiece({
           seam,
           side: seam.sides.find(({ pieceId }) => pieceId === piece.pieceId),
         }));
-        const colorwayContourPreview =
-          resolvePatternImportDxfPhaseECadWorkbenchColorwayContourPreviewV1(
-            colorwayPreview,
-            contour,
-          );
+        const strokeIsPieceSurface =
+          pieceSelectActive && !sourceMaterialRings.length && contour.role !== 'hole';
         return (
           <g key={contour.contourId} data-v2-contour-id={contour.contourId}>
             <polyline
               points={points}
-              fill={colorwayContourPreview.fill}
-              fillOpacity={colorwayContourPreview.fillOpacity}
+              fill='none'
+              pointerEvents={strokeIsPieceSurface ? 'stroke' : 'none'}
               stroke='currentColor'
               strokeWidth={exactContour ? 2 : 1}
               opacity={exactContour ? 1 : 0.4}
@@ -553,11 +571,12 @@ function ProjectedPiece({
               stroke='transparent'
               strokeWidth='12'
               vectorEffect='non-scaling-stroke'
-              pointerEvents='stroke'
+              pointerEvents={exactEnabled ? 'stroke' : 'none'}
               role='button'
               tabIndex={exactEnabled ? 0 : -1}
               aria-disabled={!exactEnabled}
               aria-label={`Select exact contour ${contour.contourId} for seam ${activeProposalSeam.id}`}
+              onPointerDown={(event) => event.stopPropagation()}
               onClick={(event) => {
                 event.stopPropagation();
                 selectContour();
@@ -591,6 +610,7 @@ function ProjectedPiece({
                         tabIndex={0}
                         aria-label={`Select seam ${seam.id}`}
                         data-v2-seam-select={seam.id}
+                        onPointerDown={(event) => event.stopPropagation()}
                         onClick={(event) => {
                           event.stopPropagation();
                           onSelectSeam(seamIndex as SeamIndex);
@@ -674,7 +694,7 @@ function ProjectedPiece({
                         r={resolvePatternImportDxfPhaseECadTableHandleHitRadiusV1(unit)}
                         fill='transparent'
                         stroke='transparent'
-                        pointerEvents='all'
+                        pointerEvents={exactEnabled || topologyToolEnabled ? 'all' : 'none'}
                         role='button'
                         tabIndex={exactEnabled || topologyToolEnabled ? 0 : -1}
                         aria-disabled={!exactEnabled && !topologyToolEnabled}
@@ -688,6 +708,7 @@ function ProjectedPiece({
                         data-v2-exact-vertex-id={vertexId}
                         data-v2-exact-vertex-selected={selected}
                         data-v2-exact-vertex-hit-radius-px='10'
+                        onPointerDown={(event) => event.stopPropagation()}
                         onClick={(event) => {
                           event.stopPropagation();
                           selectVertex();
@@ -1282,11 +1303,11 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
   const pieceArrangeGestureRef = useRef<{
     pieceKey: string;
     pointerId: number;
-    startMm: Readonly<{ x: number; y: number }>;
-    origin: PatternImportDxfPhaseECadTablePieceLayoutSessionV1;
+    startMm: PtMm;
+    dragLayout: PatternImportDxfPhaseECadTablePieceLayoutSessionV1;
+    toggle: boolean;
     moved: boolean;
   } | null>(null);
-  const suppressPieceSelectClickRef = useRef<string | null>(null);
   const selectionGestureRef = useRef<{
     pointerId: number;
     startX: number;
@@ -1384,9 +1405,14 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
   const activeAuditIssue =
     auditReport.issues.find(({ id }) => id === activeIssueId) ?? auditReport.issues[0] ?? null;
   const zeroConnectAuthority = { catalog, projection } as const;
-  const zeroConnectSegments = derivePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1(
+  const boundaryVisibility = {
+    'cut-boundary': showCutBoundaries,
+    'sewing-boundary': showSewingBoundaries,
+  };
+  const zeroConnectSegments = visiblePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1(
     projection,
-  ).filter(({ contourRole }) => contourRole !== 'hole');
+    boundaryVisibility,
+  );
   const cancelZeroConnect = () => {
     setZeroConnectController((current) =>
       cancelPatternImportDxfPhaseECadTableZeroConnectControllerV1(current),
@@ -1520,14 +1546,7 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
     !calloutToolActive &&
     !panToolActive &&
     !zeroConnectController.session;
-  const selectCanvasPiece = (pieceKey: string, toggle = false) => {
-    setPieceLayoutSession((current) =>
-      selectPatternImportDxfPhaseECadTablePiecesV1(
-        current,
-        [pieceKey],
-        toggle ? 'toggle' : 'replace',
-      ),
-    );
+  const focusCanvasPieceSide = (pieceKey: string) => {
     const identity = pieceLayoutSession.pieces.find(
       ({ identity }) => identity.key === pieceKey,
     )?.identity;
@@ -1538,6 +1557,16 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
         )
       : -1;
     if (sideIndex === 0 || sideIndex === 1) onActivePieceIndexChange(sideIndex);
+  };
+  const selectCanvasPiece = (pieceKey: string, toggle = false) => {
+    setPieceLayoutSession((current) =>
+      selectPatternImportDxfPhaseECadTablePiecesV1(
+        current,
+        [pieceKey],
+        toggle ? 'toggle' : 'replace',
+      ),
+    );
+    focusCanvasPieceSide(pieceKey);
   };
   const canvasPoint = (event: Readonly<{ clientX: number; clientY: number }>) => {
     const svg = canvasSvgRef.current;
@@ -1550,31 +1579,21 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
     return { x: transformed.x, y: transformed.y };
   };
   const beginPieceArrange = (pieceKey: string, event: ReactPointerEvent<SVGGElement>) => {
-    if (!canvasSelectActive) return;
+    if (!canvasSelectActive || event.button !== 0) return;
     const startMm = canvasPoint(event);
     if (!startMm) return;
     event.stopPropagation();
     const alreadySelected = pieceLayoutSession.selectedPieceKeys.includes(pieceKey);
-    const next = selectPatternImportDxfPhaseECadTablePiecesV1(
-      pieceLayoutSession,
-      [pieceKey],
-      event.shiftKey ? 'toggle' : alreadySelected ? 'add' : 'replace',
-    );
-    setPieceLayoutSession(next);
-    const identity = next.pieces.find(({ identity }) => identity.key === pieceKey)?.identity;
-    const sideIndex = identity
-      ? proposal.seams[activeSeamIndex].sides.findIndex(
-          (side) =>
-            side.pieceId === identity.pieceId && side.pieceLineKey === identity.pieceLineKey,
-        )
-      : -1;
-    if (sideIndex === 0 || sideIndex === 1) onActivePieceIndexChange(sideIndex);
-    if (!next.selectedPieceKeys.includes(pieceKey)) return;
     pieceArrangeGestureRef.current = {
       pieceKey,
       pointerId: event.pointerId,
       startMm,
-      origin: next,
+      dragLayout: selectPatternImportDxfPhaseECadTablePiecesV1(
+        pieceLayoutSession,
+        [pieceKey],
+        event.shiftKey ? 'toggle' : alreadySelected ? 'add' : 'replace',
+      ),
+      toggle: event.shiftKey,
       moved: false,
     };
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -1584,24 +1603,28 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
     const currentMm = canvasPoint(event);
     if (!gesture || gesture.pointerId !== event.pointerId || !currentMm) return;
     event.stopPropagation();
-    if (Math.abs(currentMm.x - gesture.startMm.x) + Math.abs(currentMm.y - gesture.startMm.y) > 0.5)
-      gesture.moved = true;
-    setPieceLayoutSession(
-      translateSelectedPatternImportDxfPhaseECadTablePiecesV1(gesture.origin, {
-        x: currentMm.x - gesture.startMm.x,
-        y: currentMm.y - gesture.startMm.y,
-      }),
-    );
+    const delta = { x: currentMm.x - gesture.startMm.x, y: currentMm.y - gesture.startMm.y };
+    if (!gesture.moved && Math.abs(delta.x) + Math.abs(delta.y) <= 0.5) return;
+    const canDrag = gesture.dragLayout.selectedPieceKeys.includes(gesture.pieceKey);
+    if (!gesture.moved && canDrag) focusCanvasPieceSide(gesture.pieceKey);
+    gesture.moved = true;
+    if (canDrag)
+      setPieceLayoutSession(
+        translateSelectedPatternImportDxfPhaseECadTablePiecesV1(gesture.dragLayout, delta),
+      );
   };
   const endPieceArrange = (event: ReactPointerEvent<SVGGElement>) => {
     const gesture = pieceArrangeGestureRef.current;
     if (gesture?.pointerId !== event.pointerId) return;
-    if (gesture.moved) {
-      suppressPieceSelectClickRef.current = gesture.pieceKey;
-      window.setTimeout(() => {
-        if (suppressPieceSelectClickRef.current === gesture.pieceKey)
-          suppressPieceSelectClickRef.current = null;
-      }, 0);
+    if (!gesture.moved && event.type === 'pointerup') {
+      const pieceKey = gesture.toggle
+        ? gesture.pieceKey
+        : nextPatternImportDxfPhaseECadTablePieceHitV1(
+            pieceLayoutSession,
+            gesture.pieceKey,
+            gesture.startMm,
+          );
+      selectCanvasPiece(pieceKey, gesture.toggle);
     }
     pieceArrangeGestureRef.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId))
@@ -2027,8 +2050,7 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
                             colorwayPreview={activeColorwayPreview}
                             showProposals={proposalBound && showProposals}
                             showVertices={proposalBound && showVertices}
-                            showSewingBoundaries={showSewingBoundaries}
-                            showCutBoundaries={showCutBoundaries}
+                            boundaryVisibility={boundaryVisibility}
                             showMeasurementLabels={proposalBound && showMeasurementLabels}
                             showCalloutText={proposalBound && showCalloutText}
                             measurementUnit={measurementUnit}
@@ -2039,16 +2061,12 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
                             callouts={proposalBound ? callouts : []}
                             layoutKey={layout.identity.key}
                             sourceBounds={layout.sourceBounds}
+                            sourceMaterialRings={layout.sourceMaterialRings}
                             displayOffset={layout.offsetMm}
+                            pieceSelectActive={canvasSelectActive}
                             unit={canvasMmPerPixel}
                             disabled={disabled || panToolActive}
-                            onSelect={(toggle) => {
-                              if (suppressPieceSelectClickRef.current === layout.identity.key) {
-                                suppressPieceSelectClickRef.current = null;
-                                return;
-                              }
-                              selectCanvasPiece(layout.identity.key, toggle);
-                            }}
+                            onSelect={() => selectCanvasPiece(layout.identity.key)}
                             onArrangePointerDown={(event) =>
                               beginPieceArrange(layout.identity.key, event)
                             }
@@ -2114,10 +2132,11 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
                                   aria-label={`Choose ${segment.pieceLineKey} edge ${segment.boundaryVertexIds.join(' → ')}; hold Shift for reverse`}
                                   onClick={(event) => {
                                     event.stopPropagation();
+                                    if (!canSelect) return;
                                     select(event.shiftKey);
                                   }}
                                   onKeyDown={(event) => {
-                                    if (event.key === 'Enter' || event.key === ' ') {
+                                    if (canSelect && (event.key === 'Enter' || event.key === ' ')) {
                                       event.preventDefault();
                                       event.stopPropagation();
                                       select(event.shiftKey);

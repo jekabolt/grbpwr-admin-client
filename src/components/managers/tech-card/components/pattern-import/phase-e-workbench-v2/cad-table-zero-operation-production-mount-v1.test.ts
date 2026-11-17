@@ -132,6 +132,7 @@ function savedCardWithRow(prepared: SavedPrepared): common_TechCard {
           sizeBytes: row.sizeBytes,
           sha256: row.sha256,
           savedRowRevision: row.revision,
+          version: 3,
           filename: 'main.dxf',
         },
       ],
@@ -391,6 +392,14 @@ describe('zero-operation current saved-card gate', () => {
 
     expect(pendingRoute).toMatchObject({ mode: 'saved' });
     expect(admittedRoute).toMatchObject({ mode: 'fresh' });
+    expect(
+      routePatternImportDxfPhaseECadTableAfterCurrentSavedCardGateV1({
+        techCardId,
+        freshChoices: freshChoices(techCardId + 1),
+        cachedSavedChoices: cachedChoices,
+        currentSavedCardGate: gate,
+      }),
+    ).toMatchObject({ mode: 'saved', choices: { ok: false } });
   });
 
   it('does not admit fresh when the current card has a complete saved row but saved choices are blocked', async () => {
@@ -1119,9 +1128,16 @@ describe('existing saved one-physical-seam operation exact rebind', () => {
 
 describe('zero-operation production mount fresh-to-saved race failover', () => {
   it('re-reads the saved card after fresh preparation when the row appeared after Host routing', async () => {
-    const prepared = await genuineSavedPrepared();
-    const latestCard = savedCardWithRow(prepared);
+    const original = await genuineSavedPrepared();
+    const latestCard = savedCardWithRow(original);
     const sizeNameById = new Map([[7, 'M']]);
+    const savedChoices = listPatternImportDxfPhaseECadTableZeroOperationSavedChoicesV1(
+      latestCard,
+      (ids) => ids,
+      sizeNameById,
+    );
+    if (!savedChoices.ok) throw new Error(savedChoices.blocker.detail);
+    const prepared = { ...original, choices: savedChoices.choices };
     const cachedChoices = listPatternImportDxfPhaseECadTableZeroOperationSavedChoicesV1(
       cachedCardWithoutRow(prepared.techCardId),
       (ids) => ids,
@@ -1156,6 +1172,7 @@ describe('zero-operation production mount fresh-to-saved race failover', () => {
       importGeneration: 37,
       scopeKey: 'main',
       sizeToken: 'M',
+      choices: savedChoices.choices,
       selection: {
         selection: {
           pipeline: {
@@ -1165,8 +1182,23 @@ describe('zero-operation production mount fresh-to-saved race failover', () => {
       },
       catalog: prepared.catalog,
     } as unknown as FreshPrepared;
-    const result = await preparePatternImportDxfPhaseECadTableZeroOperationSavedFailoverV1({
+    const row = prepared.authoringAuthority.row;
+    const evidence = {
+      techCardId: row.techCardId,
+      scopeKey: row.scopeKey,
+      patternLineKey: row.patternLineKey,
+      dxfSha256: row.sha256,
+      patternVersion: 3,
+      cardLockVersion: row.cardLockVersion,
+    };
+    const loadDocumentEvidence = vi.fn(async () => ({
+      ok: true as const,
+      evidence,
+      blocker: null,
+    }));
+    const hostResolution = await preparePatternImportDxfPhaseECadTableZeroOperationSavedFailoverV1({
       fresh: freshPrepared,
+      loadDocumentEvidence,
       expectedCommit: { techCardId: prepared.techCardId, previousLockVersion: 10 },
       savedAuthority: { resolveLatestCommittedCard } as never,
       orderSizeIds: (ids) => ids,
@@ -1177,13 +1209,12 @@ describe('zero-operation production mount fresh-to-saved race failover', () => {
       signal: new AbortController().signal,
       prepareSaved: prepareSaved as never,
     });
-
     expect(resolveLatestCommittedCard).toHaveBeenCalledOnce();
     expect(prepareSaved).toHaveBeenCalledOnce();
-    const hostResolution = resolvePatternImportDxfPhaseECadTableZeroOperationAfterFreshV1(
-      freshPrepared,
-      result,
+    expect(loadDocumentEvidence.mock.invocationCallOrder[0]).toBeLessThan(
+      prepareSaved.mock.invocationCallOrder[0],
     );
+    if (!hostResolution) throw new Error('Expected the independently prepared saved row');
     expect(hostResolution).toMatchObject({
       result: { ok: true, importGeneration: 37 },
       resolvedSavedCard: { lockVersion: 12 },
@@ -1198,6 +1229,46 @@ describe('zero-operation production mount fresh-to-saved race failover', () => {
       ),
     ).toBe(true);
 
+    expect(loadDocumentEvidence).toHaveBeenCalledWith('main');
+    const result = {
+      result: prepared,
+      resolvedSavedCard: latestCard,
+      authoringPrepared: prepared,
+      rebindExpectation:
+        capturePatternImportDxfPhaseECadTableZeroOperationSavedRebindExpectationV1(prepared),
+      resolvedSource: 'saved' as const,
+    };
+    const document = { ok: true as const, evidence, blocker: null };
+    const resolveSource = resolvePatternImportDxfPhaseECadTableZeroOperationAfterFreshV1;
+    for (const change of [
+      { patternLineKey: 'same-bytes-replacement-row' },
+      { patternVersion: 4 },
+      { scopeKey: 'lining' },
+      { techCardId: row.techCardId + 1 },
+      { cardLockVersion: row.cardLockVersion + 1 },
+      { dxfSha256: '0'.repeat(64) },
+    ]) {
+      expect(
+        resolveSource(freshPrepared, result, {
+          ok: true,
+          evidence: { ...evidence, ...change },
+          blocker: null,
+        }),
+      ).toBe(result);
+    }
+    expect(resolveSource(freshPrepared, result, null)).toBe(result);
+    expect(
+      resolveSource(freshPrepared, result, {
+        ok: false,
+        evidence: null,
+        blocker: { code: 'confirmed-pattern-row-unavailable', detail: 'Row revision changed' },
+      }),
+    ).toBe(result);
+    expect(resolveSource({ ...freshPrepared, choices: [] }, result, document)).toBe(result);
+    expect(resolveSource({ ...freshPrepared, importGeneration: 38 }, result, document)).toBe(
+      result,
+    );
+
     const failedFreshResolution = resolvePatternImportDxfPhaseECadTableZeroOperationAfterFreshV1(
       {
         ok: false,
@@ -1208,6 +1279,7 @@ describe('zero-operation production mount fresh-to-saved race failover', () => {
         blocker: { code: 'fresh-session-invalid', detail: FRESH_DETAIL },
       } as never,
       result,
+      document,
     );
     expect(failedFreshResolution).toMatchObject({ resolvedSource: 'saved', result: { ok: true } });
     expect(JSON.stringify(failedFreshResolution)).not.toContain(FRESH_DETAIL);

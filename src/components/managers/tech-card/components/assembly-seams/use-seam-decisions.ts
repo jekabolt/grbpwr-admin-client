@@ -23,8 +23,10 @@ import { useUndoHistory } from '../undo-history';
 import { buildReview, type Review } from './review-model';
 import { poseChange, type StepRef } from './seam-change-plan';
 import {
+  capturedSeamWriteOptions,
   NOT_SAVED,
   runSeamChange,
+  type CapturedSeamWriteGuard,
   type SeamChangeInput,
   type SeamChangeOpts,
   type SeamChangeResult,
@@ -129,18 +131,13 @@ export type StrictSeamAcceptResult =
     }>
   | Extract<StrictSeamUpsertResult, { ok: false }>;
 
-export type StrictSeamAcceptGuardResult =
-  | Readonly<{ ok: true }>
-  | Readonly<{ ok: false; why: string }>;
+export type StrictSeamAcceptGuardResult = ReturnType<CapturedSeamWriteGuard['validate']>;
 
-export type StrictSeamAcceptGuard = Readonly<{
-  /** Exact saved-card version captured with the target operation. */
-  expectedLockVersion: number;
-  /** An existing seam edit keeps its persisted identity. */
-  expectedExistingSeamKey?: string;
-  /** Re-check the live selected operation synchronously at the final request boundary. */
-  validate: () => StrictSeamAcceptGuardResult;
-}>;
+export type StrictSeamAcceptGuard = CapturedSeamWriteGuard &
+  Readonly<{
+    /** An existing seam edit keeps its persisted identity. */
+    expectedExistingSeamKey?: string;
+  }>;
 
 function strictUpsertBlocked(
   code: StrictSeamUpsertFailureCode,
@@ -241,7 +238,11 @@ export type SeamWrites = {
   /** Insert or replace these rows (by seam key); resolves true when the server took them. */
   upsert: (rows: StoredRow[], errorAt?: string) => Promise<boolean>;
   /** Same write, but only succeeds with the exact final rows and keys echoed by the server. */
-  upsertWithReceipt: (rows: StoredRow[], errorAt?: string) => Promise<StrictSeamUpsertResult>;
+  upsertWithReceipt: (
+    rows: StoredRow[],
+    errorAt?: string,
+    guard?: CapturedSeamWriteGuard,
+  ) => Promise<StrictSeamUpsertResult>;
   /** Delete these rows; resolves true when the server took it. */
   remove: (rows: StoredRow[]) => Promise<boolean>;
   /** Insert or replace these pose rows (P8, by seam key); true when the server took them. */
@@ -347,7 +348,11 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
   );
 
   const upsertWithReceipt = useCallback(
-    async (rows0: StoredRow[], errorAt?: string): Promise<StrictSeamUpsertResult> => {
+    async (
+      rows0: StoredRow[],
+      errorAt?: string,
+      guard?: CapturedSeamWriteGuard,
+    ): Promise<StrictSeamUpsertResult> => {
       if (rows0.length === 0)
         return strictUpsertBlocked(
           'receipt-missing',
@@ -365,7 +370,7 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
         return strictUpsertBlocked(
           'write-failed',
           'The seam list did not load before the write.',
-          'unknown',
+          guard ? 'not-attempted' : 'unknown',
         );
       if (useSeamsStore.getState().cardId !== cardId)
         return strictUpsertBlocked(
@@ -381,13 +386,17 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
       const rows: StoredRow[] = [...seams, ...poses];
       const result = await change(
         { upsert: rows },
-        { verb: rows.length > 1 ? `decisions (${rows.length})` : 'decision', errorAt },
+        {
+          verb: rows.length > 1 ? `decisions (${rows.length})` : 'decision',
+          errorAt,
+          ...(guard ? capturedSeamWriteOptions(guard) : {}),
+        },
       );
       if (!result.ok)
         return strictUpsertBlocked(
           result.why === 'still saving' ? 'write-in-flight' : 'write-failed',
           result.why,
-          result.why === 'still saving' ? 'not-attempted' : 'unknown',
+          result.why === 'still saving' ? 'not-attempted' : result.outcome ?? 'unknown',
         );
       if (useSeamsStore.getState().cardId !== cardId)
         return strictUpsertBlocked(
@@ -492,14 +501,7 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
         {
           verb: 'decision',
           pastInvalidForm: true,
-          retryLockMoved: false,
-          beforeRequest: ({ expectedLockVersion }) => {
-            if (!guard) return null;
-            if (expectedLockVersion !== guard.expectedLockVersion)
-              return 'The saved card moved after the exact operation was captured.';
-            const validation = guard.validate();
-            return validation.ok ? null : validation.why;
-          },
+          ...capturedSeamWriteOptions(guard),
           ...(row.seamKey !== row0.seamKey ? { errorAt: row0.seamKey } : {}),
         },
       );

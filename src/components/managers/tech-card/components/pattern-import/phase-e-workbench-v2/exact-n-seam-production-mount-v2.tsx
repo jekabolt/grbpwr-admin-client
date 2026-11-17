@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import type { PatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
+import type { CadTablePieceFeaturesByKey } from './cad-table-piece-features-v1';
 import { PatternImportDxfPhaseECadTableZeroConnectCanvasV1 } from './cad-table-zero-connect-canvas-v1';
 
 import {
@@ -78,6 +79,7 @@ export type PatternImportDxfProductExactNDesktopGeometryV2 = Readonly<{
   catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1;
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
   annotationSource: Readonly<{ identity: string; revision: string; sha256: string }> | null;
+  pieceFeatures?: CadTablePieceFeaturesByKey;
 }>;
 
 export function matchesPatternImportDxfProductExactNDesktopGeometryV2(
@@ -229,6 +231,7 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
           <PatternImportDxfPhaseECadTableZeroConnectCanvasV1
             catalog={desktopGeometry.catalog}
             projection={desktopGeometry.projection}
+            pieceFeatures={desktopGeometry.pieceFeatures}
             savedSeamSides={activeSeam.sides}
             disabled
           />

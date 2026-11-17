@@ -459,7 +459,10 @@ import {
   executePatternImportDxfPhaseEZeroConnectStrictSeamWriteOnceV1,
   preparePatternImportDxfPhaseEZeroConnectPostSaveSeamLinkV1,
 } from './pattern-import/phase-e-workbench-v2/cad-table-zero-connect-post-save-seam-link-v1';
-import { resolvePatternImportDxfPhaseEZeroConnectFreshSavedOperationBindingV1 } from './pattern-import/phase-e-workbench-v2/zero-connect-fresh-saved-operation-binding-v1';
+import {
+  matchesPatternImportDxfPhaseEZeroConnectFreshSavedOperationInputsV1,
+  resolvePatternImportDxfPhaseEZeroConnectFreshSavedOperationBindingV1,
+} from './pattern-import/phase-e-workbench-v2/zero-connect-fresh-saved-operation-binding-v1';
 import {
   activatePatternImportDxfPhaseEZeroConnectSecondSaveCompletionV1,
   blocksPatternImportDxfPhaseEZeroConnectNextConnectionV1,
@@ -7602,8 +7605,8 @@ export function OperationsField({
       placePoses: (step, put, drop, reflag) =>
         write(() => sourceStepWrites.placePoses(step, put, drop, reflag), false),
       upsert: (rows, errorAt) => write(() => sourceStepWrites.upsert(rows, errorAt), false),
-      upsertWithReceipt: (rows, errorAt) =>
-        write(() => sourceStepWrites.upsertWithReceipt(rows, errorAt), strictNotWritten),
+      upsertWithReceipt: (rows, errorAt, guard) =>
+        write(() => sourceStepWrites.upsertWithReceipt(rows, errorAt, guard), strictNotWritten),
       remove: (rows) => write(() => sourceStepWrites.remove(rows), false),
       upsertPoses: (rows) => write(() => sourceStepWrites.upsertPoses(rows), false),
       removePoses: (rows) => write(() => sourceStepWrites.removePoses(rows), false),
@@ -9368,12 +9371,7 @@ export function OperationsField({
               });
             try {
               const currentSavedOperation = () => {
-                if (
-                  !zeroConnectPostSaveLifecycle.isCurrent(lifecycleTicket, pending) ||
-                  zeroConnectPendingHandoffRef.current !== pending ||
-                  pending.status !== 'in-memory-awaiting-save-direction-and-seam-link'
-                )
-                  return null;
+                if (frozenRef.current) return null;
                 const operations = (getValues('operations') ?? []) as OperationFormValue[];
                 const saved = resolvePatternImportDxfPhaseEZeroConnectCurrentPostSaveAttemptV1({
                   lifecycle: zeroConnectPostSaveLifecycle,
@@ -9382,7 +9380,7 @@ export function OperationsField({
                   currentPending: zeroConnectPendingHandoffRef.current,
                   operations,
                 });
-                if (!saved.ok) return null;
+                if (!saved.ok || saved.operationIndex !== seenRows.current.open) return null;
                 return Object.freeze({ saved, operations });
               };
               const initial = currentSavedOperation();
@@ -9393,7 +9391,8 @@ export function OperationsField({
                     'The current saved operation or its exact ordered inputs changed before seam linking.',
                 });
               const { saved } = initial;
-              if (!stepSeams.cardId || stepSeams.cardId !== request.catalog.techCardId)
+              const cardId = stepSeams.cardId;
+              if (!cardId || cardId !== request.catalog.techCardId)
                 return zeroConnectPostSaveRefused(
                   {
                     code: 'zero-connect-seam-link-geometry-unavailable',
@@ -9404,6 +9403,24 @@ export function OperationsField({
                     operationNumber: saved.savedOperation.operationNumber,
                   },
                 );
+              const initialSeamKeys = [
+                ...(initial.operations[saved.operationIndex].seamKeys ?? []),
+              ];
+              const sameSeamKeys = (keys: readonly string[]) =>
+                keys.length === initialSeamKeys.length &&
+                keys.every((key, index) => key === initialSeamKeys[index]);
+              const currentCapturedOperation = () => {
+                const current = currentSavedOperation();
+                if (
+                  !current ||
+                  useSeamsStore.getState().cardId !== cardId ||
+                  current.saved.savedOperation.operationNumber !==
+                    saved.savedOperation.operationNumber ||
+                  !sameSeamKeys(current.operations[current.saved.operationIndex].seamKeys ?? [])
+                )
+                  return null;
+                return current;
+              };
               const prepared = preparePatternImportDxfPhaseEZeroConnectPostSaveSeamLinkV1({
                 savedOperation: saved.savedOperation,
                 candidate: request.candidate,
@@ -9427,14 +9444,15 @@ export function OperationsField({
                   historyKey: saved.savedOperation.historyKey,
                   operationNumber: saved.savedOperation.operationNumber,
                 });
-              if (!currentSavedOperation())
+              if (!currentCapturedOperation())
                 return zeroConnectPostSaveRefused({
                   code: 'zero-connect-seam-link-owner-superseded',
                   detail: 'The exact seam-link attempt changed during authority refresh.',
                 });
+              const expectedLockVersion = refreshed.authority.row.cardLockVersion;
               let completed;
               try {
-                if (!currentSavedOperation())
+                if (!currentCapturedOperation())
                   return zeroConnectPostSaveRefused({
                     code: 'zero-connect-seam-link-owner-superseded',
                     detail: 'The exact seam-link attempt changed before the seam write.',
@@ -9442,7 +9460,62 @@ export function OperationsField({
                 completed = await executePatternImportDxfPhaseEZeroConnectStrictSeamWriteOnceV1(
                   pending,
                   prepared.receipt,
-                  (rows) => stepSeams.writes.upsertWithReceipt([...rows]),
+                  async (rows) => {
+                    const notAttempted = (detail: string): StrictSeamUpsertResult => ({
+                      ok: false,
+                      rows: [],
+                      seamKeys: [],
+                      outcome: 'not-attempted',
+                      blocker: { code: 'write-failed', detail },
+                    });
+                    let beforeWrite;
+                    try {
+                      beforeWrite = await adminService.GetTechCard({
+                        id: cardId,
+                        vatCountryCode: undefined,
+                      });
+                    } catch {
+                      return notAttempted('The exact saved operation could not be read.');
+                    }
+                    if (
+                      beforeWrite.techCard?.id !== cardId ||
+                      beforeWrite.techCard.lockVersion !== expectedLockVersion
+                    )
+                      return notAttempted(
+                        'The saved card changed after the exact DXF authority was refreshed.',
+                      );
+
+                    const savedOperations = (
+                      beforeWrite.techCard.techCard?.operations ?? []
+                    ).filter(
+                      ({ operationNumber }) =>
+                        operationNumber === saved.savedOperation.operationNumber,
+                    );
+                    const [sideA, sideB] = pending.candidate.connection.sides;
+                    if (
+                      !currentCapturedOperation() ||
+                      savedOperations.length !== 1 ||
+                      !matchesPatternImportDxfPhaseEZeroConnectFreshSavedOperationInputsV1(
+                        savedOperations[0].inputKeys,
+                        [sideA.pieceLineKey, sideB.pieceLineKey],
+                      ) ||
+                      !sameSeamKeys(savedOperations[0].seamKeys ?? [])
+                    )
+                      return notAttempted(
+                        'The exact operation or its links differ from the current saved card.',
+                      );
+
+                    return stepSeams.writes.upsertWithReceipt([...rows], undefined, {
+                      expectedLockVersion,
+                      validate: () =>
+                        currentCapturedOperation()
+                          ? { ok: true as const }
+                          : {
+                              ok: false as const,
+                              why: 'The selected exact operation changed before the seam write.',
+                            },
+                    });
+                  },
                 );
               } catch (error) {
                 return zeroConnectPostSaveRefused({
@@ -9453,7 +9526,7 @@ export function OperationsField({
                       : 'The existing strict seam writer refused the exact seam.',
                 });
               }
-              if (!currentSavedOperation())
+              if (!currentCapturedOperation())
                 return zeroConnectPostSaveRefused({
                   code: 'zero-connect-seam-link-owner-superseded',
                   detail: 'The exact seam-link attempt changed during the seam write.',
@@ -9484,17 +9557,17 @@ export function OperationsField({
                   },
                 );
               const fresh = await adminService.GetTechCard({
-                id: stepSeams.cardId,
+                id: cardId,
                 vatCountryCode: undefined,
               });
-              if (!currentSavedOperation())
+              if (!currentCapturedOperation())
                 return zeroConnectPostSaveRefused({
                   code: 'zero-connect-seam-link-owner-superseded',
                   detail: 'The exact seam-link attempt changed while reading back the saved card.',
                 });
               const lockVersion = fresh.techCard?.lockVersion;
               if (
-                fresh.techCard?.id !== stepSeams.cardId ||
+                fresh.techCard?.id !== cardId ||
                 !Number.isSafeInteger(lockVersion) ||
                 (lockVersion ?? -1) < 0
               )
@@ -9522,7 +9595,7 @@ export function OperationsField({
                     seamKey: finalReceipt.finalSeamKey,
                   },
                 );
-              const current = currentSavedOperation();
+              const current = currentCapturedOperation();
               if (!current)
                 return zeroConnectPostSaveRefused({
                   code: 'zero-connect-seam-link-owner-superseded',
@@ -9538,7 +9611,7 @@ export function OperationsField({
                   operationNumber: saved.savedOperation.operationNumber,
                   seamKey: finalReceipt.finalSeamKey,
                 });
-              if (!currentSavedOperation())
+              if (!currentCapturedOperation())
                 return zeroConnectPostSaveRefused({
                   code: 'zero-connect-seam-link-owner-superseded',
                   detail: 'The exact seam-link attempt changed before the form mutation.',
