@@ -157,7 +157,7 @@ describe('explicit new revision of a matching DXF', () => {
     version: 3,
     sizeBytes: 100,
     sha256: 'a'.repeat(64),
-  } as Row;
+  } as unknown as Row;
   const draft = draftOf('main', filename);
   draft.scopes[0].alreadyOnCard = { url: existing.url!, filename };
   draft.aliases = [
