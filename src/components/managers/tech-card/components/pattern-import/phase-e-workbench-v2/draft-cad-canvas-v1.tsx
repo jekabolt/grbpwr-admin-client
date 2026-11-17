@@ -494,11 +494,11 @@ function commandForPoint(
       };
     case 'mark':
       return {
-        label: 'Add mark',
+        label: 'Add drill mark',
         command: {
           ...common,
           tool: 'mark',
-          payload: { entityId: ids.entityId, pointMm: input.pointMm, kind: 'cross' },
+          payload: { entityId: ids.entityId, pointMm: input.pointMm, kind: 'drill' },
         },
       };
     case 'rectangle': {
@@ -1301,7 +1301,8 @@ function toolInstruction(tool: PatternImportDxfPhaseEDraftCadToolV1): string {
   if (tool === 'rectangle')
     return 'Click two exact opposite corners to create one ungraded piece for this size.';
   if (tool === 'circle') return 'Click a centre and then its radius to record one circle intent.';
-  if (tool === 'point-only' || tool === 'draft-point' || tool === 'mark')
+  if (tool === 'mark') return 'Click the active pattern to place a drill mark in this size.';
+  if (tool === 'point-only' || tool === 'draft-point')
     return 'Click the exact sheet to record one local Draft intent.';
   return `${tool} input is unavailable until a verified pattern geometry kernel is integrated. No command will be recorded.`;
 }
