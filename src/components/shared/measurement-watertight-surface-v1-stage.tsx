@@ -911,6 +911,14 @@ function cssColor(name: string): string {
   return value;
 }
 
+/** Vertex normals of the displayed body; guide lines bound to its vertices stand off along them. */
+function displayedNormals(geometry: THREE.BufferGeometry): Float32Array | null {
+  const normals = geometry.getAttribute('normal');
+  return normals instanceof THREE.BufferAttribute && normals.array instanceof Float32Array
+    ? normals.array
+    : null;
+}
+
 function disposeMaterial(material: THREE.Material | THREE.Material[]): void {
   if (Array.isArray(material)) material.forEach((item) => item.dispose());
   else material.dispose();
@@ -2069,6 +2077,7 @@ export function MeasurementWatertightSurfaceV1Stage({
         guide,
         positions,
         cssColor('--color-highlightColor'),
+        displayedNormals(geometry),
       );
       measurementGuideLayer = next.layer;
       measurementGuideBindings = next.bindings;
@@ -3079,7 +3088,11 @@ export function MeasurementWatertightSurfaceV1Stage({
         delete contextCanvas.dataset.livePositionError;
         publishAcceptedGeometry(positions);
         if (normals?.visible) normals.update();
-        updateMeasurementSurfaceGuideLayerPositionsV1(measurementGuideBindings, positions);
+        updateMeasurementSurfaceGuideLayerPositionsV1(
+          measurementGuideBindings,
+          positions,
+          displayedNormals(geometry),
+        );
         scheduleRender();
         return result;
       };

@@ -117,6 +117,7 @@ const browserSuites = Object.freeze([
       'female chest and under bust reshape the bust; male keeps its chest path',
       'hidden measurement lines read through the body and from their own view',
       'measurement lines read on a phone portrait stage while a field is typed',
+      'a posed wrist ring draws on the posed body',
     ].join('|'),
   }),
   Object.freeze({

@@ -2428,6 +2428,26 @@ const FULL_BODY_EDITOR_V9: FullBodyPoseEditorAdapter<ModelOpenReferenceDirectPos
     ),
   });
 
+/**
+ * The A-rest body a posed guide is cut on; its vertices then ride the posed body. The bind-pose
+ * proxy has bent elbows, so without an admitted limb mode the frame's forearm station missed it
+ * and the posed wrist cut a sliver or no ring at all.
+ */
+function measurementGuideRestMeshV1(
+  proxyMesh: MeasurementSurfaceMeshV1,
+  solveRest: (() => Float32Array) | null,
+): MeasurementSurfaceMeshV1 {
+  if (!solveRest) return proxyMesh;
+  try {
+    const positions = solveRest();
+    return positions.length === proxyMesh.positions.length && positions.every(Number.isFinite)
+      ? { ...proxyMesh, positions }
+      : proxyMesh;
+  } catch {
+    return proxyMesh;
+  }
+}
+
 function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
   onDisplayedBodySnapshotV1,
   activeMeasurementName,
@@ -2869,7 +2889,12 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
                 frame: finalFrame,
                 runtime,
                 measurementGuideSourceMesh: snapshotMeasurementSurfaceMeshV1(
-                  fkProxyRuntime.displayMesh,
+                  measurementGuideRestMeshV1(
+                    fkProxyRuntime.displayMesh,
+                    liveFkSession
+                      ? () => liveFkSession.solve(editor.runtimePose(editor.neutralPose)).positions
+                      : null,
+                  ),
                 ),
                 waistHipStatus: proxyRuntime.status,
                 representedWaistHipProxies: Object.freeze([

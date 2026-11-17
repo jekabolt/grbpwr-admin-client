@@ -1410,6 +1410,11 @@ const PHONE_LINES: readonly GuideLineCheck[] = [
   },
 ];
 
+/**
+ * Posed wrist ring at DPR 2 on the dev page: 183 px with the 2 mm lift off the skin, 150 px with
+ * bare vertices tied in depth with the skin. The floor sits between them so a lost lift fails.
+ */
+const POSED_WRIST_MIN_BLUE = 165;
 const PHONE_REST_STAGE = [318, 328] as const;
 const PHONE_TYPING_STAGE = [390, 410] as const;
 
@@ -1592,5 +1597,65 @@ test.describe('guide lines at DPR 2', () => {
         blue,
       })}`,
     );
+  });
+
+  test('a posed wrist ring draws on the posed body', async ({ page }) => {
+    test.setTimeout(600_000);
+    await prewarmDevRuntime(page);
+    await page.goto(DEV_ROUTE);
+    const status = page.getByTestId('model-open-reference-preview-status');
+    const canvas = page.getByTestId('measurement-watertight-surface-v1-canvas');
+    const poseDraft = page.locator('[data-pose-draft]');
+    await expect(status).toContainText('Preview partial: A-rest', { timeout: 180_000 });
+    await expect(canvas).toHaveAttribute('data-view-preset', 'front');
+
+    const wrist = measurementField(page, 'wrist');
+    const wristBlue = async (shot: string) => {
+      await revealMeasurement(page, wrist);
+      await wrist.focus();
+      await expect(canvas).toHaveAttribute(
+        'data-active-measurement-guide',
+        'BODY_MEASUREMENT_NAME_WRIST',
+      );
+      await expect(canvas).toHaveAttribute('data-measurement-guide-status', 'visible');
+      await expect(canvas).toHaveAttribute('data-measurement-guide-camera-motion', 'still');
+      await expect(canvas).toHaveAttribute('data-camera-facing', 'front');
+      await page.mouse.move(0, 0);
+      const stats = await canvasPixelStats(page, canvas);
+      await canvas.screenshot({ path: `${NECK_SHOTS_DIR}/guide-v4-wrist-${shot}-female.png` });
+      await wrist.blur();
+      return stats.blue;
+    };
+    const restBlue = await wristBlue('rest');
+
+    // Raise the left arm by its wrist marker, then put edit pose away so no marker is drawn.
+    const editPose = page.getByRole('checkbox', { name: 'edit pose', exact: true });
+    await editPose.check();
+    await expect(canvas).toHaveAttribute('data-joint-editor-mode', 'edit-pose');
+    const box = (await canvas.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    const markers = JSON.parse(
+      (await canvas.getAttribute('data-projected-joint-markers')) ?? '[]',
+    ) as readonly Readonly<{ id: string; screenX: number; screenY: number }>[];
+    const marker = markers.find(({ id }) => id === 'left-wrist');
+    expect(marker, 'left wrist marker').toBeDefined();
+    const start = { x: box.x + marker!.screenX, y: box.y + marker!.screenY };
+    const sourceBefore = await canvas.getAttribute('data-source-revision');
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    await expect(canvas).toHaveAttribute('data-position-dragging', 'true');
+    await page.mouse.move(start.x + 40, start.y - 60, { steps: 10 });
+    await page.mouse.up();
+    await expect(canvas).toHaveAttribute('data-position-dragging', 'false');
+    await expect.poll(() => canvas.getAttribute('data-source-revision')).not.toBe(sourceBefore);
+    await expect(status).toContainText('Preview partial', { timeout: 180_000 });
+    await expect(poseDraft).toHaveAttribute('data-pose-draft', 'custom');
+    await editPose.uncheck();
+    await expect(canvas).toHaveAttribute('data-joint-editor-mode', 'off');
+    await expect(poseDraft).toHaveAttribute('data-pose-draft', 'custom');
+
+    const posedBlue = await wristBlue('posed');
+    console.info(`MANNEQUIN_GUIDE_POSED_WRIST=${JSON.stringify({ restBlue, posedBlue })}`);
+    expect(posedBlue, 'posed wrist blue px').toBeGreaterThanOrEqual(POSED_WRIST_MIN_BLUE);
   });
 });

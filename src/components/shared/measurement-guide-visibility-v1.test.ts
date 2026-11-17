@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import process from 'node:process';
 
+import { BufferAttribute, BufferGeometry } from 'three';
 import { describe, expect, it } from 'vitest';
 
 import type { common_BodyMeasurementName } from 'api/proto-http/admin';
@@ -9,6 +10,7 @@ import { BODY_MEASUREMENT_GROUPS } from 'components/managers/model/components/me
 import { resolveModelGuidedMeasurementPreviewInputV1 } from 'components/managers/model/components/model-guided-measurement-preview-input-v1';
 import {
   MODEL_OPEN_REFERENCE_DIRECT_NEUTRAL_POSE_V9,
+  type ModelOpenReferenceDirectPoseV9,
   modelOpenReferenceDirectRuntimePoseV9,
 } from 'components/managers/model/components/model-open-reference-direct-pose-v9';
 import { resolveModelOpenReferencePreviewInputV1 } from 'components/managers/model/components/model-open-reference-preview-input-v1';
@@ -20,6 +22,7 @@ import {
 import {
   measurementSurfaceGuideCameraActionV1,
   measurementSurfaceGuidePassesV1,
+  measurementSurfaceGuidePolylineV1,
 } from 'components/shared/measurement-surface-guide-lines-v1';
 import { getBodyMeasurementProtocolFieldV1 } from 'lib/cloth/body/measurement-protocol-v1';
 import { createMeasurementOpenReferenceFullBodyLocalFkRuntimeV4 } from 'lib/cloth/body/makehuman-full-body-local-fk-runtime-v4';
@@ -72,6 +75,12 @@ const MAX_INSIDE_PERCENT = 1;
 const MAX_DEPTH_MM = 2;
 const MIN_VISIBLE_FRACTION = 0.4;
 const MIN_VISIBLE_BUFFER_PX = 6;
+/**
+ * A depth-tested line closer to the skin than this ties with it in the depth buffer and draws as
+ * nothing or as dots: the stage's depth step at the fitted distance is about 0.2 mm (near is
+ * distance / 1000, 24-bit depth).
+ */
+const DEPTH_TIE_M = 0.0005;
 
 const BASES = Object.freeze([
   Object.freeze({ name: 'female' as const, gender: 'GENDER_ENUM_FEMALE' as const }),
@@ -535,20 +544,29 @@ function stageCamera(
   };
 }
 
+/** The polyline the stage draws for a path (closed paths repeat their first point). */
 function pathPolyline(
   path: MeasurementSurfaceMeasurementGuidePathV1,
   positions: Float32Array,
+  normals?: Float32Array,
 ): Vec3[] {
-  const points: Vec3[] =
-    path.source === 'fixed-points'
-      ? path.pointsM.map((point) => [point[0], point[1], point[2]])
-      : path.vertexIndices.map((vertex) => [
-          positions[vertex * 3],
-          positions[vertex * 3 + 1],
-          positions[vertex * 3 + 2],
-        ]);
-  if (path.closed && points.length > 0) points.push(points[0]);
+  const polyline = measurementSurfaceGuidePolylineV1(path, positions, normals);
+  const points: Vec3[] = [];
+  for (let offset = 0; polyline && offset < polyline.length; offset += 3) {
+    points.push([polyline[offset], polyline[offset + 1], polyline[offset + 2]]);
+  }
   return points;
+}
+
+/** Smooth vertex normals exactly as the stage computes them for the displayed body. */
+function vertexNormals(mesh: MeasurementSurfaceMeshV1): Float32Array {
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(mesh.positions.slice(), 3));
+  geometry.setIndex(new BufferAttribute(mesh.indices.slice(), 1));
+  geometry.computeVertexNormals();
+  const normals = Float32Array.from(geometry.getAttribute('normal').array);
+  geometry.dispose();
+  return normals;
 }
 
 interface GuideMetrics {
@@ -556,6 +574,11 @@ interface GuideMetrics {
   readonly maxDepthMm: number;
   readonly visiblePx: number;
   readonly projectedPx: number;
+  /** Visible px that also stand off the skin by DEPTH_TIE_M: what a depth-tested line draws. */
+  readonly drawnPx: number;
+  /** Signed distance to the skin over all samples (negative inside), mm. */
+  readonly minClearanceMm: number;
+  readonly maxClearanceMm: number;
 }
 
 function measureGuide(
@@ -563,15 +586,19 @@ function measureGuide(
   mesh: MeasurementSurfaceMeshV1,
   index: MeshIndex,
   camera: StageCamera,
+  normals?: Float32Array,
 ): GuideMetrics {
   let totalLengthM = 0;
   let insideLengthM = 0;
   let maxDepthM = 0;
   let visiblePx = 0;
   let projectedPx = 0;
+  let drawnPx = 0;
+  let minClearanceM = Infinity;
+  let maxClearanceM = -Infinity;
 
   for (const path of paths) {
-    const polyline = pathPolyline(path, mesh.positions);
+    const polyline = pathPolyline(path, mesh.positions, normals);
     for (let segment = 0; segment + 1 < polyline.length; segment += 1) {
       const start = polyline[segment];
       const end = polyline[segment + 1];
@@ -586,10 +613,14 @@ function measureGuide(
         totalLengthM += sampleLengthM;
 
         const distance = index.distance(point);
-        if (distance > INSIDE_EPSILON_M && index.inside(point)) {
+        const inside = distance > INSIDE_EPSILON_M && index.inside(point);
+        if (inside) {
           insideLengthM += sampleLengthM;
           maxDepthM = Math.max(maxDepthM, distance);
         }
+        const clearance = inside ? -distance : distance;
+        minClearanceM = Math.min(minClearanceM, clearance);
+        maxClearanceM = Math.max(maxClearanceM, clearance);
 
         const projectedStart = camera.project(interpolate(start, end, t0));
         const projectedEnd = camera.project(interpolate(start, end, t1));
@@ -608,6 +639,7 @@ function measureGuide(
         const ray = toCamera.map((value) => value / cameraDistance) as Vec3;
         if (index.hits(point, ray, OCCLUSION_EPSILON_M, cameraDistance).length === 0) {
           visiblePx += projectedLength;
+          if (clearance >= DEPTH_TIE_M) drawnPx += projectedLength;
         }
       }
     }
@@ -618,6 +650,9 @@ function measureGuide(
     maxDepthMm: maxDepthM * 1000,
     visiblePx,
     projectedPx,
+    drawnPx,
+    minClearanceMm: minClearanceM * 1000,
+    maxClearanceMm: maxClearanceM * 1000,
   };
 }
 
@@ -693,7 +728,23 @@ async function buildDefaultBodyUncached(base: (typeof BASES)[number]) {
     sourceRevision: runtime.sourceRevision,
     pose: 'A',
   });
-  return { betaRuntime, frame, mesh: runtime.displayMesh };
+  const posedRuntime = (pose: ModelOpenReferenceDirectPoseV9) =>
+    createMeasurementOpenReferenceFullBodyLocalFkRuntimeV4({
+      basis,
+      measurements,
+      proxyRuntime: betaRuntime?.fkProxyRuntime ?? waistHipRuntime,
+      input: modelOpenReferenceDirectRuntimePoseV9(pose),
+      sourceRevision: `guide-visibility:${base.name}:posed`,
+      loadResources: async () => poseResources as never,
+    });
+  return {
+    betaRuntime,
+    frame,
+    mesh: runtime.displayMesh,
+    // The bind-pose proxy every FK runtime poses (bent elbows); posed guides were cut on it.
+    bindPoseMesh: (betaRuntime?.fkProxyRuntime ?? waistHipRuntime).displayMesh,
+    posedRuntime,
+  };
 }
 
 interface TableRow {
@@ -1036,6 +1087,170 @@ describe('measurement guide visibility v1', () => {
     }
     console.log(summaries.join('\n'));
   }, 120_000);
+
+  // The posed wrist drew 0 px for two reasons, both asserted both ways: the posed guide was cut on
+  // the bind-pose proxy, whose bent elbow the frame's wrist station misses (a sliver or no ring),
+  // and its vertices sit exactly on the skin, so the depth-tested line tied with the body. The
+  // preview now cuts it on the A-rest body and the stage lifts it along the displayed normals.
+  it('draws the posed wrist ring on every base, desktop and phone', async () => {
+    const arm = (raise: number, elbow: number, wrist: number) =>
+      Object.freeze({
+        shoulderRaiseDegrees: raise,
+        shoulderForwardDegrees: 0,
+        elbowBendDegrees: elbow,
+        wristBendDegrees: wrist,
+      });
+    const poses = [
+      { name: 'raised-bent', arm: arm(30, 45, 0) },
+      { name: 'wrist-bent', arm: arm(0, 0, 10) },
+    ] as const;
+    const stages = [
+      { name: 'desktop', cssSize: CSS_SIZE },
+      { name: 'phone', cssSize: PHONE_CSS_SIZE },
+    ] as const;
+    const perimeterMm = (
+      paths: readonly MeasurementSurfaceMeasurementGuidePathV1[],
+      positions: Float32Array,
+    ) =>
+      paths.reduce((total, path) => {
+        const points = pathPolyline(path, positions);
+        let length = 0;
+        for (let point = 0; point + 1 < points.length; point += 1) {
+          length += Math.hypot(...subtract(points[point + 1], points[point]));
+        }
+        return total + length * 1000;
+      }, 0);
+    const rows: string[] = [];
+    const checks: (() => void)[] = [];
+    for (const base of BASES) {
+      const body = await buildDefaultBody(base);
+      const wristGuide = (mesh: MeasurementSurfaceMeshV1) =>
+        buildMeasurementSurfaceActiveMeasurementGuideV1({
+          measurementName: 'BODY_MEASUREMENT_NAME_WRIST',
+          frame: body.frame,
+          mesh,
+          neutralPose: false,
+          limbSectionModes: body.betaRuntime?.limbSectionModes,
+          torsoSectionStations: body.betaRuntime?.torsoSectionStations,
+          neckSectionStation: body.betaRuntime?.neckSectionStation,
+        });
+      const bindGuide = wristGuide(body.bindPoseMesh);
+      const bindPerimeterMm =
+        bindGuide.status === 'visible'
+          ? perimeterMm(bindGuide.paths, body.bindPoseMesh.positions)
+          : 0;
+      const guide = wristGuide(body.mesh);
+      const restPerimeterMm = perimeterMm(guide.paths, body.mesh.positions);
+      checks.push(() => {
+        // Before: on the bind-pose proxy the frame's station cuts a sliver or nothing.
+        expect(bindPerimeterMm, `${base.name} bind pose`).toBeLessThan(40);
+        // Now: on the A-rest body, a whole wrist ring bound to mesh vertices.
+        expect(guide.status, base.name).toBe('visible');
+        expect(guide.paths.length, base.name).toBeGreaterThan(0);
+        expect(
+          guide.paths.every((path) => path.source === 'mesh-vertices'),
+          base.name,
+        ).toBe(true);
+        expect(restPerimeterMm, base.name).toBeGreaterThan(120);
+      });
+      for (const pose of poses) {
+        const posed = (
+          await body.posedRuntime({
+            ...MODEL_OPEN_REFERENCE_DIRECT_NEUTRAL_POSE_V9,
+            armMode: 'linked',
+            leftArm: pose.arm,
+            rightArm: pose.arm,
+          })
+        ).displayMesh;
+        const where = `${base.name}/${pose.name}`;
+        expect(posed.positions.length, where).toBe(body.mesh.positions.length);
+        let wristMovedM = 0;
+        for (const path of guide.paths) {
+          if (path.source !== 'mesh-vertices') continue;
+          for (const vertex of path.vertexIndices) {
+            const offset = vertex * 3;
+            wristMovedM = Math.max(
+              wristMovedM,
+              Math.hypot(
+                posed.positions[offset] - body.mesh.positions[offset],
+                posed.positions[offset + 1] - body.mesh.positions[offset + 1],
+                posed.positions[offset + 2] - body.mesh.positions[offset + 2],
+              ),
+            );
+          }
+        }
+        const posedPerimeterMm = perimeterMm(guide.paths, posed.positions);
+        const normals = vertexNormals(posed);
+        const index = new MeshIndex(posed.positions, posed.indices);
+        for (const stage of stages) {
+          const camera = stageCamera(posed.positions, guide.view ?? 'front', stage.cssSize);
+          const lifted = measureGuide(guide.paths, posed, index, camera, normals);
+          const bare = measureGuide(guide.paths, posed, index, camera);
+          const at = `${where}/${stage.name}`;
+          rows.push(
+            `| ${at} | ${fixed(bindPerimeterMm, 0)} | ${fixed(posedPerimeterMm, 0)} | ${fixed(wristMovedM * 1000, 0)} | ${fixed(bare.drawnPx)} / ${fixed(bare.projectedPx)} | ${fixed(bare.maxClearanceMm, 2)} | ${fixed(lifted.drawnPx)} / ${fixed(lifted.projectedPx)} | ${fixed(lifted.minClearanceMm, 2)} |`,
+          );
+          checks.push(() => {
+            expect(posedPerimeterMm, at).toBeGreaterThan(120);
+            // Bare: on or under the skin, so the depth test draws less than the threshold.
+            expect(bare.maxClearanceMm, at).toBeLessThan(1);
+            expect(bare.drawnPx, at).toBeLessThan(MIN_VISIBLE_BUFFER_PX);
+            // Lifted: clear of the skin everywhere and drawn past the visibility threshold.
+            expect(lifted.insidePercent, at).toBe(0);
+            expect(lifted.minClearanceMm, at).toBeGreaterThanOrEqual(DEPTH_TIE_M * 1000);
+            expect(lifted.drawnPx, at).toBeGreaterThanOrEqual(MIN_VISIBLE_BUFFER_PX);
+            expect(lifted.drawnPx / lifted.projectedPx, at).toBeGreaterThanOrEqual(
+              MIN_VISIBLE_FRACTION,
+            );
+          });
+        }
+        // Raised and bent, the forearm really moved; a wrist bend alone still binds to the mesh.
+        if (pose.name === 'raised-bent') {
+          checks.push(() => expect(wristMovedM, where).toBeGreaterThan(0.05));
+        }
+      }
+    }
+    console.log(
+      [
+        '',
+        '| posed wrist | bind-pose ring mm | posed ring mm | moved mm | bare drawn / projected px | bare max clearance mm | lifted drawn / projected px | lifted min clearance mm |',
+        '|---|---:|---:|---:|---:|---:|---:|---:|',
+        ...rows,
+      ].join('\n'),
+    );
+    for (const check of checks) check();
+  }, 240_000);
+
+  it('lifts mesh-bound guide vertices 2 mm along the displayed normals, never fixed points', () => {
+    const positions = Float32Array.from([0, 1, 0.1, 0.05, 1, 0.1, 0.05, 1.05, 0.1]);
+    const normals = Float32Array.from([0, 0, 2, 0, 0, 1, 0, 0, 0]);
+    const bound: MeasurementSurfaceMeasurementGuidePathV1 = {
+      id: 'bound',
+      closed: false,
+      source: 'mesh-vertices',
+      vertexIndices: [0, 1, 2],
+    };
+    const lifted = measurementSurfaceGuidePolylineV1(bound, positions, normals)!;
+    expect(lifted[2]).toBeCloseTo(0.102, 6);
+    expect(lifted[5]).toBeCloseTo(0.102, 6);
+    // A degenerate normal leaves the vertex where it is.
+    expect(lifted[8]).toBeCloseTo(0.1, 6);
+    expect(Array.from(measurementSurfaceGuidePolylineV1(bound, positions)!)).toEqual(
+      Array.from(positions),
+    );
+    const fixedPath: MeasurementSurfaceMeasurementGuidePathV1 = {
+      id: 'fixed',
+      closed: false,
+      source: 'fixed-points',
+      pointsM: [
+        [0, 1, 0.1],
+        [0.05, 1, 0.1],
+      ],
+    };
+    expect(Array.from(measurementSurfaceGuidePolylineV1(fixedPath, positions, normals)!)).toEqual(
+      Array.from(Float32Array.from([0, 1, 0.1, 0.05, 1, 0.1])),
+    );
+  });
 
   it('draws air paths through the body: dashed x-ray with end dots, caliper with ticks', () => {
     expect(measurementSurfaceGuidePassesV1({ closed: false })).toEqual([
