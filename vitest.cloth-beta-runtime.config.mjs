@@ -24,6 +24,10 @@ export default {
       'src/components/cloth-simulation-spike/saved-physical-preview-panel-v1.test.tsx',
       'src/components/cloth-simulation-spike/beta-skirt-saved-annular-observed-placement-strain-heatmap-preview-v1.lifecycle.test.ts',
       'src/components/cloth-simulation-spike/saved-cloth-physical-controls-v1.test.tsx',
+      'src/lib/cloth/domain/observed-bounded-radial-initialization-v1.test.ts',
+      'src/components/cloth-simulation-spike/beta-skirt-saved-annular-observed-bounded-initialization-v1.test.ts',
+      'src/components/cloth-simulation-spike/qualified-two-panel-observed-placement-authoring-v1.test.ts',
+      'src/components/cloth-simulation-spike/saved-observed-physical-host-v1.diagnostic-retention.test.ts',
     ],
   },
 };
