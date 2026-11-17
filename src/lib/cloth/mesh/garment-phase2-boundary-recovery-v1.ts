@@ -867,7 +867,11 @@ function buildIntervalPlans(
         `${evidence.edgeId} is outside the unit-line identity recovery scope.`,
       );
     const [nativeStartT, nativeEndT] = edge.native.sourceCurveTRange;
-    if (!(nativeEndT > nativeStartT))
+    if (
+      !Number.isFinite(nativeStartT) ||
+      !Number.isFinite(nativeEndT) ||
+      nativeStartT === nativeEndT
+    )
       fail('unsupported-source-geometry', `${evidence.edgeId} has unsupported native direction.`);
     const ids = [
       edge.startBoundaryVertexId,
@@ -911,8 +915,14 @@ function buildIntervalPlans(
         index === 0 ? startArc : start.binding.source.provenance.normalizedArc;
       let intervalEndArc = end.binding.source.provenance.normalizedArc;
       if (index + 1 === ids.length - 1 && intervalEndArc <= intervalStartArc) intervalEndArc = 1;
+      const startProgress = (startT - nativeStartT) / (nativeEndT - nativeStartT);
+      const endProgress = (endT - nativeStartT) / (nativeEndT - nativeStartT);
       if (
-        !(endT > startT) ||
+        !Number.isFinite(startProgress) ||
+        !Number.isFinite(endProgress) ||
+        startProgress < 0 ||
+        endProgress > 1 ||
+        !(endProgress > startProgress) ||
         !(intervalEndArc > intervalStartArc) ||
         (index > 0 &&
           (start.binding.source.provenance.sourceCurveId !== edge.native.sourceCurveId ||

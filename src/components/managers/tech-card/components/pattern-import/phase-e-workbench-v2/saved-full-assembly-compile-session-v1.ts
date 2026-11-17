@@ -14,6 +14,7 @@ import {
 } from 'lib/pattern-import/dxf-pipeline-source-path-carrier-v2';
 import {
   bindDxfProductPhaseDNativeStraightEdgesV3,
+  bindDxfProductPhaseDSelectedNativeStraightEdgesV3,
   consumeDxfProductPhaseDNativeStraightEdgesV3,
   type DxfProductPhaseDNativeStraightEdgesProjectionV3,
 } from 'lib/cloth/domain/dxf-product-phase-d-native-straight-edge-binding-v1';
@@ -100,6 +101,9 @@ export type SavedFullAssemblyCompileEvidenceV1 = Readonly<{
   }>[];
   sourceCutHandoffSha256: string | null;
   nativeSewingHandoffSha256?: string;
+  directedNativeSewingHandoffSha256?: string;
+  nativeEdgeBindingSha256?: string;
+  reversedNativeEdgeCount?: number;
   sourceSurface?: 'explicit-native-drawn-sewing';
   originalSourceSha256?: string;
   sewingHandoffSha256: string;
@@ -280,6 +284,7 @@ function sampling(
   native: DxfProductPhaseDNativeStraightEdgesProjectionV3,
   sizeToken: string,
   targetEdgeMm: number,
+  allowNativeReverse = false,
 ): Phase2BoundarySamplingRequestV1 {
   const used = new Set<object>();
   const pieces = handoff.pieces.map((piece) => {
@@ -304,15 +309,17 @@ function sampling(
         v.source.normalizedArc === n.normalizedArc;
       if (
         edge.sizeToken !== sizeToken ||
-        edge.contourDirection !== 'forward' ||
+        (!allowNativeReverse && edge.contourDirection !== 'forward') ||
         !vertexMatches(start, edge.startVertex) ||
         !vertexMatches(end, edge.endVertex) ||
-        d.startVertexId !== start.id ||
-        d.endVertexId !== end.id ||
+        d.startVertexId !== (edge.contourDirection === 'forward' ? start.id : end.id) ||
+        d.endVertexId !== (edge.contourDirection === 'forward' ? end.id : start.id) ||
         d.path.sourcePathId !== edge.sourcePathId ||
         d.sourceFileId !== native.binding.sourceFileId ||
-        canonical(d.startMm) !== canonical(start.positionMm) ||
-        canonical(d.endMm) !== canonical(end.positionMm) ||
+        canonical(d.startMm) !==
+          canonical(edge.contourDirection === 'forward' ? start.positionMm : end.positionMm) ||
+        canonical(d.endMm) !==
+          canonical(edge.contourDirection === 'forward' ? end.positionMm : start.positionMm) ||
         d.native.curveKind !== 'line' ||
         d.native.parameterSpace !== 'unit' ||
         canonical(d.native.sourceCurveTRange) !== '[0,1]' ||
@@ -331,7 +338,11 @@ function sampling(
         edgeIndex: i,
         startBoundaryVertexId: start.id,
         endBoundaryVertexId: end.id,
-        native: { sourceFileId: native.binding.sourceFileId, ...d.native },
+        native: {
+          sourceFileId: native.binding.sourceFileId,
+          ...d.native,
+          ...(edge.contourDirection === 'reverse' ? { sourceCurveTRange: [1, 0] as const } : {}),
+        },
       };
     });
     return {
@@ -340,14 +351,18 @@ function sampling(
         shell: {
           id: contour.id,
           role: 'shell' as const,
-          vertices: contour.vertices.map((v) => ({
+          vertices: contour.vertices.map((v, i) => ({
             id: v.id,
             positionMm: v.positionMm,
             source: {
               contourId: contour.id,
-              sourceCurveId: v.source.sourceCurveId,
+              sourceCurveId: allowNativeReverse
+                ? edges[i].native.sourceCurveId
+                : v.source.sourceCurveId,
               sourceCurveParameterSpace: v.source.parameterSpace,
-              sourceCurveT: v.source.sourceCurveT,
+              sourceCurveT: allowNativeReverse
+                ? edges[i].native.sourceCurveTRange[0]
+                : v.source.sourceCurveT,
               normalizedArc: v.source.normalizedArc,
             },
           })),
@@ -648,7 +663,9 @@ export function createSavedFullAssemblyCompileSessionV1(): SavedFullAssemblyComp
           selectedGeometrySha256: selection.selection.selectedGeometrySha256,
         };
         const bound = await stage(() =>
-          bindDxfProductPhaseDNativeStraightEdgesV3(
+          (nativeSewing
+            ? bindDxfProductPhaseDSelectedNativeStraightEdgesV3
+            : bindDxfProductPhaseDNativeStraightEdgesV3)(
             source.nativeRead.owner,
             carrier.artifact,
             nativeExpected,
@@ -767,7 +784,13 @@ export function createSavedFullAssemblyCompileSessionV1(): SavedFullAssemblyComp
         if (!surface.ok)
           fail('cut-handoff-blocked', surface.blockers.map((b) => b.detail).join('; '));
         // Prove native coordinates/IDs first. Coordinates only confirm already-selected exact IDs.
-        sampling(surface.handoff, native, intent.sizeToken, intent.compile.targetEdgeMm);
+        const sourceSampling = sampling(
+          surface.handoff,
+          native,
+          intent.sizeToken,
+          intent.compile.targetEdgeMm,
+          !!nativeSewing,
+        );
         const zeroAllowanceEquivalence: { pieceId: string; contourId: string; sha256: string }[] =
           [];
         if (!nativeSewing) {
@@ -813,7 +836,34 @@ export function createSavedFullAssemblyCompileSessionV1(): SavedFullAssemblyComp
           }
         }
         const sewing = nativeSewing
-          ? { ok: true as const, value: surface.handoff }
+          ? await stage(() =>
+              buildDxfAssemblyHandoffV1({
+                schemaVersion: surface.handoff.schemaVersion,
+                source: surface.handoff.source,
+                physicalSurface: surface.handoff.physicalSurface,
+                pieces: surface.handoff.pieces.map((p) => ({
+                  ...p,
+                  contours: p.contours.map((c) => {
+                    const ring = sourceSampling.pieces.find((s) => s.input.pieceId === p.id)!.input
+                      .shell;
+                    return {
+                      ...c,
+                      vertices: c.vertices.map((v, i) => ({
+                        ...v,
+                        source: {
+                          ...v.source,
+                          sourceCurveId: ring.vertices[i].source.sourceCurveId,
+                          sourceCurveT: ring.vertices[i].source.sourceCurveT,
+                        },
+                      })),
+                    };
+                  }),
+                })),
+                seams,
+                operations,
+                materials,
+              }),
+            )
           : await stage(() =>
               buildDxfAssemblyHandoffV1({
                 schemaVersion: surface.handoff.schemaVersion,
@@ -863,12 +913,9 @@ export function createSavedFullAssemblyCompileSessionV1(): SavedFullAssemblyComp
                 seams: before.seams,
               },
               sourceHandoff: sewing.value,
-              sourceSampling: sampling(
-                sewing.value,
-                native,
-                intent.sizeToken,
-                intent.compile.targetEdgeMm,
-              ),
+              sourceSampling: nativeSewing
+                ? sourceSampling
+                : sampling(sewing.value, native, intent.sizeToken, intent.compile.targetEdgeMm),
             },
             ticket.controller.signal,
           ),
@@ -898,6 +945,11 @@ export function createSavedFullAssemblyCompileSessionV1(): SavedFullAssemblyComp
             ...(nativeSewing
               ? {
                   nativeSewingHandoffSha256: surface.handoff.seal.canonicalSha256,
+                  directedNativeSewingHandoffSha256: sewing.value.seal.canonicalSha256,
+                  nativeEdgeBindingSha256: native.binding.nativeStraightEdgesSha256,
+                  reversedNativeEdgeCount: native.edges.filter(
+                    (e) => e.contourDirection === 'reverse',
+                  ).length,
                   sourceSurface: 'explicit-native-drawn-sewing' as const,
                   originalSourceSha256: source.row.sha256,
                 }
