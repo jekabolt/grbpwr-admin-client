@@ -31,6 +31,18 @@ import {
   restorePatternImportDxfPhaseETopologyAnnotationsV5,
 } from './composite-sidecar-v5';
 import {
+  createCadMannequinArrangementDocumentV1,
+  encodeCadMannequinArrangementDocumentV1,
+  type CadMannequinArrangementBindingsV1,
+} from './cad-mannequin-arrangement-document-v1';
+import {
+  PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V6,
+  buildPatternImportDxfProductCompositeSidecarV6,
+  decodePatternImportDxfProductCompositeSidecarV6,
+  encodePatternImportDxfProductCompositeSidecarV6,
+  readPatternImportDxfProductCompositeComponentBytesV6,
+} from './composite-sidecar-v6';
+import {
   buildPatternImportDxfPhaseEExactNSeamConsistencyCarrierV2,
   type PatternImportDxfPhaseEExactNSeamConsistencyResultV2,
 } from './exact-n-seam-consistency-carrier-v2';
@@ -362,7 +374,102 @@ async function sha256(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
+function arrangementBytesV1(
+  activeBindings: PatternImportDxfProductCompositeSidecarBindingsV3 = bindings,
+): Uint8Array<ArrayBuffer> {
+  const arrangementBindings: CadMannequinArrangementBindingsV1 = {
+    card: {
+      techCardId: activeBindings.row.techCardId,
+      cardLockVersion: activeBindings.row.cardLockVersion,
+    },
+    scope: {
+      scopeKey: activeBindings.row.scopeKey,
+      patternLineKey: activeBindings.row.patternLineKey,
+      sizeToken: 'M',
+    },
+    savedRow: {
+      revision: activeBindings.row.revision,
+      dxfSha256: activeBindings.row.sha256,
+    },
+    source: {
+      catalogCanonicalSha256: hash('d'),
+      sizeSelectionCanonicalSha256: hash('e'),
+    },
+    mannequin: {
+      baseModelId: 42,
+      modelFormRevisionKeyV1: '["model-form:edit",42,"Vera"]',
+      poseBinding: { canonicalKey: '{"schema":"pose-v2","arms":"rest"}' },
+    },
+  };
+  return new TextEncoder().encode(
+    encodeCadMannequinArrangementDocumentV1(
+      createCadMannequinArrangementDocumentV1({
+        bindings: arrangementBindings,
+        pieces: [
+          {
+            pieceKey: `${activeBindings.row.scopeKey}::front`,
+            scopeKey: activeBindings.row.scopeKey,
+            pieceId: 'piece:front',
+            pieceLineKey: 'line:front',
+            transform: { offsetM: [0.12, 0.03, -0.04], rotationRad: 0.4 },
+          },
+        ],
+      }),
+    ),
+  );
+}
+
 describe('Composite V5 durable topology annotations', () => {
+  it('round-trips a real V5 through V6 without replacing or mocking the V5 decoder', async () => {
+    const { built } = await builtV5();
+    const encodedV5 = encodePatternImportDxfProductCompositeSidecarV5(built.owner);
+    if (!encodedV5.ok) throw new Error('V5 fixture encode failed.');
+
+    const v6 = await buildPatternImportDxfProductCompositeSidecarV6({
+      schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V6,
+      expectedPreviousSidecarSha256: built.seal.canonicalSha256,
+      compositeV5Bytes: encodedV5.bytes,
+      mannequinArrangementBytes: arrangementBytesV1(),
+    });
+    expect(v6.ok).toBe(true);
+    if (!v6.ok) throw new Error(v6.blockers[0].detail);
+    expect(v6.document.bindings).toEqual(bindings);
+    expect(readPatternImportDxfProductCompositeComponentBytesV6(v6.owner, 'composite-v5')).toEqual(
+      encodedV5.bytes,
+    );
+
+    const encodedV6 = encodePatternImportDxfProductCompositeSidecarV6(v6.owner);
+    if (!encodedV6.ok) throw new Error('V6 fixture encode failed.');
+    const decodedV6 = await decodePatternImportDxfProductCompositeSidecarV6(encodedV6.bytes);
+    expect(decodedV6.ok).toBe(true);
+    if (!decodedV6.ok) throw new Error(decodedV6.blockers[0].detail);
+    expect(decodedV6.nestedCompositeV5.document.bindings.row).toMatchObject({
+      techCardId: bindings.row.techCardId,
+      scopeKey: bindings.row.scopeKey,
+      patternLineKey: bindings.row.patternLineKey,
+      revision: bindings.row.revision,
+      cardLockVersion: bindings.row.cardLockVersion,
+      sha256: bindings.row.sha256,
+    });
+    expect(
+      readPatternImportDxfProductCompositeComponentBytesV6(decodedV6.owner, 'composite-v5'),
+    ).toEqual(encodedV5.bytes);
+
+    const drifted = await buildPatternImportDxfProductCompositeSidecarV6({
+      schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V6,
+      expectedPreviousSidecarSha256: built.seal.canonicalSha256,
+      compositeV5Bytes: encodedV5.bytes,
+      mannequinArrangementBytes: arrangementBytesV1({
+        ...bindings,
+        row: { ...bindings.row, revision: bindings.row.revision + 1 },
+      }),
+    });
+    expect(drifted).toMatchObject({
+      ok: false,
+      blockers: [{ code: 'component-binding-mismatch' }],
+    });
+  });
+
   it('preserves original V4 bytes exactly and restores exact annotations', async () => {
     const { built, originalV4 } = await builtV5();
     expect(
