@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Button, GroupLabel, Text } from 'ui';
+import { Button, CheckboxCommon, GroupLabel, Text } from 'ui';
 import {
   buildQualifiedTwoPanelObservedPlacementIntentV1,
   confirmQualifiedTwoPanelObservedPlacementDraftV1,
   createQualifiedTwoPanelObservedPlacementDraftV1,
+  type QualifiedTwoPanelObservedPlacementDraftV1,
   type QualifiedTwoPanelObservedPlacementAuthoringInputV1,
   type QualifiedTwoPanelObservedPlacementIntentV1,
 } from './qualified-two-panel-observed-placement-authoring-v1';
@@ -84,6 +85,45 @@ export function createSavedObservedPlacementSubmissionV1(isCurrent: () => boolea
       disposed = true;
     },
   });
+}
+
+/** The existing checkbox supplies pointer and native keyboard activation; a changed allowance
+ * always requires a new explicit confirmation, independently of garment roles or target identity. */
+export function SavedObservedRadialInitializationChoiceV1({
+  draft,
+  disabled,
+  onChange,
+}: Readonly<{
+  draft: QualifiedTwoPanelObservedPlacementDraftV1;
+  disabled: boolean;
+  onChange: (
+    update: (
+      previous: QualifiedTwoPanelObservedPlacementDraftV1,
+    ) => QualifiedTwoPanelObservedPlacementDraftV1,
+  ) => void;
+}>) {
+  return (
+    <div className='flex flex-col gap-1'>
+      <label className='flex min-h-7 items-center gap-2'>
+        <CheckboxCommon
+          name='observed-placement-bounded-radial-initialization'
+          checked={draft.allowBoundedRadialInitialization}
+          disabled={disabled}
+          aria-label='Allow up to 1% initial stretch for clearance'
+          onChange={(checked) => {
+            if (disabled) return;
+            onChange((previous) => ({
+              ...previous,
+              allowBoundedRadialInitialization: checked === true,
+              confirmation: null,
+            }));
+          }}
+        />
+        <Text component='span'>Allow up to 1% initial stretch for clearance</Text>
+      </label>
+      <Text variant='label'>Saved with placement. Pattern dimensions stay unchanged.</Text>
+    </div>
+  );
 }
 
 export function SavedObservedPlacementAuthoringV1(props: SavedObservedPlacementAuthoringPropsV1) {
@@ -205,6 +245,14 @@ function CurrentObservedAuthoring({
         }}
       />
       <SavedAnnularPlacementProfileDetailsV1 />
+      <SavedObservedRadialInitializationChoiceV1
+        draft={draft}
+        disabled={locked}
+        onChange={(update) => {
+          setError(null);
+          setDraft(update);
+        }}
+      />
       <Text>
         {observedTarget
           ? `Placement target: displayed model #${observedTarget.target.persistedModel.id}, ${observedTarget.target.displayedModel.basisKind} body, current pose.`
