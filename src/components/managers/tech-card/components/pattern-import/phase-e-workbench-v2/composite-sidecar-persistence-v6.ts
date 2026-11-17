@@ -182,6 +182,23 @@ type SidecarService = Pick<
   'GetTechCardPatternSemanticSidecar' | 'PutTechCardPatternSemanticSidecar'
 >;
 
+type StoredSidecarRowSnapshotV6 = Readonly<
+  Pick<
+    TechCardPatternSemanticSidecar,
+    | 'techCardId'
+    | 'patternLineKey'
+    | 'dxfSha256'
+    | 'patternVersion'
+    | 'sidecarSha256'
+    | 'mediaType'
+    | 'byteLength'
+    | 'sidecarBytes'
+    | 'postSaveReceiptSha256'
+    | 'cardLockVersion'
+    | 'savedRowRevision'
+  >
+>;
+
 export type PatternImportDxfProductCompositeSidecarPersistenceDepsV6 = Readonly<{
   createClient: (signal: AbortSignal) => SidecarService;
   crypto?: Pick<Crypto, 'subtle'>;
@@ -499,17 +516,85 @@ function base64ToBytes(value: unknown, expectedLength: number): Uint8Array<Array
   return bytes;
 }
 
-function responseRow(value: unknown): TechCardPatternSemanticSidecar | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value))
+const STORED_SIDECAR_ROW_REQUIRED_KEYS_V6 = Object.freeze([
+  'techCardId',
+  'patternLineKey',
+  'dxfSha256',
+  'patternVersion',
+  'sidecarSha256',
+  'mediaType',
+  'byteLength',
+  'sidecarBytes',
+  'postSaveReceiptSha256',
+  'cardLockVersion',
+  'savedRowRevision',
+] as const);
+const STORED_SIDECAR_ROW_ALLOWED_KEYS_V6 = new Set<PropertyKey>([
+  ...STORED_SIDECAR_ROW_REQUIRED_KEYS_V6,
+  'createdAt',
+  'createdBy',
+]);
+
+function responseRow(value: unknown): StoredSidecarRowSnapshotV6 | undefined {
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Object.prototype
+  )
     fail('readback-invalid', 'GET response is not a record.');
-  const descriptor = Object.getOwnPropertyDescriptor(value, 'semanticSidecar');
-  if (!descriptor) return undefined;
+  const responseDescriptors = Object.getOwnPropertyDescriptors(value);
+  const responseKeys = Reflect.ownKeys(responseDescriptors);
+  if (responseKeys.length === 0) return undefined;
+  if (
+    responseKeys.length !== 1 ||
+    responseKeys[0] !== 'semanticSidecar' ||
+    !responseDescriptors.semanticSidecar
+  )
+    fail('readback-invalid', 'GET response has symbol, hidden, or unexpected fields.');
+  const descriptor = responseDescriptors.semanticSidecar;
   if (!descriptor.enumerable || !Object.prototype.hasOwnProperty.call(descriptor, 'value'))
     fail('readback-invalid', 'GET semanticSidecar is not stable data.');
   if (descriptor.value === undefined) return undefined;
-  if (!descriptor.value || typeof descriptor.value !== 'object' || Array.isArray(descriptor.value))
+  if (
+    !descriptor.value ||
+    typeof descriptor.value !== 'object' ||
+    Array.isArray(descriptor.value) ||
+    Object.getPrototypeOf(descriptor.value) !== Object.prototype
+  )
     fail('readback-invalid', 'GET semanticSidecar is not a record.');
-  return descriptor.value as TechCardPatternSemanticSidecar;
+  const rowDescriptors = Object.getOwnPropertyDescriptors(descriptor.value);
+  const rowKeys = Reflect.ownKeys(rowDescriptors);
+  if (
+    rowKeys.some(
+      (key) =>
+        typeof key !== 'string' ||
+        !STORED_SIDECAR_ROW_ALLOWED_KEYS_V6.has(key) ||
+        !rowDescriptors[key]?.enumerable ||
+        !Object.prototype.hasOwnProperty.call(rowDescriptors[key], 'value'),
+    ) ||
+    STORED_SIDECAR_ROW_REQUIRED_KEYS_V6.some((key) => !rowDescriptors[key])
+  ) {
+    fail(
+      'readback-invalid',
+      'GET semanticSidecar has accessor, symbol, hidden, or unexpected fields.',
+    );
+  }
+  const read = <Key extends (typeof STORED_SIDECAR_ROW_REQUIRED_KEYS_V6)[number]>(key: Key) =>
+    rowDescriptors[key]!.value as TechCardPatternSemanticSidecar[Key];
+  return Object.freeze({
+    techCardId: read('techCardId'),
+    patternLineKey: read('patternLineKey'),
+    dxfSha256: read('dxfSha256'),
+    patternVersion: read('patternVersion'),
+    sidecarSha256: read('sidecarSha256'),
+    mediaType: read('mediaType'),
+    byteLength: read('byteLength'),
+    sidecarBytes: read('sidecarBytes'),
+    postSaveReceiptSha256: read('postSaveReceiptSha256'),
+    cardLockVersion: read('cardLockVersion'),
+    savedRowRevision: read('savedRowRevision'),
+  });
 }
 
 function plainRecord(value: unknown, label: string): Record<string, unknown> {
@@ -697,7 +782,7 @@ export function createPatternImportDxfProductCompositeSidecarStorageAdapterV6(
 }
 
 function sameStoredRow(
-  row: TechCardPatternSemanticSidecar,
+  row: StoredSidecarRowSnapshotV6,
   authority: PatternImportDxfProductCompositeSidecarBindingsV3,
 ): boolean {
   return (
@@ -745,8 +830,11 @@ async function readExactStoredV6(
     fail('readback-drift', 'Stored Composite V6 row differs from current authority.');
   }
   const bytes = base64ToBytes(row.sidecarBytes, row.byteLength as number);
-  const storedSha256 = await readbackStep(sha256(bytes, deps.crypto ?? globalThis.crypto), signal);
-  if (row.sidecarSha256 !== storedSha256)
+  const verifiedSha256 = await readbackStep(
+    sha256(bytes, deps.crypto ?? globalThis.crypto),
+    signal,
+  );
+  if (row.sidecarSha256 !== verifiedSha256)
     fail('readback-invalid', 'Stored Composite V6 SHA differs from its bytes.');
   const decoded = await readbackStep(
     decodePatternImportDxfProductCompositeSidecarV6(bytes, deps.crypto ?? globalThis.crypto),
@@ -774,7 +862,14 @@ async function readExactStoredV6(
     fail('readback-drift', 'Stored row receipt differs from nested semantic-product-v1.');
   }
   checkReadbackSignal(signal);
-  return Object.freeze({ row, bytes, decoded, transport, nestedCompositeV5Bytes });
+  return Object.freeze({
+    row,
+    bytes,
+    decoded,
+    transport,
+    nestedCompositeV5Bytes,
+    verifiedSha256,
+  });
 }
 
 function blocker(
@@ -835,7 +930,7 @@ async function recoveredReceipt(
     serverAssemblyRevision: request.currentAuthority.serverAssemblyRevision,
     assemblyTopologySha256: request.currentAuthority.assemblyTopologySha256,
     previousSidecarSha256: stored.decoded.document.writeCas.expectedPreviousSidecarSha256,
-    sidecarSha256: stored.row.sidecarSha256 as string,
+    sidecarSha256: stored.verifiedSha256,
     canonicalByteLength: stored.bytes.byteLength,
     mediaType: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6,
   });
@@ -860,7 +955,7 @@ export function createPatternImportDxfProductCompositeSidecarPersistenceV6(
         return Object.freeze({
           ok: true as const,
           schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_RESTORE_V6,
-          sidecarSha256: stored.row.sidecarSha256 as string,
+          sidecarSha256: stored.verifiedSha256,
           canonicalByteLength: stored.bytes.byteLength,
           mediaType: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6,
           owner: stored.decoded.owner,
