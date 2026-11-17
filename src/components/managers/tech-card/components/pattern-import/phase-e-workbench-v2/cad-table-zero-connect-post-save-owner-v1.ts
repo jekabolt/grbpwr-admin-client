@@ -1,5 +1,6 @@
 import type { PatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
+import type { StoredSeam } from 'lib/seams';
 
 import {
   isPatternImportDxfPhaseEZeroConnectAuthoringRefreshOwnerV1,
@@ -59,6 +60,7 @@ export type PatternImportDxfPhaseEZeroConnectPendingHandoffV1 = Readonly<
           status: 'in-memory-final-seam-attached-awaiting-second-save';
           savedOperationNumber: number;
           finalSeamKey: string;
+          echoedStoredSeam: StoredSeam;
           afterSeamAttachCardLockVersion: number;
           refreshedAuthoringAuthority: PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1;
         }>
@@ -403,6 +405,7 @@ export function markPatternImportDxfPhaseEZeroConnectPendingSeamAttachedV1(
     status: 'in-memory-final-seam-attached-awaiting-second-save' as const,
     savedOperationNumber: operation.operationNumber,
     finalSeamKey: finalReceipt.finalSeamKey,
+    echoedStoredSeam: finalReceipt.echoedSeam,
     afterSeamAttachCardLockVersion,
     refreshedAuthoringAuthority,
   });

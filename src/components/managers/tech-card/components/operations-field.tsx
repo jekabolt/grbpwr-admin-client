@@ -408,6 +408,12 @@ import {
   preparePatternImportDxfPhaseEZeroConnectPostSaveSeamLinkV1,
 } from './pattern-import/phase-e-workbench-v2/cad-table-zero-connect-post-save-seam-link-v1';
 import { resolvePatternImportDxfPhaseEZeroConnectFreshSavedOperationBindingV1 } from './pattern-import/phase-e-workbench-v2/zero-connect-fresh-saved-operation-binding-v1';
+import {
+  activatePatternImportDxfPhaseEZeroConnectSecondSaveCompletionV1,
+  blocksPatternImportDxfPhaseEZeroConnectNextConnectionV1,
+  deactivatePatternImportDxfPhaseEZeroConnectSecondSaveCompletionV1,
+  type PatternImportDxfPhaseEZeroConnectSecondSaveCompletionOwnerV1,
+} from './pattern-import/phase-e-workbench-v2/zero-connect-second-save-completion-v1';
 import { PatternImportDxfPhaseECadTableZeroOperationProductionMountV1 } from './pattern-import/phase-e-workbench-v2/cad-table-zero-operation-production-mount-v1';
 import { projectPatternImportDxfPhaseECadTableCurrentOperationV1 } from './pattern-import/phase-e-workbench-v2/cad-table-current-operation-projection-v1';
 import {
@@ -6836,21 +6842,75 @@ export function OperationsField({
   const zeroConnectPendingHandoffRef = useRef(zeroConnectPendingHandoff);
   const zeroConnectPostSaveLifecycleRef =
     useRef<PatternImportDxfPhaseEZeroConnectPostSaveLifecycleOwnerV1 | null>(null);
+  const zeroConnectSecondSaveCompletionRef =
+    useRef<PatternImportDxfPhaseEZeroConnectSecondSaveCompletionOwnerV1 | null>(null);
+  const autosaveLastSavedAtRef = useRef(autosave.lastSavedAt);
   zeroConnectPendingHandoffRef.current = zeroConnectPendingHandoff;
+  autosaveLastSavedAtRef.current = autosave.lastSavedAt;
   useEffect(() => {
     const lifecycle = activatePatternImportDxfPhaseEZeroConnectPostSaveLifecycleV1(
       zeroConnectPostSaveLifecycleRef,
       zeroConnectPendingHandoffRef.current,
     );
-    return () =>
+    const completion = activatePatternImportDxfPhaseEZeroConnectSecondSaveCompletionV1(
+      zeroConnectSecondSaveCompletionRef,
+      zeroConnectPendingHandoffRef.current,
+      autosaveLastSavedAtRef.current,
+    );
+    return () => {
       deactivatePatternImportDxfPhaseEZeroConnectPostSaveLifecycleV1(
         zeroConnectPostSaveLifecycleRef,
         lifecycle,
       );
+      deactivatePatternImportDxfPhaseEZeroConnectSecondSaveCompletionV1(
+        zeroConnectSecondSaveCompletionRef,
+        completion,
+      );
+    };
   }, []);
   useEffect(() => {
     zeroConnectPostSaveLifecycleRef.current?.bindCurrent(zeroConnectPendingHandoff);
+    zeroConnectSecondSaveCompletionRef.current?.bindCurrent(
+      zeroConnectPendingHandoff,
+      autosaveLastSavedAtRef.current,
+    );
   }, [zeroConnectPendingHandoff]);
+  useEffect(() => {
+    const pending = zeroConnectPendingHandoffRef.current;
+    const completion = zeroConnectSecondSaveCompletionRef.current;
+    if (
+      !completion ||
+      !pending ||
+      pending.status !== 'in-memory-final-seam-attached-awaiting-second-save'
+    )
+      return;
+    const seamState = useSeamsStore.getState();
+    const completed = completion.complete({
+      pending,
+      currentPending: zeroConnectPendingHandoffRef.current,
+      completedSavedAt: autosave.lastSavedAt,
+      autosaveStatus: autosave.status,
+      currentTechCardId: techCardId,
+      savedCard: savedCard
+        ? {
+            id: savedCard.id,
+            lockVersion: savedCard.lockVersion,
+            operations: savedCard.techCard?.operations,
+            patterns: savedCard.techCard?.patterns,
+            bomItems: savedCard.techCard?.bomItems,
+          }
+        : null,
+      liveOperations: (getValues('operations') ?? []) as OperationFormValue[],
+      storedSeamCardId: seamState.cardId,
+      storedSeamLockVersion: seamState.serverVersion,
+      storedSeams: seamState.server,
+    });
+    if (!completed.ok || zeroConnectPendingHandoffRef.current !== completed.completedPending)
+      return;
+    zeroConnectPendingHandoffRef.current = null;
+    zeroConnectPostSaveLifecycleRef.current?.bindCurrent(null);
+    setZeroConnectPendingHandoff(null);
+  }, [autosave.lastSavedAt, autosave.status, getValues, savedCard, techCardId]);
   const selected = selection.index;
   const setSelected = useCallback((next: number | ((current: number) => number)) => {
     setSelection((cur) => ({ index: typeof next === 'function' ? next(cur.index) : next }));
@@ -8029,9 +8089,9 @@ export function OperationsField({
               };
             const liveOperations = (getValues('operations') ?? []) as OperationFormValue[];
             if (
-              zeroConnectPendingHandoff &&
-              liveOperations.some(
-                ({ historyKey }) => historyKey === zeroConnectPendingHandoff.historyKey,
+              blocksPatternImportDxfPhaseEZeroConnectNextConnectionV1(
+                zeroConnectPendingHandoff,
+                liveOperations,
               )
             )
               return {
