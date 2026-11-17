@@ -897,22 +897,40 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
     );
   }
 
-  const artifact = deepFreeze({
+  const artifact = draftCadCompiledArtifactV1(
+    session,
+    compileSource.techCardId,
+    selected.scopeKey,
+    selected.sizeToken,
+    job,
+    written,
+    compiledFeatures,
+  );
+  return deepFreeze({ ok: true as const, artifact, blockers: [] as const });
+}
+
+/** Common output envelope of the ordinary compiler and the exact saved-line compiler. */
+export function draftCadCompiledArtifactV1(
+  session: PatternImportDxfPhaseEDraftCadGeometryCompileInputV1['session'],
+  techCardId: number,
+  scopeKey: string,
+  sizeToken: string,
+  job: WriteJob,
+  written: Pick<ReturnType<typeof writeDxfDetailed>, 'dxfText' | 'manifest' | 'warnings'>,
+  compiledFeatures: readonly PatternImportDxfPhaseEDraftCadCompiledFeatureV1[],
+): PatternImportDxfPhaseEDraftCadGeometryCompileArtifactV1 {
+  return deepFreeze({
     schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_GEOMETRY_COMPILE_V1,
     status: 'compiled-reimport-required' as const,
     source: {
       revision: session.source.revision,
-      sourceFileId: binding.sourceFileId,
-      sourceSha256: binding.sourceSha256,
-      selectedGeometrySha256: binding.selectedGeometrySha256,
+      sourceFileId: session.source.phaseD.sourceFileId,
+      sourceSha256: session.source.phaseD.sourceSha256,
+      selectedGeometrySha256: session.source.phaseD.selectedGeometrySha256,
       catalogCanonicalSha256: session.source.catalog.canonicalSha256,
-      sizeSelectionCanonicalSha256: selected.canonicalSha256,
+      sizeSelectionCanonicalSha256: session.source.catalog.sizeSelectionCanonicalSha256,
     },
-    scope: {
-      techCardId: compileSource.techCardId,
-      scopeKey: selected.scopeKey,
-      sizeToken: selected.sizeToken,
-    },
+    scope: { techCardId, scopeKey, sizeToken },
     compiledJob: job,
     dxfText: written.dxfText,
     manifest: written.manifest,
@@ -925,7 +943,6 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
     },
     claims: PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_GEOMETRY_COMPILE_CLAIMS_V1,
   });
-  return deepFreeze({ ok: true as const, artifact, blockers: [] as const });
 }
 
 export function compilePatternImportDxfPhaseEDraftCadGeometryV1(

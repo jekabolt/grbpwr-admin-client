@@ -1,3 +1,7 @@
+import {
+  compileDraftForOrdinaryReviewV1,
+  type SavedAddPointReviewOwner,
+} from './draft-cad-saved-add-point-review-v1';
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 import type { DxfProductPhaseDSizeSelectionResultV1 } from 'lib/pattern-import/dxf-product-phase-d-size-selection-v1';
 import {
@@ -155,6 +159,7 @@ export type PatternImportDxfPhaseEDraftCadWorkspacePropsV1 = Readonly<{
   activeMaterialScopeKey?: string;
   /** Confirmed import generation visible when this compile starts; zero for saved-only sources. */
   confirmedImportGeneration?: number;
+  prepareSavedAddPointReview?: () => Promise<SavedAddPointReviewOwner>;
   onSelectMaterialScope?: (scopeKey: string) => void;
   workspaceContextControl?: ReactNode;
   arrangementScope?: PatternImportDxfPhaseEDraftCadArrangementScopeV1 | null;
@@ -190,6 +195,7 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
   preparedMaterialScopeKeys,
   activeMaterialScopeKey,
   confirmedImportGeneration = 0,
+  prepareSavedAddPointReview,
   onSelectMaterialScope,
   workspaceContextControl,
   arrangementScope = null,
@@ -430,28 +436,18 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
     if (!result.ok) pressSubmitLocked.current = false;
     setPressResult(result);
   };
-  const compileDraft = () => {
+  const compileDraft = async () => {
     const epoch = compiledReimportEpoch.current + 1;
     compiledReimportEpoch.current = epoch;
     compiledReimportRequestLocked.current = false;
     setPendingCompiledReimport(null);
     setCompiledReimportResult(null);
-    let compiledArtifact: PatternImportDxfPhaseEDraftCadGeometryCompileArtifactV1 | null = null;
-    const nextCompileState = executePatternImportDxfPhaseEDraftCadCompileUiActionV1(
-      {
-        session,
-        projection,
-        selection,
-        compileSource,
-      },
-      undefined,
-      (artifact) => {
-        compiledArtifact = artifact;
-      },
-    );
-    setCompileState(nextCompileState);
-    if (!compiledArtifact) return;
-    const artifact = compiledArtifact;
+    const input = { session, projection, selection, compileSource };
+    const result = await compileDraftForOrdinaryReviewV1(input, prepareSavedAddPointReview);
+    if (compiledReimportEpoch.current !== epoch) return;
+    setCompileState(executePatternImportDxfPhaseEDraftCadCompileUiActionV1(input, () => result));
+    if (!result.ok) return;
+    const artifact = result.artifact;
     const confirmedImportGenerationAtCompile = confirmedImportGeneration;
     const sessionCursorAtCompile = session.cursor;
     void stagePatternImportDxfPhaseECadSemanticCompiledArtifactV1(artifact, {

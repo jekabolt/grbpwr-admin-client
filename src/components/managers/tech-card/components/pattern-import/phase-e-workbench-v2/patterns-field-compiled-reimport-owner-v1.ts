@@ -1,3 +1,4 @@
+import { takeCompiledSavedAddPointFileV1 } from './draft-cad-saved-add-point-review-v1';
 import type { PatternImportDxfPhaseEDraftCadGeometryCompileArtifactV1 } from './draft-cad-geometry-compile-v1';
 import {
   createPatternImportDxfPhaseECadCommandCompiledReimportOwnerV1,
@@ -7,6 +8,7 @@ import {
 export type PatternImportDxfPhaseEPatternsFieldCompiledReimportReviewV1 = Readonly<{
   scopeKey: string;
   files: readonly [File];
+  requireManualApply?: true;
 }>;
 
 export type PatternImportDxfPhaseEPatternsFieldCompiledReimportOwnerInputV1 = Readonly<{
@@ -43,12 +45,14 @@ export function registerPatternImportDxfPhaseEPatternsFieldCompiledReimportOwner
     scopeAvailable: input.scopeAvailable,
     reviewAlreadyOpen: input.reviewAlreadyOpen,
     openExistingImportReview: (artifact) => {
-      const file = new File([artifact.dxfText], compiledFileName(artifact), {
-        type: 'image/vnd.dxf',
-      });
+      const addPoint = artifact.compiledFeatures.some((feature) => feature.tool === 'add-point');
+      const file = addPoint
+        ? takeCompiledSavedAddPointFileV1(artifact)
+        : new File([artifact.dxfText], compiledFileName(artifact), { type: 'image/vnd.dxf' });
       input.openExistingImportReview(
         Object.freeze({
           scopeKey: artifact.scope.scopeKey,
+          ...(addPoint ? { requireManualApply: true as const } : {}),
           files: Object.freeze([file]) as readonly [File],
         }),
       );

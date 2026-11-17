@@ -13,7 +13,7 @@ import {
   type DxfProductSavedReprocessHostV1,
   type DxfProductSavedRowIdentityV1,
 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
-import { pinToScope } from 'lib/pattern-import/fabrics/scope';
+import { pinToScope, scopedSpec } from 'lib/pattern-import/fabrics/scope';
 import {
   PATIMPORT,
   type AllowanceDecision,
@@ -41,6 +41,8 @@ export type PatternImportDxfPhaseESavedDxfAuthorityReadV1 = Readonly<{
 export type PatternImportDxfPhaseESavedDxfReprocessHostDepsV1 = Readonly<{
   /** Explicit physical-source opt-in; content is later verified against native source authority. */
   nativeSewingReplay?: boolean;
+  /** A protected Draft edit requires the ordinary unmodified semantics and scoped writer to keep its identity. */
+  requiredStablePiece?: string;
   /** Current GetTechCard projection, explicitly rebound to the row's optimistic card lock. */
   resolveCard: (
     expected: DxfProductSavedRowIdentityV1,
@@ -684,6 +686,19 @@ async function reprocessSavedDxf(
       8,
       'reading product semantics',
     );
+    if (deps.requiredStablePiece) {
+      const pieces = initialSemantics.pieces;
+      const indexes = exactManifestPieceIndexes(pieces, manifest);
+      const matches = pieces.filter(
+        (_, index) => manifest.pieces[indexes[index]!]!.identity === deps.requiredStablePiece,
+      );
+      if (
+        matches.length !== 1 ||
+        matches[0]!.identity !== deps.requiredStablePiece ||
+        scopedSpec(matches[0]!, target).identity !== deps.requiredStablePiece
+      )
+        throw new Error('Ordinary import would rename the selected protected piece.');
+    }
     const overrides = buildPatternImportDxfExactManifestPieceOverridesV1(
       initialSemantics,
       manifest,

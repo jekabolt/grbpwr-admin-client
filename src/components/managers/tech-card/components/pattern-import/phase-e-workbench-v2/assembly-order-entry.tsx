@@ -1992,6 +1992,58 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
     | PatternImportDxfPhaseECadPreparedMaterialScopeV1
     | PatternImportDxfPhaseECadSavedPreparedMaterialScopeEditorV1
     | null = activeFreshPreparedMaterialScope ?? activeSavedPreparedMaterialScope;
+  // Read the active saved row and session again at handoff, ordinary worker write, and Apply.
+  const activeSavedDraftRef = useRef<{
+    runtime: PatternImportDxfPhaseESavedRowProductionRuntimeV1;
+    row: PatternImportDxfPhaseESavedRowPreparedV1['row'];
+    sizeToken: string;
+    generation: number;
+  } | null>(null);
+  const selectedSavedScope = activePreparedMaterialScope?.scopeKey ?? prepared?.scopeKey;
+  activeSavedDraftRef.current =
+    open &&
+    !frozen &&
+    savedSession &&
+    savedPreparedResult?.ok &&
+    prepared === savedPreparedResult.prepared &&
+    !activeFreshPreparedMaterialScope &&
+    selectedSavedScope === savedSession.row.scopeKey &&
+    sameSavedRow(savedSession.row, savedPreparedResult.prepared.row)
+      ? {
+          runtime: savedSession.runtime,
+          row: savedSession.row,
+          sizeToken:
+            activePreparedMaterialScope?.sizeToken ?? savedPreparedResult.prepared.sizeToken,
+          generation: cardSession?.importGeneration ?? 0,
+        }
+      : null;
+  const savedDraftMounted = useRef(false);
+  useEffect(() => {
+    savedDraftMounted.current = true;
+    return () => {
+      savedDraftMounted.current = false;
+    };
+  }, []);
+  const prepareSavedAddPointReview =
+    activeSavedDraftRef.current && savedSession?.runtime.prepareSavedAddPointReview
+      ? () => {
+          const runtime = savedSession.runtime,
+            row = savedSession.row,
+            captured = draftCadSession;
+          return runtime.prepareSavedAddPointReview!(row, () => {
+            const now = activeSavedDraftRef.current,
+              session = draftCadSessionRef.current;
+            return savedDraftMounted.current &&
+              now?.runtime === runtime &&
+              session &&
+              session === captured &&
+              (readPatternImportDxfPhaseECardSessionV1(row.techCardId)?.importGeneration ?? 0) ===
+                now.generation
+              ? { row: now.row, session, sizeToken: now.sizeToken, generation: now.generation }
+              : null;
+          });
+        }
+      : undefined;
   const activeDraftTopologyScopeKey =
     activePreparedMaterialScope?.scopeKey ?? prepared?.scopeKey ?? null;
   const activeDraftTopologyProjection =
@@ -2168,6 +2220,7 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
     return pressAuthoringHandoff.ingest(planned.candidate);
   };
   const publishDraftCadSession = (session: PatternImportDxfPhaseEDraftCadSessionV1) => {
+    draftCadSessionRef.current = session;
     setDraftCadSession(session);
     if (!activeDraftMaterialScopeKey) return;
     setMaterialScopeDraftSessions((sessions) =>
@@ -2616,6 +2669,7 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
                             activePreparedMaterialScope?.scopeKey ?? prepared.scopeKey
                           }
                           confirmedImportGeneration={cardSession?.importGeneration ?? 0}
+                          prepareSavedAddPointReview={prepareSavedAddPointReview}
                           arrangementScope={
                             materialScopeDraftArrangements[
                               activePreparedMaterialScope?.scopeKey ?? prepared.scopeKey

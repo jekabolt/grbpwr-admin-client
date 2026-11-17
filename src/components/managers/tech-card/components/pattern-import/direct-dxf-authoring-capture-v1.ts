@@ -1,6 +1,15 @@
-import { bindReviewedAddPointWorkerOpen } from 'lib/pattern-import/worker/reviewed-add-point-main';
+import type { ApplyDraftFn } from './client';
+import {
+  bindReviewedAddPointWorkerOpen,
+  verifyReviewedAddPointAtApply,
+} from 'lib/pattern-import/worker/reviewed-add-point-main';
 import { sha256Hex } from 'lib/features/sha256';
-import type { PatternImportOpenFile, StageIO, StageName } from 'lib/pattern-import/types';
+import type {
+  CardDraft,
+  PatternImportOpenFile,
+  StageIO,
+  StageName,
+} from 'lib/pattern-import/types';
 
 /** The same content identity is used on first open and cancelled-worker reconstruction. */
 export async function directDxfAuthoringOpenFileV1(
@@ -28,6 +37,23 @@ export async function directDxfAuthoringOpenFileV1(
   };
   await bindReviewedAddPointWorkerOpen(file, opened, index);
   return opened;
+}
+
+/** A protected wizard result must be explicitly applied against the same saved row and current review. */
+export async function applyDirectDxfReviewedDraftV1(
+  draft: CardDraft,
+  files: readonly File[],
+  autopilotToken: number | undefined,
+  isCurrent: () => boolean,
+  apply: () => ReturnType<ApplyDraftFn>,
+): ReturnType<ApplyDraftFn> {
+  if (draft.scopes.some((scope) => scope.writerReplay?.retainedLineSplit)) {
+    if (autopilotToken != null)
+      throw new Error('Confirm the saved Add point with the Apply button.');
+    await verifyReviewedAddPointAtApply(files);
+    if (!isCurrent()) throw new Error('The reviewed Add point source changed before Apply.');
+  }
+  return apply();
 }
 
 type Run = <S extends StageName>(stage: S, input: StageIO[S]['in']) => Promise<StageIO[S]['out']>;

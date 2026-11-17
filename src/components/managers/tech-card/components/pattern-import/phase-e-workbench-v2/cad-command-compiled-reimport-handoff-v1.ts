@@ -215,7 +215,14 @@ export function createPatternImportDxfPhaseECadCommandCompiledReimportOwnerV1(
           'reimport-review-already-open',
           'A pattern import review is already open for this Tech Card.',
         );
-      input.openExistingImportReview(request.artifact);
+      try {
+        input.openExistingImportReview(request.artifact);
+      } catch (error) {
+        return blocked(
+          'reimport-request-invalid',
+          error instanceof Error ? error.message : 'The compiled DXF could not enter review.',
+        );
+      }
       return Object.freeze({
         ok: true as const,
         status: 'review-opened' as const,

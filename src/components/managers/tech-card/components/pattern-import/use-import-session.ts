@@ -1,5 +1,6 @@
 import {
   directDxfAuthoringOpenFileV1,
+  applyDirectDxfReviewedDraftV1,
   captureDirectDxfAuthoringV1,
 } from './direct-dxf-authoring-capture-v1';
 // The wizard's state machine (08-CONTRACT §4.2). One session per run; every field of
@@ -1548,13 +1549,20 @@ export function useImportSession(deps: {
           // failed result with its reason — the step never stays 'running'
           let result: ApplyResult;
           try {
-            result = await applyDraft(
+            result = await applyDirectDxfReviewedDraftV1(
               built,
-              (p) => {
-                progress[p.scopeKey] = p.state;
-                setApply({ phase: 'running', progress: { ...progress } });
-              },
-              ev.replaceMatchingFile ? { replaceMatchingFile: true } : undefined,
+              iRef.current.fileList,
+              ev.token,
+              () => sRef.current.draft === built && applyLock.current === lock && !cardStale(),
+              () =>
+                applyDraft(
+                  built,
+                  (p) => {
+                    progress[p.scopeKey] = p.state;
+                    setApply({ phase: 'running', progress: { ...progress } });
+                  },
+                  ev.replaceMatchingFile ? { replaceMatchingFile: true } : undefined,
+                ),
             );
           } catch (e) {
             result = {

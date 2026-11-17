@@ -12,6 +12,7 @@ type Grant = {
   check: () => void;
   atWrite: () => ReviewedAddPointAtWrite;
   active: boolean;
+  beforeApply?: () => Promise<void>;
 };
 export type ReviewedAddPointLease = {
   wire: ReviewedAddPointOpen;
@@ -37,6 +38,7 @@ async function authorize(file: File): Promise<Grant> {
     wire,
     active: false,
     atWrite: () => owner.savedAddPointCurrentWorkerAliasesV1(proof),
+    beforeApply: () => owner.recheckSavedAddPointBeforeApplyV1(proof),
     check: () => {
       if (!owner.isCurrentSavedAddPointReviewClaimV1(proof))
         throw new Error('The reviewed Add point selection is stale.');
@@ -188,4 +190,13 @@ export function takeReviewedAddPointWorkerOpen(
       }
     },
   };
+}
+
+/** Only the original reviewed File can take a protected wizard draft into the ordinary Apply. */
+export async function verifyReviewedAddPointAtApply(files: readonly File[]) {
+  const grant = files.length === 1 && authorized.get(files[0]!);
+  if (!grant) throw new Error('The original reviewed Add point file is unavailable.');
+  const { beforeApply } = await grant;
+  if (!beforeApply) throw new Error('The saved Add point source cannot be revalidated.');
+  await beforeApply();
 }

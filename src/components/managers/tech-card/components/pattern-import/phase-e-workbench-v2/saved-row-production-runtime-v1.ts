@@ -1,3 +1,12 @@
+import { DXF_PRODUCT_SAVED_REPROCESS_REQUEST_V1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
+import {
+  createDxfProductSavedNativeReprocessOwnerV1,
+  DXF_PRODUCT_SAVED_NATIVE_COMPILER_SOURCE_REQUEST_V1,
+} from 'lib/pattern-import/dxf-product-saved-native-reprocess-owner-v1';
+import type {
+  SavedAddPointCurrentV1,
+  SavedAddPointReviewOwner,
+} from './draft-cad-saved-add-point-review-v1';
 import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 
 import type { CardContext } from '../client';
@@ -62,6 +71,10 @@ export type PatternImportDxfPhaseESavedRowProductionRuntimeV1 = Readonly<{
   schemaVersion: typeof PATTERN_IMPORT_DXF_PHASE_E_SAVED_ROW_PRODUCTION_RUNTIME_V1;
   preparationOwner: PreparationOwner;
   consumeConfirmedCompilerSource: PreparationOwner['consumeConfirmedCompilerSource'];
+  prepareSavedAddPointReview?: (
+    row: DxfProductSavedRowIdentityV1,
+    readCurrent: () => Omit<SavedAddPointCurrentV1, 'card'> | null,
+  ) => Promise<SavedAddPointReviewOwner>;
   dispose: () => void;
   snapshot: () => Readonly<{
     disposed: boolean;
@@ -148,10 +161,11 @@ export function createPatternImportDxfPhaseESavedRowRuntimeV1(
     ReturnType<typeof createPatternImportDxfPhaseESavedDxfReprocessHostV1>
   >();
 
-  const createSavedReprocessHost = () => {
+  const createSavedReprocessHost = (requiredStablePiece?: string) => {
     if (disposed) throw new Error('Saved-row production runtime is disposed.');
     const concrete = createPatternImportDxfPhaseESavedDxfReprocessHostV1({
       resolveCard,
+      ...(requiredStablePiece ? { nativeSewingReplay: true, requiredStablePiece } : {}),
       readAuthoritativeRow: deps.snapshot.bridge.readAuthoritativeRow,
       ...(deps.fetch ? { fetch: deps.fetch } : {}),
       ...(crypto ? { crypto } : {}),
@@ -184,6 +198,69 @@ export function createPatternImportDxfPhaseESavedRowRuntimeV1(
     schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_SAVED_ROW_PRODUCTION_RUNTIME_V1,
     preparationOwner,
     consumeConfirmedCompilerSource: preparationOwner.consumeConfirmedCompilerSource,
+    async prepareSavedAddPointReview(row, readCurrent) {
+      const opening = readCurrent(),
+        command = opening?.session.history[0]?.commands[0];
+      if (
+        !opening ||
+        opening.session.cursor !== 1 ||
+        opening.session.history[0]?.commands.length !== 1 ||
+        command?.tool !== 'add-point'
+      )
+        throw new Error('The current saved Draft must contain one confirmed Add point.');
+      const host = createSavedReprocessHost(command.target.pieceId);
+      const signal = new AbortController().signal;
+      const sourceBytes: { current: Uint8Array | null } = { current: null };
+      const owner = createDxfProductSavedNativeReprocessOwnerV1({
+        ...host,
+        async readAuthoritativeRow(expected, signal, progress) {
+          const loaded = await host.readAuthoritativeRow(expected, signal, progress);
+          sourceBytes.current = loaded.bytes.slice();
+          return loaded;
+        },
+      });
+      try {
+        const card = (await resolveCard(row, signal)).card;
+        const read = await owner.run({
+          schemaVersion: DXF_PRODUCT_SAVED_REPROCESS_REQUEST_V1,
+          row,
+        });
+        if (!read.ok) throw new Error(read.blockers[0].detail);
+        if (!sourceBytes.current) throw new Error('The verified saved DXF bytes are unavailable.');
+        const module = await import('./draft-cad-saved-add-point-review-v1');
+        return await module.prepareSavedAddPointReviewV1({
+          sourceOwner: read.sourceOwner,
+          sourceRequest: {
+            schemaVersion: DXF_PRODUCT_SAVED_NATIVE_COMPILER_SOURCE_REQUEST_V1,
+            sourceFileId: read.sourceFileId,
+            sourceSha256: row.sha256,
+            techCardId: row.techCardId,
+            patternLineKey: row.patternLineKey,
+            cardLockVersion: row.cardLockVersion,
+            scopeKey: row.scopeKey,
+            draft: read.draft,
+          },
+          savedBytes: sourceBytes.current.buffer as ArrayBuffer,
+          readCurrent: () => {
+            const current = readCurrent();
+            return !disposed && current ? { ...current, card } : null;
+          },
+          verifyCurrentRow: async () => {
+            if (disposed) throw new Error('The saved Draft runtime has closed.');
+            const currentHost = createSavedReprocessHost();
+            try {
+              await currentHost.readCurrentRowIdentity(row, signal);
+            } finally {
+              currentHost.dispose();
+            }
+          },
+        });
+      } finally {
+        sourceBytes.current?.fill(0);
+        owner.dispose();
+        host.dispose();
+      }
+    },
     dispose() {
       if (disposed) return;
       disposed = true;

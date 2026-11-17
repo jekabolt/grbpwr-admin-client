@@ -1,3 +1,10 @@
+import {
+  compilePatternImportDxfPhaseEDraftCadGeometryV1,
+  type PatternImportDxfPhaseEDraftCadGeometryCompileInputV1,
+  type PatternImportDxfPhaseEDraftCadGeometryCompileResultV1,
+  draftCadCompiledArtifactV1,
+  type PatternImportDxfPhaseEDraftCadGeometryCompileArtifactV1,
+} from './draft-cad-geometry-compile-v1';
 import { markReviewedAddPointFile } from 'lib/pattern-import/worker/reviewed-add-point-main';
 import { readProtectedLineSplit } from 'lib/pattern-import/write/read-protected-line-split';
 import type {
@@ -36,16 +43,18 @@ import {
   type PatternImportDxfPhaseEDraftCadSessionV1,
 } from './draft-cad-session-v1';
 
-type Current = Readonly<{
+export type SavedAddPointCurrentV1 = Readonly<{
   session: PatternImportDxfPhaseEDraftCadSessionV1;
   row: DxfProductSavedRowIdentityV1;
   card: Pick<CardContext, 'techCardId' | 'existingAliases' | 'existingPieces'>;
   generation: number;
   sizeToken: string;
 }>;
-type ReadCurrent = () => Current | null;
+type ReadCurrent = () => SavedAddPointCurrentV1 | null;
 export type SavedAddPointReviewOwner = Readonly<{ kind: 'saved-add-point-review/1' }>;
 type ReviewState = {
+  session: PatternImportDxfPhaseEDraftCadSessionV1;
+  artifact?: PatternImportDxfPhaseEDraftCadGeometryCompileArtifactV1;
   file: File;
   sha256: string;
   block: string;
@@ -53,8 +62,13 @@ type ReviewState = {
   wire: ReviewedAddPointOpen;
   atWrite: () => ReviewedAddPointAtWrite;
   current: () => boolean;
+  verifyCurrentRow?: () => Promise<void>;
 };
 const owners = new WeakMap<SavedAddPointReviewOwner, ReviewState>();
+const compileOwners = new WeakMap<
+  PatternImportDxfPhaseEDraftCadGeometryCompileArtifactV1,
+  SavedAddPointReviewOwner
+>();
 const opened = new WeakMap<File, ReviewState>();
 type NativeReviewProof = Awaited<ReturnType<typeof readProtectedLineSplit>>;
 const checked = new WeakMap<NativeReviewProof, ReviewState>();
@@ -75,12 +89,13 @@ function sameRow(a: DxfProductSavedRowIdentityV1, b: DxfProductSavedRowIdentityV
   );
 }
 
-/** Dormant review producer. `readCurrent` belongs to the card host and must read its current row and Draft snapshot. */
+/** Saved review producer. `readCurrent` belongs to the card host and must read its current row and Draft snapshot. */
 export async function prepareSavedAddPointReviewV1(input: {
   sourceOwner: DxfProductSavedNativeCompilerSourceOwnerV1;
   sourceRequest: DxfProductSavedNativeCompilerSourceRequestV1;
   savedBytes: ArrayBuffer;
   readCurrent: ReadCurrent;
+  verifyCurrentRow?: () => Promise<void>;
 }): Promise<SavedAddPointReviewOwner> {
   const { readCurrent } = input;
   const current = readCurrent();
@@ -264,6 +279,25 @@ export async function prepareSavedAddPointReviewV1(input: {
     'writer did not emit the protected occurrence',
   );
   owners.set(owner, {
+    session,
+    artifact: draftCadCompiledArtifactV1(
+      session,
+      row.techCardId,
+      row.scopeKey,
+      sizeToken,
+      applied.job,
+      written,
+      [
+        {
+          commandId: command.commandId,
+          entityId: command.payload.entityId,
+          tool: command.tool,
+          pieceId: command.target.pieceId,
+          sizeToken,
+          output: 'boundary-point',
+        },
+      ],
+    ),
     file,
     sha256,
     block: blocks[0]!.block,
@@ -294,6 +328,7 @@ export async function prepareSavedAddPointReviewV1(input: {
       });
     },
     current: isCurrent,
+    verifyCurrentRow: input.verifyCurrentRow,
   });
   return owner;
 }
@@ -324,11 +359,82 @@ async function selectedDraft(
   return projected.ok ? { selection, projection: projected.projection } : null;
 }
 
+/** The mounted Draft Compile action takes the protected route for every active Add point. */
+export async function compileDraftForOrdinaryReviewV1(
+  input: PatternImportDxfPhaseEDraftCadGeometryCompileInputV1,
+  prepare?: () => Promise<SavedAddPointReviewOwner>,
+): Promise<PatternImportDxfPhaseEDraftCadGeometryCompileResultV1> {
+  const commands = input.session.history
+    .slice(0, input.session.cursor)
+    .flatMap((tx) => tx.commands);
+  const point = commands.find((command) => command.tool === 'add-point');
+  if (!point) return compilePatternImportDxfPhaseEDraftCadGeometryV1(input);
+  try {
+    requireReview(
+      prepare && commands.length === 1 && input.session.cursor === 1,
+      'compile one confirmed Add point on the current saved size and material',
+    );
+    const artifact = compiledSavedAddPointArtifactV1(await prepare(), input.session);
+    requireReview(
+      artifact.source.revision === input.session.source.revision &&
+        artifact.source.sourceSha256 === input.session.source.phaseD.sourceSha256 &&
+        artifact.source.catalogCanonicalSha256 === input.session.source.catalog.canonicalSha256 &&
+        artifact.source.sizeSelectionCanonicalSha256 ===
+          input.selection.selection.canonicalSha256 &&
+        artifact.scope.scopeKey === input.selection.selection.scopeKey &&
+        artifact.scope.techCardId === input.compileSource.techCardId &&
+        artifact.scope.sizeToken === input.selection.selection.sizeToken &&
+        artifact.compiledFeatures[0]?.commandId === point.commandId,
+      'the protected compile belongs to a different source or command',
+    );
+    return { ok: true, artifact, blockers: [] };
+  } catch (error) {
+    return {
+      ok: false,
+      artifact: null,
+      blockers: [
+        {
+          code: 'add-point-geometry-blocked',
+          tool: point.tool,
+          commandId: point.commandId,
+          detail:
+            error instanceof Error
+              ? error.message
+              : 'The selected native edge could not be verified.',
+        },
+      ],
+    };
+  }
+}
+
+function compiledSavedAddPointArtifactV1(
+  owner: SavedAddPointReviewOwner,
+  session: PatternImportDxfPhaseEDraftCadSessionV1,
+) {
+  const state = owners.get(owner);
+  requireReview(
+    state && state.artifact && state.session === session && state.current(),
+    'the current saved row or Draft changed before staging',
+  );
+  compileOwners.set(state.artifact, owner);
+  return state.artifact;
+}
+
+export function takeCompiledSavedAddPointFileV1(
+  artifact: PatternImportDxfPhaseEDraftCadGeometryCompileArtifactV1,
+) {
+  const owner = compileOwners.get(artifact);
+  requireReview(owner, 'the compiled Add point has no current protected review');
+  compileOwners.delete(artifact);
+  return takeSavedAddPointReviewV1(owner).file;
+}
+
 /** Consumes only the private owner. A copied file, manifest or structural artifact cannot mint intent. */
 export function takeSavedAddPointReviewV1(owner: SavedAddPointReviewOwner) {
   const state = owners.get(owner);
   requireReview(state, 'unknown or previously consumed review');
   owners.delete(owner);
+  delete state.artifact;
   requireReview(state.current(), 'current saved row or Draft selection changed');
   opened.set(state.file, state);
   markReviewedAddPointFile(state.file);
@@ -357,6 +463,14 @@ export function isCurrentSavedAddPointReviewClaimV1(proof: NativeReviewProof): b
   if (current?.current()) return true;
   checked.delete(proof);
   return false;
+}
+
+export async function recheckSavedAddPointBeforeApplyV1(proof: NativeReviewProof) {
+  const state = checked.get(proof);
+  requireReview(state && state.current(), 'saved source or Draft changed before Apply');
+  requireReview(state.verifyCurrentRow, 'the saved row cannot be revalidated before Apply');
+  await state.verifyCurrentRow();
+  requireReview(state.current(), 'saved source or Draft changed during Apply verification');
 }
 
 /** Only a live proof from the actual review File can reach the private worker-client transport. */

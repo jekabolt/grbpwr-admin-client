@@ -121,7 +121,19 @@ async function fixture(stable = false) {
     savedBytes: seed.bytes.buffer,
     readCurrent: () => current,
   };
-  return { current, request, tx, source, initial: session.session };
+  return {
+    current,
+    request,
+    tx,
+    source,
+    initial: session.session,
+    compileInput: {
+      session: current.session,
+      projection: projected.projection,
+      selection: selection.selection,
+      compileSource: createPatternImportDxfPhaseEDraftCadCompileSourceV1(draft)!,
+    },
+  };
 }
 
 it('seals one selected native interval to the exact Draft session, current saved row and compiled File', async () => {
@@ -468,6 +480,39 @@ import {
 import { createDxfProductSavedNativeReprocessOwnerV1 } from 'lib/pattern-import/dxf-product-saved-native-reprocess-owner-v1';
 import { createPatternImportDxfPhaseESavedDxfReprocessHostV1 } from './saved-dxf-reprocess-host-v1';
 
+import { createPatternImportDxfPhaseEDraftCadCompileSourceV1 } from './draft-cad-compile-source-v1';
+import { compileDraftForOrdinaryReviewV1 } from './draft-cad-saved-add-point-review-v1';
+import { createPatternImportDxfPhaseESavedRowRuntimeV1 } from './saved-row-production-runtime-v1';
+import { registerPatternImportDxfPhaseEPatternsFieldCompiledReimportOwnerV1 } from './patterns-field-compiled-reimport-owner-v1';
+import {
+  requestPatternImportDxfPhaseECadCommandCompiledReimportV1,
+  PATTERN_IMPORT_DXF_PHASE_E_CAD_COMMAND_COMPILED_REIMPORT_HANDOFF_V1,
+} from './cad-command-compiled-reimport-handoff-v1';
+import { applyDirectDxfReviewedDraftV1 } from '../direct-dxf-authoring-capture-v1';
+import { stagePatternImportDxfPhaseECadSemanticCompiledArtifactV1 } from './cad-command-semantic-reimport-session-owner-v1';
+function savedUiRuntime(
+  f: Awaited<ReturnType<typeof fixture>>,
+  read: () => DxfProductSavedRowIdentityV1,
+) {
+  return createPatternImportDxfPhaseESavedRowRuntimeV1({
+    selectedOperationNumber: 10,
+    projection: { card: f.current.card, cardLockVersion: f.current.row.cardLockVersion },
+    snapshot: {
+      bridge: {
+        readAuthoritativeRow: async () => {
+          const row = read();
+          return { row, downloadUrl: row.url };
+        },
+      },
+      authorityAdapter: {
+        readAuthoritativeAssembly: async () => {
+          throw Error('unexpected Assembly read');
+        },
+      },
+    },
+    fetch: async () => new Response(f.request.savedBytes.slice(0)),
+  });
+}
 it('reopens the protected saved row through the normal worker and rejects stale or foreign evidence', async () => {
   const f = await fixture(true);
   vi.stubGlobal('Worker', InProcessTransport);
@@ -480,8 +525,46 @@ it('reopens the protected saved row through the normal worker and rejects stale 
       stored = Uint8Array.from(atob(raw!), (c) => c.charCodeAt(0));
       return { url, filename, sizeBytes: stored.length };
     });
+  let authoritative = f.current.row;
+  const runtime = savedUiRuntime(f, () => authoritative);
+  const reviews: File[] = [];
+  const unregister = registerPatternImportDxfPhaseEPatternsFieldCompiledReimportOwnerV1({
+    techCardId: f.current.card.techCardId,
+    readConfirmedImportGeneration: () => f.current.generation,
+    scopeAvailable: (key) => key === f.current.row.scopeKey,
+    reviewAlreadyOpen: () => false,
+    openExistingImportReview: (review) => {
+      expect(review.requireManualApply).toBe(true);
+      reviews.push(...review.files);
+    },
+  });
   try {
-    const { file } = takeSavedAddPointReviewV1(await prepareSavedAddPointReviewV1(f.request));
+    const compile = () => runtime.prepareSavedAddPointReview!(f.current.row, () => f.current);
+    const compiled = await compileDraftForOrdinaryReviewV1(f.compileInput, compile);
+    if (!compiled.ok) throw Error(JSON.stringify(compiled.blockers));
+    expect(
+      await stagePatternImportDxfPhaseECadSemanticCompiledArtifactV1(compiled.artifact, {
+        confirmedImportGenerationAtCompile: f.current.generation,
+      }),
+    ).toBe(true);
+    const handoff = {
+      schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_CAD_COMMAND_COMPILED_REIMPORT_HANDOFF_V1,
+      artifact: compiled.artifact,
+      confirmedImportGenerationAtCompile: f.current.generation,
+      cadSessionCursorAtCompile: f.current.session.cursor,
+    };
+    expect(
+      requestPatternImportDxfPhaseECadCommandCompiledReimportV1({
+        ...handoff,
+        artifact: { ...compiled.artifact },
+      }).ok,
+    ).toBe(false);
+    expect(requestPatternImportDxfPhaseECadCommandCompiledReimportV1(handoff).ok).toBe(true);
+    expect(requestPatternImportDxfPhaseECadCommandCompiledReimportV1(handoff).ok).toBe(false);
+    expect(reviews).toHaveLength(1);
+    expect(upload).not.toHaveBeenCalled();
+    const file = reviews[0]!;
+    expect(await file.text()).toBe(compiled.artifact.dxfText);
     const card = structuredClone(f.current.card),
       prior = f.current.row,
       scope = card.scopes[0]!;
@@ -502,7 +585,7 @@ it('reopens the protected saved row through the normal worker and rejects stale 
         bomLineKey: scope.bomLineKey,
       })),
     };
-    const applied = await createCardApply({
+    const apply = createCardApply({
       read: () => live,
       write: (path, value) => {
         if (!Array.isArray(value)) throw Error('unexpected form edit');
@@ -531,7 +614,23 @@ it('reopens the protected saved row through the normal worker and rejects stale 
         };
         return 'ok';
       },
-    })(draft);
+    });
+    const submit = (token?: number, current = true) =>
+      applyDirectDxfReviewedDraftV1(
+        draft,
+        [file],
+        token,
+        () => current,
+        () => apply(draft),
+      );
+    await expect(submit(2)).rejects.toThrow('Apply button');
+    const original = authoritative;
+    authoritative = { ...original, revision: original.revision + 1 };
+    await expect(submit()).rejects.toThrow();
+    authoritative = original;
+    await expect(submit(undefined, false)).rejects.toThrow('changed');
+    expect(upload).not.toHaveBeenCalled();
+    const applied = await submit();
     expect(applied.ok && applied.commitReceipt, JSON.stringify(applied)).toBeTruthy();
     const row = savedRow!;
     expect(row.revision).toBeGreaterThan(prior.revision);
@@ -671,7 +770,62 @@ it('reopens the protected saved row through the normal worker and rejects stale 
       ).ok,
     ).toBe(false);
   } finally {
+    unregister();
+    runtime.dispose();
     upload.mockRestore();
+    vi.unstubAllGlobals();
+    f.source.dispose();
+  }
+});
+
+it('blocks the Draft Compile action on mixed history, missing current row, and a copied recorded session', async () => {
+  const f = await fixture(true);
+  try {
+    const extra = recordPatternImportDxfPhaseEDraftCadTransactionV1(f.current.session, {
+      transactionId: 'other',
+      label: 'Other command',
+      commands: [
+        {
+          ...f.tx.commands[0]!,
+          commandId: 'other-command',
+          payload: { ...f.tx.commands[0]!.payload, entityId: 'other-entity' },
+        },
+      ],
+    });
+    if (!extra.ok) throw Error('expected recorded transaction');
+    const prepare = vi.fn(() => prepareSavedAddPointReviewV1(f.request));
+    expect(
+      (
+        await compileDraftForOrdinaryReviewV1(
+          { ...f.compileInput, session: extra.session },
+          prepare,
+        )
+      ).ok,
+    ).toBe(false);
+    expect(prepare).not.toHaveBeenCalled();
+    expect((await compileDraftForOrdinaryReviewV1(f.compileInput)).ok).toBe(false);
+    const copy = await compileDraftForOrdinaryReviewV1(
+      { ...f.compileInput, session: structuredClone(f.current.session) },
+      prepare,
+    );
+    expect(copy.ok).toBe(false);
+  } finally {
+    f.source.dispose();
+  }
+});
+
+it('blocks the compiled review when ordinary saved semantics would rename the selected identity', async () => {
+  const f = await fixture(false);
+  vi.stubGlobal('Worker', InProcessTransport);
+  const runtime = savedUiRuntime(f, () => f.current.row);
+  try {
+    const result = await compileDraftForOrdinaryReviewV1(f.compileInput, () =>
+      runtime.prepareSavedAddPointReview!(f.current.row, () => f.current),
+    );
+    expect(result.ok).toBe(false);
+    expect(result.artifact).toBeNull();
+  } finally {
+    runtime.dispose();
     vi.unstubAllGlobals();
     f.source.dispose();
   }

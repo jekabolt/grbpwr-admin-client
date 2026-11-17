@@ -1707,11 +1707,11 @@ export function PatternsField({
         readPatternImportDxfPhaseECardSessionV1(techCardId)?.importGeneration ?? 0,
       scopeAvailable: (scopeKey) => Boolean(resolveScope(scopeKey)),
       reviewAlreadyOpen: () => importingRef.current !== null,
-      openExistingImportReview: ({ scopeKey, files }) => {
+      openExistingImportReview: ({ scopeKey, files, requireManualApply }) => {
         const scope = resolveScope(scopeKey);
         if (!scope) return;
         setPickedKey(scope.key);
-        setImporting({ scopeKey: scope.key, files: [...files] });
+        setImporting({ scopeKey: scope.key, files: [...files], requireManualApply });
       },
     });
   }, [techCardId]);
