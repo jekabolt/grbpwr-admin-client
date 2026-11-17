@@ -115,11 +115,10 @@ export function shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
   exactNSessionAvailable: boolean;
   savedProjectionBlockerCode: string | null;
 }>): boolean {
-  return (
-    workbenchOpen &&
-    !exactNSessionAvailable &&
-    savedProjectionBlockerCode === 'saved-operation-not-two-seam'
-  );
+  const operationCanBeCompletedOnTable =
+    savedProjectionBlockerCode === 'saved-operation-missing' ||
+    savedProjectionBlockerCode === 'saved-operation-not-two-seam';
+  return workbenchOpen && !exactNSessionAvailable && operationCanBeCompletedOnTable;
 }
 
 export const PATTERN_IMPORT_DXF_PHASE_E_ASSEMBLY_ORDER_ENTRY_CONTRACT_V1 = Object.freeze({
