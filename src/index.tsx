@@ -135,6 +135,13 @@ const ModelOpenReferencePreviewDevPage = import.meta.env.DEV
       ),
     )
   : null;
+const AssemblyCarrierDevPage = import.meta.env.DEV
+  ? lazyRoute(() =>
+      import(
+        'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/assembly-carrier-dev-page'
+      ).then((m) => ({ default: m.AssemblyCarrierDevPage })),
+    )
+  : null;
 const ModelFormPersonalizedPreviewDevPage = import.meta.env.DEV
   ? lazyRoute(() =>
       import('components/managers/model/components/model-form-personalized-preview-dev-page').then(
@@ -417,6 +424,9 @@ const app = (
                 <Route path={ROUTES.login} element={<LoginBlock />} />
                 <Route path='/' element={<ProtectedLayout />}>
                   <Route path={ROUTES.main} element={<AnalyticsHome />} />
+                  {import.meta.env.DEV && AssemblyCarrierDevPage ? (
+                    <Route path='/dev/assembly-carrier' element={<AssemblyCarrierDevPage />} />
+                  ) : null}
                   {/* Без `disabled`: страница библиотеки — единственное место, где снимки можно
                       выбрать пачкой и удалить одним действием. Флаг глушил `toggleMedia`, то есть
                       выбор на ней был мёртв физически, и чистка после съёмки шла по одному кадру. */}
