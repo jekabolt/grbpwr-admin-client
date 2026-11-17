@@ -98,7 +98,10 @@ export type SavedFullAssemblyCompileEvidenceV1 = Readonly<{
     contourId: string;
     sha256: string;
   }>[];
-  sourceCutHandoffSha256: string;
+  sourceCutHandoffSha256: string | null;
+  nativeSewingHandoffSha256?: string;
+  sourceSurface?: 'explicit-native-drawn-sewing';
+  originalSourceSha256?: string;
   sewingHandoffSha256: string;
   fullAssemblySnapshotSha256: string;
   serverAssemblyRevision: string;
@@ -541,7 +544,14 @@ export function createSavedFullAssemblyCompileSessionV1(): SavedFullAssemblyComp
             'Genuine saved source row does not match all eight expected fields.',
           );
         const source = consumed.value;
+        const nativeSewing = source.nativeSewingReplay;
+        if (nativeSewing && !nativeSewing.replayReady)
+          fail('native-sewing-unavailable', nativeSewing.blockers.map((b) => b.detail).join('; '));
         const draft = capture(source.draft);
+        if (nativeSewing?.replayReady) {
+          draft.dxfProvenance = capture(nativeSewing.pipeline);
+          draft.dxfPhaseDReplay = capture(nativeSewing.replay);
+        }
         const before = await read();
         check();
         const chosen = await stage(() =>
@@ -595,11 +605,21 @@ export function createSavedFullAssemblyCompileSessionV1(): SavedFullAssemblyComp
           fail('writer-replay-mismatch', 'Writer clock/card/scope differs.');
         const written = writeDxfDetailed(replay.job, { now: () => new Date(date.getTime()) });
         check();
-        const writtenBytes = encoder.encode(written.dxfText);
+        // The existing saved/foreign owners hash the exact Latin-1 DXF byte representation.
+        const writtenBytes = Uint8Array.from(written.dxfText, (c) => {
+          const value = c.charCodeAt(0);
+          if (value > 255)
+            fail('writer-replay-mismatch', 'Writer output is not byte-preserving Latin-1.');
+          return value;
+        });
         const writerSha256 = await stage(() => hash(writtenBytes));
         if (
-          writerSha256 !== source.row.sha256 ||
-          writtenBytes.byteLength !== source.row.sizeBytes ||
+          (source.reconstruction
+            ? source.reconstruction.kind !== 'foreign-saved-dxf' ||
+              source.reconstruction.originalSourceSha256 !== source.row.sha256 ||
+              writerSha256 !== source.reconstruction.canonicalWriterSha256
+            : writerSha256 !== source.row.sha256 ||
+              writtenBytes.byteLength !== source.row.sizeBytes) ||
           canonical(written.manifest) !== canonical(scope.manifest)
         )
           fail(
@@ -679,9 +699,11 @@ export function createSavedFullAssemblyCompileSessionV1(): SavedFullAssemblyComp
         const unsigned = {
           documentId: request.intent.documentId,
           revision: request.intent.revision,
-          exporterId: 'grbpwr.pattern-import.writeDxfDetailed',
+          exporterId: nativeSewing
+            ? 'grbpwr.saved-native-drawn-sewing'
+            : 'grbpwr.pattern-import.writeDxfDetailed',
           exporterVersion: SAVED_FULL_ASSEMBLY_COMPILE_SESSION_V1,
-          exportSha256: writerSha256,
+          exportSha256: nativeSewing ? source.row.sha256 : writerSha256,
           manifestIdentitySha256: digests.value.manifestIdentitySha256,
           selectedGeometrySha256: digests.value.selectedGeometrySha256,
           manifestCreatedAt: manifest.createdAt,
@@ -726,7 +748,7 @@ export function createSavedFullAssemblyCompileSessionV1(): SavedFullAssemblyComp
             .filter((p) => p.materialId === material.id && p.materialRevision === material.revision)
             .map((p) => p.pieceId),
         }));
-        const cut = await stage(() =>
+        const surface = await stage(() =>
           buildPatternImportDxfPipelineHandoffV1({
             schemaVersion: PATTERN_IMPORT_DXF_PIPELINE_HANDOFF_V1,
             sourceFileId: source.sourceFileId,
@@ -734,75 +756,82 @@ export function createSavedFullAssemblyCompileSessionV1(): SavedFullAssemblyComp
             manifest,
             pieces: allPieces,
             binding: { ...unsigned, artifactBindingSha256: binding.artifactBindingSha256 },
-            physicalSurface: { mode: 'cut-surface', seamAllowancePhysical: true },
+            physicalSurface: nativeSewing
+              ? intent.physicalSurface
+              : { mode: 'cut-surface', seamAllowancePhysical: true },
             seams,
             operations,
             materials,
           }),
         );
-        if (!cut.ok) fail('cut-handoff-blocked', cut.blockers.map((b) => b.detail).join('; '));
+        if (!surface.ok)
+          fail('cut-handoff-blocked', surface.blockers.map((b) => b.detail).join('; '));
         // Prove native coordinates/IDs first. Coordinates only confirm already-selected exact IDs.
-        sampling(cut.handoff, native, intent.sizeToken, intent.compile.targetEdgeMm);
-        if (m.cutLayerIsFinal !== true || m.allowanceMm !== 0 || Object.is(m.allowanceMm, -0))
-          fail('unsupported-cut-surface', 'Exact saved manifest allowance zero is required.');
+        sampling(surface.handoff, native, intent.sizeToken, intent.compile.targetEdgeMm);
         const zeroAllowanceEquivalence: { pieceId: string; contourId: string; sha256: string }[] =
           [];
-        for (const piece of cut.handoff.pieces) {
-          const matches = replay.job.pieces.filter((p) => p.identity === piece.id);
-          const manifestPieces = m.pieces.filter((p) => p.identity === piece.id);
-          const p = matches[0],
-            sizes = p?.sizes.filter((s) => s.sizeToken === intent.sizeToken) ?? [];
-          const s = sizes[0],
-            c = piece.contours[0];
-          if (
-            matches.length !== 1 ||
-            manifestPieces.length !== 1 ||
-            manifestPieces[0].allowanceMm !== 0 ||
-            Object.is(manifestPieces[0].allowanceMm, -0) ||
-            !p ||
-            p.allowance.meaning !== 'cut' ||
-            p.allowance.allowanceMm !== 0 ||
-            Object.is(p.allowance.allowanceMm, -0) ||
-            sizes.length !== 1 ||
-            !s?.seam ||
-            s.cutLoops?.length ||
-            piece.contours.length !== 1 ||
-            c.role !== 'cut-boundary' ||
-            canonical(s.cut) !== canonical(s.seam) ||
-            canonical(s.cut.map((v) => [v.x, v.y])) !==
-              canonical(c.vertices.map((v) => v.positionMm))
-          )
-            fail(
-              'unsupported-cut-surface',
-              'Exact ordered zero-allowance cut/seam/native equivalence is missing.',
-            );
-          const sha256 = await stage(() =>
-            hash(
-              encoder.encode(
-                `saved-full-assembly-zero-allowance/1\0${canonical({ pieceId: piece.id, contour: c, sizeToken: intent.sizeToken, cut: s.cut, seam: s.seam, nativeEdges: native.edges.filter((e) => e.pieceId === piece.id) })}`,
+        if (!nativeSewing) {
+          if (m.cutLayerIsFinal !== true || m.allowanceMm !== 0 || Object.is(m.allowanceMm, -0))
+            fail('unsupported-cut-surface', 'Exact saved manifest allowance zero is required.');
+          for (const piece of surface.handoff.pieces) {
+            const matches = replay.job.pieces.filter((p) => p.identity === piece.id);
+            const manifestPieces = m.pieces.filter((p) => p.identity === piece.id);
+            const p = matches[0],
+              sizes = p?.sizes.filter((s) => s.sizeToken === intent.sizeToken) ?? [];
+            const s = sizes[0],
+              c = piece.contours[0];
+            if (
+              matches.length !== 1 ||
+              manifestPieces.length !== 1 ||
+              manifestPieces[0].allowanceMm !== 0 ||
+              Object.is(manifestPieces[0].allowanceMm, -0) ||
+              !p ||
+              p.allowance.meaning !== 'cut' ||
+              p.allowance.allowanceMm !== 0 ||
+              Object.is(p.allowance.allowanceMm, -0) ||
+              sizes.length !== 1 ||
+              !s?.seam ||
+              s.cutLoops?.length ||
+              piece.contours.length !== 1 ||
+              c.role !== 'cut-boundary' ||
+              canonical(s.cut) !== canonical(s.seam) ||
+              canonical(s.cut.map((v) => [v.x, v.y])) !==
+                canonical(c.vertices.map((v) => v.positionMm))
+            )
+              fail(
+                'unsupported-cut-surface',
+                'Exact ordered zero-allowance cut/seam/native equivalence is missing.',
+              );
+            const sha256 = await stage(() =>
+              hash(
+                encoder.encode(
+                  `saved-full-assembly-zero-allowance/1\0${canonical({ pieceId: piece.id, contour: c, sizeToken: intent.sizeToken, cut: s.cut, seam: s.seam, nativeEdges: native.edges.filter((e) => e.pieceId === piece.id) })}`,
+                ),
               ),
-            ),
-          );
-          zeroAllowanceEquivalence.push({ pieceId: piece.id, contourId: c.id, sha256 });
+            );
+            zeroAllowanceEquivalence.push({ pieceId: piece.id, contourId: c.id, sha256 });
+          }
         }
-        const sewing = await stage(() =>
-          buildDxfAssemblyHandoffV1({
-            schemaVersion: cut.handoff.schemaVersion,
-            source: {
-              ...cut.handoff.source,
-              provenanceKind: 'untrusted-product',
-              corpusEntryId: null,
-            },
-            physicalSurface: intent.physicalSurface,
-            pieces: cut.handoff.pieces.map((p) => ({
-              ...p,
-              contours: p.contours.map((c) => ({ ...c, role: 'sewing-boundary' as const })),
-            })),
-            seams,
-            operations,
-            materials,
-          }),
-        );
+        const sewing = nativeSewing
+          ? { ok: true as const, value: surface.handoff }
+          : await stage(() =>
+              buildDxfAssemblyHandoffV1({
+                schemaVersion: surface.handoff.schemaVersion,
+                source: {
+                  ...surface.handoff.source,
+                  provenanceKind: 'untrusted-product',
+                  corpusEntryId: null,
+                },
+                physicalSurface: intent.physicalSurface,
+                pieces: surface.handoff.pieces.map((p) => ({
+                  ...p,
+                  contours: p.contours.map((c) => ({ ...c, role: 'sewing-boundary' as const })),
+                })),
+                seams,
+                operations,
+                materials,
+              }),
+            );
         if (!sewing.ok) fail('sewing-handoff-blocked', sewing.errors.join('; '));
         const graph: DxfExactAssemblyGraphV1 = {
           schemaVersion: DXF_EXACT_ASSEMBLY_GRAPH_V1,
@@ -865,7 +894,14 @@ export function createSavedFullAssemblyCompileSessionV1(): SavedFullAssemblyComp
             authoringCatalogSha256: catalog.catalog.canonicalSha256,
             nativeBinding: native.binding,
             zeroAllowanceEquivalence,
-            sourceCutHandoffSha256: cut.handoff.seal.canonicalSha256,
+            sourceCutHandoffSha256: nativeSewing ? null : surface.handoff.seal.canonicalSha256,
+            ...(nativeSewing
+              ? {
+                  nativeSewingHandoffSha256: surface.handoff.seal.canonicalSha256,
+                  sourceSurface: 'explicit-native-drawn-sewing' as const,
+                  originalSourceSha256: source.row.sha256,
+                }
+              : {}),
             sewingHandoffSha256: sewing.value.seal.canonicalSha256,
             fullAssemblySnapshotSha256: before.snapshotSha256,
             serverAssemblyRevision: before.serverAssemblyRevision,

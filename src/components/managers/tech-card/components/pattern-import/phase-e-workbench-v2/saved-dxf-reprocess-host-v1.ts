@@ -1,3 +1,4 @@
+import { DXF_NATIVE_SEWING_REPLAY_REQUEST_V1 } from 'lib/pattern-import/dxf-native-sewing-replay-v1';
 import { readManifestBytes } from 'lib/pattern-import/manifest';
 import {
   DXF_PIPELINE_PROVENANCE_REQUEST_V1,
@@ -37,6 +38,8 @@ export type PatternImportDxfPhaseESavedDxfAuthorityReadV1 = Readonly<{
 }>;
 
 export type PatternImportDxfPhaseESavedDxfReprocessHostDepsV1 = Readonly<{
+  /** Explicit physical-source opt-in; content is later verified against native source authority. */
+  nativeSewingReplay?: boolean;
   /** Current GetTechCard projection, explicitly rebound to the row's optimistic card lock. */
   resolveCard: (
     expected: DxfProductSavedRowIdentityV1,
@@ -713,6 +716,14 @@ async function reprocessSavedDxf(
       11,
       'building exact topology replay',
     )) as DxfProductPhaseDReplayStageOutputV1;
+    const nativeSewingReplay = deps.nativeSewingReplay
+      ? await run(
+          'dxf-native-sewing-replay',
+          { schemaVersion: DXF_NATIVE_SEWING_REPLAY_REQUEST_V1 },
+          11,
+          'reading exact native sewing paths',
+        )
+      : undefined;
     const written = await run(
       'write',
       {
@@ -737,6 +748,7 @@ async function reprocessSavedDxf(
     return Object.freeze({
       row: Object.freeze({ ...input.row }),
       draft: restorePatternImportDxfSavedWriterReplayV1(draft, manifest),
+      ...(nativeSewingReplay ? { nativeSewingReplay } : {}),
     });
   } finally {
     signal.removeEventListener('abort', cancel);

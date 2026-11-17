@@ -1,3 +1,9 @@
+import type { DxfNativeSewingReplayStageOutputV1 } from './dxf-native-sewing-replay-v1';
+import {
+  createDxfProductSavedForeignReprocessOwnerV1,
+  type DxfProductSavedForeignReprocessRequestV1,
+  type DxfProductSavedForeignReprocessBlockerV1,
+} from './dxf-product-saved-foreign-reprocess-owner-v1';
 import {
   readDxfWithSourceNativeStraightEdgeAuthorityV1,
   type DxfSourceNativeStraightEdgeBlockerCodeV1,
@@ -46,6 +52,7 @@ export const DXF_PRODUCT_SAVED_NATIVE_REPROCESS_CLAIMS_V1 = Object.freeze({
 export type DxfProductSavedNativeReprocessBlockerV1 = Readonly<{
   code:
     | DxfProductSavedReprocessBlockerV1['code']
+    | DxfProductSavedForeignReprocessBlockerV1['code']
     | 'source-native-read-blocked'
     | 'source-native-binding-mismatch';
   detail: string;
@@ -74,6 +81,14 @@ export type DxfProductSavedNativeCompilerSourceProjectionV1 = Readonly<{
   sourceFileId: string;
   draft: CardDraft;
   nativeRead: DxfSourceNativeStraightEdgeReadV1;
+  /** Detached content only; downstream native V3 binding must authenticate every selected edge. */
+  nativeSewingReplay?: DxfNativeSewingReplayStageOutputV1;
+  /** Present only after the existing foreign-row owner independently validates canonical replay. */
+  reconstruction?: Readonly<{
+    kind: 'foreign-saved-dxf';
+    originalSourceSha256: string;
+    canonicalWriterSha256: string;
+  }>;
 }>;
 
 export type DxfProductSavedNativeCompilerSourceResultV1 =
@@ -93,6 +108,12 @@ export type DxfProductSavedNativeCompilerSourceResultV1 =
       ];
     }>;
 
+type NativeReprocessClaims = Readonly<
+  Omit<typeof DXF_PRODUCT_SAVED_NATIVE_REPROCESS_CLAIMS_V1, 'sourceDecodePasses'> & {
+    sourceDecodePasses: 2 | 3 | null;
+  }
+>;
+
 export type DxfProductSavedNativeReprocessResultV1 =
   | Readonly<{
       ok: true;
@@ -101,8 +122,10 @@ export type DxfProductSavedNativeReprocessResultV1 =
       sourceFileId: string;
       draft: CardDraft;
       sourceOwner: DxfProductSavedNativeCompilerSourceOwnerV1;
+      /** Catalog content only; sourceRequest must still retain the original draft identity. */
+      nativeSewingReplay?: DxfNativeSewingReplayStageOutputV1;
       blockers: readonly [];
-      claims: typeof DXF_PRODUCT_SAVED_NATIVE_REPROCESS_CLAIMS_V1;
+      claims: NativeReprocessClaims;
     }>
   | Readonly<{
       ok: false;
@@ -112,7 +135,7 @@ export type DxfProductSavedNativeReprocessResultV1 =
       draft: null;
       sourceOwner: null;
       blockers: readonly [DxfProductSavedNativeReprocessBlockerV1];
-      claims: typeof DXF_PRODUCT_SAVED_NATIVE_REPROCESS_CLAIMS_V1;
+      claims: NativeReprocessClaims;
     }>;
 
 type NativeFailure = Readonly<{
@@ -127,6 +150,14 @@ type CompilerSourceState = {
   sourceFileId: string;
   draft: CardDraft;
   nativeRead: DxfSourceNativeStraightEdgeReadV1;
+  /** Detached content only; downstream native V3 binding must authenticate every selected edge. */
+  nativeSewingReplay?: DxfNativeSewingReplayStageOutputV1;
+  /** Present only after the existing foreign-row owner independently validates canonical replay. */
+  reconstruction?: Readonly<{
+    kind: 'foreign-saved-dxf';
+    originalSourceSha256: string;
+    canonicalWriterSha256: string;
+  }>;
 };
 
 const compilerSourceState = new WeakMap<object, CompilerSourceState>();
@@ -212,6 +243,8 @@ export function consumeDxfProductSavedNativeCompilerSourceV1(
       sourceFileId: state.sourceFileId,
       draft: state.draft,
       nativeRead: state.nativeRead,
+      ...(state.nativeSewingReplay ? { nativeSewingReplay: state.nativeSewingReplay } : {}),
+      ...(state.reconstruction ? { reconstruction: state.reconstruction } : {}),
     }),
     blockers: Object.freeze([]) as readonly [],
   });
@@ -233,11 +266,41 @@ function nativeBindingFailure(detail: string): NativeFailure {
  * decodes the same verified source independently because a module-private WeakMap capability cannot
  * cross the worker boundary. That remaining optimization is isolated by this contract.
  */
-export function createDxfProductSavedNativeReprocessOwnerV1(host: DxfProductSavedReprocessHostV1) {
+type NativeBaseResult =
+  | Readonly<{
+      ok: true;
+      row: DxfProductSavedRowIdentityV1;
+      sourceFileId: string;
+      draft: CardDraft;
+      canonicalWriterSha256?: string;
+    }>
+  | Readonly<{
+      ok: false;
+      row: DxfProductSavedRowIdentityV1 | null;
+      sourceFileId: string | null;
+      blockers: readonly [
+        { code: DxfProductSavedNativeReprocessBlockerV1['code']; detail: string },
+      ];
+    }>;
+
+function createNativeReprocessOwner<Request>(
+  host: DxfProductSavedReprocessHostV1,
+  createBase: (wrapped: DxfProductSavedReprocessHostV1) => {
+    run: (
+      request: Request,
+      progress?: (value: DxfProductSavedReprocessProgressV1) => void,
+    ) => Promise<NativeBaseResult>;
+    cancel: () => void;
+    dispose: () => void;
+  },
+) {
   let disposed = false;
   let running = false;
+  let publicationEpoch = 0;
   let activeNativeRead: DxfSourceNativeStraightEdgeReadV1 | null = null;
   let activeNativeFailure: NativeFailure | null = null;
+  let activeNativeSewing: DxfNativeSewingReplayStageOutputV1 | undefined;
+  const readActiveSewing = () => activeNativeSewing;
   // Keep the callback-owned assignment opaque to TypeScript's local control-flow narrowing. The
   // wrapped async reprocess callback publishes this value before baseOwner.run() resolves, but a
   // direct read after assigning null above is otherwise incorrectly narrowed to null/never.
@@ -292,7 +355,34 @@ export function createDxfProductSavedNativeReprocessOwnerV1(host: DxfProductSave
       }
 
       try {
-        return await host.reprocess(input, signal, onProgress);
+        const rebuilt = await host.reprocess(input, signal, onProgress);
+        const descriptor = Object.getOwnPropertyDescriptor(rebuilt, 'nativeSewingReplay');
+        if (descriptor) {
+          if (!('value' in descriptor) || !descriptor.enumerable)
+            throw new Error('Native sewing carrier must be own data.');
+          const content = structuredClone(descriptor.value) as DxfNativeSewingReplayStageOutputV1;
+          if (!content || content.schemaVersion !== 'dxf-native-sewing-replay/1')
+            throw new Error('Invalid native sewing replay.');
+          if (
+            content.replayReady &&
+            (content.pipeline.contentBinding?.sourceFileId !== input.sourceFileId ||
+              content.pipeline.contentBinding?.sourceSha256 !== input.row.sha256 ||
+              content.replay.carrier.sourceFileId !== input.sourceFileId ||
+              content.replay.carrier.sourceSha256 !== input.row.sha256)
+          )
+            throw new Error('Native sewing replay differs from original saved bytes.');
+          const seen = new WeakSet<object>();
+          const freeze = (value: unknown): void => {
+            if (!value || typeof value !== 'object' || Object.isFrozen(value) || seen.has(value))
+              return;
+            seen.add(value);
+            for (const child of Object.values(value)) freeze(child);
+            Object.freeze(value);
+          };
+          freeze(content);
+          activeNativeSewing = content;
+        }
+        return rebuilt;
       } catch (error) {
         activeNativeRead = null;
         throw error;
@@ -302,10 +392,10 @@ export function createDxfProductSavedNativeReprocessOwnerV1(host: DxfProductSave
     ...(host.crypto ? { crypto: host.crypto } : {}),
     dispose: () => host.dispose?.(),
   });
-  const baseOwner = createDxfProductSavedReprocessOwnerV1(wrappedHost);
+  const baseOwner = createBase(wrappedHost);
 
   const run = async (
-    request: DxfProductSavedReprocessRequestV1,
+    request: Request,
     onProgress?: (progress: DxfProductSavedReprocessProgressV1) => void,
   ): Promise<DxfProductSavedNativeReprocessResultV1> => {
     if (disposed)
@@ -320,10 +410,17 @@ export function createDxfProductSavedNativeReprocessOwnerV1(host: DxfProductSave
       });
 
     running = true;
+    const expectedEpoch = ++publicationEpoch;
     activeNativeRead = null;
     activeNativeFailure = null;
+    activeNativeSewing = undefined;
     try {
       const base = await baseOwner.run(request, onProgress);
+      if (disposed || expectedEpoch !== publicationEpoch)
+        return blocked({
+          code: 'cancelled',
+          detail: 'Saved native source was cancelled before publication.',
+        });
       if (!base.ok) {
         const nativeFailure = activeNativeFailure;
         return blocked(nativeFailure ?? base.blockers[0], base.row, base.sourceFileId);
@@ -358,6 +455,16 @@ export function createDxfProductSavedNativeReprocessOwnerV1(host: DxfProductSave
         sourceFileId: base.sourceFileId,
         draft: base.draft,
         nativeRead,
+        ...(readActiveSewing() ? { nativeSewingReplay: readActiveSewing() } : {}),
+        ...(base.canonicalWriterSha256
+          ? {
+              reconstruction: Object.freeze({
+                kind: 'foreign-saved-dxf' as const,
+                originalSourceSha256: base.row.sha256,
+                canonicalWriterSha256: base.canonicalWriterSha256,
+              }),
+            }
+          : {}),
       });
 
       return Object.freeze({
@@ -367,12 +474,21 @@ export function createDxfProductSavedNativeReprocessOwnerV1(host: DxfProductSave
         sourceFileId: base.sourceFileId,
         draft: base.draft,
         sourceOwner,
+        ...(readActiveSewing() ? { nativeSewingReplay: readActiveSewing() } : {}),
         blockers: Object.freeze([]) as readonly [],
-        claims: DXF_PRODUCT_SAVED_NATIVE_REPROCESS_CLAIMS_V1,
+        claims: Object.freeze({
+          ...DXF_PRODUCT_SAVED_NATIVE_REPROCESS_CLAIMS_V1,
+          sourceDecodePasses: readActiveSewing()
+            ? readActiveSewing()?.replayReady
+              ? (3 as const)
+              : null
+            : (2 as const),
+        }),
       });
     } finally {
       activeNativeRead = null;
       activeNativeFailure = null;
+      activeNativeSewing = undefined;
       running = false;
     }
   };
@@ -382,17 +498,38 @@ export function createDxfProductSavedNativeReprocessOwnerV1(host: DxfProductSave
     claims: DXF_PRODUCT_SAVED_NATIVE_REPROCESS_CLAIMS_V1,
     run,
     cancel() {
+      publicationEpoch += 1;
       baseOwner.cancel();
     },
     dispose() {
       if (disposed) return;
       disposed = true;
+      publicationEpoch += 1;
       baseOwner.dispose();
       activeNativeRead = null;
       activeNativeFailure = null;
+      activeNativeSewing = undefined;
     },
     snapshot() {
       return Object.freeze({ disposed, running });
     },
   });
+}
+
+/** Original byte-exact product-writer route; its checks are unchanged. */
+export function createDxfProductSavedNativeReprocessOwnerV1(host: DxfProductSavedReprocessHostV1) {
+  return createNativeReprocessOwner<DxfProductSavedReprocessRequestV1>(
+    host,
+    createDxfProductSavedReprocessOwnerV1,
+  );
+}
+
+/** Original saved bytes remain native authority; canonical reconstruction is a separate artifact. */
+export function createDxfProductSavedForeignNativeReprocessOwnerV1(
+  host: DxfProductSavedReprocessHostV1,
+) {
+  return createNativeReprocessOwner<DxfProductSavedForeignReprocessRequestV1>(
+    host,
+    createDxfProductSavedForeignReprocessOwnerV1,
+  );
 }

@@ -1,3 +1,4 @@
+import type { DxfNativeSewingReplayStageOutputV1 } from './dxf-native-sewing-replay-v1';
 import {
   PATTERN_IMPORT_DXF_PRODUCT_WRITER_REPLAY_CARRIER_V1,
   PATIMPORT,
@@ -119,7 +120,13 @@ export type DxfProductSavedReprocessHostV1 = Readonly<{
     }>,
     signal: AbortSignal,
     onProgress: (done: number, total: number, note?: string) => void,
-  ) => Promise<Readonly<{ row: DxfProductSavedRowIdentityV1; draft: CardDraft }>>;
+  ) => Promise<
+    Readonly<{
+      row: DxfProductSavedRowIdentityV1;
+      draft: CardDraft;
+      nativeSewingReplay?: DxfNativeSewingReplayStageOutputV1;
+    }>
+  >;
   /** Reads row metadata again after reconstruction so a stale card lock/revision cannot win. */
   readCurrentRowIdentity: (
     expected: DxfProductSavedRowIdentityV1,
