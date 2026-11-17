@@ -43,6 +43,75 @@ vi.mock('lib/cloth/body/makehuman-uniform-waist-hip-modes-v1', () => ({
 afterEach(() => vi.clearAllMocks());
 
 describe('observed physical host reaches actual runtime admission', () => {
+  it.each(['panel-stop', 'caller-abort'] as const)(
+    'preserves the source/preview cancellation boundary on first local-frame publication: %s',
+    async (action) => {
+      await withObservedFirstSaveFixtureV3(async (f) => {
+        const body = createSavedModelDisplayedTriangleBodySessionV2(f.body.readCurrentModel);
+        await body.observe(f.body.input);
+        const host = createSavedObservedPhysicalHostV1({ row: f.seed.row, bodySession: body });
+        const caller = new AbortController();
+        let firstReady = false;
+        let compilingPublications = 0;
+        let publishedCompile: ReturnType<typeof host.latestCompile> = null;
+        const unsubscribe = host.subscribe(() => {
+          const snapshot = host.getSnapshot();
+          if (snapshot.status === 'compiling') compilingPublications += 1;
+          if (snapshot.status !== 'local-frame-ready' || firstReady) return;
+          // Arm once before the reentrant call: stop may publish the same ready status itself.
+          firstReady = true;
+          publishedCompile = host.latestCompile();
+          // This is the actual host publication seam used by panel effect cleanup. It does not
+          // simulate React or claim browser acceptance; the DXF compiler and source are genuine.
+          if (action === 'panel-stop') host.stop();
+          else caller.abort();
+        });
+        try {
+          await withFirstSaveSourceV3(async (request) => {
+            vi.mocked(
+              createPatternImportDxfProductSavedPlacementProductionContextV1,
+            ).mockImplementation((input) => {
+              const prepared = prepareObservedHostTransportV1(f, request, input.compiled);
+              return createPatternImportDxfProductSavedPlacementContextV1(input, {
+                readSavedAssemblySnapshot: async () => (await prepared)(),
+              });
+            });
+            await host.downstream.ready(caller.signal);
+            const pending = host.downstream.consume(request, caller.signal);
+            if (action === 'panel-stop') {
+              const result = await pending;
+              expect(result.ok).toBe(true);
+              expect(host.getSnapshot().status).toBe('local-frame-ready');
+              expect(caller.signal.aborted).toBe(false);
+            } else {
+              await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+              expect(caller.signal.aborted).toBe(true);
+            }
+            expect(firstReady).toBe(true);
+            expect(publishedCompile).not.toBeNull();
+            expect(host.latestCompile()).toEqual(publishedCompile);
+            expect(compilingPublications).toBe(1);
+            await host.waitUntilIdle(new AbortController().signal);
+            // An unrelated pane cleanup must not require replaying the consumed saved source.
+            // Conversely, explicit cancellation must never make that source reusable.
+            await expect(
+              host.downstream.consume(request, new AbortController().signal),
+            ).rejects.toThrow('new cloth source');
+            expect(compilingPublications).toBe(1);
+            expect(host.latestCompile()).toEqual(publishedCompile);
+            expect(f.put).not.toHaveBeenCalled();
+          });
+        } finally {
+          unsubscribe();
+          host.dispose();
+          expect(body.getSnapshot().status).toBe('observed-body-bound');
+          body.dispose();
+        }
+      });
+    },
+    120_000,
+  );
+
   it('uses one source handoff, saves once, reloads exact placement and retains the physical refusal', async () => {
     await withObservedFirstSaveFixtureV3(async (f) => {
       const body = createSavedModelDisplayedTriangleBodySessionV2(f.body.readCurrentModel);

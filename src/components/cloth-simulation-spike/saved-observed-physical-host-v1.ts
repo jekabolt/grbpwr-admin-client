@@ -100,6 +100,7 @@ export function createSavedObservedPhysicalHostV1(
     controller: AbortController;
     usesBody: boolean;
     finished: Promise<void>;
+    kind: 'compile' | 'preview';
   } | null = null;
   let state: SavedObservedPhysicalHostSnapshotV1 = Object.freeze({
     status: 'idle',
@@ -189,6 +190,7 @@ export function createSavedObservedPhysicalHostV1(
     usesBody: boolean,
     signal: AbortSignal | undefined,
     action: (signal: AbortSignal, check: () => void) => Promise<T>,
+    kind: 'compile' | 'preview' = 'preview',
   ): Promise<T> {
     current(signal);
     if (operation) throw new Error('The saved cloth operation is already running.');
@@ -197,7 +199,7 @@ export function createSavedObservedPhysicalHostV1(
     const finished = new Promise<void>((resolve) => {
       finish = resolve;
     });
-    const scope = { controller, usesBody, finished };
+    const scope = { controller, usesBody, finished, kind };
     const expectedBodyEpoch = usesBody ? bodyEpoch : undefined;
     const cancel = () => controller.abort();
     if (signal) nativeAdd.call(signal, 'abort', cancel, { once: true });
@@ -292,25 +294,32 @@ export function createSavedObservedPhysicalHostV1(
       current(signal);
     },
     consume: (request, signal) =>
-      work(false, signal, async (local, check) => {
-        if (consumed)
-          throw new Error('Reconfirm the assembly with a new cloth source before compiling again.');
-        consumed = true;
-        publish({ status: 'compiling', detail: null });
-        const result = await source.consume(request, local);
-        check();
-        if (!result.ok) throw new Error(`${result.stage}: ${result.detail}`);
-        compiled = result.compile;
-        context = createPatternImportDxfProductSavedPlacementProductionContextV1({
-          row,
-          compiled,
-          readCurrentSession: source.snapshot,
-        });
-        check();
-        publish({ status: 'local-frame-ready', generation: compiled.generation, detail: null });
-        // The table receives its actual inner compile result. The one-shot source is never replayed.
-        return result.compile;
-      }),
+      work(
+        false,
+        signal,
+        async (local, check) => {
+          if (consumed)
+            throw new Error(
+              'Reconfirm the assembly with a new cloth source before compiling again.',
+            );
+          consumed = true;
+          publish({ status: 'compiling', detail: null });
+          const result = await source.consume(request, local);
+          check();
+          if (!result.ok) throw new Error(`${result.stage}: ${result.detail}`);
+          compiled = result.compile;
+          context = createPatternImportDxfProductSavedPlacementProductionContextV1({
+            row,
+            compiled,
+            readCurrentSession: source.snapshot,
+          });
+          check();
+          publish({ status: 'local-frame-ready', generation: compiled.generation, detail: null });
+          // The table receives its actual inner compile result. The one-shot source is never replayed.
+          return result.compile;
+        },
+        'compile',
+      ),
     physicalStage: () => ({
       stage: source.snapshot().blocker?.stage ?? 'actual-body',
       blockers: source.snapshot().blocker
@@ -538,6 +547,9 @@ export function createSavedObservedPhysicalHostV1(
         return { ok: true, receipt: preview.receipt };
       }),
     stop() {
+      // The table caller owns compilation; its signal and dispose() retain cancellation authority.
+      // A newly mounted preview may replay cleanup before that handoff has fully settled.
+      if (operation?.kind === 'compile') return;
       operation?.controller.abort();
       releaseRuntime();
       if (!disposed)
