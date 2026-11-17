@@ -703,7 +703,8 @@ function framePiece(
   let persisted: PatternImportDxfProductSavedAnnularWriterFrameReceiptV2['pieces'][number] | null =
     null;
   let diagnosed:
-    PatternImportDxfProductSavedAnnularLocalFramePreflightReportV2['pieces'][number] | null = null;
+    | PatternImportDxfProductSavedAnnularLocalFramePreflightReportV2['pieces'][number]
+    | null = null;
   for (let index = 0; index < receipt.pieces.length; index += 1) {
     const piece = receipt.pieces[index]!;
     if (piece.pieceId === pieceId) persisted = piece;

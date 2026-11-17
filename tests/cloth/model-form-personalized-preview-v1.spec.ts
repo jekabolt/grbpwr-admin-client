@@ -267,7 +267,9 @@ test('real ModelForm auto-binds edit/create measurements to its V9 mannequin', a
   expect(chestFrontTorso.equals(baselineFrontTorso)).toBe(false);
 
   await revealMeasurement(page, chest);
-  await chest.fill('1040');
+  // The female bust proxy with a proportional ribcage reaches ~1100 mm without an under bust, so
+  // the safe-range probe sits above that (it was 1040 on the pre-bust legacy chest path).
+  await chest.fill('1200');
   await chest.blur();
   await expect
     .poll(() => canvas.getAttribute('data-source-revision'))
@@ -1117,4 +1119,65 @@ test('neck applies as a bounded proxy on female and neutral, and is honestly not
     await input.blur();
   }
   await exerciseNeck(page, 'neutral');
+});
+
+async function exerciseBust(page: import('@playwright/test').Page, basisKind: 'female' | 'male') {
+  const preview = page.getByTestId('model-open-reference-preview');
+  const status = page.getByTestId('model-open-reference-preview-status');
+  const canvas = page.getByTestId('measurement-watertight-surface-v1-canvas');
+  const measurementApplication = page.getByTestId(
+    'model-open-reference-measurement-application-status',
+  );
+  await expect(status).toContainText('Preview partial: A-rest', { timeout: 180_000 });
+  await expect(canvas).toHaveAttribute(
+    'data-source-revision',
+    new RegExp(`basisKind=${basisKind}`),
+  );
+  const edit = async (label: 'chest' | 'under bust', value: string) => {
+    const before = await canvas.getAttribute('data-source-revision');
+    const input = measurementField(page, label);
+    await revealMeasurement(page, input);
+    await input.fill(value);
+    await input.blur();
+    await expect
+      .poll(() => canvas.getAttribute('data-source-revision'), { timeout: 180_000 })
+      .not.toBe(before);
+    await expect(status).toContainText('Preview partial: A-rest', { timeout: 180_000 });
+    await expect(preview).toHaveAttribute('data-body-display-ownership', 'current');
+    return {
+      applied: (await measurementApplication.getAttribute('data-applied')) ?? '',
+      limited: (await measurementApplication.getAttribute('data-limited')) ?? '',
+    };
+  };
+  const chest = await edit('chest', '835');
+  const underBust = await edit('under bust', '720');
+  const wide = await edit('chest', '1000');
+  console.info(`MANNEQUIN_BUST_V1=${JSON.stringify({ basisKind, chest, underBust, wide })}`);
+  if (basisKind === 'female') {
+    expect(underBust.applied).toMatch(/chestCircumferenceMm/u);
+    expect(underBust.limited).not.toMatch(/chestCircumferenceMm/u);
+    expect(`${underBust.applied},${underBust.limited}`).toMatch(/underBustCircumferenceMm/u);
+    // Beyond the bust range: clamped and named, never hidden, never a whole-body rollback.
+    expect(wide.limited).toMatch(/chestCircumferenceMm/u);
+    expect(wide.applied).toMatch(/waistCircumferenceMm/u);
+    expect(`${wide.applied},${wide.limited}`).toMatch(/underBustCircumferenceMm/u);
+  } else {
+    expect(`${underBust.applied},${underBust.limited}`).toMatch(/chestCircumferenceMm/u);
+    expect(`${wide.applied},${wide.limited}`).toMatch(/chestCircumferenceMm/u);
+    expect(wide.applied).toMatch(/waistCircumferenceMm/u);
+  }
+  await expect(status).not.toContainText('Preview failed');
+}
+
+test('female chest and under bust reshape the bust; male keeps its chest path', async ({
+  page,
+}) => {
+  test.setTimeout(900_000);
+  await prewarmDevRuntime(page);
+  await page.goto(DEV_ROUTE);
+  await exerciseBust(page, 'female');
+
+  await page.getByRole('button', { name: 'switch to model beta' }).click();
+  await expect(page.getByTestId('model-form-smoke-model-id')).toHaveText('8402');
+  await exerciseBust(page, 'male');
 });

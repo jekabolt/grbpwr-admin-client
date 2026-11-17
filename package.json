@@ -197,7 +197,8 @@
     "test:assembly-table:mannequin-browser": "node scripts/assembly-table-mannequin-browser-smoke.mjs",
     "test:assembly-table:material-scopes": "node scripts/assembly-table-material-scope-browser-smoke.mjs",
     "test:assembly-table:physical-host-panel": "node scripts/assembly-table-physical-host-panel-browser-smoke.mjs",
-    "test:assembly-table:browser:all": "yarn test:assembly-table:browser && yarn test:assembly-table:ao-browser && yarn test:assembly-table:mannequin-browser && yarn test:assembly-table:material-scopes && yarn test:assembly-table:physical-host-panel",
+    "test:assembly-table:reimport-review": "node scripts/assembly-table-patterns-reimport-browser-smoke.mjs",
+    "test:assembly-table:browser:all": "yarn test:assembly-table:browser && yarn test:assembly-table:ao-browser && yarn test:assembly-table:mannequin-browser && yarn test:assembly-table:material-scopes && yarn test:assembly-table:physical-host-panel && yarn test:assembly-table:reimport-review",
     "pretest": "vite build",
     "test": "vitest run scripts/probes.test.ts --maxWorkers=1"
   },

@@ -2,6 +2,7 @@ import type { BodyPoseKind } from './contracts';
 import type { CanonicalBodyMeasurementsMm } from './measurement-adapter';
 import type { UniformChestShoulderResearchKeyV1 } from './makehuman-uniform-chest-shoulder-modes-research-v1';
 import type { MakeHumanOpenReferenceBasisKindV1 } from './measurement-open-reference-display-v1';
+import type { MeasurementOpenReferenceFemaleTorsoBustSummaryV1 } from './measurement-open-reference-female-torso-stage-v1';
 import type {
   MeasurementOpenReferenceHighHipDiagnosticV1,
   MeasurementOpenReferenceHighHipModeResultV1,
@@ -53,6 +54,8 @@ export interface MeasurementOpenReferenceBetaTorsoWorkerResultV1 {
   readonly chestStationOriginM?: readonly [number, number, number];
   readonly underBustStationOriginM?: readonly [number, number, number];
   readonly ribcageRepresentedMeasurements: readonly 'underBustCircumferenceMm'[];
+  /** Female bust proxy only: under bust reached its band bound or a cross-talk limit. */
+  readonly ribcageLimitedMeasurements?: readonly 'underBustCircumferenceMm'[];
   readonly ribcageDiagnostics: readonly string[];
   readonly chestShoulderRepresentedMeasurements: readonly UniformChestShoulderResearchKeyV1[];
   readonly chestShoulderLimitedMeasurements: readonly UniformChestShoulderResearchKeyV1[];
@@ -73,6 +76,8 @@ export interface MeasurementOpenReferenceBetaTorsoWorkerResultV1 {
   readonly neckBaselineCircumferenceMm?: number;
   readonly neckAchievedCircumferenceMm?: number;
   readonly neckDiagnostics: readonly MeasurementOpenReferenceNeckDiagnosticV1[];
+  /** Female basis only: the joint under-bust/chest proxy summary (diagnostic, not a claim). */
+  readonly femaleBust?: MeasurementOpenReferenceFemaleTorsoBustSummaryV1;
 }
 
 export type MeasurementOpenReferenceBetaTorsoWorkerRequestV1 = Readonly<{

@@ -87,7 +87,8 @@ export const BETA_SKIRT_CANONICAL_MEDIUM_SOURCE_ADMISSION_LIMITS_V1 = freeze({
 } as const);
 
 export type BetaSkirtCanonicalMediumSourceAdmissionDecisionV1 =
-  'diagnostic-source-clear-no-contact-relaxation-required' | 'contact-relaxation-required';
+  | 'diagnostic-source-clear-no-contact-relaxation-required'
+  | 'contact-relaxation-required';
 
 export type BetaSkirtCanonicalMediumSourceAdmissionRequestV1 = Readonly<{
   schemaVersion: typeof BETA_SKIRT_CANONICAL_MEDIUM_SOURCE_ADMISSION_REQUEST_V1;

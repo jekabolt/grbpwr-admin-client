@@ -11,7 +11,7 @@ import { ROUTES, SECTION } from 'constants/routes';
 import { ContextProvider } from 'context';
 import { initObservability, observabilityEnabled, reportBoundaryError } from 'lib/observability';
 import { DictionaryProvider } from 'lib/providers/dictionary-provider';
-import { reloadForNewVersion, reloadWindowOpen } from 'lib/stale-reload';
+import { recoverStaleBuild, registerStaleBuildProbe } from 'lib/stale-reload';
 import { lazy, StrictMode, Suspense, type ComponentType } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ErrorBoundary, type FallbackProps } from 'react-error-boundary';
@@ -36,10 +36,13 @@ import './global.css';
 function lazyRoute<T extends ComponentType<any>>(factory: () => Promise<{ default: T }>) {
   return lazy(() =>
     factory().catch((err) => {
-      if (isStaleChunkError(err) && reloadWindowOpen()) {
-        reloadForNewVersion();
-        // Never resolves — the reload takes over before React can render anything from it.
-        return new Promise<{ default: T }>(() => {});
+      if (isStaleChunkError(err)) {
+        const recovery = recoverStaleBuild();
+        if (recovery !== 'none') {
+          // Never resolves: either the reload takes over, or the current page stays mounted while
+          // the user decides when it is safe to use the warning's explicit reload action.
+          return new Promise<{ default: T }>(() => {});
+        }
       }
       throw err;
     }),
@@ -614,6 +617,10 @@ const app = (
     </ErrorBoundary>
   </StrictMode>
 );
+
+// An already-open route can remain fully executable after a deploy and therefore never throw a
+// chunk error. Check the entry hash only when the user returns to a production tab.
+if (!import.meta.env.DEV) registerStaleBuildProbe();
 
 // With a DSN, error reporting starts before the first render so a crash on boot is caught too.
 // The wait is capped: a slow or blocked Sentry chunk must not hold the app back.

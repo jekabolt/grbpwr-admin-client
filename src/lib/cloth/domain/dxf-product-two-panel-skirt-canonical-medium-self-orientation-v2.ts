@@ -221,7 +221,8 @@ export type DxfProductTwoPanelSkirtCanonicalMediumSelfOrientationReportV2 = Read
     qualified: boolean;
   }>;
   decision:
-    'PASS_PRODUCT_SELF_AND_ORIENTATION_DIAGNOSTIC' | 'BLOCK_PRODUCT_SELF_OR_ORIENTATION_DIAGNOSTIC';
+    | 'PASS_PRODUCT_SELF_AND_ORIENTATION_DIAGNOSTIC'
+    | 'BLOCK_PRODUCT_SELF_OR_ORIENTATION_DIAGNOSTIC';
   blockers: readonly (
     | 'residual-nonadjacent-self-intersections-present'
     | 'published-orientation-threshold-failed'

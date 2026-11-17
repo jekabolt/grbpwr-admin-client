@@ -68,33 +68,23 @@ const EXTERNAL_RULER_FIELDS = new Set<common_BodyMeasurementName>([
   'BODY_MEASUREMENT_NAME_WAIST_HEIGHT',
 ]);
 
-const KNOWN_FAIL_FIELDS = new Set<common_BodyMeasurementName>([
-  // F/M/N inside 100/100/100%, depth 1.6/1.7/1.6 mm; N visible 0/11 px. Wrong inner jaw loop.
-  'BODY_MEASUREMENT_NAME_NECK_BASE',
+type FailureRule = 'status' | 'surface' | 'visibility';
+
+const KNOWN_FAILURE_RULES = new Map<common_BodyMeasurementName, readonly FailureRule[]>([
   // F/M/N inside 99.1/99.1/99.1%, depth 36.8/53.8/48.2 mm; N 0/68 px. Chord crosses the torso.
-  'BODY_MEASUREMENT_NAME_ACROSS_SHOULDER',
+  ['BODY_MEASUREMENT_NAME_ACROSS_SHOULDER', ['surface', 'visibility']],
   // F/M/N inside 38.9/57.0/38.0%, depth 4.0/4.5/4.4 mm; N 0/88 px. Hidden from the front.
-  'BODY_MEASUREMENT_NAME_SLEEVE_LENGTH',
-  // F/M/N inside 99.1/68.8/98.6%, depth 42.6/28.3/33.3 mm; N 1/69 px. Torso chord is hidden.
-  'BODY_MEASUREMENT_NAME_HPS_TO_WAIST_FRONT',
-  // F/M/N inside 99.1/68.8/98.6%, depth 42.6/28.3/33.3 mm; N 1/69 px. Torso chord is hidden.
-  'BODY_MEASUREMENT_NAME_CF_NECK_TO_WAIST',
-  // F/M/N inside 0/24.9/3.3%, depth 0/4.3/0.8 mm; N 0/63 px. Surface line is on the back.
-  'BODY_MEASUREMENT_NAME_CB_NECK_TO_WAIST',
-  // F/M/N inside 76.5/36.1/0%, depth 1.5/0.9/0 mm; N 0/8 px. Slanted chord is occluded.
-  'BODY_MEASUREMENT_NAME_WAIST_TO_HIGH_HIP',
-  // F/M/N inside 94.2/93.2/92.3%, depth 6.2/4.8/4.1 mm; N 0/20 px. Chord lies inside.
-  'BODY_MEASUREMENT_NAME_WAIST_TO_HIP',
-  // F/M/N inside 100/98.2/100%, depth 55.6/15.6/29.3 mm; N 0/36 px. Width chord lies inside.
-  'BODY_MEASUREMENT_NAME_ACROSS_FRONT',
-  // F/M/N inside 97.8/98.2/98.1%, depth 10.4/16.0/14.1 mm; N 0/31 px. Width chord lies inside.
-  'BODY_MEASUREMENT_NAME_ACROSS_BACK',
+  ['BODY_MEASUREMENT_NAME_SLEEVE_LENGTH', ['surface', 'visibility']],
+  // F/M/N inside 0/0/0%, depth 0/0/0 mm; visible 0/37, 0/36, 0/36 px. Back line, front camera.
+  ['BODY_MEASUREMENT_NAME_CB_NECK_TO_WAIST', ['visibility']],
+  // F/M/N inside 0/0/0%, depth 0/0/0 mm; visible 0/40 px. Back arc, front camera.
+  ['BODY_MEASUREMENT_NAME_ACROSS_BACK', ['visibility']],
   // F/M/N inside 100/100/100%, depth 91.3/92.1/93.9 mm; N 0/1 px. Inside and end-on.
-  'BODY_MEASUREMENT_NAME_CHEST_DEPTH',
+  ['BODY_MEASUREMENT_NAME_CHEST_DEPTH', ['surface', 'visibility']],
   // F/M/N inside 100/99.1/99.1%, depth 98.6/100.3/98.0 mm; N 0/1 px. Depth chord lies inside.
-  'BODY_MEASUREMENT_NAME_WAIST_DEPTH',
+  ['BODY_MEASUREMENT_NAME_WAIST_DEPTH', ['surface', 'visibility']],
   // F/M/N inside 100/97.9/100%, depth 34.1/24.0/29.1 mm; N 0/6 px. Depth chord lies inside.
-  'BODY_MEASUREMENT_NAME_HIP_DEPTH',
+  ['BODY_MEASUREMENT_NAME_HIP_DEPTH', ['surface', 'visibility']],
 ]);
 
 /*
@@ -675,6 +665,7 @@ describe('measurement guide visibility v1', () => {
     const rows: TableRow[] = [];
     const unexpectedFailures: string[] = [];
     const knownFailuresNowPassing: string[] = [];
+    const knownFailureRuleMismatches: string[] = [];
     const observedKnownFailures = new Set<common_BodyMeasurementName>();
 
     for (const base of BASES) {
@@ -693,8 +684,8 @@ describe('measurement guide visibility v1', () => {
           neckSectionStation: body.betaRuntime?.neckSectionStation,
         });
         const field = measurementName.replace('BODY_MEASUREMENT_NAME_', '');
-        const statusPass =
-          guide.paths.length === 0 ? guide.status === 'unsupported' : guide.status === 'visible';
+        const drawnStatus = guide.status === 'visible' || guide.status === 'limited';
+        const statusPass = guide.paths.length === 0 ? guide.status === 'unsupported' : drawnStatus;
         const metrics =
           guide.paths.length > 0 ? measureGuide(guide.paths, body.mesh, meshIndex, camera) : null;
         const isSurfacePath = !EXTERNAL_RULER_FIELDS.has(measurementName);
@@ -708,16 +699,21 @@ describe('measurement guide visibility v1', () => {
             metrics.visiblePx / metrics.projectedPx >= MIN_VISIBLE_FRACTION &&
             metrics.visiblePx >= MIN_VISIBLE_BUFFER_PX);
         const passed = statusPass && surfacePass && visibilityPass;
-        const failedRules = [
-          !statusPass && 'status',
-          !surfacePass && 'surface',
-          !visibilityPass && 'visibility',
-        ].filter(Boolean);
-        const isKnownFailure = KNOWN_FAIL_FIELDS.has(measurementName);
+        const failedRules: FailureRule[] = [];
+        if (!statusPass) failedRules.push('status');
+        if (!surfacePass) failedRules.push('surface');
+        if (!visibilityPass) failedRules.push('visibility');
+        const expectedKnownFailureRules = KNOWN_FAILURE_RULES.get(measurementName);
+        const isKnownFailure = expectedKnownFailureRules !== undefined;
 
-        if (isKnownFailure) {
+        if (expectedKnownFailureRules) {
           observedKnownFailures.add(measurementName);
           if (passed) knownFailuresNowPassing.push(`${field}/${base.name}`);
+          else if (failedRules.join(',') !== expectedKnownFailureRules.join(',')) {
+            knownFailureRuleMismatches.push(
+              `${field}/${base.name}: expected ${expectedKnownFailureRules.join('+')}, got ${failedRules.join('+')}`,
+            );
+          }
         } else if (!passed) {
           unexpectedFailures.push(`${field}/${base.name}: ${failedRules.join(', ')}`);
         }
@@ -742,16 +738,18 @@ describe('measurement guide visibility v1', () => {
 
     printTable(rows);
 
-    const unobservedKnownFailures = [...KNOWN_FAIL_FIELDS]
+    const unobservedKnownFailures = [...KNOWN_FAILURE_RULES.keys()]
       .filter((field) => !observedKnownFailures.has(field))
       .map((field) => field.replace('BODY_MEASUREMENT_NAME_', ''));
     expect({
       unexpectedFailures,
       knownFailuresNowPassing,
+      knownFailureRuleMismatches,
       unobservedKnownFailures,
     }).toEqual({
       unexpectedFailures: [],
       knownFailuresNowPassing: [],
+      knownFailureRuleMismatches: [],
       unobservedKnownFailures: [],
     });
   }, 90_000);

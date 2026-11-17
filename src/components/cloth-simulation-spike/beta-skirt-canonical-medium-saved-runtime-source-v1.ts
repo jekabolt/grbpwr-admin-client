@@ -2685,8 +2685,9 @@ export async function runBetaSkirtCanonicalMediumSavedRuntime16FrameV1(
   } catch (error) {
     if (lateRunnerOwner) {
       try {
-        const adapter =
-          await import('./beta-skirt-canonical-medium-saved-webgpu-16-frame-contact-v1');
+        const adapter = await import(
+          './beta-skirt-canonical-medium-saved-webgpu-16-frame-contact-v1'
+        );
         adapter.disposeBetaSkirtCanonicalMediumSavedWebgpu16FrameRunnerV1(lateRunnerOwner);
       } catch {
         // The fixed adapter already owns its normal failure cleanup. This is a last-resort late
@@ -2992,8 +2993,9 @@ export async function runBetaSkirtCanonicalMediumSavedRuntime32FrameV4(
   } catch (error) {
     if (lateRunnerOwner) {
       try {
-        const command =
-          await import('./beta-skirt-canonical-medium-saved-webgpu-32-frame-command-v4');
+        const command = await import(
+          './beta-skirt-canonical-medium-saved-webgpu-32-frame-command-v4'
+        );
         command.disposeBetaSkirtCanonicalMediumSavedWebgpu32FrameCommandV4(lateRunnerOwner);
       } catch {
         // The fixed command owns normal failure cleanup. This only rolls back a late success.
@@ -3267,8 +3269,9 @@ export async function runBetaSkirtCanonicalMediumSavedRuntime32FrameStrainV1(
   let lateStrainOwner: BetaSkirtCanonicalMediumSavedWebgpu32FrameStrainUtilizationOwnerV1 | null =
     null;
   try {
-    const adapter =
-      await import('./beta-skirt-canonical-medium-saved-webgpu-32-frame-strain-utilization-v1');
+    const adapter = await import(
+      './beta-skirt-canonical-medium-saved-webgpu-32-frame-strain-utilization-v1'
+    );
     if (exactOptions.signal?.aborted)
       throw new DOMException('Saved 32-frame strain execution was cancelled.', 'AbortError');
     const beforeRun = reflectApply(weakMapGet, owners, [owner]) as OwnerRecord | undefined;
@@ -3339,8 +3342,9 @@ export async function runBetaSkirtCanonicalMediumSavedRuntime32FrameStrainV1(
   } catch (error) {
     if (lateStrainOwner) {
       try {
-        const adapter =
-          await import('./beta-skirt-canonical-medium-saved-webgpu-32-frame-strain-utilization-v1');
+        const adapter = await import(
+          './beta-skirt-canonical-medium-saved-webgpu-32-frame-strain-utilization-v1'
+        );
         adapter.disposeBetaSkirtCanonicalMediumSavedWebgpu32FrameStrainUtilizationV1(
           lateStrainOwner,
         );
@@ -3654,8 +3658,9 @@ export async function runBetaSkirtCanonicalMediumSavedRuntime32FrameStrainHeatma
   record.heatmapState = 'running';
   let lateSession: BetaSkirtCanonicalMediumSavedWebgpu32FrameStrainHeatmapSessionV1 | null = null;
   try {
-    const adapter =
-      await import('./beta-skirt-canonical-medium-saved-webgpu-32-frame-strain-heatmap-adapter-v1');
+    const adapter = await import(
+      './beta-skirt-canonical-medium-saved-webgpu-32-frame-strain-heatmap-adapter-v1'
+    );
     const beforeRender = reflectApply(weakMapGet, owners, [owner]) as OwnerRecord | undefined;
     if (
       beforeRender !== record ||
@@ -3989,8 +3994,9 @@ export async function runBetaSkirtCanonicalMediumSavedRuntime32FrameSelfOrientat
   record.selfState = 'running';
   let lateSelfOwner: BetaSkirtCanonicalMediumSavedWebgpu32FrameSelfOrientationOwnerV1 | null = null;
   try {
-    const adapter =
-      await import('./beta-skirt-canonical-medium-saved-webgpu-32-frame-self-orientation-v1');
+    const adapter = await import(
+      './beta-skirt-canonical-medium-saved-webgpu-32-frame-self-orientation-v1'
+    );
     if (exactOptions.signal?.aborted)
       throw new DOMException('Saved 32-frame self evaluation was cancelled.', 'AbortError');
     const beforeRun = reflectApply(weakMapGet, owners, [owner]) as OwnerRecord | undefined;
@@ -4073,8 +4079,9 @@ export async function runBetaSkirtCanonicalMediumSavedRuntime32FrameSelfOrientat
   } catch (error) {
     if (lateSelfOwner) {
       try {
-        const adapter =
-          await import('./beta-skirt-canonical-medium-saved-webgpu-32-frame-self-orientation-v1');
+        const adapter = await import(
+          './beta-skirt-canonical-medium-saved-webgpu-32-frame-self-orientation-v1'
+        );
         adapter.disposeBetaSkirtCanonicalMediumSavedWebgpu32FrameSelfOrientationV1(lateSelfOwner);
       } catch {
         // The structural adapter owns normal failure cleanup; this only rolls back late success.
@@ -4328,8 +4335,9 @@ export async function runBetaSkirtCanonicalMediumSavedRuntime32FrameStateRetenti
   record.retentionState = 'running';
   let lateStateOwner: BetaSkirtCanonicalMediumSavedWebgpu32FrameStateRetentionOwnerV5 | null = null;
   try {
-    const command =
-      await import('./beta-skirt-canonical-medium-saved-webgpu-32-frame-state-retention-command-v5');
+    const command = await import(
+      './beta-skirt-canonical-medium-saved-webgpu-32-frame-state-retention-command-v5'
+    );
     if (exactOptions.signal?.aborted)
       throw new DOMException('Saved state-retention execution was cancelled.', 'AbortError');
     const beforeRun = reflectApply(weakMapGet, owners, [owner]) as OwnerRecord | undefined;
@@ -4408,8 +4416,9 @@ export async function runBetaSkirtCanonicalMediumSavedRuntime32FrameStateRetenti
   } catch (error) {
     if (lateStateOwner) {
       try {
-        const command =
-          await import('./beta-skirt-canonical-medium-saved-webgpu-32-frame-state-retention-command-v5');
+        const command = await import(
+          './beta-skirt-canonical-medium-saved-webgpu-32-frame-state-retention-command-v5'
+        );
         command.disposeBetaSkirtCanonicalMediumSavedWebgpu32FrameStateRetentionCommandV5(
           lateStateOwner,
         );
@@ -4684,8 +4693,9 @@ export async function runBetaSkirtCanonicalMediumSavedRuntime32FrameStaticRespon
   let lateResponseOwner: BetaSkirtCanonicalMediumSavedWebgpu32FrameStaticResponseOwnerV1 | null =
     null;
   try {
-    const command =
-      await import('./beta-skirt-canonical-medium-saved-webgpu-32-frame-static-response-command-v1');
+    const command = await import(
+      './beta-skirt-canonical-medium-saved-webgpu-32-frame-static-response-command-v1'
+    );
     if (exactOptions.signal?.aborted)
       throw new DOMException('Saved static response was cancelled.', 'AbortError');
     const beforeRun = reflectApply(weakMapGet, owners, [owner]) as OwnerRecord | undefined;
@@ -4770,8 +4780,9 @@ export async function runBetaSkirtCanonicalMediumSavedRuntime32FrameStaticRespon
   } catch (error) {
     if (lateResponseOwner) {
       try {
-        const command =
-          await import('./beta-skirt-canonical-medium-saved-webgpu-32-frame-static-response-command-v1');
+        const command = await import(
+          './beta-skirt-canonical-medium-saved-webgpu-32-frame-static-response-command-v1'
+        );
         command.disposeBetaSkirtCanonicalMediumSavedWebgpu32FrameStaticResponseCommandV1(
           lateResponseOwner,
         );
@@ -5111,8 +5122,9 @@ export async function runBetaSkirtCanonicalMediumSavedRuntime32FrameStaticRespon
   let lateStrainOwner: BetaSkirtCanonicalMediumSavedWebgpu32FrameStaticResponseStrainOwnerV1 | null =
     null;
   try {
-    const adapter =
-      await import('./beta-skirt-canonical-medium-saved-webgpu-32-frame-static-response-strain-utilization-v1');
+    const adapter = await import(
+      './beta-skirt-canonical-medium-saved-webgpu-32-frame-static-response-strain-utilization-v1'
+    );
     if (exactOptions.signal?.aborted)
       throw new DOMException('Saved corrected-strain execution was cancelled.', 'AbortError');
     const beforeRun = reflectApply(weakMapGet, owners, [owner]) as OwnerRecord | undefined;
@@ -5214,8 +5226,9 @@ export async function runBetaSkirtCanonicalMediumSavedRuntime32FrameStaticRespon
   } catch (error) {
     if (lateStrainOwner) {
       try {
-        const adapter =
-          await import('./beta-skirt-canonical-medium-saved-webgpu-32-frame-static-response-strain-utilization-v1');
+        const adapter = await import(
+          './beta-skirt-canonical-medium-saved-webgpu-32-frame-static-response-strain-utilization-v1'
+        );
         adapter.disposeBetaSkirtCanonicalMediumSavedWebgpu32FrameStaticResponseStrainV1(
           lateStrainOwner,
         );
@@ -5605,8 +5618,9 @@ export async function runBetaSkirtCanonicalMediumSavedRuntime32FrameStaticRespon
   let lateSession: BetaSkirtCanonicalMediumSavedWebgpu32FrameStaticResponseStrainHeatmapSessionV1 | null =
     null;
   try {
-    const adapter =
-      await import('./beta-skirt-canonical-medium-saved-webgpu-32-frame-static-response-strain-heatmap-adapter-v1');
+    const adapter = await import(
+      './beta-skirt-canonical-medium-saved-webgpu-32-frame-static-response-strain-heatmap-adapter-v1'
+    );
     const beforeRender = reflectApply(weakMapGet, owners, [owner]) as OwnerRecord | undefined;
     if (
       beforeRender !== record ||
@@ -5972,8 +5986,9 @@ export async function runBetaSkirtCanonicalMediumSavedRuntime33FrameContinuation
   let lateContinuationOwner: BetaSkirtCanonicalMediumSavedWebgpu33FrameContinuationOwnerV6 | null =
     null;
   try {
-    const command =
-      await import('./beta-skirt-canonical-medium-saved-webgpu-33-frame-continuation-command-v6');
+    const command = await import(
+      './beta-skirt-canonical-medium-saved-webgpu-33-frame-continuation-command-v6'
+    );
     if (exactOptions.signal?.aborted)
       throw new DOMException('Saved frame33 continuation was cancelled.', 'AbortError');
     const beforeRun = reflectApply(weakMapGet, owners, [owner]) as OwnerRecord | undefined;
@@ -6060,8 +6075,9 @@ export async function runBetaSkirtCanonicalMediumSavedRuntime33FrameContinuation
   } catch (error) {
     if (lateContinuationOwner) {
       try {
-        const command =
-          await import('./beta-skirt-canonical-medium-saved-webgpu-33-frame-continuation-command-v6');
+        const command = await import(
+          './beta-skirt-canonical-medium-saved-webgpu-33-frame-continuation-command-v6'
+        );
         command.disposeBetaSkirtCanonicalMediumSavedWebgpu33FrameContinuationCommandV6(
           lateContinuationOwner,
         );
@@ -6367,8 +6383,9 @@ export async function runBetaSkirtCanonicalMediumSavedRuntimeContinuationCarrier
   let lateResponseOwner: BetaSkirtCanonicalMediumSavedWebgpuContinuationCarrierResponseOwnerV1 | null =
     null;
   try {
-    const command =
-      await import('./beta-skirt-canonical-medium-saved-webgpu-continuation-carrier-response-command-v1');
+    const command = await import(
+      './beta-skirt-canonical-medium-saved-webgpu-continuation-carrier-response-command-v1'
+    );
     if (exactOptions.signal?.aborted)
       throw new DOMException('Saved continuation carrier response was cancelled.', 'AbortError');
     const beforeRun = reflectApply(weakMapGet, owners, [owner]) as OwnerRecord | undefined;
@@ -6446,8 +6463,9 @@ export async function runBetaSkirtCanonicalMediumSavedRuntimeContinuationCarrier
   } catch (error) {
     if (lateResponseOwner) {
       try {
-        const command =
-          await import('./beta-skirt-canonical-medium-saved-webgpu-continuation-carrier-response-command-v1');
+        const command = await import(
+          './beta-skirt-canonical-medium-saved-webgpu-continuation-carrier-response-command-v1'
+        );
         command.disposeBetaSkirtCanonicalMediumSavedWebgpuContinuationCarrierResponseCommandV1(
           lateResponseOwner,
         );
@@ -6796,8 +6814,9 @@ export async function runBetaSkirtCanonicalMediumSavedRuntime34FrameContinuation
   let lateContinuationOwner: BetaSkirtCanonicalMediumSavedWebgpu34FrameContinuationOwnerV7 | null =
     null;
   try {
-    const command =
-      await import('./beta-skirt-canonical-medium-saved-webgpu-34-frame-continuation-command-v7');
+    const command = await import(
+      './beta-skirt-canonical-medium-saved-webgpu-34-frame-continuation-command-v7'
+    );
     if (exactOptions.signal?.aborted)
       throw new DOMException('Saved frame34 continuation was cancelled.', 'AbortError');
     const beforeRun = reflectApply(weakMapGet, owners, [owner]) as OwnerRecord | undefined;
@@ -6892,8 +6911,9 @@ export async function runBetaSkirtCanonicalMediumSavedRuntime34FrameContinuation
   } catch (error) {
     if (lateContinuationOwner) {
       try {
-        const command =
-          await import('./beta-skirt-canonical-medium-saved-webgpu-34-frame-continuation-command-v7');
+        const command = await import(
+          './beta-skirt-canonical-medium-saved-webgpu-34-frame-continuation-command-v7'
+        );
         command.disposeBetaSkirtCanonicalMediumSavedWebgpu34FrameContinuationCommandV7(
           lateContinuationOwner,
         );
@@ -7200,8 +7220,9 @@ export async function runBetaSkirtCanonicalMediumSavedRuntime34FrameCarrierRespo
   let lateResponseOwner: BetaSkirtCanonicalMediumSavedWebgpu34FrameCarrierResponseOwnerV1 | null =
     null;
   try {
-    const command =
-      await import('./beta-skirt-canonical-medium-saved-webgpu-34-frame-carrier-response-command-v1');
+    const command = await import(
+      './beta-skirt-canonical-medium-saved-webgpu-34-frame-carrier-response-command-v1'
+    );
     if (exactOptions.signal?.aborted)
       throw new DOMException('Saved frame34 carrier response was cancelled.', 'AbortError');
     const beforeRun = reflectApply(weakMapGet, owners, [owner]) as OwnerRecord | undefined;
@@ -7279,8 +7300,9 @@ export async function runBetaSkirtCanonicalMediumSavedRuntime34FrameCarrierRespo
   } catch (error) {
     if (lateResponseOwner) {
       try {
-        const command =
-          await import('./beta-skirt-canonical-medium-saved-webgpu-34-frame-carrier-response-command-v1');
+        const command = await import(
+          './beta-skirt-canonical-medium-saved-webgpu-34-frame-carrier-response-command-v1'
+        );
         command.disposeBetaSkirtCanonicalMediumSavedWebgpu34FrameCarrierResponseCommandV1(
           lateResponseOwner,
         );
@@ -7634,8 +7656,9 @@ export async function runBetaSkirtCanonicalMediumSavedRuntime35FrameContinuation
   let lateContinuationOwner: BetaSkirtCanonicalMediumSavedWebgpu35FrameContinuationOwnerV8 | null =
     null;
   try {
-    const command =
-      await import('./beta-skirt-canonical-medium-saved-webgpu-35-frame-continuation-command-v8');
+    const command = await import(
+      './beta-skirt-canonical-medium-saved-webgpu-35-frame-continuation-command-v8'
+    );
     if (exactOptions.signal?.aborted)
       throw new DOMException('Saved frame35 continuation was cancelled.', 'AbortError');
     const beforeRun = reflectApply(weakMapGet, owners, [owner]) as OwnerRecord | undefined;
@@ -7720,8 +7743,9 @@ export async function runBetaSkirtCanonicalMediumSavedRuntime35FrameContinuation
   } catch (error) {
     if (lateContinuationOwner) {
       try {
-        const command =
-          await import('./beta-skirt-canonical-medium-saved-webgpu-35-frame-continuation-command-v8');
+        const command = await import(
+          './beta-skirt-canonical-medium-saved-webgpu-35-frame-continuation-command-v8'
+        );
         command.disposeBetaSkirtCanonicalMediumSavedWebgpu35FrameContinuationCommandV8(
           lateContinuationOwner,
         );
@@ -8034,8 +8058,9 @@ export async function runBetaSkirtCanonicalMediumSavedRuntime35FrameCarrierRespo
   let lateResponseOwner: BetaSkirtCanonicalMediumSavedWebgpu35FrameCarrierResponseOwnerV1 | null =
     null;
   try {
-    const command =
-      await import('./beta-skirt-canonical-medium-saved-webgpu-35-frame-carrier-response-command-v1');
+    const command = await import(
+      './beta-skirt-canonical-medium-saved-webgpu-35-frame-carrier-response-command-v1'
+    );
     if (saved35FrameCarrierResponseAborted(exactOptions.signal))
       throw new DOMException('Saved frame35 carrier response was cancelled.', 'AbortError');
     const beforeRun = reflectApply(weakMapGet, owners, [owner]) as OwnerRecord | undefined;
@@ -8123,8 +8148,9 @@ export async function runBetaSkirtCanonicalMediumSavedRuntime35FrameCarrierRespo
   } catch (error) {
     if (lateResponseOwner) {
       try {
-        const command =
-          await import('./beta-skirt-canonical-medium-saved-webgpu-35-frame-carrier-response-command-v1');
+        const command = await import(
+          './beta-skirt-canonical-medium-saved-webgpu-35-frame-carrier-response-command-v1'
+        );
         command.disposeBetaSkirtCanonicalMediumSavedWebgpu35FrameCarrierResponseCommandV1(
           lateResponseOwner,
         );
@@ -8430,8 +8456,9 @@ export async function runBetaSkirtCanonicalMediumSavedRuntime32FrameStaticRespon
   let lateSession: BetaSkirtCanonicalMediumSavedWebgpu32FrameStaticResponsePreviewSessionV1 | null =
     null;
   try {
-    const adapter =
-      await import('./beta-skirt-canonical-medium-saved-webgpu-32-frame-static-response-preview-adapter-v1');
+    const adapter = await import(
+      './beta-skirt-canonical-medium-saved-webgpu-32-frame-static-response-preview-adapter-v1'
+    );
     const beforeRender = reflectApply(weakMapGet, owners, [owner]) as OwnerRecord | undefined;
     if (
       beforeRender !== record ||

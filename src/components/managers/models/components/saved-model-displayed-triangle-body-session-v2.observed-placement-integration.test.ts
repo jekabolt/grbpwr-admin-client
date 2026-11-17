@@ -84,8 +84,7 @@ describe('private V3 compile → observed body consumer chain (synthetic cube ho
             const before = await source.projectLatestGarment(compiled.generation);
             if (!before?.projection.normalizedMaterial) throw new Error('Local material missing.');
             const rest = new Uint8Array(
-              before.projection.normalizedMaterial.normalizedV5.simulation.constraints
-                .continuumStrain.triangleRestFrames,
+              before.projection.normalizedMaterial.normalizedV5.simulation.constraints.continuumStrain.triangleRestFrames,
             ).slice();
             expect(
               await buildCurrentSavedModelDisplayedTriangleBodyGarmentPairV1(
@@ -151,8 +150,7 @@ describe('private V3 compile → observed body consumer chain (synthetic cube ho
             );
             expect(
               new Uint8Array(
-                retained!.projection.normalizedMaterial!.normalizedV5.simulation.constraints
-                  .continuumStrain.triangleRestFrames,
+                retained!.projection.normalizedMaterial!.normalizedV5.simulation.constraints.continuumStrain.triangleRestFrames,
               ),
             ).toEqual(rest);
             expect(fixture.body.input.isCurrent()).toBe(true);

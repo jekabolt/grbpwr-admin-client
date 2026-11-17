@@ -446,8 +446,7 @@ describe('saved-annular observed world initial preflight (declared synthetic cub
           name: 'immutable rest frame',
           garment: (p) => {
             new Uint8Array(
-              p.normalizedMaterial!.normalizedV5.simulation.constraints.continuumStrain
-                .triangleRestFrames,
+              p.normalizedMaterial!.normalizedV5.simulation.constraints.continuumStrain.triangleRestFrames,
             )[0] ^= 1;
           },
         },

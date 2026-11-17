@@ -308,6 +308,15 @@ function gates(pair: Pair, world: World) {
       s.receipt.counts.ambiguousSignVertexCount === 0,
     worldInitialClear:
       w.worldInitialChecksPassed &&
+      ('boundedRadialInitialization' in p.candidate
+        ? w.rigidPlacement === null &&
+          !!w.boundedRadialPlacement?.float32RecipeReplayedByteExactly &&
+          w.boundedRadialPlacement.recipe.passed &&
+          p.candidate.boundedRadialInitialization.passed &&
+          JSON.stringify(w.boundedRadialPlacement.recipe) ===
+            JSON.stringify(p.candidate.boundedRadialInitialization)
+        : w.rigidPlacement?.float32TranslationReplayedByteExactly === true &&
+          !w.boundedRadialPlacement) &&
       w.selfIntersection.passed &&
       w.selfIntersection.exactRawExcludedResidualAccounting &&
       w.selfIntersection.residualBlockingCount === 0 &&

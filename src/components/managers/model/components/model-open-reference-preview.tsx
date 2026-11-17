@@ -3164,8 +3164,10 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
         : undefined,
     [activeMeasurementName, displayedBuilt, draftPose, editor],
   );
+  const measurementGuideIsDrawn =
+    measurementGuide?.status === 'visible' || measurementGuide?.status === 'limited';
   const measurementGuideStatusText =
-    measurementGuide?.status === 'visible'
+    measurementGuide?.status === 'visible' || measurementGuide?.status === 'limited'
       ? `visual guide visible for ${measurementGuide.label}`
       : measurementGuide?.status === 'unsupported'
         ? `visual guide unavailable for ${measurementGuide.label} · follow the written protocol`
@@ -3663,7 +3665,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
           ? [{ text: measurementApplicationText, error: true }]
           : []),
         ...(sideSeamCapability ? [{ text: sideSeamCapability.message, error: false }] : []),
-        ...(measurementGuide && measurementGuide.status !== 'visible' && measurementGuideStatusText
+        ...(measurementGuide && !measurementGuideIsDrawn && measurementGuideStatusText
           ? [{ text: measurementGuideStatusText, error: false }]
           : []),
         ...(updateStatus === 'error'
@@ -3937,9 +3939,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
               component='p'
               size='micro'
               variant='label'
-              className={
-                headerOwned || measurementGuide.status === 'visible' ? 'sr-only' : undefined
-              }
+              className={headerOwned || measurementGuideIsDrawn ? 'sr-only' : undefined}
               role='status'
               aria-live='polite'
               data-testid='model-open-reference-measurement-guide-status'

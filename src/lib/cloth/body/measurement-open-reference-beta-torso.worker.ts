@@ -5,7 +5,10 @@ import type {
   MeasurementOpenReferenceBetaTorsoWorkerRequestV1,
   MeasurementOpenReferenceBetaTorsoWorkerResponseV1,
 } from './measurement-open-reference-beta-torso-worker-protocol-v1';
-import { solveMeasurementOpenReferenceBetaTorsoV1 } from './measurement-open-reference-beta-torso-worker-v1';
+import {
+  loadFemaleBustBundleForTorsoV1,
+  solveMeasurementOpenReferenceBetaTorsoV1,
+} from './measurement-open-reference-beta-torso-worker-v1';
 import { loadMakeHumanOpenReferenceBasisV1 } from './measurement-open-reference-display-v1';
 
 const context = self as DedicatedWorkerGlobalScope;
@@ -17,11 +20,13 @@ context.onmessage = async (
   const startedAt = performance.now();
   try {
     if (request.type !== 'solve') throw new Error('Unsupported beta torso worker request.');
-    const [basis, torsoBundle] = await Promise.all([
+    const [basis, torsoBundle, femaleBust] = await Promise.all([
       loadMakeHumanOpenReferenceBasisV1(request.options.basisKind),
       loadMakeHumanTorsoShapeDeltaBundleV1(),
+      request.options.basisKind === 'female' ? loadFemaleBustBundleForTorsoV1() : undefined,
     ]);
     const value = solveMeasurementOpenReferenceBetaTorsoV1({
+      ...femaleBust,
       basis,
       sourcePositionsM: request.options.sourcePositionsM,
       triangleIndices: request.options.triangleIndices,

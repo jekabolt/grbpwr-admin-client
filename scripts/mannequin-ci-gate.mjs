@@ -46,6 +46,9 @@ const unitFiles = Object.freeze([
   'src/lib/cloth/body/measurement-open-reference-display-quality-gate-v1.test.ts',
   'src/lib/cloth/body/measurement-open-reference-display-quality-worker-v1.test.ts',
   'src/lib/cloth/body/measurement-open-reference-beta-torso-worker-v1.test.ts',
+  'src/lib/cloth/body/measurement-open-reference-female-bust-proxy-v1.test.ts',
+  'src/lib/cloth/body/measurement-open-reference-beta-torso-female-bust-v1.test.ts',
+  'src/lib/cloth/body/measurement-open-reference-beta-torso-male-neutral-parity-v1.test.ts',
   'src/lib/cloth/body/measurement-open-reference-torso-depth-proxy-v1.test.ts',
   'src/lib/cloth/body/measurement-open-reference-high-hip-proxy-v1.test.ts',
   'src/lib/cloth/body/measurement-open-reference-knee-proxy-v1.test.ts',
@@ -57,6 +60,11 @@ const unitFiles = Object.freeze([
   'src/lib/cloth/body/measurement-open-reference-limb-subset-runtime-loader-v1.test.ts',
   'src/lib/cloth/body/measurement-watertight-surface-worker-v1.test.ts',
   'src/lib/cloth/body/measurement-protocol-v1.test.ts',
+  'src/lib/cloth/body/mesh-surface-topology-v1.test.ts',
+  'src/lib/cloth/body/mesh-surface-path-v1.test.ts',
+  'src/lib/cloth/body/mesh-surface-geodesic-v1.test.ts',
+  'src/lib/cloth/body/measurement-surface-anchors-v1.test.ts',
+  'src/lib/cloth/body/measurement-surface-anchors-morph-v1.test.ts',
 ]);
 
 const browserSuites = Object.freeze([
@@ -106,6 +114,7 @@ const browserSuites = Object.freeze([
       'real ModelForm admits female, male and neutral open-reference bases',
       'high hip and knee apply as bounded proxies on female, male and neutral bases',
       'neck applies as a bounded proxy on female and neutral, and is honestly not applied on male',
+      'female chest and under bust reshape the bust; male keeps its chest path',
     ].join('|'),
   }),
   Object.freeze({
