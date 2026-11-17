@@ -11,12 +11,13 @@ describe('saved Assembly Order workbench routing', () => {
     expect(resolvePatternImportDxfPhaseEWorkbenchRequestedV1(false, false)).toBe(false);
   });
 
-  it('keeps non-two-seam operations on the shared CAD table instead of showing a blocker', () => {
+  it('routes a saved legacy N1 operation with no durable session to zero-connect authoring', () => {
     expect(
       shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
         workbenchOpen: true,
         exactNSessionAvailable: false,
-        savedProjectionBlockerCode: 'saved-operation-not-two-seam',
+        savedProjectionBlockerCode: null,
+        selectedSeamCount: 1,
       }),
     ).toBe(true);
   });
@@ -27,6 +28,7 @@ describe('saved Assembly Order workbench routing', () => {
         workbenchOpen: true,
         exactNSessionAvailable: false,
         savedProjectionBlockerCode: 'saved-operation-missing',
+        selectedSeamCount: 1,
       }),
     ).toBe(true);
   });
@@ -43,7 +45,7 @@ describe('saved Assembly Order workbench routing', () => {
       label: 'one seam',
       seamKeys: ['seam-a'],
       entryRoute: 'v1',
-      blocker: 'saved-operation-not-two-seam',
+      blocker: null,
       fallback: true,
     },
     {
@@ -57,8 +59,8 @@ describe('saved Assembly Order workbench routing', () => {
       label: 'more than two seams',
       seamKeys: ['seam-a', 'seam-b', 'seam-c'],
       entryRoute: 'v2',
-      blocker: 'saved-operation-not-two-seam',
-      fallback: true,
+      blocker: null,
+      fallback: false,
     },
   ])(
     'routes $label without exposing the legacy exactly-two-seam blocker',
@@ -69,6 +71,7 @@ describe('saved Assembly Order workbench routing', () => {
           workbenchOpen: true,
           exactNSessionAvailable: false,
           savedProjectionBlockerCode: blocker,
+          selectedSeamCount: seamKeys.length,
         }),
       ).toBe(fallback);
     },
@@ -79,7 +82,8 @@ describe('saved Assembly Order workbench routing', () => {
       shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
         workbenchOpen: true,
         exactNSessionAvailable: true,
-        savedProjectionBlockerCode: 'saved-operation-not-two-seam',
+        savedProjectionBlockerCode: null,
+        selectedSeamCount: 1,
       }),
     ).toBe(false);
     expect(
@@ -87,6 +91,7 @@ describe('saved Assembly Order workbench routing', () => {
         workbenchOpen: true,
         exactNSessionAvailable: false,
         savedProjectionBlockerCode: 'saved-operation-ambiguous',
+        selectedSeamCount: 1,
       }),
     ).toBe(false);
     expect(
@@ -94,6 +99,7 @@ describe('saved Assembly Order workbench routing', () => {
         workbenchOpen: true,
         exactNSessionAvailable: false,
         savedProjectionBlockerCode: 'saved-seam-not-exact',
+        selectedSeamCount: 1,
       }),
     ).toBe(false);
   });
