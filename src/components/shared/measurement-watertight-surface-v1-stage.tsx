@@ -21,6 +21,7 @@ import {
   measurementSurfaceGuideAirDatasetV1,
   measurementSurfaceGuideCameraActionV1,
   syncMeasurementSurfaceGuideResolutionV1,
+  type MeasurementSurfaceGuideCameraFacingV1,
   type MeasurementSurfaceGuideCameraTargetV1,
   type MeasurementSurfaceGuideCameraViewV1,
   updateMeasurementSurfaceGuideLayerPositionsV1,
@@ -1391,7 +1392,10 @@ function createPatternPieceLayerV1(
   return Object.freeze({ layer, bindings, guides: Object.freeze(guides) });
 }
 
-function directionForView(view: MeasurementSurfaceViewPreset): THREE.Vector3 {
+function directionForView(
+  view: MeasurementSurfaceViewPreset | MeasurementSurfaceGuideCameraViewV1,
+): THREE.Vector3 {
+  if (view === 'back-three-quarter') return new THREE.Vector3(Math.SQRT1_2, 0, -Math.SQRT1_2);
   if (view === 'side') return new THREE.Vector3(1, 0, 0);
   if (view === 'back') return new THREE.Vector3(0, 0, -1);
   return new THREE.Vector3(0, 0, 1);
@@ -2102,11 +2106,12 @@ export function MeasurementWatertightSurfaceV1Stage({
     }
 
     /** Where the camera looks at the body from, within 10 degrees; `free` anywhere else. */
-    function stageCameraFacing(): 'front' | 'back' | 'side' | 'free' {
+    function stageCameraFacing(): MeasurementSurfaceGuideCameraFacingV1 {
       if (!camera || !controls) return 'free';
       const direction = camera.position.clone().sub(controls.target).normalize();
       if (direction.z > 0.985) return 'front';
       if (direction.z < -0.985) return 'back';
+      if (direction.dot(directionForView('back-three-quarter')) > 0.985) return 'back-three-quarter';
       return Math.abs(direction.x) > 0.985 ? 'side' : 'free';
     }
 
@@ -3017,7 +3022,7 @@ export function MeasurementWatertightSurfaceV1Stage({
           // A running guide animation already carries the camera to the front or the owner's camera.
           cameraFacing: guideCameraAnimation !== 0 ? 'free' : stageCameraFacing(),
         });
-        const animateToView = (view: MeasurementSurfaceViewPreset) => {
+        const animateToView = (view: MeasurementSurfaceViewPreset | MeasurementSurfaceGuideCameraViewV1) => {
           if (!camera) return;
           const verticalFov = THREE.MathUtils.degToRad(camera.fov);
           const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * camera.aspect);
@@ -3035,7 +3040,7 @@ export function MeasurementWatertightSurfaceV1Stage({
         } else if (action === 'front') {
           guideCameraTurnRef.current = null;
           animateToView('front');
-        } else if (action === 'turn' && (targetView === 'back' || targetView === 'side')) {
+        } else if (action === 'turn' && targetView !== null && targetView !== 'front') {
           guideCameraTurnRef.current = {
             view: targetView,
             saved: turn?.saved ?? snapshotStageCamera(),

@@ -7,6 +7,18 @@ import { useMemo, useState } from 'react';
 import { Button, Text } from 'ui';
 
 import { ModelForm, type ModelFormDevDependenciesV1 } from '.';
+import {
+  createModelMannequinPoseDocumentV2,
+  fingerprintModelMannequinPoseDocumentV2,
+} from './model-mannequin-pose-document-v2';
+import {
+  createModelMannequinPoseDraftOwnerV1,
+  type ModelMannequinPoseDraftOwnerV1,
+} from './model-mannequin-pose-draft-owner-v1';
+import {
+  MODEL_OPEN_REFERENCE_DIRECT_NEUTRAL_POSE_V9,
+  type ModelOpenReferenceDirectPoseV9,
+} from './model-open-reference-direct-pose-v9';
 import { modelFormRevisionKeyV1 } from './schema';
 
 const REQUIRED_MEASUREMENTS: readonly common_ModelMeasurement[] = Object.freeze(
@@ -37,8 +49,12 @@ const OPTIONAL_LIMB_MEASUREMENTS: readonly common_ModelMeasurement[] = Object.fr
 function syntheticModel(
   id: number,
   name: string,
-  gender: 'GENDER_ENUM_FEMALE' | 'GENDER_ENUM_MALE',
+  gender: 'GENDER_ENUM_FEMALE' | 'GENDER_ENUM_MALE' | undefined,
   measurementOffsetMm: number,
+  measurements: readonly common_ModelMeasurement[] = [
+    ...REQUIRED_MEASUREMENTS,
+    ...OPTIONAL_LIMB_MEASUREMENTS,
+  ],
 ): common_Model {
   return {
     id,
@@ -47,12 +63,10 @@ function syntheticModel(
       comment: `deterministic receipt 84 fixture ${id}`,
       gender,
       bodyMeasurementSchemaVersion: 1,
-      measurements: [...REQUIRED_MEASUREMENTS, ...OPTIONAL_LIMB_MEASUREMENTS].map(
-        (measurement) => ({
-          ...measurement,
-          valueMm: (measurement.valueMm ?? 0) + measurementOffsetMm,
-        }),
-      ),
+      measurements: measurements.map((measurement) => ({
+        ...measurement,
+        valueMm: (measurement.valueMm ?? 0) + measurementOffsetMm,
+      })),
       thumbnailId: 0,
       mediaIds: [],
       defaultSizeIds: [],
@@ -64,22 +78,69 @@ function syntheticModel(
   };
 }
 
+/** Model #12 on beta as stored: seven required values, no gender, no optional field. */
+const MODEL_12_MEASUREMENTS: readonly common_ModelMeasurement[] = REQUIRED_MEASUREMENTS.map(
+  (measurement) =>
+    measurement.name === 'BODY_MEASUREMENT_NAME_SLEEVE_LENGTH'
+      ? { ...measurement, valueMm: 700 }
+      : measurement,
+);
+
+const MODEL_12_ARM = Object.freeze({
+  shoulderRaiseDegrees: -25,
+  shoulderForwardDegrees: -29,
+  elbowBendDegrees: 0,
+  wristBendDegrees: 0,
+});
+
+/** Model #12's saved pose (revision 2): linked arms lowered and swung forward. */
+export const MODEL_12_POSE_V9: ModelOpenReferenceDirectPoseV9 = Object.freeze({
+  ...MODEL_OPEN_REFERENCE_DIRECT_NEUTRAL_POSE_V9,
+  armMode: 'linked',
+  leftArm: MODEL_12_ARM,
+  rightArm: MODEL_12_ARM,
+});
+
 export const MODEL_FORM_PERSONALIZED_PREVIEW_FIXTURES_V1 = Object.freeze({
   alpha: syntheticModel(8401, 'receipt 84 alpha', 'GENDER_ENUM_FEMALE', 0),
   beta: syntheticModel(8402, 'receipt 84 beta', 'GENDER_ENUM_MALE', 10),
+  m12: syntheticModel(12, 'model 12 copy', undefined, 0, MODEL_12_MEASUREMENTS),
 });
 
-type FixtureId = 'alpha' | 'beta' | 'create';
+type FixtureId = 'alpha' | 'beta' | 'm12' | 'create';
+
+/** The stored pose loads like the durable transport delivers it: a found, fingerprinted row. */
+function model12PoseOwner(): ModelMannequinPoseDraftOwnerV1 {
+  const owner = createModelMannequinPoseDraftOwnerV1({
+    modelId: 12,
+    neutralPose: MODEL_OPEN_REFERENCE_DIRECT_NEUTRAL_POSE_V9,
+  });
+  const document = createModelMannequinPoseDocumentV2(MODEL_12_POSE_V9);
+  void fingerprintModelMannequinPoseDocumentV2(document).then((fingerprint) =>
+    owner.loadRemote({
+      kind: 'found',
+      stored: { document, revision: '2', canonicalSha256: fingerprint.slice('sha256:'.length) },
+    }),
+  );
+  return owner;
+}
+
+function initialFixtureId(): FixtureId {
+  const requested = new URLSearchParams(window.location.search).get('fixture');
+  return requested === 'beta' || requested === 'm12' || requested === 'create'
+    ? requested
+    : 'alpha';
+}
 
 export function ModelFormPersonalizedPreviewDevPage() {
-  const [fixtureId, setFixtureId] = useState<FixtureId>('alpha');
+  const [fixtureId, setFixtureId] = useState<FixtureId>(initialFixtureId);
   const [mutationCalls, setMutationCalls] = useState(0);
   const model =
-    fixtureId === 'alpha'
-      ? MODEL_FORM_PERSONALIZED_PREVIEW_FIXTURES_V1.alpha
-      : fixtureId === 'beta'
-        ? MODEL_FORM_PERSONALIZED_PREVIEW_FIXTURES_V1.beta
-        : undefined;
+    fixtureId === 'create' ? undefined : MODEL_FORM_PERSONALIZED_PREVIEW_FIXTURES_V1[fixtureId];
+  const poseOwner = useMemo(
+    () => (fixtureId === 'm12' ? model12PoseOwner() : undefined),
+    [fixtureId],
+  );
 
   const devDependencies = useMemo<ModelFormDevDependenciesV1>(
     () => ({
@@ -138,6 +199,9 @@ export function ModelFormPersonalizedPreviewDevPage() {
         <Button type='button' variant='secondary' size='sm' onClick={() => setFixtureId('beta')}>
           switch to model beta
         </Button>
+        <Button type='button' variant='secondary' size='sm' onClick={() => setFixtureId('m12')}>
+          switch to model 12
+        </Button>
         <Button type='button' variant='secondary' size='sm' onClick={() => setFixtureId('create')}>
           show create form
         </Button>
@@ -148,6 +212,7 @@ export function ModelFormPersonalizedPreviewDevPage() {
         isEditMode={model != null}
         id={model?.id == null ? undefined : String(model.id)}
         model={model}
+        poseOwner={poseOwner}
         devDependencies={devDependencies}
       />
     </main>

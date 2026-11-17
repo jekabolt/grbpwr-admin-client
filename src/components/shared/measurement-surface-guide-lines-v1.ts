@@ -121,6 +121,18 @@ export function measurementSurfaceGuidePolylineV1(
       if (point.length !== 3 || !point.every(Number.isFinite)) return null;
       points.push(...point);
     }
+  } else if (path.source === 'mesh-offset-points') {
+    // No normal lift: the offsets already stand the line off the body where it touches it.
+    const vertexCount = meshPositions.length / 3;
+    for (const { axisVertices, offsetM } of path.points) {
+      for (let axis = 0; axis < 3; axis += 1) {
+        const vertex = axisVertices[axis];
+        if (!Number.isSafeInteger(vertex) || vertex < 0 || vertex >= vertexCount) return null;
+        const value = meshPositions[vertex * 3 + axis] + offsetM[axis];
+        if (!Number.isFinite(value)) return null;
+        points.push(value);
+      }
+    }
   } else {
     const vertexCount = meshPositions.length / 3;
     const normals = meshNormals?.length === meshPositions.length ? meshNormals : null;
@@ -393,9 +405,9 @@ export function measurementSurfaceGuideAirDatasetV1(
   return kinds.length ? kinds.sort().join(',') : 'none';
 }
 
-export type MeasurementSurfaceGuideCameraViewV1 = 'back' | 'side';
+export type MeasurementSurfaceGuideCameraViewV1 = 'back' | 'side' | 'back-three-quarter';
 
-/** The focused field's camera view: its own back/side view, otherwise `front`. */
+/** The focused field's camera view: its own back/side/back-three-quarter view, otherwise `front`. */
 export type MeasurementSurfaceGuideCameraTargetV1 = MeasurementSurfaceGuideCameraViewV1 | 'front';
 
 export type MeasurementSurfaceGuideCameraActionV1 =
@@ -406,7 +418,12 @@ export type MeasurementSurfaceGuideCameraActionV1 =
   | 'front';
 
 /** Where the camera looks at the body from; `free` is an orbit of the owner's own. */
-export type MeasurementSurfaceGuideCameraFacingV1 = 'front' | 'back' | 'side' | 'free';
+export type MeasurementSurfaceGuideCameraFacingV1 =
+  | 'front'
+  | 'back'
+  | 'side'
+  | 'back-three-quarter'
+  | 'free';
 
 /**
  * Per-field camera turn (approved mockup, variant C). A field whose guide declares a back/side view
@@ -429,11 +446,11 @@ export function measurementSurfaceGuideCameraActionV1(options: {
   const { targetView, turn, editPose, interactive, cameraFacing = 'front' } = options;
   if (!interactive) return 'none';
   if (editPose) return turn ? 'forget' : 'none';
-  if (targetView === 'back' || targetView === 'side') {
+  if (targetView !== null && targetView !== 'front') {
     return turn?.view === targetView ? 'none' : 'turn';
   }
   if (turn?.ownerCameraSaved) return 'restore';
-  if (targetView === 'front' && (cameraFacing === 'back' || cameraFacing === 'side')) {
+  if (targetView === 'front' && cameraFacing !== 'front' && cameraFacing !== 'free') {
     return 'front';
   }
   return turn ? 'forget' : 'none';
