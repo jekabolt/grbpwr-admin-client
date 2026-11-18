@@ -58,7 +58,11 @@ import {
   type PatternImportDxfPhaseECadTableZeroOperationSavedChoicesResultV1,
   type PatternImportDxfPhaseECadTableZeroOperationSavedPreparationResultV1,
 } from './cad-table-zero-operation-saved-preparation-v1';
-import { isPatternImportDxfPhaseEZeroConnectPreparedAuthorityV1 } from './cad-table-zero-connect-phase-e-authority-v1';
+import {
+  isPatternImportDxfPhaseEZeroConnectPreparedAuthorityV1,
+  readPatternImportDxfPhaseEZeroConnectCurrentSavedReplayV1,
+} from './cad-table-zero-connect-phase-e-authority-v1';
+import { useGuardedPieceRename } from '../../guarded-piece-rename';
 import {
   hasMatchingFreshPatternChoiceV1,
   routePatternImportDxfPhaseECadTableZeroOperationSourceV1,
@@ -635,6 +639,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
   defaultOperationsMode?: PatternImportDxfPhaseECadWorkbenchOperationsModeV1;
   sourceSurface?: 'explicit-native-drawn-sewing';
 }>) {
+  const savePieceRename = useGuardedPieceRename();
   const generation = cardSession?.importGeneration ?? 0;
   const freshChoices = useMemo(
     () => listPatternImportDxfPhaseECadTableZeroOperationFreshChoicesV1(cardSession, generation),
@@ -933,6 +938,28 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
     currentPreparation?.status === 'settled' ? currentPreparation.authoringPrepared : null;
   const rebindExpectation =
     currentPreparation?.status === 'settled' ? currentPreparation.rebindExpectation : null;
+  const renameAuthority = authoringPrepared?.authoringAuthority;
+  const currentSavedPieceMetadata =
+    renameAuthority &&
+    renameAuthority.row.cardLockVersion === resolvedSavedCard?.lockVersion &&
+    readPatternImportDxfPhaseEZeroConnectCurrentSavedReplayV1(renameAuthority)
+      ? resolvedSavedCard?.techCard?.pieces
+      : undefined;
+  const renamePiece =
+    !disabled &&
+    selection.operationNumber == null &&
+    savePieceRename &&
+    renameAuthority &&
+    resolvedSavedCard?.techCard &&
+    !resolvedSavedCard.techCard.operations?.length &&
+    !resolvedSavedCard.seams?.length &&
+    !resolvedSavedCard.pieceFolds?.length &&
+    currentSavedPieceMetadata
+      ? {
+          row: renameAuthority.row,
+          save: savePieceRename,
+        }
+      : undefined;
   const authoringAuthorityRefresh = useMemo(
     () =>
       createPatternImportDxfPhaseECadTableZeroOperationAuthoringRefreshV1({
@@ -1081,6 +1108,8 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
             owner={tableSessionOwner}
             projection={prepared.projection}
             features={pieceFeatures}
+            savedPieces={currentSavedPieceMetadata}
+            renamePiece={renamePiece}
           />
         ) : null
       }

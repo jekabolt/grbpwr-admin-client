@@ -12063,6 +12063,20 @@ export type UpdateTechCardRequest = {
   // UUID minted when the edit screen opens. Non-empty ordinary saves coalesce their pre-images into
   // one autosave snapshot per server-side five-minute bucket; absent keeps legacy save behaviour.
   saveSessionId: string | undefined;
+  // Name-only Workbench edit. Send without tech_card so an older server cannot execute a
+  // full document rewrite after ignoring this field.
+  guardedPieceRename: GuardedZeroOperationPieceRename | undefined;
+};
+
+// Pins a display name change to a current zero-operation card and exact saved DXF row.
+export type GuardedZeroOperationPieceRename = {
+  pieceLineKey: string | undefined;
+  expectedName: string | undefined;
+  nextName: string | undefined;
+  scopeKey: string | undefined;
+  patternLineKey: string | undefined;
+  expectedSavedRowRevision: number | undefined;
+  expectedDxfSha256: string | undefined;
 };
 
 export type UpdateTechCardResponse = {

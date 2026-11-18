@@ -174,7 +174,7 @@ function selectedCurrentRow(
   return Object.freeze({ row: current, downloadUrl: pattern.downloadUrl });
 }
 
-function exactCurrentRow(
+export function assertExactZeroOperationSavedPatternRowV1(
   techCard: common_TechCard,
   expected: DxfProductSavedRowIdentityV1,
 ): Readonly<{ row: DxfProductSavedRowIdentityV1; downloadUrl: string }> {
@@ -212,7 +212,7 @@ export function createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1(
     assertLive(signal);
     const techCard = await readTechCard(expected.techCardId);
     assertLive(signal);
-    const current = exactCurrentRow(techCard, expected);
+    const current = assertExactZeroOperationSavedPatternRowV1(techCard, expected);
     return Object.freeze({ techCard, ...current });
   };
 

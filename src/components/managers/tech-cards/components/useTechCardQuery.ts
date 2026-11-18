@@ -5,6 +5,7 @@ import {
   common_SkuSeason,
   common_TechCardInsert,
   common_TechCardStage,
+  type GuardedZeroOperationPieceRename,
 } from 'api/proto-http/admin';
 import {
   openFindingCount,
@@ -411,19 +412,28 @@ export function useUpdateTechCard() {
       expectedLockVersion,
       snapshotReason = '',
       saveSessionId,
-    }: {
-      id: number;
-      techCard: common_TechCardInsert;
-      expectedLockVersion: number;
-      snapshotReason?: string;
-      saveSessionId: string;
-    }) =>
+      guardedPieceRename,
+    }: { id: number; expectedLockVersion: number } & (
+      | {
+          techCard: common_TechCardInsert;
+          snapshotReason?: string;
+          saveSessionId: string;
+          guardedPieceRename?: never;
+        }
+      | {
+          techCard?: never;
+          snapshotReason?: never;
+          saveSessionId?: never;
+          guardedPieceRename: GuardedZeroOperationPieceRename;
+        }
+    )) =>
       adminService.UpdateTechCard({
         id,
         techCard,
         expectedLockVersion,
         snapshotReason,
         saveSessionId,
+        guardedPieceRename,
       }),
     onSuccess: (_data, variables) => {
       // Operations or patterns may have moved: the card's hints map catches up by itself (§5a).

@@ -1,4 +1,6 @@
-import type { KeyboardEvent } from 'react';
+import { useState, type KeyboardEvent } from 'react';
+import type { GuardedSavedPieceRename } from '../../guarded-piece-rename';
+import { normalizeTechCardPieceRename } from '../../piece-rename-plan';
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 import { areaOf, perimeter } from 'lib/pattern-import/semantics/geom';
 
@@ -44,17 +46,102 @@ export function handleCadTablePieceSelectionKey(
   }));
 }
 
+type SavedPieceName = Readonly<{ lineKey: string | undefined; name: string | undefined }>;
+
+type RenamePiece = Readonly<{
+  row: GuardedSavedPieceRename['row'];
+  save: (intent: GuardedSavedPieceRename) => Promise<void>;
+}>;
+
+function SavedPieceNameEditor({
+  intent,
+  save,
+}: Readonly<{
+  intent: Omit<GuardedSavedPieceRename, 'nextName'>;
+  save: RenamePiece['save'];
+}>) {
+  const [name, setName] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (name === null) {
+    return (
+      <button className='underline' type='button' onClick={() => setName(intent.expectedName)}>
+        Rename piece
+      </button>
+    );
+  }
+  const nextName = normalizeTechCardPieceRename(name);
+  return (
+    <div className='space-y-1'>
+      <label className='block'>
+        Piece name
+        <input
+          className='block w-full rounded border border-borderColor bg-bgColor p-1'
+          disabled={busy}
+          value={name}
+          onChange={(event) => {
+            setName(event.target.value);
+            setError(null);
+          }}
+        />
+      </label>
+      <div className='flex flex-wrap gap-2'>
+        <button
+          className='underline disabled:opacity-50'
+          type='button'
+          disabled={busy || !nextName || nextName === intent.expectedName}
+          onClick={async () => {
+            setBusy(true);
+            setError(null);
+            try {
+              await save({ ...intent, nextName });
+              setName(null);
+            } catch (cause) {
+              setError(cause instanceof Error ? cause.message : 'The rename was refused.');
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          {busy ? 'Saving…' : 'Save name'}
+        </button>
+        <button
+          className='underline'
+          type='button'
+          disabled={busy}
+          onClick={() => {
+            setName(null);
+            setError(null);
+          }}
+        >
+          Cancel
+        </button>
+      </div>
+      {error ? <p role='alert'>{error}</p> : null}
+    </div>
+  );
+}
+
 export function CadTablePieceSelectionPanel({
   owner,
   projection,
   features,
+  savedPieces,
+  renamePiece,
 }: Readonly<{
   owner: CadTableZeroCanvasOwner;
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
   features?: CadTablePieceFeaturesByKey;
+  savedPieces?: readonly SavedPieceName[];
+  renamePiece?: RenamePiece;
 }>) {
   const { selectedPieceKeys } = owner.session.layout;
   const unit = usePatternImportDxfPhaseECadWorkbenchMeasurementUnitV1()?.unit ?? 'mm';
+  const savedNames = new Map<string, string | null>();
+  for (const { lineKey, name } of savedPieces ?? []) {
+    if (!lineKey) continue;
+    savedNames.set(lineKey, savedNames.has(lineKey) ? null : name?.trim() ? name : null);
+  }
   const rows = projection.pieces.map((piece) => {
     const objectKey = patternImportDxfPhaseECadTablePieceKeyV1(piece.pieceId, piece.pieceLineKey);
     const feature = features?.get(objectKey);
@@ -62,7 +149,8 @@ export function CadTablePieceSelectionPanel({
       piece,
       objectKey,
       pieceId: piece.pieceId,
-      label: feature?.pieceLabel || piece.pieceId,
+      savedName: savedNames.get(piece.pieceLineKey),
+      label: savedNames.get(piece.pieceLineKey) || feature?.pieceLabel || piece.pieceId,
       material: feature?.materialLabel,
       quantity: feature?.quantity,
       statusLabel: feature?.quantity == null ? '—' : undefined,
@@ -72,6 +160,7 @@ export function CadTablePieceSelectionPanel({
     selectedPieceKeys.length === 1
       ? rows.find(({ objectKey }) => objectKey === selectedPieceKeys[0])
       : undefined;
+  const renameLineKey = active?.piece.pieceLineKey;
 
   let measurements: { areaMm2: number; perimeterMm: number; sewingOnly: boolean } | null = null;
   if (active) {
@@ -112,6 +201,17 @@ export function CadTablePieceSelectionPanel({
             data-cad-selected-piece-inspector={active.objectKey}
           >
             <p className='font-bold'>{active.label}</p>
+            {renamePiece && renameLineKey && active.savedName ? (
+              <SavedPieceNameEditor
+                key={`${renamePiece.row.cardLockVersion}:${renamePiece.row.revision}:${renameLineKey}`}
+                intent={{
+                  row: renamePiece.row,
+                  pieceLineKey: renameLineKey,
+                  expectedName: active.savedName,
+                }}
+                save={renamePiece.save}
+              />
+            ) : null}
             {active.material ? <p className='text-labelColor'>{active.material}</p> : null}
             {measurements ? (
               <dl className='grid grid-cols-[1fr_auto] gap-x-2 tabular-nums'>
