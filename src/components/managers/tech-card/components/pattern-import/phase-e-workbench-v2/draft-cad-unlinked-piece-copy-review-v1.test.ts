@@ -4,7 +4,7 @@ import { readDxf } from 'lib/pattern-import/adapters/dxf/extract';
 import { segmentDxf } from 'lib/pattern-import/adapters/dxf/segment';
 import { dxfFastPath } from 'lib/pattern-import/adapters/dxf/stages';
 import { resolveNativeCutLoops } from 'lib/pattern-import/adapters/dxf/native-cut-holes';
-import { serialize } from 'lib/pattern-import/write/format';
+import { asciiText, serialize } from 'lib/pattern-import/write/format';
 import type { DxfPieceCandidate } from 'lib/pattern-import/adapters/dxf/dxf-types';
 
 import { signedArea } from 'lib/pattern-import/adapters/dxf/geometry';
@@ -98,6 +98,8 @@ async function seedCopy(ranks = 1, hole = false, mirror = false) {
                   ],
                 },
               ],
+              textMarks: [{ text: 'МЕТКА', at: { x: x + 50 + rank, y: y + 46 } }],
+              pointMarks: [{ kind: 'draft-point' as const, at: { x: x + 51 + rank, y: y + 51 } }],
               notches: [
                 {
                   kind: 'notch' as const,
@@ -396,6 +398,8 @@ it.each(
             if (mode === 'mirror-across-grain') {
               expect(size.cut).toHaveLength(5);
               expect(size.notches).toHaveLength(1);
+              expect(size.pointMarks).toEqual([expect.objectContaining({ kind: 'draft-point' })]);
+              expect(size.textMarks).toEqual([expect.objectContaining({ text: 'МЕТКА' })]);
               expect(
                 size.internal.filter((mark) => !mark.closed && mark.pts.length === 3),
               ).toHaveLength(1);
@@ -410,6 +414,12 @@ it.each(
                 );
                 expect(relative(size, size.notches[0]!.at)).toBe(
                   -relative(sourceSize, sourceSize.notches[0]!.at),
+                );
+                expect(relative(size, size.textMarks![0]!.at)).toBe(
+                  -relative(sourceSize, sourceSize.textMarks![0]!.at),
+                );
+                expect(relative(size, size.pointMarks![0]!.at)).toBe(
+                  -relative(sourceSize, sourceSize.pointMarks![0]!.at),
                 );
               }
             }
@@ -492,6 +502,9 @@ it('refuses mirror substitutes, modified rank geometry, missing grain, changed m
     'drill',
     'notch',
     'internal',
+    'construction-point',
+    'text-anchor',
+    'text-original-caption',
     'rank',
     'original',
     'cross-material',
@@ -511,6 +524,10 @@ it('refuses mirror substitutes, modified rank geometry, missing grain, changed m
     if (change === 'drill') size.drills[0]!.at.x += 0.001;
     if (change === 'notch') size.notches[0]!.at.x += 0.001;
     if (change === 'internal') size.internal[0]!.pts[1]!.y += 0.001;
+    if (change === 'construction-point') size.pointMarks![0]!.at.x += 0.001;
+    if (change === 'text-anchor') size.textMarks![0]!.at.x += 0.001;
+    if (change === 'text-original-caption')
+      size.textMarks![0]!.text = asciiText(size.textMarks![0]!.text);
     if (change === 'rank') copy.sizes.pop();
     if (change === 'original') job.pieces[1]!.sizes[0]!.drills = [];
     let output = writeDxfDetailed(job).dxfText;

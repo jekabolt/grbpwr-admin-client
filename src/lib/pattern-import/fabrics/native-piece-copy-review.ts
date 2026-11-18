@@ -2,7 +2,9 @@ import { buildAst, type RawBlock, type RawEntity } from '../adapters/dxf/ast';
 import { tokenize } from '../adapters/dxf/tags';
 import { readManifest } from '../manifest';
 import { authoredPointKind } from '../manifest/authored-point';
+import { AUTHORED_TEXT_HEIGHT_MM, AUTHORED_TEXT_LAYER } from '../manifest/authored-text';
 import { PATIMPORT, type ManifestBlock } from '../types';
+import { asciiText, num } from '../write/format';
 
 function requireMatch(ok: unknown, detail: string): asserts ok {
   if (!ok) throw new Error(`Unlinked copy review refused: ${detail}.`);
@@ -123,9 +125,28 @@ function grainFrame(block: RawBlock, record: ManifestBlock, reflect: boolean) {
     outer && block.entities.filter((e) => e.type === 'POLYLINE' && e.layer === '14').length <= 1,
     'ambiguous native cut or seam',
   );
+  const textMarks = record.authoredText ?? [];
+  const nativeTextMarks = block.entities.filter((e) => e.layer === AUTHORED_TEXT_LAYER);
+  requireMatch(nativeTextMarks.length === textMarks.length, 'missing or ambiguous authored text');
+  const markByEntity = new Map(nativeTextMarks.map((e, index) => [e, textMarks[index]!]));
   return JSON.stringify({
     entities: block.entities.map((e, index) => {
       const tags = attributes(e);
+      const textMark = markByEntity.get(e);
+      if (textMark) {
+        requireMatch(
+          e.type === 'TEXT' &&
+            read(e, 7) === 'STANDARD' &&
+            read(e, 1) === asciiText(textMark.text) &&
+            read(e, 40) === num(AUTHORED_TEXT_HEIGHT_MM) &&
+            coordinate(read(e, 30)) === 0n &&
+            coordinate(read(e, 50)) === 0n &&
+            coordinate(read(e, 10)) === BigInt(textMark.anchor[0]) &&
+            coordinate(read(e, 20)) === BigInt(textMark.anchor[1]),
+          'authored text differs from its native anchor or glyphs',
+        );
+        return [e.type, e.layer, tags, point(e), textMark.text];
+      }
       if (e.type === 'TEXT') {
         const value = read(e, 1) ?? '';
         const attribute =
