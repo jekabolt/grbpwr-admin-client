@@ -288,7 +288,7 @@ export async function runDirectedSourceCutPreviewV1(
   const command = (index: number) => ({
     ...schedule[index],
     operationOrder,
-    action: index === 0 ? ('activate' as const) : ('contract' as const),
+    action: index === 0 ? ('activate' as const) : ('contract-active' as const),
   });
   const frame: Frame = {
     material,

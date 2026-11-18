@@ -15,6 +15,7 @@ import {
 } from './cad-workbench-preview-lifecycle-v1';
 import { canonicalizePatternImportDxfPhaseESavedAssemblyValueV1 as canonical } from './saved-assembly-topology-hash-v1';
 import type { SavedCrossMaterialReviewForPreviewV8 } from './saved-complete-assembly-native-review-action-v8';
+import type { SavedWholeAssemblyPreviewProgressV1 } from './saved-whole-assembly-staged-preview-v1';
 
 type PreviewKind = 'seam' | 'whole';
 
@@ -57,6 +58,9 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
     number: number;
     kind: PreviewKind;
   } | null>(null);
+  const [wholeProgress, setWholeProgress] = useState<SavedWholeAssemblyPreviewProgressV1 | null>(
+    null,
+  );
   const savedCenter = review.placement?.placement.centerMm;
   const savedBody = review.placement?.body;
   const bodyMatchesPlacement = useMemo(
@@ -112,12 +116,16 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
             prepare: whole.prepare,
             isCurrent,
             verifySource: (_source, active) => review.verify(active),
+            onAccepted(progress) {
+              onAcceptedCloth(progress.cloth);
+              setAcceptedFrame({ number: progress.cloth.frameNumber, kind: 'whole' });
+              setWholeProgress(progress);
+            },
           },
           signal,
         );
         if (!isCurrent()) throw new Error('The displayed mannequin or saved assembly changed.');
-        onAcceptedCloth(accepted);
-        setAcceptedFrame({ number: accepted.frameNumber, kind: 'whole' });
+        setWholeProgress(accepted);
         return { ok: true };
       }
       if (!validCenter) throw new Error('Enter three valid placement coordinates.');
@@ -207,6 +215,7 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
       async stopPreview() {
         onAcceptedCloth(undefined);
         setAcceptedFrame(null);
+        setWholeProgress(null);
         await work?.catch(() => {});
       },
     };
@@ -219,6 +228,7 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
       setPlacementStatus({ pending: false, error: null });
       onAcceptedCloth(undefined);
       setAcceptedFrame(null);
+      setWholeProgress(null);
       setStatus({ pending: false, error: null });
       void lifecycle.cancel(host);
     };
@@ -389,9 +399,30 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
                 ? `Choose the mannequin and pose saved for this placement (#${savedBody?.modelId}).`
                 : 'Medium diagnostic cloth · 4 mm starting layer separation'
             : acceptedFrame.kind === 'whole'
-              ? `Full layout visible · frame ${acceptedFrame.number} · first sewing stage`
+              ? `Full layout visible · frame ${acceptedFrame.number}`
               : `Cloth visible · frame ${acceptedFrame.number} · medium diagnostic material`)}
       </Text>
+      {wholeProgress && (
+        <div
+          className='space-y-1'
+          data-whole-assembly-frame={wholeProgress.cloth.frameNumber}
+          data-whole-assembly-seams={JSON.stringify(wholeProgress.activeSeams)}
+          data-whole-assembly-maximum-gap-mm={wholeProgress.maximumGapMm}
+          data-whole-assembly-refused-operation={wholeProgress.stopped?.operationNumber}
+        >
+          <Text component='p' size='micro' role='status'>
+            Frame {wholeProgress.cloth.frameNumber} · {wholeProgress.activeSeams.length} of{' '}
+            {wholeProgress.totalStages} stages active · maximum gap{' '}
+            {wholeProgress.maximumGapMm.toFixed(2)} mm
+          </Text>
+          {wholeProgress.stopped && (
+            <Text component='p' size='micro' role='alert'>
+              Operation {wholeProgress.stopped.operationNumber} refused. Showing the last accepted
+              frame. {wholeProgress.stopped.detail}
+            </Text>
+          )}
+        </div>
+      )}
       <canvas ref={computeCanvas} width={1} height={1} hidden aria-hidden='true' />
     </section>
   );

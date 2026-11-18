@@ -8,10 +8,13 @@ import type {
   runStagedSourceCutFramesV1,
 } from 'components/cloth-simulation-spike/run-staged-source-cut-frames-v1';
 import type { MeasurementSurfaceAcceptedClothV1 } from 'components/shared/measurement-watertight-surface-v1-stage';
+import { inspectOwnedActiveXpbdDeviceLeaseV1 } from 'lib/cloth/runtime/webgpu/xpbd-device-session';
 import type { SavedCompleteAssemblyNativeStitchAnchorsV1 } from './saved-complete-assembly-native-stitch-anchors-v1';
 
 type Run = Parameters<typeof runStagedSourceCutFramesV1>[0];
 type Command = Parameters<typeof continueStagedSourceCutFramesV1>[1];
+type Receipt = Awaited<ReturnType<typeof runStagedSourceCutFramesV1>>;
+type ActiveSeams = Receipt['validated'][number]['activeSeams'];
 type Source = SavedCompleteAssemblyNativeStitchAnchorsV1;
 type DisplayedBody = ModelDisplayedTriangleBodyInputProjectionV1;
 
@@ -38,6 +41,14 @@ export type PrepareSavedWholeAssemblyPreviewV1 = (
   assertCurrentSource: () => boolean,
 ) => Promise<SavedWholeAssemblyStagePlanV1>;
 
+export type SavedWholeAssemblyPreviewProgressV1 = Readonly<{
+  cloth: MeasurementSurfaceAcceptedClothV1;
+  activeSeams: ActiveSeams;
+  maximumGapMm: number;
+  totalStages: number;
+  stopped?: Readonly<{ operationNumber: number; detail: string }>;
+}>;
+
 /** Hands the current saved source and rendered mannequin to the existing staged runtime. */
 export async function runSavedWholeAssemblyStagedPreviewV1(
   input: Readonly<{
@@ -47,9 +58,10 @@ export async function runSavedWholeAssemblyStagedPreviewV1(
     prepare: PrepareSavedWholeAssemblyPreviewV1;
     isCurrent: () => boolean;
     verifySource: (source: Source, signal: AbortSignal) => Promise<void>;
+    onAccepted: (progress: SavedWholeAssemblyPreviewProgressV1) => void;
   }>,
   signal: AbortSignal,
-): Promise<MeasurementSurfaceAcceptedClothV1> {
+): Promise<SavedWholeAssemblyPreviewProgressV1> {
   const { source, body, ownedLease, prepare, verifySource } = input;
   const isCurrent = () => !signal.aborted && input.isCurrent() && body.isCurrent();
   const requireCurrent = () => {
@@ -113,11 +125,43 @@ export async function runSavedWholeAssemblyStagedPreviewV1(
     },
     signal,
   );
-  for (const command of following) receipt = await advance(receipt, command, signal);
-  const frame = receipt.validated.at(-1);
-  if (!frame) throw new Error('The whole-assembly run did not accept a display frame.');
-  const positionsM = surface.project(receipt.positionsMInvMass);
-  await verifySource(source, signal);
-  requireCurrent();
-  return Object.freeze({ positionsM, frameNumber: frame.frame, ranges, isCurrent });
+  async function publish(frameReceipt: Receipt): Promise<SavedWholeAssemblyPreviewProgressV1> {
+    const frame = frameReceipt.validated.at(-1);
+    if (!frame) throw new Error('The whole-assembly run did not accept a display frame.');
+    const positionsM = surface.project(frameReceipt.positionsMInvMass);
+    await verifySource(source, signal);
+    requireCurrent();
+    const progress = Object.freeze({
+      cloth: Object.freeze({ positionsM, frameNumber: frame.frame, ranges, isCurrent }),
+      activeSeams: frame.activeSeams,
+      maximumGapMm: frame.activeSeams.reduce(
+        (maximum, seam) => Math.max(maximum, seam.maximumGapM * 1000),
+        0,
+      ),
+      totalStages: plan.frame.seams.stages.length,
+    });
+    input.onAccepted(progress);
+    return progress;
+  }
+
+  let last = await publish(receipt);
+  for (const command of following) {
+    try {
+      receipt = await advance(receipt, command, signal);
+    } catch (error) {
+      requireCurrent();
+      const live = inspectOwnedActiveXpbdDeviceLeaseV1(ownedLease);
+      if (!live.ok) throw error;
+      live.assertActive();
+      await verifySource(source, signal);
+      requireCurrent();
+      const stopped = {
+        operationNumber: command.operationOrder,
+        detail: error instanceof Error ? error.message : 'The next stage was refused.',
+      };
+      return Object.freeze({ ...last, stopped });
+    }
+    last = await publish(receipt);
+  }
+  return last;
 }

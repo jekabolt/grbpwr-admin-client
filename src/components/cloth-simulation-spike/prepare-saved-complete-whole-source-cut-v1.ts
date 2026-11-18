@@ -103,6 +103,7 @@ export async function prepareSavedCompleteWholeSourceCutV1(
     source: SavedCompleteWholeSourceCutV1;
     candidate: ArrayBuffer;
     assertCurrentSource: () => boolean;
+    frameCount?: 1 | 4;
   }>,
   signal?: AbortSignal,
 ) {
@@ -190,7 +191,7 @@ export async function prepareSavedCompleteWholeSourceCutV1(
       parameters: {
         dtS: materialSolver.dtS,
         solverIterations: materialSolver.solverIterations,
-        frameCount: 4,
+        frameCount: input.frameCount ?? 4,
         gravityMps2Y: -9.81,
         windAccelerationMps2Z: 0,
         distanceComplianceMPerN: 2e-7,
