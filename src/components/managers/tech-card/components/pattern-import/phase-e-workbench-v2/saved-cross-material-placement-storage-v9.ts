@@ -137,11 +137,52 @@ export async function persistSavedCrossMaterialPlacementV9(
     { schemaVersion: requestSchema, currentAuthority: target },
     signal,
   );
-  if (!result.ok)
-    throw new Error(result.blockers[0]?.detail ?? 'The initial placement could not be saved.');
-  const source = await readCompleteSavedAssemblySourceV1(createClient(signal), row, pinned, signal);
-  const reopened = await readSavedCrossMaterialPlacementDocumentV9(source, signal);
-  if (reopened.sha256 !== submitted.sha256)
-    throw new Error('The fresh Complete Source returned a different saved placement.');
-  return { receipt: result.receipt, source, reopened };
+  const openCurrent = async () => {
+    const source = await readCompleteSavedAssemblySourceV1(
+      createClient(signal),
+      row,
+      pinned,
+      signal,
+    );
+    const reopened = await readSavedCrossMaterialPlacementDocumentV9(source, signal);
+    if (reopened.sha256 !== submitted.sha256)
+      throw new Error('The fresh Complete Source returned a different saved placement.');
+    return { source, reopened };
+  };
+  if (result.ok) return { ...(await openCurrent()), receipt: result.receipt };
+
+  signal.throwIfAborted();
+  const failure = new Error(result.blockers[0]?.detail ?? 'The placement could not be saved.');
+  if (result.writeOutcome === 'not-attempted') throw failure;
+  try {
+    const [current, narrow, body] = await Promise.all([
+      openCurrent(),
+      createClient(signal).GetTechCardPatternSemanticSidecar({
+        techCardId: row.techCardId,
+        patternLineKey: row.patternLineKey,
+      }),
+      readCurrentBody(signal),
+    ]);
+    signal.throwIfAborted();
+    const confirmed = narrow.semanticSidecar;
+    if (
+      confirmed?.techCardId !== row.techCardId ||
+      confirmed.patternLineKey !== row.patternLineKey ||
+      confirmed.savedRowRevision !== row.revision ||
+      confirmed.cardLockVersion !== row.cardLockVersion ||
+      confirmed.patternVersion !== anchorRow.patternVersion ||
+      confirmed.dxfSha256 !== row.sha256 ||
+      confirmed.mediaType !== SAVED_COMPLETE_ASSEMBLY_PLACEMENT_MEDIA_V9 ||
+      confirmed.sidecarSha256 !== submitted.sha256 ||
+      confirmed.postSaveReceiptSha256 !== submitted.postSaveReceiptSha256 ||
+      confirmed.byteLength !== submitted.bytes.byteLength ||
+      confirmed.sidecarBytes !== current.reopened.base64 ||
+      canonical(body) !== canonical(submitted.placement.body)
+    )
+      throw failure;
+    return { ...current, receipt: undefined };
+  } catch {
+    signal.throwIfAborted();
+    throw failure;
+  }
 }
