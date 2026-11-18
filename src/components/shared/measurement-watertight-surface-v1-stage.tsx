@@ -1669,6 +1669,7 @@ export function MeasurementWatertightSurfaceV1Stage({
     let patternPiecePointerDownHandler: ((event: PointerEvent) => void) | null = null;
     let patternPiecePointerMoveHandler: ((event: PointerEvent) => void) | null = null;
     let patternPiecePointerFinishHandler: ((event: PointerEvent) => void) | null = null;
+    let cancelledPatternPointer: AbortController | null = null;
     let patternPieceGesture: Readonly<{
       pointerId: number;
       binding: MeasurementSurfacePatternPieceSceneBindingV1;
@@ -1829,27 +1830,62 @@ export function MeasurementWatertightSurfaceV1Stage({
       return Math.atan2(event.clientY - centerY, event.clientX - centerX);
     }
 
-    function finishPatternPieceGesture() {
+    function suppressCancelledPatternPointer(pointerId: number) {
+      cancelledPatternPointer?.abort();
+      const suppression = new AbortController();
+      cancelledPatternPointer = suppression;
+      const swallow = (event: PointerEvent) => {
+        if (event.pointerId !== pointerId) return;
+        // The next real press can reuse this pointer ID.
+        if (event.type === 'pointerdown') {
+          suppression.abort();
+          return;
+        }
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (event.type === 'click') suppression.abort();
+      };
+      const options = { capture: true, signal: suppression.signal };
+      window.addEventListener('pointerdown', swallow, options);
+      window.addEventListener('pointerup', swallow, options);
+      window.addEventListener('click', swallow, options);
+    }
+
+    function finishPatternPieceGesture(outcome: 'commit' | 'cancel') {
       const gesture = patternPieceGesture;
       if (!gesture) return;
       patternPieceGesture = null;
+      if (outcome === 'cancel') {
+        gesture.binding.anchor.position.copy(gesture.startPosition);
+        gesture.binding.content.rotation.z = gesture.startRotation;
+        suppressCancelledPatternPointer(gesture.pointerId);
+      }
       if (contextCanvas?.hasPointerCapture(gesture.pointerId)) {
         contextCanvas.releasePointerCapture(gesture.pointerId);
       }
       if (controls) controls.enabled = interactive;
-      const offset = gesture.binding.anchor.position.clone().sub(gesture.binding.basePosition);
-      patternPieceOverlayRef.current?.onTransformPiece?.(
-        gesture.binding.piece.pieceKey,
-        Object.freeze({
-          offsetM: Object.freeze(offset.toArray() as [number, number, number]),
-          rotationRad: gesture.binding.content.rotation.z,
-        }),
-      );
+      if (outcome === 'commit') {
+        const offset = gesture.binding.anchor.position.clone().sub(gesture.binding.basePosition);
+        patternPieceOverlayRef.current?.onTransformPiece?.(
+          gesture.binding.piece.pieceKey,
+          Object.freeze({
+            offsetM: Object.freeze(offset.toArray() as [number, number, number]),
+            rotationRad: gesture.binding.content.rotation.z,
+          }),
+        );
+      }
       if (contextCanvas) {
         contextCanvas.dataset.patternPieceGesture = 'idle';
         contextCanvas.style.cursor = '';
       }
       scheduleRender();
+    }
+
+    function cancelPatternPieceOnEscape(event: globalThis.KeyboardEvent) {
+      if (event.key !== 'Escape' || !patternPieceGesture) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      finishPatternPieceGesture('cancel');
     }
 
     function projectedJointMarkerId(
@@ -2177,7 +2213,8 @@ export function MeasurementWatertightSurfaceV1Stage({
       onDisplayedGeometryRef.current?.(null);
       finishRotationGizmo('cancel');
       finishPositionDrag('cancel');
-      patternPieceGesture = null;
+      finishPatternPieceGesture('cancel');
+      cancelledPatternPointer?.abort();
       // A rebuild mid-turn keeps the turned end pose, so the rebuilt stage does not swing again.
       stopGuideCameraAnimation(true);
       if (interactive) {
@@ -2236,7 +2273,9 @@ export function MeasurementWatertightSurfaceV1Stage({
       if (contextCanvas && patternPiecePointerFinishHandler) {
         contextCanvas.removeEventListener('pointerup', patternPiecePointerFinishHandler);
         contextCanvas.removeEventListener('pointercancel', patternPiecePointerFinishHandler);
+        contextCanvas.removeEventListener('lostpointercapture', patternPiecePointerFinishHandler);
       }
+      window.removeEventListener('keydown', cancelPatternPieceOnEscape, true);
       if (rotationEscapeHandler) window.removeEventListener('keydown', rotationEscapeHandler);
       if (rotationBlurHandler) window.removeEventListener('blur', rotationBlurHandler);
       if (rotationVisibilityHandler) {
@@ -2786,7 +2825,7 @@ export function MeasurementWatertightSurfaceV1Stage({
       document.addEventListener('visibilitychange', rotationVisibilityHandler);
 
       patternPiecePointerDownHandler = (event) => {
-        if (event.button !== 0 || !camera) return;
+        if (event.button !== 0 || !camera || patternPieceGesture) return;
         const binding = patternPieceHit(event);
         if (!binding) return;
         const overlay = patternPieceOverlayRef.current;
@@ -2854,12 +2893,14 @@ export function MeasurementWatertightSurfaceV1Stage({
         if (!patternPieceGesture || patternPieceGesture.pointerId !== event.pointerId) return;
         event.preventDefault();
         event.stopImmediatePropagation();
-        finishPatternPieceGesture();
+        finishPatternPieceGesture(event.type === 'pointerup' ? 'commit' : 'cancel');
       };
       contextCanvas.addEventListener('pointerdown', patternPiecePointerDownHandler);
       contextCanvas.addEventListener('pointermove', patternPiecePointerMoveHandler);
       contextCanvas.addEventListener('pointerup', patternPiecePointerFinishHandler);
       contextCanvas.addEventListener('pointercancel', patternPiecePointerFinishHandler);
+      contextCanvas.addEventListener('lostpointercapture', patternPiecePointerFinishHandler);
+      window.addEventListener('keydown', cancelPatternPieceOnEscape, true);
 
       controls = new OrbitControls(camera, renderer.domElement);
       controls.enabled = interactive;
