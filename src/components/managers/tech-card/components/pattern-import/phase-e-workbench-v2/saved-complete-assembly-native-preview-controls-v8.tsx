@@ -51,6 +51,7 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
   const previewKind = useRef<PreviewKind>('seam');
   const pauseRequested = useRef(false);
   const resumeRequested = useRef(false);
+  const stepRequested = useRef(false);
   const pausedCheckpoint = useRef<SavedWholeAssemblyResumeV1 | null>(null);
   const [pausing, setPausing] = useState(false);
   const [lifecycle] = useState(() => createCadWorkbenchPreviewLifecycleV1());
@@ -120,6 +121,8 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
       if (expectedBody && !matchesSavedBody(displayed, expectedBody))
         throw new Error('The displayed mannequin differs from the saved placement.');
       if (wholeRequested) {
+        const stepOnce = stepRequested.current;
+        stepRequested.current = false;
         const whole = review.wholeAssembly;
         if (!whole || !body) throw new Error('The saved assembly layout is unavailable.');
         const resume = resumeRequested.current ? pausedCheckpoint.current : null;
@@ -137,7 +140,7 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
             prepare: whole.prepare,
             savedPlacement: whole.saved,
             isCurrent: isCurrentSource,
-            pauseAfterAccepted: () => pauseRequested.current,
+            pauseAfterAccepted: () => stepOnce || pauseRequested.current,
             async verifySource(verifiedSource, active) {
               if (
                 verifiedSource.cardId !== review.cardId ||
@@ -160,7 +163,7 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
         pauseRequested.current = false;
         setPausing(false);
         setWholeProgress(accepted);
-        return { ok: true, releaseDevice: accepted.paused ? true : undefined };
+        return { ok: true, releaseDevice: true };
       }
       if (!validCenter) throw new Error('Enter three valid placement coordinates.');
       const load = review.load(signal);
@@ -277,7 +280,8 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
     };
   }, [body, disabled, host, lifecycle, onAcceptedCloth]);
 
-  const preview = (kind: PreviewKind, resumeSuspended = false) => {
+  const preview = (kind: PreviewKind, options: { resume?: boolean; step?: boolean } = {}) => {
+    const resumeSuspended = options.resume === true;
     if (
       disabled ||
       editing ||
@@ -294,6 +298,7 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
     previewKind.current = kind;
     pauseRequested.current = false;
     resumeRequested.current = resumeSuspended;
+    stepRequested.current = options.step === true;
     setPausing(false);
     void lifecycle.start(
       host,
@@ -306,6 +311,13 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
       resumeSuspended,
     );
   };
+
+  function resetWholePreview() {
+    if (disabled || placementSave.current) return;
+    stepRequested.current = false;
+    setStatus({ pending: false, error: null });
+    void lifecycle.cancel(host);
+  }
 
   async function savePlacement(kind: PreviewKind) {
     const save = kind === 'whole' ? review.wholeAssembly?.save : review.savePlacement;
@@ -427,9 +439,31 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
             variant='main'
             size='xs'
             disabled={busy || !bodyMatchesWhole || !body?.isCurrent()}
-            onClick={() => preview('whole', true)}
+            onClick={() => preview('whole', { resume: true })}
           >
             Resume full layout
+          </Button>
+        )}
+        {review.wholeAssembly && (!acceptedFrame || wholeProgress?.paused) && (
+          <Button
+            type='button'
+            variant='secondary'
+            size='xs'
+            disabled={busy || editing || !bodyMatchesWhole || !body?.isCurrent()}
+            onClick={() => preview('whole', { resume: !!wholeProgress?.paused, step: true })}
+          >
+            Step one frame
+          </Button>
+        )}
+        {(wholeProgress || (status.pending && previewKind.current === 'whole')) && (
+          <Button
+            type='button'
+            variant='secondary'
+            size='xs'
+            disabled={disabled || placementStatus.pending}
+            onClick={resetWholePreview}
+          >
+            Reset preview
           </Button>
         )}
         {review.wholeAssembly?.save && (
@@ -514,6 +548,9 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
           data-whole-assembly-seams={JSON.stringify(wholeProgress.activeSeams)}
           data-whole-assembly-frame-work={JSON.stringify(wholeProgress.frameWork)}
           data-whole-assembly-maximum-gap-mm={wholeProgress.maximumGapMm}
+          data-whole-assembly-maximum-gap-operation={
+            wholeProgress.maximumGapOperationNumber ?? undefined
+          }
           data-whole-assembly-refused-operation={wholeProgress.stopped?.operationNumber}
         >
           <Text component='p' size='micro' role='status'>
@@ -521,6 +558,8 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
             {wholeProgress.cloth.frameNumber} · {wholeProgress.activeSeams.length} of{' '}
             {wholeProgress.totalStages} stages active · maximum gap{' '}
             {wholeProgress.maximumGapMm.toFixed(2)} mm
+            {wholeProgress.maximumGapOperationNumber !== null &&
+              ` at operation ${wholeProgress.maximumGapOperationNumber}`}
           </Text>
           {wholeProgress.stopped && (
             <>

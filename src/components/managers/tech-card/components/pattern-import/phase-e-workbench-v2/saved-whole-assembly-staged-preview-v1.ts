@@ -73,6 +73,7 @@ export type SavedWholeAssemblyPreviewProgressV1 = Readonly<{
   action: Command['action'];
   activeSeams: ActiveSeams;
   maximumGapMm: number;
+  maximumGapOperationNumber: number | null;
   totalStages: number;
   frameWork: FrameWork;
   paused?: SavedWholeAssemblyResumeV1;
@@ -385,15 +386,17 @@ export async function runSavedWholeAssemblyStagedPreviewV1(
           : undefined,
       bodyQuery: bodyQuery?.frame === frame.frame ? Object.freeze({ ...bodyQuery }) : undefined,
     });
+    const worst = frame.activeSeams.reduce<ActiveSeams[number] | null>(
+      (maximum, seam) => (!maximum || seam.maximumGapM > maximum.maximumGapM ? seam : maximum),
+      null,
+    );
     last = Object.freeze({
       cloth: Object.freeze({ positionsM, frameNumber: frame.frame, ranges, isCurrent }),
       frameWork,
       action: command.action,
       activeSeams: frame.activeSeams,
-      maximumGapMm: frame.activeSeams.reduce(
-        (maximum, seam) => Math.max(maximum, seam.maximumGapM * 1000),
-        0,
-      ),
+      maximumGapMm: (worst?.maximumGapM ?? 0) * 1000,
+      maximumGapOperationNumber: worst?.operationOrder ?? null,
       totalStages,
     });
     input.onAccepted(last);

@@ -33,7 +33,15 @@ const hashes = {
 };
 const frame = (number: number) => ({
   positionsMInvMass: new Float32Array([number, 0, 0, 1]),
-  validated: [{ frame: number, activeSeams: [{ maximumGapM: number / 1000 }] }],
+  validated: [
+    {
+      frame: number,
+      activeSeams: [
+        { maximumGapM: number / 1000, operationOrder: 80 },
+        { maximumGapM: number / 2000, operationOrder: 30 },
+      ],
+    },
+  ],
   safeguardedSteps: [
     {
       frame: number,
@@ -211,6 +219,8 @@ describe('same Workbench staged checkpoint', () => {
     expect(calls.advance).toHaveBeenCalledTimes(1);
     expect(final.cloth.frameNumber).toBe(3);
     expect(final.action).toBe('contract-active');
+    expect(final.maximumGapMm).toBe(3);
+    expect(final.maximumGapOperationNumber).toBe(80);
     expect(final.frameWork).toEqual({
       safeguard: {
         scale: 0.5,
