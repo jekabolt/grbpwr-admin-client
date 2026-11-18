@@ -55,7 +55,9 @@ class PointerCanvas {
   }
 }
 
-function exerciseCamera(guarded: boolean) {
+type PointerEventArgs = Parameters<PointerCanvas['dispatch']>;
+
+function exerciseCamera(guarded: boolean, sequence: readonly PointerEventArgs[]) {
   const target = new PointerCanvas();
   const canvas = target as unknown as HTMLCanvasElement;
   let controls: OrbitControls;
@@ -70,12 +72,7 @@ function exerciseCamera(guarded: boolean) {
   controls.addEventListener('start', starts);
   controls.addEventListener('end', ends);
   try {
-    target.dispatch('pointerdown', 3, 'mouse');
-    target.dispatch('pointercancel', 21, 'touch');
-    target.dispatch('pointerdown', 3, 'mouse');
-    target.dispatch('pointerup', 3, 'mouse');
-    target.dispatch('pointerdown', 4, 'mouse');
-    target.dispatch('pointerup', 4, 'mouse');
+    for (const event of sequence) target.dispatch(...event);
     return {
       faults: target.faults,
       starts: starts.mock.calls.length,
@@ -89,10 +86,30 @@ function exerciseCamera(guarded: boolean) {
 }
 
 it('keeps the camera gesture after an unrelated cancel and discards duplicate starts', () => {
-  expect(String(exerciseCamera(false).faults[0])).toMatch(/reading 'x'/);
-  const guarded = exerciseCamera(true);
+  const events: PointerEventArgs[] = [
+    ['pointerdown', 3, 'mouse'],
+    ['pointercancel', 21, 'touch'],
+    ['pointerdown', 3, 'mouse'],
+    ['pointerup', 3, 'mouse'],
+    ['pointerdown', 4, 'mouse'],
+    ['pointerup', 4, 'mouse'],
+  ];
+  expect(String(exerciseCamera(false, events).faults[0])).toMatch(/reading 'x'/);
+  const guarded = exerciseCamera(true, events);
   expect(guarded.stageEnds).toHaveBeenCalledOnce();
   expect(guarded.faults).toEqual([]);
   expect(guarded.starts).toBe(2);
   expect(guarded.ends).toBe(2);
+});
+
+it('preserves the two-finger camera gesture and its normal end', () => {
+  const guarded = exerciseCamera(true, [
+    ['pointerdown', 10, 'touch'],
+    ['pointerdown', 11, 'touch'],
+    ['pointerup', 11, 'touch'],
+    ['pointerup', 10, 'touch'],
+  ]);
+  expect(guarded.faults).toEqual([]);
+  expect(guarded.starts).toBe(3);
+  expect(guarded.ends).toBe(1);
 });
