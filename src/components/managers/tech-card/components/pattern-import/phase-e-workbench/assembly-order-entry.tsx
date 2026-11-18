@@ -2,6 +2,7 @@ import { useSavedClothPhysicalHostV1 } from '../phase-e-workbench-v2/use-saved-c
 import { CadWorkbenchPhysicalHostProductionMountV1 } from '../phase-e-workbench-v2/cad-workbench-physical-host-production-mount-v1';
 import type { CadWorkbenchPhysicalHostV1 } from '../phase-e-workbench-v2/cad-workbench-physical-host-v1';
 import type { SavedCrossMaterialReviewForPreviewV8 } from '../phase-e-workbench-v2/saved-complete-assembly-native-review-action-v8';
+import type { PrepareSavedWholeAssemblyPreviewV1 } from '../phase-e-workbench-v2/saved-whole-assembly-staged-preview-v1';
 import {
   readSavedCadMannequinArrangementV1,
   readSavedCadMannequinModelIdV1,
@@ -1606,6 +1607,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
   onEditStitchField,
   exactNSession = null,
   exactNApplicationOwner,
+  prepareWholeAssemblyPreview,
   workbenchOpen = false,
   autoOpen = false,
   onOpenChange,
@@ -1628,6 +1630,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
   exactNSession?: PatternImportDxfPhaseEExactNAssemblyOrderSessionV2 | null;
   /** Existing Composite V4 application transaction; never recreated by the workbench. */
   exactNApplicationOwner?: PatternImportDxfProductCompositeSidecarApplicationTransactionV4;
+  prepareWholeAssemblyPreview?: PrepareSavedWholeAssemblyPreviewV1;
   workbenchOpen?: boolean;
   /** Visible production tab opens the one CAD owner immediately; no intermediate door is needed. */
   autoOpen?: boolean;
@@ -2703,6 +2706,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
             operationNumber={selectedOperationNumber}
             seamKeys={crossMaterialKeys}
             onVerifiedReview={setCrossMaterialReview}
+            prepareWholeAssemblyPreview={prepareWholeAssemblyPreview}
             authority={savedAllScopeAuthority}
             orderSizeIds={orderSizeIds}
             sizeNameById={sizeNameById}

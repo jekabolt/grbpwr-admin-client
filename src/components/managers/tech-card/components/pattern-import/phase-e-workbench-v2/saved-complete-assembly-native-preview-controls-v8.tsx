@@ -16,6 +16,8 @@ import {
 import { canonicalizePatternImportDxfPhaseESavedAssemblyValueV1 as canonical } from './saved-assembly-topology-hash-v1';
 import type { SavedCrossMaterialReviewForPreviewV8 } from './saved-complete-assembly-native-review-action-v8';
 
+type PreviewKind = 'seam' | 'whole';
+
 function matchesSavedBody(
   displayed: ModelDisplayedTriangleBodyInputProjectionV1 | null,
   saved: NonNullable<SavedCrossMaterialReviewForPreviewV8['placement']>['body'],
@@ -41,6 +43,7 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
   const id = useId();
   const computeCanvas = useRef<HTMLCanvasElement>(null);
   const placementSave = useRef<AbortController | null>(null);
+  const previewKind = useRef<PreviewKind>('seam');
   const [lifecycle] = useState(() => createCadWorkbenchPreviewLifecycleV1());
   const [status, setStatus] = useState<CadWorkbenchPreviewStatusV1>({
     pending: false,
@@ -50,7 +53,10 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
     pending: false,
     error: null,
   });
-  const [acceptedFrame, setAcceptedFrame] = useState<number | null>(null);
+  const [acceptedFrame, setAcceptedFrame] = useState<{
+    number: number;
+    kind: PreviewKind;
+  } | null>(null);
   const savedCenter = review.placement?.placement.centerMm;
   const savedBody = review.placement?.body;
   const bodyMatchesPlacement = useMemo(
@@ -87,10 +93,34 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
         current.current.body === body &&
         !current.current.disabled &&
         body?.isCurrent() === true;
-      if (!displayed || !validCenter || !isCurrent())
+      if (!displayed || !isCurrent())
         throw new Error('Choose a current displayed mannequin and three placement coordinates.');
       if (savedBody && !matchesSavedBody(displayed, savedBody))
         throw new Error('The displayed mannequin differs from the saved placement.');
+      if (previewKind.current === 'whole') {
+        const whole = review.wholeAssembly;
+        if (!whole || !body) throw new Error('The saved assembly layout is unavailable.');
+        const [source, { runSavedWholeAssemblyStagedPreviewV1 }] = await Promise.all([
+          whole.load(signal),
+          import('./saved-whole-assembly-staged-preview-v1'),
+        ]);
+        const accepted = await runSavedWholeAssemblyStagedPreviewV1(
+          {
+            source,
+            body,
+            ownedLease: lease,
+            prepare: whole.prepare,
+            isCurrent,
+            verifySource: (_source, active) => review.verify(active),
+          },
+          signal,
+        );
+        if (!isCurrent()) throw new Error('The displayed mannequin or saved assembly changed.');
+        onAcceptedCloth(accepted);
+        setAcceptedFrame({ number: accepted.frameNumber, kind: 'whole' });
+        return { ok: true };
+      }
+      if (!validCenter) throw new Error('Enter three valid placement coordinates.');
       const load = review.load(signal);
       const source = await load;
       if (review.placement && body) {
@@ -162,7 +192,7 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
           isCurrent,
         }),
       );
-      setAcceptedFrame(frameNumber);
+      setAcceptedFrame({ number: frameNumber, kind: 'seam' });
       return { ok: true };
     };
     return {
@@ -200,17 +230,19 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
     };
   }, [body, disabled, host, lifecycle, onAcceptedCloth]);
 
-  const preview = () => {
+  const preview = (kind: PreviewKind) => {
     if (
       disabled ||
       editing ||
       placementSave.current ||
-      !validCenter ||
+      status.pending ||
+      (kind === 'seam' ? !validCenter : !review.wholeAssembly) ||
       !bodyMatchesPlacement ||
       !body?.isCurrent() ||
       !computeCanvas.current
     )
       return;
+    previewKind.current = kind;
     void lifecycle.start(host, computeCanvas.current, null, setStatus);
   };
 
@@ -296,14 +328,25 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
           variant='main'
           size='xs'
           disabled={busy || editing || !validCenter || !bodyMatchesPlacement || !body?.isCurrent()}
-          onClick={preview}
+          onClick={() => preview('seam')}
         >
           {status.pending
             ? 'Computing cloth…'
-            : acceptedFrame === null
+            : acceptedFrame?.kind !== 'seam'
               ? 'Preview cloth'
               : 'Refresh cloth'}
         </Button>
+        {review.wholeAssembly && (
+          <Button
+            type='button'
+            variant='secondary'
+            size='xs'
+            disabled={busy || editing || !bodyMatchesPlacement || !body?.isCurrent()}
+            onClick={() => preview('whole')}
+          >
+            Preview full layout
+          </Button>
+        )}
         {(!review.placement || editing) && (
           <Button
             type='button'
@@ -345,7 +388,9 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
               : !bodyMatchesPlacement
                 ? `Choose the mannequin and pose saved for this placement (#${savedBody?.modelId}).`
                 : 'Medium diagnostic cloth · 4 mm starting layer separation'
-            : `Cloth visible · frame ${acceptedFrame} · medium diagnostic material`)}
+            : acceptedFrame.kind === 'whole'
+              ? `Full layout visible · frame ${acceptedFrame.number} · first sewing stage`
+              : `Cloth visible · frame ${acceptedFrame.number} · medium diagnostic material`)}
       </Text>
       <canvas ref={computeCanvas} width={1} height={1} hidden aria-hidden='true' />
     </section>

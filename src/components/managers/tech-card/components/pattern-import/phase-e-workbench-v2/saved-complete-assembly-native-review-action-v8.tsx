@@ -18,6 +18,8 @@ import {
   SAVED_COMPLETE_ASSEMBLY_PLACEMENT_MEDIA_V9,
 } from './saved-cross-material-placement-document-v9';
 import type { prepareCurrentSavedCrossMaterialPlacementV9 } from './saved-cross-material-placement-prepare-v9';
+import type { readSavedCompleteAssemblyNativeStitchAnchorsV1 } from './saved-complete-assembly-native-stitch-anchors-v1';
+import type { PrepareSavedWholeAssemblyPreviewV1 } from './saved-whole-assembly-staged-preview-v1';
 import type { PatternImportDxfPhaseEZeroOperationSavedCardAuthorityRuntimeV1 as Authority } from './zero-operation-saved-card-authority-v1';
 import { resolvePatternImportDxfPhaseEZeroOperationSavedDxfCapabilityV1 } from './zero-operation-saved-dxf-capability-v1';
 
@@ -35,6 +37,12 @@ export type SavedCrossMaterialReviewForPreviewV8 = Readonly<{
   sha256: string;
   load: (signal: AbortSignal) => ReturnType<typeof readSavedCompleteAssemblyNativePhysicalSourceV8>;
   verify: (signal: AbortSignal) => Promise<void>;
+  wholeAssembly?: Readonly<{
+    prepare: PrepareSavedWholeAssemblyPreviewV1;
+    load: (
+      signal: AbortSignal,
+    ) => ReturnType<typeof readSavedCompleteAssemblyNativeStitchAnchorsV1>;
+  }>;
   placement?: RestoredPlacement['world'];
   savePlacement: (input: PlacementInput, signal: AbortSignal) => Promise<void>;
 }>;
@@ -109,6 +117,7 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
   sizeNameById,
   disabled,
   onVerifiedReview,
+  prepareWholeAssemblyPreview,
 }: {
   techCard: common_TechCard;
   operationNumber: number;
@@ -118,6 +127,7 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
   sizeNameById: ReadonlyMap<number, string>;
   disabled: boolean;
   onVerifiedReview?: (review: SavedCrossMaterialReviewForPreviewV8 | null) => void;
+  prepareWholeAssemblyPreview?: PrepareSavedWholeAssemblyPreviewV1;
 }) {
   const id = useId();
   const { dictionary, loading } = useDictionary();
@@ -243,6 +253,20 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
             operationNumber,
             sha256: carrierSha256,
             load,
+            wholeAssembly: prepareWholeAssemblyPreview && {
+              prepare: prepareWholeAssemblyPreview,
+              load: async (active) => {
+                const { readSavedCompleteAssemblyNativeStitchAnchorsV1 } = await import(
+                  './saved-complete-assembly-native-stitch-anchors-v1'
+                );
+                return readSavedCompleteAssemblyNativeStitchAnchorsV1(
+                  current,
+                  projection,
+                  sizeAuthority,
+                  active,
+                );
+              },
+            },
             placement: placement?.world,
             async savePlacement(input, active) {
               const [
