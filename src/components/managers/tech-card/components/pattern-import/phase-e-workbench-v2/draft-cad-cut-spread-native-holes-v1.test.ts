@@ -252,3 +252,42 @@ it('refuses to split an authored notch group into two different pieces', async (
     ],
   });
 });
+
+it.each(['bulge', 'owner', 'width'] as const)(
+  'refuses an own R2000 signed cut hole with altered %s',
+  async (change) => {
+    const { job } = await holeFixture();
+    const { dxfFastPath } = await import('lib/pattern-import/adapters/dxf/stages');
+    const { dxfText } = writeDxfDetailed({ ...job, dialect: 'r2000' });
+    // Edit the native entity with the exact first hole vertex. Retain every manifest byte.
+    const lines = dxfText.split(/\r?\n/);
+    const start = lines.findIndex(
+      (v, i) =>
+        v.trim() === '10' &&
+        lines[i + 1] === '12.000000' &&
+        lines[i + 2]?.trim() === '20' &&
+        lines[i + 3] === '30.000000',
+    );
+    expect(start).toBeGreaterThan(0);
+    let begin = start;
+    while (begin > 0 && lines[begin] !== 'LWPOLYLINE') begin--;
+    expect(lines[begin]).toBe('LWPOLYLINE');
+    if (change === 'bulge') lines.splice(start + 4, 0, ' 42', '0.015625');
+    else {
+      const tag = change === 'owner' ? '330' : '43';
+      const offset = lines.slice(begin + 1, start).findIndex((value) => value.trim() === tag);
+      expect(offset).toBeGreaterThanOrEqual(0);
+      lines[begin + 2 + offset] = change === 'owner' ? 'FFFF' : '1.000000';
+    }
+    const read = await readDxf(
+      {
+        id: 'altered-hole',
+        name: 'altered-hole.dxf',
+        bytes: new TextEncoder().encode(lines.join(dxfText.includes('\r\n') ? '\r\n' : '\n'))
+          .buffer,
+      },
+      { sagittaMm: 0.05, keepFills: true },
+    );
+    expect(() => dxfFastPath(read, segmentDxf(read))).toThrow(/native DXF cut hole/i);
+  },
+);

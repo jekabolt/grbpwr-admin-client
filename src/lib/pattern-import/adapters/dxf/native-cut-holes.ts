@@ -26,27 +26,16 @@ function requireHole(value: unknown, reason: string): asserts value {
 const tag = (e: RawEntity, code: number) => e.tags.find((t) => t.code === code)?.value;
 const samePoint = (a: PtMm, b: PtMm) => a.x === b.x && a.y === b.y;
 
-/** The stage accepts only native writer polygons, never sampled bulges, fit curves or stitched paths. */
-function straightRing(e: RawEntity, path: IRPath, group: DxfMeta['groups'][number]): Ring {
+function r12CutVertices(e: RawEntity) {
   requireHole(
     e.type === 'POLYLINE' &&
-      e.layer === '1' &&
-      tag(e, 70) === '1' &&
       tag(e, 66) === '1' &&
       e.tags.length === 3 &&
       tag(e, 8) === '1' &&
-      e.seqend &&
-      path.closed &&
-      path.src.block === group.block &&
-      path.src.op === e.op &&
-      path.src.sub === 0 &&
-      group.transform.a === 1 &&
-      group.transform.b === 0 &&
-      group.transform.c === 0 &&
-      group.transform.d === 1,
-    'expected a native R12 straight polygon in its original axes',
+      e.seqend,
+    'expected a native R12 straight polygon',
   );
-  const points = e.children.map((v) => {
+  return e.children.map((v) => {
     requireHole(
       v.type === 'VERTEX' &&
         v.layer === '1' &&
@@ -62,8 +51,71 @@ function straightRing(e: RawEntity, path: IRPath, group: DxfMeta['groups'][numbe
       Number.isFinite(x) && Number.isFinite(y) && num(x) === tag(v, 10) && num(y) === tag(v, 20),
       'invalid native cut vertex',
     );
-    return apply(group.transform, { x, y });
+    return { x, y };
   });
+}
+function r2000CutVertices(e: RawEntity, ownerHandle: string | undefined) {
+  const tags = e.tags;
+  const count = Number(tag(e, 90));
+  const header = [5, 330, 100, 8, 100, 90, 70, 43];
+  requireHole(
+    e.type === 'LWPOLYLINE' &&
+      !e.paper &&
+      !e.children.length &&
+      ownerHandle &&
+      /^[0-9A-F]+$/.test(ownerHandle) &&
+      tag(e, 330) === ownerHandle &&
+      /^[0-9A-F]+$/.test(e.handle ?? '') &&
+      header.every((code, i) => tags[i]?.code === code) &&
+      tags[2]!.value === 'AcDbEntity' &&
+      tags[4]!.value === 'AcDbPolyline' &&
+      tag(e, 43) === num(0) &&
+      Number.isSafeInteger(count) &&
+      count >= 3 &&
+      String(count) === tag(e, 90) &&
+      tags.length === header.length + 2 * count,
+    'expected a native R2000 straight polygon with its original block owner',
+  );
+  return Array.from({ length: count }, (_, i) => {
+    const x = tags[header.length + 2 * i]!,
+      y = tags[header.length + 2 * i + 1]!;
+    const point = { x: Number(x.value), y: Number(y.value) };
+    requireHole(
+      x.code === 10 &&
+        y.code === 20 &&
+        Number.isFinite(point.x) &&
+        Number.isFinite(point.y) &&
+        num(point.x) === x.value &&
+        num(point.y) === y.value,
+      'invalid native R2000 cut vertex',
+    );
+    return point;
+  });
+}
+
+/** The stage accepts only native writer polygons, never sampled bulges, fit curves or stitched paths. */
+function straightRing(
+  e: RawEntity,
+  path: IRPath,
+  group: DxfMeta['groups'][number],
+  version: string,
+  ownerHandle: string | undefined,
+): Ring {
+  requireHole(
+    e.layer === '1' &&
+      tag(e, 70) === '1' &&
+      path.closed &&
+      path.src.block === group.block &&
+      path.src.op === e.op &&
+      path.src.sub === 0 &&
+      group.transform.a === 1 &&
+      group.transform.b === 0 &&
+      group.transform.c === 0 &&
+      group.transform.d === 1,
+    'expected a native cut ring in its original axes',
+  );
+  const vertices = version === 'AC1015' ? r2000CutVertices(e, ownerHandle) : r12CutVertices(e);
+  const points = vertices.map((p) => apply(group.transform, p));
   requireHole(
     points.length >= 3 &&
       points.length === path.pts.length &&
@@ -76,14 +128,19 @@ function straightRing(e: RawEntity, path: IRPath, group: DxfMeta['groups'][numbe
 }
 
 /** Read-time native evidence is scoped to the exact decoder instance and never serialized into a DXF. */
-export function captureOwnR12CutHoles(
+export function captureOwnNativeCutHoles(
   read: DxfRead,
   raw: RawDxf,
   bytes: ArrayBuffer,
   budget: WorkBudgetLike,
 ) {
   const { meta } = read;
-  if (!meta.manifest || meta.version !== 'AC1009' || meta.generatedFusing) return;
+  if (
+    !meta.manifest ||
+    (meta.version !== 'AC1009' && meta.version !== 'AC1015') ||
+    meta.generatedFusing
+  )
+    return;
   const withExtraCut = raw.blockOrder.filter(
     (b) => b.entities.filter((e) => e.type !== 'TEXT' && e.layer === '1').length > 1,
   );
@@ -147,7 +204,7 @@ export function captureOwnR12CutHoles(
         const rings = entities.map((e) => {
           const path = byEntity.get(e.op);
           requireHole(path, 'cut entity is missing its native instance');
-          return straightRing(e, path, group);
+          return straightRing(e, path, group, meta.version!, block.ownerHandle);
         });
         const outers = rings.filter((r) => signedArea(r.points) > 0),
           holes = rings.filter((r) => signedArea(r.points) < 0);
