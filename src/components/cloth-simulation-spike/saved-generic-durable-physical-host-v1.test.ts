@@ -113,6 +113,12 @@ import { PatternImportDxfPhaseEExactNTopologyAnnotationEditorV1 } from 'componen
 // HTTP storage, declared synthetic observed triangle geometry, and GPU/preview lifecycle ports are fixtures.
 // Native/compiler/body ownership and durable verification are real; this is not GPU/V11/fit acceptance.
 vi.mock('api/api', () => ({ abortableAdminService: vi.fn() }));
+const previewMetricBinding = vi.hoisted(() => ({
+  frameReportSha256: '2'.repeat(64),
+  sourceBindingSha256: '3'.repeat(64),
+  finalStateSha256: '4'.repeat(64),
+  strainRenderMappingSha256: '5'.repeat(64),
+}));
 const ports = vi.hoisted(() => ({
   calls: [] as Array<{ frame: number; request: Record<string, unknown>; prior: unknown }>,
   live: new Map<object, AbortController>(),
@@ -157,7 +163,11 @@ vi.mock('./dxf-garment-observed-webgpu-replay-v1', () => {
       report: {
         status: 'diagnostic-completed',
         frameCount: frame,
-        reportSha256: String(frame === 16 ? 1 : 2).repeat(64),
+        reportSha256: frame === 32 ? previewMetricBinding.frameReportSha256 : '1'.repeat(64),
+        bodyBinding: structuredClone(request.bodyBinding),
+        sourceBindingSha256: previewMetricBinding.sourceBindingSha256,
+        finalStateSha256: previewMetricBinding.finalStateSha256,
+        strain: { renderMappingSha256: previewMetricBinding.strainRenderMappingSha256 },
         checkpoint16Matched: frame === 32,
         claims: { numericReplayOnly: true, runtimeAuthority: false, productAuthority: false },
       },
@@ -209,7 +219,21 @@ vi.mock('./dxf-garment-observed-strain-heatmap-preview-v1', () => ({
     signal.addEventListener('abort', dispose, { once: true });
     if (signal.aborted) dispose();
     return {
-      receipt: { declaredSyntheticPreview: true, frameReportSha256: '2'.repeat(64) },
+      receipt: {
+        ...previewMetricBinding,
+        frames: 32,
+        quantity: 'normalized-green-strain-utilization',
+        units: 'dimensionless',
+        minimumUtilization: 0.125,
+        maximumUtilization: 2.75,
+        triangleCountAtOrAboveDisplayClamp: 3,
+        displayClampMaximum: 2,
+        visibleHeatmapRendered: true,
+        stressPaComputed: false,
+        numericReplayOnly: true,
+        productAuthority: false,
+        fitAuthority: false,
+      },
       lifetime: controller.signal,
       pick: (x: number, y: number, runtimeSeamId?: string) =>
         ports.previewPick?.(x, y, runtimeSeamId) ?? null,
@@ -2048,12 +2072,14 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
       vi.unstubAllGlobals();
     });
     let controls: ReactNode;
+    let retainedSnapshot: ReturnType<typeof f.host.getSnapshot> | null = null;
     function Controls() {
       // Run the actual React control hooks in the same CPU-only harness as the saved route test.
       const state = {
         host: f.host,
+        bodySession: f.body,
         sourceStatus: 'ready',
-        durableSnapshot: f.host.getSnapshot(),
+        durableSnapshot: retainedSnapshot ?? f.host.getSnapshot(),
       } as ComponentProps<typeof CadWorkbenchPhysicalHostControlsV1>['state'];
       controls = CadWorkbenchPhysicalHostControlsV1({ state, interaction });
       const props = visitMountedTree(
@@ -2064,11 +2090,38 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
       if (ref) ref.current = canvas;
       return null;
     }
-    await act(async () => route.render(createElement(Controls)));
-    const canvasProps = visitMountedTree(
-      controls,
-      (props) => props['aria-label'] === 'Cloth simulation on the selected mannequin',
-    ) as ComponentProps<'canvas'> | null;
+    const drawControls = () => act(async () => route.render(createElement(Controls)));
+    const mountedLegend = () =>
+      visitMountedTree(controls, (props) => props['aria-label'] === 'Strain utilization legend');
+    const mountedCanvas = () =>
+      visitMountedTree(
+        controls,
+        (props) => props['aria-label'] === 'Cloth simulation on the selected mannequin',
+      ) as ComponentProps<'canvas'> | null;
+    await drawControls();
+    const legend = mountedLegend();
+    expect(legend).not.toBeNull();
+    const legendMarkup = renderToStaticMarkup(createElement('section', legend));
+    expect(legendMarkup).toContain('Normalized strain utilization · dimensionless');
+    expect(legendMarkup).toContain('1.0 = provisional visualization limit · uncalibrated');
+    expect(legendMarkup).toContain('≥2');
+    expect(legendMarkup).toContain('Range 0.125–2.750');
+    const admitted = f.host.getSnapshot();
+    const currentReport = admitted.numeric.frame32Report;
+    if (!currentReport) throw new Error('The admitted frame report is absent.');
+    retainedSnapshot = {
+      ...admitted,
+      numeric: {
+        ...admitted.numeric,
+        frame32Report: { ...currentReport, reportSha256: '6'.repeat(64) },
+      },
+    };
+    await drawControls();
+    expect(mountedLegend()).toBeNull();
+    expect(mountedCanvas()?.className).toContain('hidden');
+    retainedSnapshot = null;
+    await drawControls();
+    const canvasProps = mountedCanvas();
     if (!canvasProps) throw new Error('Mounted physical preview canvas is absent.');
     const pointer = (clientX: number, button = 0) =>
       ({
@@ -2235,6 +2288,27 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
       numeric: { previewReceipt: null },
     });
     expect((await f.host.projectLatestRender()).ok).toBe(true);
+    await drawControls();
+    expect(mountedLegend()).toBeNull();
+    requireOk(await f.host.mountPreview(canvas));
+    await drawControls();
+    expect(mountedLegend()).not.toBeNull();
+    // The body turn can be revoked independently of a render carrying the last cloth snapshot.
+    retainedSnapshot = f.host.getSnapshot();
+    const originalBody = f.body.getSnapshot();
+    await f.body.observe(null);
+    await drawControls();
+    expect(mountedLegend()).toBeNull();
+    expect(mountedCanvas()?.className).toContain('hidden');
+    await f.body.observe(f.observed.input);
+    const rebound = f.body.getSnapshot();
+    expect(rebound.status).toBe('observed-body-bound');
+    expect(rebound.generation).toBeGreaterThan(originalBody.generation);
+    expect(rebound.binding).toEqual(originalBody.binding);
+    expect(f.host.getSnapshot().numeric.previewReceipt).toBeNull();
+    await drawControls();
+    expect(mountedLegend()).toBeNull();
+    expect(mountedCanvas()?.className).toContain('hidden');
   }, 120000);
 
   it('refuses fresh saved-row drift and clears physical children without revoking the borrowed body', async () => {

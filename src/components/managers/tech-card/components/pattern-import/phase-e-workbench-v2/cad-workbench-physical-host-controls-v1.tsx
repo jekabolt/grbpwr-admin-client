@@ -1,4 +1,6 @@
 import { useLayoutEffect, useRef, useState, type PointerEvent } from 'react';
+import { BETA_SKIRT_STRAIN_UTILIZATION_COLOR_LUT_V1 } from 'components/cloth-simulation-spike/beta-skirt-strain-utilization-legend-v1';
+import type { SavedModelDisplayedTriangleBodySessionSnapshotV2 } from 'components/managers/models/components/saved-model-displayed-triangle-body-session-v2';
 import { Button, Text } from 'ui';
 
 import type { CadWorkbenchPhysicalPreviewInteractionV1 } from './cad-workbench-physical-host-v1';
@@ -10,6 +12,48 @@ import {
 } from './cad-workbench-preview-lifecycle-v1';
 
 type HostState = ReturnType<typeof useSavedClothPhysicalHostV1>;
+const strainScale = BETA_SKIRT_STRAIN_UTILIZATION_COLOR_LUT_V1;
+
+function currentStrainReceipt(
+  { host, durableSnapshot: snapshot }: HostState,
+  displayedBody: SavedModelDisplayedTriangleBodySessionSnapshotV2 | undefined,
+) {
+  if (
+    snapshot?.status !== 'preview-ready' ||
+    host?.getSnapshot() !== snapshot ||
+    displayedBody?.status !== 'observed-body-bound'
+  )
+    return null;
+  const { binding, numeric } = snapshot;
+  const { frame32Report: frame, previewReceipt: receipt } = numeric;
+  const frameBody = frame?.bodyBinding;
+  const body = displayedBody.binding;
+  if (
+    !binding ||
+    numeric.status !== 'preview-ready' ||
+    numeric.sourceGeneration !== binding.sourceGeneration ||
+    numeric.initializationSha256 !== binding.physicalInitializationCanonicalSha256 ||
+    frame?.status !== 'diagnostic-completed' ||
+    !receipt ||
+    receipt.frames !== frame.frameCount ||
+    receipt.frameReportSha256 !== frame.reportSha256 ||
+    receipt.sourceBindingSha256 !== frame.sourceBindingSha256 ||
+    receipt.finalStateSha256 !== frame.finalStateSha256 ||
+    receipt.strainRenderMappingSha256 !== frame.strain?.renderMappingSha256 ||
+    receipt.quantity !== 'normalized-green-strain-utilization' ||
+    receipt.units !== strainScale.legend.units ||
+    receipt.displayClampMaximum !== strainScale.clamp.maximum ||
+    !frameBody ||
+    !body ||
+    frameBody.generation !== body.generation ||
+    frameBody.persistedModel.id !== body.persistedModel.id ||
+    frameBody.persistedModel.revision !== body.persistedModel.revision ||
+    frameBody.persistedModel.updatedAt !== body.persistedModel.updatedAt ||
+    frameBody.observedBodyContentSha256 !== body.observedBodyContentSha256
+  )
+    return null;
+  return receipt;
+}
 
 /** Compact viewport-only controls. The underlying mannequin remains mounted and visible. */
 export function CadWorkbenchPhysicalHostControlsV1({
@@ -47,8 +91,9 @@ export function CadWorkbenchPhysicalHostControlsV1({
   };
 
   const ready = state.sourceStatus === 'ready' && state.host !== null;
-  const previewReady = state.durableSnapshot?.status === 'preview-ready';
-  const receipt = state.durableSnapshot?.numeric.previewReceipt;
+  const displayedBody = state.bodySession?.getSnapshot();
+  const receipt = ready ? currentStrainReceipt(state, displayedBody) : null;
+  const previewReady = receipt !== null;
   useLayoutEffect(() => {
     const canvas = previewCanvas.current;
     if (!host || !canvas || !previewReady || !receipt) return;
@@ -121,7 +166,6 @@ export function CadWorkbenchPhysicalHostControlsV1({
     );
     if (hit) interaction.onPick(hit);
   };
-  const displayedBody = state.bodySession?.getSnapshot();
   return (
     <div
       className='pointer-events-none absolute inset-0 z-20 overflow-hidden'
@@ -195,6 +239,32 @@ export function CadWorkbenchPhysicalHostControlsV1({
                     (previewReady ? 'Cloth preview' : 'Cloth ready')}
         </Text>
       </div>
+      {receipt ? (
+        <section
+          aria-label='Strain utilization legend'
+          className='absolute bottom-2 left-2 flex max-w-[calc(100%-1rem)] flex-col gap-1 border border-borderColor bg-bgColor/95 px-2 py-1'
+        >
+          <Text component='span' size='micro'>
+            {strainScale.legend.title} · {strainScale.legend.units}
+          </Text>
+          <div className='flex flex-wrap gap-x-2 gap-y-1'>
+            {strainScale.stops.map(({ utilization, color }) => (
+              <span className='inline-flex items-center gap-1' key={utilization}>
+                <span className='size-2' style={{ backgroundColor: color }} aria-hidden='true' />
+                <Text component='span' size='micro' className='tabular-nums'>
+                  {utilization === strainScale.clamp.maximum ? `≥${utilization}` : utilization}
+                </Text>
+              </span>
+            ))}
+          </div>
+          <Text component='span' size='micro' variant='label'>
+            {strainScale.legend.thresholdLabel} · uncalibrated
+          </Text>
+          <Text component='span' size='micro' variant='label' className='tabular-nums'>
+            Range {receipt.minimumUtilization.toFixed(3)}–{receipt.maximumUtilization.toFixed(3)}
+          </Text>
+        </section>
+      ) : null}
       <CadWorkbenchFirstPhysicalAuthoringV1 state={state} disabled={disabled} />
     </div>
   );
