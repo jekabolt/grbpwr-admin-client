@@ -3,7 +3,6 @@ import {
   projectSavedNativeStitchRegistrationV1,
   type SavedNativeStitchRegistrationV1,
 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-native-stitch-registration-v1';
-import { canonicalizePatternImportDxfPhaseESavedAssemblyValueV1 as canonical } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-assembly-topology-hash-v1';
 import { compileSourceCutRegisteredStitchPairsV1 } from 'lib/cloth/compiler/source-cut-registered-stitch-pairs-v1';
 import type { SavedWholeAssemblyPlacementLayoutV10 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-whole-assembly-placement-document-v10';
 import { prepareSourceCutSurfaceProjectionV1 } from 'lib/cloth/runtime/cpu/source-cut-surface-projection-v1';
@@ -135,13 +134,13 @@ function labelCorners(outline: readonly (readonly [number, number])[]) {
   });
 }
 
-function verifyRegisteredMaterialPairs(
+function replayRegisteredMaterialPairs(
   source: SavedCompleteWholeSourceCutV1,
   candidatePairs: Candidate['pairs'],
   manifest: SealedWholeSourceCutFixtureV1['exactFabricStitchRegistrations'],
   signal?: AbortSignal,
 ) {
-  if (!manifest) return;
+  if (!manifest) return candidatePairs;
   if (!manifest.seams.length)
     throw new RangeError('The diagnostic carrier has an empty fabric stitch registration.');
   const stitches = manifest.seams.map((registration) => {
@@ -157,18 +156,30 @@ function verifyRegisteredMaterialPairs(
   const compiled = compileSourceCutRegisteredStitchPairsV1(stitches, manifest.sampling, signal);
   const keys = new Set(stitches.map(({ seamId }) => seamId));
   const retained = candidatePairs.filter(({ seamId }) => keys.has(seamId));
-  const materialIdentity = (pairs: readonly Pair[]) =>
-    pairs.map(({ operationOrder, seamId, sourcePairIndex, sideA, sideB }) => [
-      operationOrder,
-      seamId,
-      sourcePairIndex,
-      sideA.pieceId,
-      ...sideA.positionMm,
-      sideB.pieceId,
-      ...sideB.positionMm,
-    ]);
-  if (canonical(materialIdentity(compiled)) !== canonical(materialIdentity(retained)))
+  // Interpolation can differ by a few Float64 units. The projected points are used for the
+  // solver, and the exact compiled support bytes are verified below.
+  const sameStation = (actual: Pair['sideA'], expected: Pair['sideA']) =>
+    actual.pieceId === expected.pieceId &&
+    actual.positionMm.every((a, axis) => {
+      const b = expected.positionMm[axis];
+      return Math.abs(a - b) <= 8 * Number.EPSILON * Math.max(1, Math.abs(a), Math.abs(b));
+    });
+  if (
+    compiled.length !== retained.length ||
+    compiled.some((pair, index) => {
+      const previous = retained[index];
+      return (
+        pair.operationOrder !== previous.operationOrder ||
+        pair.seamId !== previous.seamId ||
+        pair.sourcePairIndex !== previous.sourcePairIndex ||
+        !sameStation(pair.sideA, previous.sideA) ||
+        !sameStation(pair.sideB, previous.sideB)
+      );
+    })
+  )
     throw new RangeError('The diagnostic stations differ from their registered native parts.');
+  let index = 0;
+  return candidatePairs.map((pair) => (keys.has(pair.seamId) ? compiled[index++] : pair));
 }
 
 /** Bind the diagnostic pants placement to the exact saved source before using the existing solver. */
@@ -222,7 +233,12 @@ export async function prepareSavedCompleteWholeSourceCutV1(
     throw new RangeError('The sealed diagnostic pants placement has changed.');
   requireCurrent();
   const data = JSON.parse(new TextDecoder().decode(bytes)) as Candidate;
-  verifyRegisteredMaterialPairs(source, data.pairs, fixture.exactFabricStitchRegistrations, signal);
+  const pairs = replayRegisteredMaterialPairs(
+    source,
+    data.pairs,
+    fixture.exactFabricStitchRegistrations,
+    signal,
+  );
   const cuts = new Map<string, Cut>(
     data.cuts.map(([id, entry]) => [
       id,
@@ -290,7 +306,7 @@ export async function prepareSavedCompleteWholeSourceCutV1(
         JSON.stringify({
           mesh: data.mesh,
           cuts: data.cuts,
-          pairs: data.pairs,
+          pairs,
           profile: data.profile,
           pressedCreases: data.pressedCreases,
           ...(allNative ? { grains } : {}),
@@ -397,7 +413,7 @@ export async function prepareSavedCompleteWholeSourceCutV1(
     },
     signal,
   );
-  const seams = prepareGarmentStagedSourceCutSeamsV1(material, data.pairs, {
+  const seams = prepareGarmentStagedSourceCutSeamsV1(material, pairs, {
     maxTriangleTests: 2_000_000,
     maxSupportBytes: 128_000,
   });
