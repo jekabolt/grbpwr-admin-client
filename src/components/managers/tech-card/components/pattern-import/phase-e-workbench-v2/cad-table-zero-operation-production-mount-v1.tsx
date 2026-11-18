@@ -84,7 +84,6 @@ import {
   type PatternImportDxfPhaseECadWorkbenchSelectionV1,
 } from './cad-workbench-split-shell-v1';
 import type { CadWorkbenchPhysicalHostV1 } from './cad-workbench-physical-host-v1';
-import { CadWorkbenchPhysicalHostPanelV1 } from './cad-workbench-physical-host-panel-v1';
 import {
   createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1,
   type PatternImportDxfPhaseEZeroOperationSavedCardAuthorityRuntimeV1,
@@ -1302,6 +1301,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
       sourceSurface={sourceSurface}
       mannequin={({ sources, activeScopeKey, stagingBlocked }) => (
         <div className='flex h-full min-h-0 flex-col'>
+          {physicalHost?.panel ? <div className='shrink-0'>{physicalHost.panel}</div> : null}
           <div className='min-h-0 flex-1'>
             <PatternImportDxfPhaseECadMannequinModelPickerV1
               disabled={disabled}
@@ -1319,9 +1319,6 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
               }}
             />
           </div>
-          {physicalHost?.panel ? (
-            <CadWorkbenchPhysicalHostPanelV1>{physicalHost.panel}</CadWorkbenchPhysicalHostPanelV1>
-          ) : null}
           {stagingBlocked ? (
             <details
               className='shrink-0 border-t border-hairline px-2 py-1'
