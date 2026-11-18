@@ -27,11 +27,5 @@ static_sites:
       - key: NODE_OPTIONS
         scope: BUILD_TIME
         value: --max-old-space-size=6144
-      # The root of the multi-team hosts; a team is <slug>.beta.lekalo.studio.
-      - key: VITE_BASE_DOMAIN
-        scope: BUILD_TIME
-        value: beta.lekalo.studio
-      # Any other host (e.g. the App Platform default *.ondigitalocean.app) acts as this team.
-      - key: VITE_DEFAULT_TEAM
-        scope: BUILD_TIME
-        value: grbpwr
+      # No VITE_BASE_DOMAIN: the bundle knows beta.lekalo.studio by itself (src/lib/host.ts), so the
+      # site needs no build variable beyond the two above.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveHost } from './host';
+import { knownBase, resolveHost } from './host';
 
 const BASE = 'beta.lekalo.studio';
 
@@ -46,5 +46,25 @@ describe('resolveHost', () => {
 
   it.each(table)('%s on base %s', (host, base, def, want) => {
     expect(resolveHost(host, base, def)).toEqual(want);
+  });
+});
+
+describe('knownBase', () => {
+  const table: [string, string][] = [
+    ['beta.lekalo.studio', 'beta.lekalo.studio'],
+    ['ostra.beta.lekalo.studio', 'beta.lekalo.studio'],
+    ['console.beta.lekalo.studio', 'beta.lekalo.studio'],
+    ['Ostra.Beta.Lekalo.Studio:443', 'beta.lekalo.studio'],
+    ['lekalo.studio', 'lekalo.studio'],
+    ['ostra.lekalo.studio', 'lekalo.studio'],
+    ['xbeta.lekalo.studio', 'lekalo.studio'],
+    ['admin.beta.grbpwr.com', ''],
+    ['notlekalo.studio', ''],
+    ['lekalo-web-beta-oim9q.ondigitalocean.app', ''],
+    ['localhost', ''],
+  ];
+
+  it.each(table)('%s', (host, want) => {
+    expect(knownBase(host)).toBe(want);
   });
 });

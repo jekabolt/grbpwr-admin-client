@@ -3,8 +3,9 @@
 //   console.<base>    the operator's console
 //   <slug>.<base>     one team's workspace (one label only)
 //   anything else     legacy: admin[.beta].grbpwr.com, localhost, preview aliases — team #1
-// `VITE_BASE_DOMAIN` unset means there is no lekalo host at all, so every tab is legacy and the
-// app behaves exactly as before teams existed. `VITE_DEV_HOST` (dev builds only) pretends to be
+// `VITE_BASE_DOMAIN` names the base. A build without it falls back to the product's own domains
+// (KNOWN_BASES), so on any other host every tab is legacy and the app behaves exactly as before
+// teams existed. `VITE_DEV_HOST` (dev builds only) pretends to be
 // another host so one `yarn dev` can show the root, a team or the console.
 
 export type HostKind = 'root' | 'console' | 'team' | 'legacy';
@@ -37,6 +38,16 @@ export function resolveHost(hostname: string, base: string, defaultTeam: string)
   return { kind: 'team', slug: label, base: b };
 }
 
+// The product's own base domains, longest first: `beta.lekalo.studio` is the beta root, never the
+// team "beta" of the prod base (that address is reserved on the server).
+const KNOWN_BASES = ['beta.lekalo.studio', 'lekalo.studio'];
+
+/** The known base this hostname sits on ('' when none). */
+export function knownBase(hostname: string): string {
+  const host = normalize(hostname);
+  return KNOWN_BASES.find((b) => host === b || host.endsWith(`.${b}`)) ?? '';
+}
+
 function currentHostname(): string {
   const dev = import.meta.env.DEV ? import.meta.env.VITE_DEV_HOST : undefined;
   if (dev) return String(dev);
@@ -48,9 +59,10 @@ let cached: HostInfo | null = null;
 /** The host of this tab. It cannot change without a page load, so it is read once. */
 export function currentHost(): HostInfo {
   if (!cached) {
+    const hostname = currentHostname();
     cached = resolveHost(
-      currentHostname(),
-      String(import.meta.env.VITE_BASE_DOMAIN ?? ''),
+      hostname,
+      String(import.meta.env.VITE_BASE_DOMAIN || knownBase(hostname)),
       String(import.meta.env.VITE_DEFAULT_TEAM ?? ''),
     );
   }
