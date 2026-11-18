@@ -23,7 +23,6 @@ export const FEATURE = {
   analytics: 'analytics',
   accounting: 'accounting',
   settings: 'settings',
-  dictionaries: 'dictionaries',
   aiProviders: 'ai_providers',
   localAccounts: 'local_accounts',
 } as const;

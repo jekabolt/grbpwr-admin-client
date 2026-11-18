@@ -363,7 +363,7 @@ export const ADMIN_GROUP: NavGroup = {
       label: 'dictionaries',
       route: ROUTES.dictionaries,
       section: SECTION.settings,
-      feature: FEATURE.dictionaries,
+      feature: FEATURE.core,
     },
     {
       label: 'shipping',

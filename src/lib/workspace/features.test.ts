@@ -64,3 +64,14 @@ describe('featureForPath', () => {
     expect(featureForPath(path, items)).toBe(want);
   });
 });
+
+describe('core nav items', () => {
+  it('keeps accounts and dictionaries on whatever the team switches', async () => {
+    const { ADMIN_GROUP } = await import('constants/routes');
+    const core = ADMIN_GROUP.items.filter(
+      (i) => i.label === 'accounts' || i.label === 'dictionaries',
+    );
+    expect(core).toHaveLength(2);
+    for (const item of core) expect(featureOn(ws([]), item.feature)).toBe(true);
+  });
+});
