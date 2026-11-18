@@ -165,3 +165,66 @@ it('moves the hole rigidly with the spread panel and refuses a chord through or 
     });
   }
 });
+
+it('preserves both grades and refuses the whole cut when one grade has an ambiguous hole', async () => {
+  const { job, card, size, cut } = await holeFixture();
+  const largerRank = { rank: 1, token: 'L', sizeId: 8, name: 'L', sourceLabel: 'L' };
+  job.sizes.push(largerRank);
+  card.sizes.push({ ...largerRank, spellings: ['L'] });
+  const larger = structuredClone(size);
+  larger.rank = largerRank.rank;
+  larger.sizeId = largerRank.sizeId;
+  larger.sizeToken = largerRank.token;
+  larger.cut = size.cut.map(({ x, y }) => ({ x: x * (130 / 120), y: y * 1.1 }));
+  larger.seam = structuredClone(larger.cut);
+  larger.bbox = { minX: 0, minY: 0, maxX: 130, maxY: 110 };
+  larger.cutLoops = [squareHole(14, 34), squareHole(84, 48)];
+  larger.areaMm2 = 14_100;
+  job.pieces[0]!.sizes.push(larger);
+  const original = structuredClone(job);
+  const result = executePatternImportDxfPhaseEDraftCadCutGeometryV1(job, cut);
+  if (!result.ok) throw Error(JSON.stringify(result.blockers));
+  expect(job).toEqual(original);
+  expect(
+    result.job.pieces.map(({ sizes }) =>
+      sizes.map(({ sizeToken, cutLoops }) => [sizeToken, cutLoops?.length]),
+    ),
+  ).toEqual([
+    [
+      ['M', 1],
+      ['L', 1],
+    ],
+    [
+      ['M', 1],
+      ['L', 1],
+    ],
+  ]);
+  const file = new File([writeDxfDetailed(result.job).dxfText], 'graded-cut.dxf', {
+    type: 'image/vnd.dxf',
+  });
+  const scope = (await reviewWithGrain(file, card)).scopes[0]!;
+  expect(scope.manifest.gate?.passed).toBe(true);
+  expect(
+    scope.writerReplay?.job.pieces.map(({ sizes }) =>
+      sizes.map(({ sizeToken, cutLoops }) => [sizeToken, cutLoops?.map(signedArea)]),
+    ),
+  ).toEqual([
+    [
+      ['M', [-100]],
+      ['L', [-100]],
+    ],
+    [
+      ['M', [-100]],
+      ['L', [-100]],
+    ],
+  ]);
+
+  larger.cutLoops[1] = squareHole(56, 48);
+  const changed = structuredClone(job);
+  expect(executePatternImportDxfPhaseEDraftCadCutGeometryV1(job, cut)).toMatchObject({
+    ok: false,
+    job: null,
+    blockers: [{ code: 'feature-partition-ambiguous', detail: expect.stringContaining('size L') }],
+  });
+  expect(job).toEqual(changed);
+});
