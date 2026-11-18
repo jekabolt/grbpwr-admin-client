@@ -83,6 +83,7 @@ export type DxfSemanticsProvenanceTraceV1 = Readonly<{
   geometry: 'cut' | 'seam';
   cyclicShift: 0;
   direction: 'forward' | 'reverse';
+  cutLoopSourcePathIds?: readonly number[];
   mutations: readonly DxfPipelineMutationEventV1[];
 }>;
 
@@ -916,8 +917,11 @@ function hexUtf8(value: string): string {
 export function createDxfPipelineContourIdV1(
   identity: string,
   sizeToken: string,
-  geometry: 'cut' | 'seam',
+  geometry: 'cut' | 'seam' | Readonly<{ kind: 'cut-loop'; index: number }>,
 ): string | null {
-  const value = `dxf-piece-v1/p/${hexUtf8(identity)}/s/${hexUtf8(sizeToken)}/g/${geometry}`;
+  if (typeof geometry !== 'string' && (!Number.isSafeInteger(geometry.index) || geometry.index < 0))
+    return null;
+  const locator = typeof geometry === 'string' ? geometry : `cut-loop/${geometry.index}`;
+  const value = `dxf-piece-v1/p/${hexUtf8(identity)}/s/${hexUtf8(sizeToken)}/g/${locator}`;
   return textEncoder.encode(value).byteLength <= MAX_STABLE_ID_BYTES ? value : null;
 }

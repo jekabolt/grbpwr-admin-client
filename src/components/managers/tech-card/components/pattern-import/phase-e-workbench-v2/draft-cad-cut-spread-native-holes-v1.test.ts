@@ -1,11 +1,21 @@
 import { expect, it } from 'vitest';
-import { readDxf } from 'lib/pattern-import/adapters/dxf/extract';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { selectPatternImportDxfProductDraftPhaseDSizeV1 } from 'lib/cloth/domain/pattern-import-dxf-product-draft-phase-d-selection-v1';
+import { buildPatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
+import { readDxf, readDxfWithPathProvenanceV1 } from 'lib/pattern-import/adapters/dxf/extract';
 import { signedArea } from 'lib/pattern-import/adapters/dxf/geometry';
 import { segmentDxf } from 'lib/pattern-import/adapters/dxf/segment';
+import { projectPatternImportDxfProductPhaseEAssemblyV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 import type { PtMm } from 'lib/pattern-import/types';
 import { writeDxfDetailed } from 'lib/pattern-import/write';
 import type { CardContext } from '../client';
 import { draftThroughWizardStages } from '../ordinary-dxf-wizard.test-fixture';
+import {
+  createPatternImportDxfPhaseECadTablePieceLayoutSessionV1,
+  selectPatternImportDxfPhaseECadTablePiecesInBoxV1,
+} from './cad-table-piece-layout-session-v1';
+import { PatternImportDxfPhaseECadTableZeroConnectCanvasV1 } from './cad-table-zero-connect-canvas-v1';
 import { executePatternImportDxfPhaseEDraftCadCutGeometryV1 } from './draft-cad-cut-geometry-executor-v1';
 import { executePatternImportDxfPhaseEDraftCadSpreadGeometryV1 } from './draft-cad-spread-geometry-executor-v1';
 import { createSavedThreePanelFixtureV1 } from './saved-full-assembly-compile-session-v1.test-fixture';
@@ -63,6 +73,97 @@ function reviewWithGrain(file: File, card: CardContext) {
     return { operatorGrain };
   });
 }
+
+it('keeps the native L1 hole in the Workbench material without changing the L14 seam', async () => {
+  const { job, card, size } = await holeFixture();
+  size.cut = [
+    { x: 0, y: 0 },
+    { x: 160, y: 0 },
+    { x: 160, y: 40 },
+    { x: 105, y: 40 },
+    { x: 105, y: 80 },
+    { x: 160, y: 80 },
+    { x: 160, y: 120 },
+    { x: 0, y: 120 },
+  ];
+  size.seam = structuredClone(size.cut);
+  const hole = [
+    { x: 40, y: 44 },
+    { x: 40, y: 72 },
+    { x: 68, y: 72 },
+    { x: 68, y: 44 },
+  ];
+  size.cutLoops = [hole];
+  size.areaMm2 = signedArea(size.cut) + signedArea(hole);
+  size.bbox = { minX: 0, minY: 0, maxX: 160, maxY: 120 };
+  size.grain = { ...size.grain!, a: { x: 24, y: 12 }, b: { x: 24, y: 108 } };
+  delete size.pointMarks;
+  delete size.textMarks;
+  const { dxfText } = writeDxfDetailed(job);
+  const file = new File([dxfText], 'ac05-native-l1-hole-r12.dxf', { type: 'image/vnd.dxf' });
+  const draft = await reviewWithGrain(file, card);
+  const [selected, catalog] = await Promise.all([
+    selectPatternImportDxfProductDraftPhaseDSizeV1(draft, 'main', 'M'),
+    buildPatternImportDxfProductPhaseEAuthoringCatalogV1(draft, 'main', 'M'),
+  ]);
+  if (!selected.ok || !catalog.ok)
+    throw Error(JSON.stringify([selected.blockers, catalog.blockers]));
+  const result = projectPatternImportDxfProductPhaseEAssemblyV1(
+    catalog.catalog,
+    selected.selection,
+  );
+  if (!result.ok) throw Error(JSON.stringify(result.blockers));
+
+  const [boundary, cutHole] = result.projection.pieces[0].contours;
+  expect(boundary.role).toBe('cut-boundary');
+  expect(cutHole.role).toBe('hole');
+  expect(cutHole.contourId).toMatch(/\/g\/cut-loop\/0$/);
+  expect(cutHole.vertices.map(({ pointMm }) => pointMm)).toEqual(hole);
+  const original = await readDxfWithPathProvenanceV1(
+    { id: 'source', name: file.name, bytes: await file.arrayBuffer() },
+    { sagittaMm: 0.05, keepFills: true },
+    { sourceFileId: result.projection.sourceFileId },
+  );
+  if (!original.ok) throw Error(JSON.stringify(original.blockers));
+  const [nativePiece] = segmentDxf(original.value.read).pieces;
+  const nativeHole = original.value.provenance.paths.find(
+    ({ pathId }) => nativePiece.roles[pathId] === 'hole',
+  );
+  expect(cutHole.vertices.map(({ vertexId }) => vertexId)).toEqual(
+    nativeHole?.provenance.samples.map(({ vertexId }) => vertexId),
+  );
+  const nativeSewing = draft.dxfNativeSewingReplay;
+  if (!nativeSewing?.replayReady) throw Error(JSON.stringify(nativeSewing?.blockers));
+  const [seam] = nativeSewing.pipeline.carrier!.pieces[0].contours;
+  expect(nativeSewing.pipeline.carrier!.pieces[0].contours).toHaveLength(1);
+  expect(seam.role).toBe('sewing-boundary');
+  expect(seam.id).toMatch(/\/g\/seam$/);
+
+  const layout = createPatternImportDxfPhaseECadTablePieceLayoutSessionV1(result.projection.pieces);
+  expect(layout.pieces[0].sourceMaterialRings).toEqual([size.cut, hole]);
+  const pick = (x: number, y: number) =>
+    selectPatternImportDxfPhaseECadTablePiecesInBoxV1(
+      layout,
+      { minX: x, maxX: x, minY: y, maxY: y },
+      'replace',
+    ).selectedPieceKeys;
+  expect(pick(75, 22)).toEqual([layout.pieces[0].identity.key]);
+  expect(pick(54, 58)).toEqual([]);
+  expect(pick(135, 60)).toEqual([]);
+  expect(pick(172, 60)).toEqual([]);
+
+  const html = renderToStaticMarkup(
+    createElement(PatternImportDxfPhaseECadTableZeroConnectCanvasV1, {
+      catalog: catalog.catalog,
+      projection: result.projection,
+    }),
+  );
+  const hitArea = html.match(/<path[^>]*data-cad-zero-connect-material=""[^>]*>/)?.[0];
+  expect(hitArea).toContain('fill-rule="evenodd"');
+  expect(hitArea).toContain('M 40,-44 40,-72 68,-72 68,-44 Z');
+  expect(hitArea).toContain('pointer-events="fill"');
+  expect(html).toContain(`data-cad-zero-connect-contour="${cutHole.contourId}"`);
+});
 
 it('keeps one native L1 hole, exact marks and signed material area on each cut descendant', async () => {
   const { job, card, size, cut } = await holeFixture();

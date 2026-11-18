@@ -2392,6 +2392,50 @@ export class Session {
         );
         if (projected.ok) boundaries.push(projected.value);
         else blockers.push(...phaseCBlockersToPipelineV1(projected.blockers));
+        const cutLoopPaths = trace.cutLoopSourcePathIds ?? [];
+        if (
+          (size.cutLoops?.length ?? 0) !== cutLoopPaths.length ||
+          (cutLoopPaths.length > 0 && (trace.geometry !== 'cut' || mutations.length > 0))
+        ) {
+          blockers.push(
+            dxfPipelineBlockerV1(
+              'ambiguous-final-locator',
+              'Native cut holes must keep their original path, order, and unmodified outer cut.',
+              piece.identity,
+              size.sizeToken,
+            ),
+          );
+          continue;
+        }
+        for (const [index, sourcePathId] of cutLoopPaths.entries()) {
+          const geometry = { kind: 'cut-loop', index } as const;
+          const holeId = createDxfPipelineContourIdV1(piece.identity, size.sizeToken, geometry);
+          if (!holeId) {
+            blockers.push(
+              dxfPipelineBlockerV1(
+                'bounds-exceeded',
+                'The native cut-loop identity exceeds 256 UTF-8 bytes.',
+                piece.identity,
+                size.sizeToken,
+              ),
+            );
+            break;
+          }
+          const hole = projectDxfPieceSpecContourBoundaryV1(piece, size.sizeToken, {
+            contourId: holeId,
+            role: 'hole',
+            geometry,
+            lineage: {
+              sourcePathIds: [sourcePathId],
+              uniformPositiveScale: lineage.uniformPositiveScale,
+              cyclicShift: 0,
+              direction: 'forward',
+              mutations: [],
+            },
+          });
+          if (hole.ok) boundaries.push(hole.value);
+          else blockers.push(...phaseCBlockersToPipelineV1(hole.blockers));
+        }
       }
     }
     for (const entry of lineage.entries) {

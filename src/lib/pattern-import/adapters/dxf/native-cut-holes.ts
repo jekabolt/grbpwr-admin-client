@@ -1,6 +1,6 @@
 import { num } from '../../write/format';
 import { readManifestBytes } from '../../manifest';
-import type { CardSize, Feature, IRPath, PtMm, WorkBudgetLike } from '../../types';
+import type { CardSize, Feature, IRPath, PieceSizeSpec, PtMm, WorkBudgetLike } from '../../types';
 import { ringSelfIntersects, ringsOverlap, ringStrictlyInside } from '../../../fusing-dxf/spline';
 import type { RawDxf, RawEntity } from './ast';
 import type { DxfBlockPiece, DxfMeta, DxfRead } from './dxf-types';
@@ -18,6 +18,7 @@ type Binding = Readonly<{
   holes: Ring[];
 }>;
 type Refusal = Readonly<{ reason: string; onlyIfHole?: true }>;
+type Candidate = { features?: Feature[]; block?: string; group?: number; identity?: string };
 const byRead = new WeakMap<DxfMeta, Map<number, Binding | Refusal>>();
 const byFeatures = new WeakMap<readonly Feature[], Binding>();
 function requireHole(value: unknown, reason: string): asserts value {
@@ -286,12 +287,12 @@ export function nativeCutHolesOf(
 }
 
 /** A candidate DTO can only signal the presence of holes. The decoder's original feature array owns the native occurrence. */
-export function resolveNativeCutLoops(
-  dxf: { features?: Feature[]; block?: string; group?: number; identity?: string },
+function nativeCutLoopBinding(
+  dxf: Candidate,
   rank: number,
   card: Pick<CardSize, 'sizeId' | 'token'>,
   cut: readonly PtMm[],
-): PtMm[][] | null {
+): Binding | null {
   const bound = dxf.features && byFeatures.get(dxf.features);
   if (
     !bound ||
@@ -305,5 +306,41 @@ export function resolveNativeCutLoops(
     cut.some((p, i) => !samePoint(p, bound.outer.points[i]!))
   )
     return null;
-  return bound.holes.map((h) => h.points.map((p) => ({ ...p })));
+  return bound;
+}
+
+export function resolveNativeCutLoops(
+  dxf: Candidate,
+  rank: number,
+  card: Pick<CardSize, 'sizeId' | 'token'>,
+  cut: readonly PtMm[],
+): PtMm[][] | null {
+  const bound = nativeCutLoopBinding(dxf, rank, card, cut);
+  return bound?.holes.map((h) => h.points.map((p) => ({ ...p }))) ?? null;
+}
+
+/** Returns the original PathIds in the verified final cut-loop order. */
+export function nativeCutLoopPathIds(
+  dxf: Candidate,
+  rank: number,
+  size: Pick<PieceSizeSpec, 'sizeId' | 'sizeToken' | 'cut' | 'cutLoops'>,
+): readonly number[] | null {
+  const bound = nativeCutLoopBinding(
+    dxf,
+    rank,
+    { sizeId: size.sizeId, token: size.sizeToken },
+    size.cut,
+  );
+  const loops = size.cutLoops;
+  if (
+    !bound ||
+    !loops ||
+    bound.holes.length !== loops.length ||
+    !bound.holes.every(({ points }, index) => {
+      const loop = loops[index];
+      return points.length === loop.length && points.every((point, i) => samePoint(point, loop[i]));
+    })
+  )
+    return null;
+  return Object.freeze(bound.holes.map(({ path }) => path.id));
 }

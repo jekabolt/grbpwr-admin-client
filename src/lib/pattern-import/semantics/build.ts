@@ -23,7 +23,7 @@ import {
   isReadProductFoldAxis,
   matchesSavedFoldRank,
 } from '../adapters/dxf/product-fold-axis';
-import { resolveNativeCutLoops } from '../adapters/dxf/native-cut-holes';
+import { nativeCutLoopPathIds, resolveNativeCutLoops } from '../adapters/dxf/native-cut-holes';
 import { isMirrorSymmetric } from '../ai/geom';
 import { chainView, partAt, sheetView } from '../assemble/composite';
 import { parseQuantity, saysFold } from '../ai/evidence';
@@ -2791,6 +2791,10 @@ export function buildPieceSpecsDetailed(
       events.add('mirror');
     if (src.w.fold) events.add('unfold');
     const direction = signedArea(cand.outer) < 0 ? ('reverse' as const) : ('forward' as const);
+    const nativeHolePaths =
+      matches.length === 1 && matches[0].cutLoops?.length
+        ? nativeCutLoopPathIds(cand.dxf!, cand.rank, matches[0])
+        : null;
     if (matches.length !== 1) events.add('unknown');
     else if (events.size === 0) {
       const target = geometry === 'cut' ? matches[0].cut : matches[0].seam;
@@ -2826,6 +2830,7 @@ export function buildPieceSpecsDetailed(
       geometry,
       cyclicShift: 0 as const,
       direction,
+      ...(nativeHolePaths ? { cutLoopSourcePathIds: nativeHolePaths } : {}),
       mutations: Object.freeze(mutationOrder.filter((mutation) => events.has(mutation))),
     });
   };
