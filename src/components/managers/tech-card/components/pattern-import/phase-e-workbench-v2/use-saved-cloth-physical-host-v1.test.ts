@@ -356,7 +356,13 @@ it('edits only a current idle or failed V7 and reloads after one explicit save',
     expect(editActor.savePlacementEdit).not.toHaveBeenCalled();
     expect(latest!.placementEditor.status).toBe('idle');
     await act(async () => latest!.startSavedPlacementEdit(() => idle));
-    const change = { kind: 'quarter-turn-world-y' } as const;
+    const change = {
+      kind: 'rotate-piece-world',
+      pieceId: 'FRONT',
+      pieceLineKey: 'front',
+      axis: 'Z',
+      degrees: -37.5,
+    } as const;
     idle = false;
     await act(async () => latest!.saveSavedPlacementEdit(draft, change));
     expect(editActor.savePlacementEdit).not.toHaveBeenCalled();
@@ -376,7 +382,15 @@ it('edits only a current idle or failed V7 and reloads after one explicit save',
   }
 });
 
-it.each(['prior', 'prior-rotation', 'intended', 'different', 'body', 'operation'] as const)(
+it.each([
+  'prior',
+  'prior-rotation',
+  'prior-piece-rotation',
+  'intended',
+  'different',
+  'body',
+  'operation',
+] as const)(
   'retains the uncertain placement save and reconciles current %s authority',
   async (outcome) => {
     const root = createRoot(reactContainer() as never);
@@ -395,14 +409,23 @@ it.each(['prior', 'prior-rotation', 'intended', 'different', 'body', 'operation'
       pieces: [{ pieceId: 'FRONT', pieceLineKey: 'front', translationM: [1, 2, 3] as const }],
     };
     const renewed = { ...draft };
-    const priorCurrent = outcome === 'prior' || outcome === 'prior-rotation';
+    const priorCurrent =
+      outcome === 'prior' || outcome === 'prior-rotation' || outcome === 'prior-piece-rotation';
     const retained =
       outcome === 'prior-rotation'
         ? ({ kind: 'quarter-turn-world-y' } as const)
-        : ({
-            kind: 'translate',
-            pieces: [{ ...draft.pieces[0]!, translationM: [1.25, 2, 3] as const }],
-          } as const);
+        : outcome === 'prior-piece-rotation'
+          ? ({
+              kind: 'rotate-piece-world',
+              pieceId: 'FRONT',
+              pieceLineKey: 'front',
+              axis: 'X',
+              degrees: -37.5,
+            } as const)
+          : ({
+              kind: 'translate',
+              pieces: [{ ...draft.pieces[0]!, translationM: [1.25, 2, 3] as const }],
+            } as const);
     const actor = (outerSha256 = binding.outerSha256) => {
       const snapshot = {
         status: 'ready',

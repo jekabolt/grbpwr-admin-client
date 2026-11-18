@@ -117,9 +117,17 @@ export type SavedV7PieceTranslationV1 = Readonly<{
   pieceLineKey: string;
   translationM: readonly [number, number, number];
 }>;
+export type SavedV7WorldRotationAxisV1 = 'X' | 'Y' | 'Z';
 export type SavedV7PlacementChangeV1 =
   | Readonly<{ kind: 'translate'; pieces: readonly SavedV7PieceTranslationV1[] }>
-  | Readonly<{ kind: 'quarter-turn-world-y' }>;
+  | Readonly<{ kind: 'quarter-turn-world-y' }>
+  | Readonly<{
+      kind: 'rotate-piece-world';
+      pieceId: string;
+      pieceLineKey: string;
+      axis: SavedV7WorldRotationAxisV1;
+      degrees: number;
+    }>;
 export type SavedV7PlacementEditV1 = Readonly<{
   binding: SavedGenericDurablePhysicalBindingV1;
   pieces: readonly SavedV7PieceTranslationV1[];
@@ -134,10 +142,36 @@ export class SavedV7PlacementPersistenceErrorV1 extends Error {
 
 type PlacementRotation = DxfGarmentExplicitPiecePlacementV1['rotationRowMajor'];
 
-/** Pre-multiply by the right-handed +90° world Y rotation. This permutes existing rows exactly. */
-function quarterTurnWorldY(r: PlacementRotation): PlacementRotation {
-  const negate = (value: number) => (value === 0 ? 0 : -value);
-  return [r[6], r[7], r[8], r[3], r[4], r[5], negate(r[0]), negate(r[1]), negate(r[2])];
+/** Pre-multiply the saved orientation by a right-handed turn about an explicit world axis. */
+function rotatePlacementWorld(
+  rotation: PlacementRotation,
+  axis: SavedV7WorldRotationAxisV1,
+  degrees: number,
+): PlacementRotation {
+  const turn = degrees % 360;
+  const radians = (turn * Math.PI) / 180;
+  const quarter = turn / 90;
+  const exact = (quarter + 4) % 4;
+  const quadrantal = [
+    [1, 0],
+    [0, 1],
+    [-1, 0],
+    [0, -1],
+  ] as const;
+  const [cos, sin] = Number.isInteger(quarter)
+    ? quadrantal[exact]!
+    : [Math.cos(radians), Math.sin(radians)];
+  const [a, b] = axis === 'X' ? [3, 6] : axis === 'Y' ? [6, 0] : [0, 3];
+  const result: [...PlacementRotation] = [...rotation];
+  for (let column = 0; column < 3; column++) {
+    const x = rotation[a + column]!;
+    const y = rotation[b + column]!;
+    const first = cos * x - sin * y;
+    const second = sin * x + cos * y;
+    result[a + column] = first === 0 ? 0 : first;
+    result[b + column] = second === 0 ? 0 : second;
+  }
+  return result;
 }
 
 function placementAfterEdit(
@@ -152,10 +186,30 @@ function placementAfterEdit(
       const [x, y, z] = piece.translationM;
       return {
         ...piece,
-        rotationRowMajor: quarterTurnWorldY(piece.rotationRowMajor),
+        rotationRowMajor: rotatePlacementWorld(piece.rotationRowMajor, 'Y', 90),
         translationM: [pivot[0] + (z - pivot[2]), y, pivot[2] - (x - pivot[0])],
       };
     });
+  }
+  if (change.kind === 'rotate-piece-world') {
+    const { pieceId, pieceLineKey, axis, degrees } = change;
+    if (
+      !edit.pieces.some(
+        (piece) => piece.pieceId === pieceId && piece.pieceLineKey === pieceLineKey,
+      ) ||
+      (axis !== 'X' && axis !== 'Y' && axis !== 'Z') ||
+      !Number.isFinite(degrees) ||
+      degrees % 360 === 0
+    )
+      throw new Error('Select a current saved piece and a world axis, then enter a nonzero turn.');
+    return placements.map((piece) =>
+      piece.pieceId === pieceId
+        ? {
+            ...piece,
+            rotationRowMajor: rotatePlacementWorld(piece.rotationRowMajor, axis, degrees),
+          }
+        : piece,
+    );
   }
   if (
     change.kind !== 'translate' ||

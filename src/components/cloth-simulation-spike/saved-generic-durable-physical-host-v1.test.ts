@@ -711,13 +711,14 @@ async function compiledObservedFixture(
   };
   requireOk(await pre.consume({ ...raw, intent }));
   const author = requireOk(await pre.projectAuthoringContext(1));
-  return { pre, author, native };
+  return { pre, author, native, intent };
 }
 async function fixture(
   withAnnotations = false,
   options?: {
     nativeExactDesktop?: boolean;
     initialRotation?: DxfGarmentPhysicalInitializationV1['placements'][number]['rotationRowMajor'];
+    hingeRotation?: DxfGarmentPhysicalInitializationV1['placements'][number]['rotationRowMajor'];
   },
 ) {
   const observed = await sessionFixture();
@@ -727,18 +728,48 @@ async function fixture(
   );
   await body.observe(observed.input);
   cleanup.push(() => body.dispose());
-  const { pre, author, native } = await compiledObservedFixture(body);
+  const { pre, author, native, intent } = await compiledObservedFixture(body);
+  const frontSeam = intent.seams[0]!.sides[0];
+  const hinge = author.sourceGeometry.pieces
+    .find((piece) => piece.pieceId === frontSeam.pieceId)
+    ?.contours.find((contour) => contour.contourId === frontSeam.contourId)
+    ?.vertices.find((vertex) => vertex.vertexId === frontSeam.anchors[0])?.positionM;
+  if (options?.hingeRotation && !hinge)
+    throw new Error('Fixture is missing its exact native hinge.');
   const doc: DxfGarmentPhysicalInitializationV1 = {
     schemaVersion: DXF_GARMENT_PHYSICAL_INITIALIZATION_V1,
     graphCanonicalSha256: author.graphCanonicalSha256,
     compileInputSha256: author.compileInputSha256,
     convention: DXF_GARMENT_PHYSICAL_INITIALIZATION_CONVENTION_V1,
-    placements: ['FRONT', 'BACK', 'SIDE'].map((pieceId, i) => ({
-      pieceId,
-      sourceOriginM: [i * 0.15, 0, 0],
-      rotationRowMajor: options?.initialRotation ?? [1, 0, 0, 0, 1, 0, 0, 0, 1],
-      translationM: [1 + i * 0.1, 0.5, 0],
-    })),
+    placements: ['FRONT', 'BACK', 'SIDE'].map((pieceId, i) => {
+      const originalOrigin = [i * 0.15, 0, 0] as const;
+      const originalPosition = [1 + i * 0.1, 0.5, 0] as const;
+      const rotation = options?.hingeRotation;
+      if (!rotation)
+        return {
+          pieceId,
+          sourceOriginM: originalOrigin,
+          rotationRowMajor: options?.initialRotation ?? [1, 0, 0, 0, 1, 0, 0, 0, 1],
+          translationM: originalPosition,
+        };
+      const origin = pieceId === frontSeam.pieceId ? hinge! : originalOrigin;
+      const [x, y, z] = [
+        originalPosition[0] - 1 + origin[0] - originalOrigin[0],
+        origin[1] - originalOrigin[1],
+        origin[2] - originalOrigin[2],
+      ];
+      return {
+        pieceId,
+        sourceOriginM: origin,
+        rotationRowMajor: rotation,
+        // A common rigid turn of the whole known coherent prior aligns the hinge with a world axis.
+        translationM: [
+          1 + rotation[0] * x! + rotation[1] * y! + rotation[2] * z!,
+          0.5 + rotation[3] * x! + rotation[4] * y! + rotation[5] * z!,
+          rotation[6] * x! + rotation[7] * y! + rotation[8] * z!,
+        ],
+      };
+    }),
     observedTarget: author.observedTarget,
     support: 'none',
     replayProfile: 'garment-material-contact-replay/1',
@@ -2146,6 +2177,173 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
           Buffer.from(JSON.stringify(requireOk(originalNative!).selection.phaseD.contours)),
         );
         expect(seed.bytes).toEqual(beforeDxf);
+      }
+      expect(ports.calls).toEqual([]);
+    },
+    120000,
+  );
+  it.each(['X', 'Y', 'Z'] as const)(
+    'saves one mounted numeric world-%s turn about the exact saved hinge',
+    async (axis) => {
+      type State = ComponentProps<typeof CadWorkbenchSavedPlacementEditorV1>['state'];
+      type Rotation = DxfGarmentPhysicalInitializationV1['placements'][number]['rotationRowMajor'];
+      const priorByAxis = {
+        X: [0, -1, 0, 1, 0, 0, 0, 0, 1],
+        Y: [1, 0, 0, 0, -1, 0, 0, 0, -1],
+        Z: [1, 0, 0, 0, 0, -1, 0, 1, 0],
+      } as const satisfies Record<typeof axis, Rotation>;
+      const f = await fixture(false, { hingeRotation: priorByAxis[axis] });
+      const prior = {
+        ...f.storage.v7,
+        postSaveReceiptSha256: semanticDocument(seed.row).persistence.receiptSealSha256,
+      };
+      outer = prior;
+      const baseClient = vi.mocked(abortableAdminService).getMockImplementation()!;
+      const put = vi.fn(async (request: PutTechCardPatternSemanticSidecarRequest) => {
+        expect(request.expectedPreviousSidecarSha256).toBe(prior.sidecarSha256);
+        expect(request.expectedCardLockVersion).toBe(seed.row.cardLockVersion);
+        expect(request.expectedSavedRowRevision).toBe(seed.row.revision);
+        outer = {
+          ...prior,
+          sidecarBytes: request.sidecarBytes,
+          sidecarSha256: request.sidecarSha256,
+          mediaType: request.mediaType,
+          byteLength: Buffer.from(request.sidecarBytes!, 'base64').length,
+        };
+        return { semanticSidecar: structuredClone(outer) };
+      });
+      vi.mocked(abortableAdminService).mockImplementation((signal) => ({
+        ...baseClient(signal),
+        GetTechCardPatternSemanticSidecar: async () => ({
+          semanticSidecar: structuredClone(outer),
+        }),
+        PutTechCardPatternSemanticSidecar: put,
+      }));
+      requireOk(await f.host.restore(f.request));
+      const staleEdit = axis === 'Y' ? await f.host.preparePlacementEdit() : null;
+      const actor = await freshPhysicalFixtureHost(f.body);
+      requireOk(await actor.host.restore(actor.request));
+      const edit = await actor.host.preparePlacementEdit();
+      const before = f.context.physicalInitialization.document;
+      const front = edit.pieces.find((entry) => entry.pieceId === 'FRONT')!;
+      const goal = {
+        kind: 'rotate-piece-world',
+        pieceId: front.pieceId,
+        pieceLineKey: front.pieceLineKey,
+        axis,
+        degrees: -37.5,
+      } as const;
+      await expect(
+        actor.host.savePlacementEdit(edit, { ...goal, pieceLineKey: 'another-line' }),
+      ).rejects.toThrow('Select a current saved piece');
+      await expect(
+        actor.host.savePlacementEdit(await actor.host.preparePlacementEdit(), {
+          ...goal,
+          axis: axis === 'X' ? 'Y' : 'X',
+        }),
+      ).rejects.toThrow(/incoherent-rest-pair/);
+      expect(outer).toEqual(prior);
+      expect(put).not.toHaveBeenCalled();
+      const editActor = await freshPhysicalFixtureHost(f.body);
+      requireOk(await editActor.host.restore(editActor.request));
+      const readyEdit = await editActor.host.preparePlacementEdit();
+      const save = vi.fn<State['saveSavedPlacementEdit']>(async (draft, change) => {
+        requireOk(await editActor.host.savePlacementEdit(draft, change));
+      });
+      const state = {
+        placementEditor: { status: 'editing', draft: readyEdit, error: null },
+        saveSavedPlacementEdit: save,
+        cancelSavedPlacementEdit: vi.fn(),
+      } as unknown as State;
+      vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+      vi.stubGlobal('window', { event: undefined, location: { origin: 'http://fixture.local' } });
+      cleanup.push(() => vi.unstubAllGlobals());
+      const view = mountAnnotationFixtureView(({ disabled }: { disabled: boolean }) => {
+        const root = CadWorkbenchSavedPlacementEditorV1({ state, disabled });
+        const fields = Children.toArray(root?.props.children).find(
+          (item) =>
+            isValidElement(item) &&
+            typeof item.type === 'function' &&
+            item.type.name === 'SavedPlacementFields',
+        ) as ReactElement;
+        return (fields.type as (props: unknown) => ReactNode)(fields.props);
+      });
+      const field = (name: string) =>
+        visitMountedTree(view.output(), (props) => props.name === name);
+      const button = () =>
+        visitMountedTree(view.output(), (props) => props.children === 'Save placement');
+      const select = (name: string, value: string) =>
+        act(async () => (field(name)?.onValueChange as (s: string) => void)(value));
+      const angleName = 'saved-placement-rotate-degrees';
+      const setAngle = (value: string) =>
+        act(async () => (field(angleName)?.onChange as (s: string) => void)(value));
+      await view.render({ disabled: true });
+      expect(field(angleName)?.readOnly).toBe(true);
+      await setAngle('-37.5');
+      await view.render({ disabled: false });
+      expect(field(angleName)?.value).toBe('');
+      expect(button()?.disabled).toBe(true);
+      await select('saved-placement-rotate-piece', front.pieceId);
+      await select('saved-placement-rotate-axis', axis);
+      await setAngle('360');
+      expect(button()?.disabled).toBe(true);
+      await setAngle('-37.5');
+      expect(button()?.disabled).toBe(false);
+      expect(field('saved-placement-FRONT-X')?.readOnly).toBe(true);
+      expect(put).not.toHaveBeenCalled();
+      await act(async () => {
+        (button()?.onClick as () => void)();
+        await save.mock.results[0]!.value;
+      });
+      expect(save).toHaveBeenCalledExactlyOnceWith(readyEdit, goal);
+      expect(put).toHaveBeenCalledTimes(1);
+      const cold = await freshPhysicalFixtureHost(f.body);
+      requireOk(await cold.host.restore(cold.request));
+      const restored = physicalReader.projectSavedFullAssemblyPhysicalSnapshotV1(cold.reader)!;
+      const r = before.placements.find((entry) => entry.pieceId === front.pieceId)!;
+      const radians = (goal.degrees * Math.PI) / 180;
+      const c = Math.cos(radians);
+      const s = Math.sin(radians);
+      const q = {
+        X: [
+          [1, 0, 0],
+          [0, c, -s],
+          [0, s, c],
+        ],
+        Y: [
+          [c, 0, s],
+          [0, 1, 0],
+          [-s, 0, c],
+        ],
+        Z: [
+          [c, -s, 0],
+          [s, c, 0],
+          [0, 0, 1],
+        ],
+      }[axis];
+      const expected = q.flatMap((row) =>
+        [0, 1, 2].map((column) =>
+          row.reduce((sum, value, k) => sum + value * r.rotationRowMajor[k * 3 + column]!, 0),
+        ),
+      );
+      expect(restored.physicalInitialization).toEqual({
+        ...before,
+        placements: before.placements.map((entry) =>
+          entry.pieceId === r.pieceId ? { ...r, rotationRowMajor: expected } : entry,
+        ),
+      });
+      expect(restored.graphCanonicalSha256).toBe(f.context.graphCanonicalSha256);
+      expect(restored.compileInputSha256).toBe(f.context.compileInputSha256);
+      if (staleEdit) {
+        const verifiedOuter = structuredClone(outer);
+        await expect(f.host.savePlacementEdit(staleEdit, goal)).rejects.toThrow(
+          /saved full graph\/physical outer changed/,
+        );
+        const obsoleteBodyEdit = await cold.host.preparePlacementEdit();
+        await f.body.observe(null);
+        await expect(cold.host.savePlacementEdit(obsoleteBodyEdit, goal)).rejects.toThrow();
+        expect(put).toHaveBeenCalledTimes(1);
+        expect(outer).toEqual(verifiedOuter);
       }
       expect(ports.calls).toEqual([]);
     },

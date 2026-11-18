@@ -1,6 +1,10 @@
 import { useEffect, useState, type ChangeEvent, type ReactNode } from 'react';
 import { Button, Input, Select, Text } from 'ui';
-import type { SavedV7PlacementEditV1 } from 'components/cloth-simulation-spike/saved-generic-durable-physical-host-v1';
+import type {
+  SavedV7PlacementChangeV1,
+  SavedV7PlacementEditV1,
+  SavedV7WorldRotationAxisV1,
+} from 'components/cloth-simulation-spike/saved-generic-durable-physical-host-v1';
 
 import {
   savedFullAssemblyFirstContourRoleV1,
@@ -586,15 +590,39 @@ function SavedPlacementFields({
     draft.pieces.map(({ translationM }) => translationM.map(String)),
   );
   const [rotate, setRotate] = useState(false);
+  const [pieceId, setPieceId] = useState('');
+  const [axis, setAxis] = useState<SavedV7WorldRotationAxisV1 | ''>('');
+  const [angle, setAngle] = useState('');
   const parsed = values.map((entry) => entry.map((value) => finite(value)));
   const complete = parsed.every((entry) => entry.every((value) => value !== null));
   const translationChanged = parsed.some((entry, index) =>
     entry.some((value, axis) => value !== draft.pieces[index]!.translationM[axis]),
   );
-  const changed = rotate || translationChanged;
+  const piece = draft.pieces.find((entry) => entry.pieceId === pieceId);
+  const degrees = finite(angle);
+  const hasAngle = angle.trim() !== '';
+  let change: SavedV7PlacementChangeV1 | null = null;
+  if (rotate) change = { kind: 'quarter-turn-world-y' };
+  else if (!translationChanged && piece && axis && degrees !== null && degrees % 360 !== 0)
+    change = {
+      kind: 'rotate-piece-world',
+      pieceId: piece.pieceId,
+      pieceLineKey: piece.pieceLineKey,
+      axis,
+      degrees,
+    };
+  else if (!hasAngle && complete && translationChanged)
+    change = {
+      kind: 'translate',
+      pieces: draft.pieces.map((entry, index) => ({
+        ...entry,
+        translationM: [parsed[index]![0]!, parsed[index]![1]!, parsed[index]![2]!],
+      })),
+    };
   const saving = status === 'saving';
   const busy = disabled || saving;
   const readOnly = status !== 'editing';
+  const rotationReadOnly = busy || readOnly || rotate || translationChanged;
   return (
     <div className='space-y-stack'>
       <Text component='p' size='micro' variant='label'>
@@ -606,9 +634,9 @@ function SavedPlacementFields({
           size='xs'
           variant={rotate ? 'main' : 'secondary'}
           aria-pressed={rotate}
-          disabled={busy || readOnly || translationChanged}
+          disabled={busy || readOnly || translationChanged || hasAngle}
           onClick={() => {
-            if (busy || readOnly || translationChanged) return;
+            if (busy || readOnly || translationChanged || hasAngle) return;
             setRotate((selected) => !selected);
           }}
         >
@@ -616,6 +644,48 @@ function SavedPlacementFields({
         </Button>
         <Text component='p' size='micro' variant='label'>
           Rotation pivot: {draft.pieces[0]?.pieceId}
+        </Text>
+      </div>
+      <div className='space-y-2 border-t border-hairline pt-2'>
+        <Text component='p' size='micro'>
+          Rotate one piece at its saved pivot
+        </Text>
+        <div className='grid grid-cols-2 gap-2'>
+          <Select
+            name='saved-placement-rotate-piece'
+            aria-label='Piece to rotate'
+            placeholder='Choose piece'
+            value={pieceId || undefined}
+            items={draft.pieces.map((entry) => ({ value: entry.pieceId, label: entry.pieceId }))}
+            readOnly={rotationReadOnly}
+            onValueChange={(next) => {
+              if (!rotationReadOnly) setPieceId(next);
+            }}
+          />
+          <Select
+            name='saved-placement-rotate-axis'
+            aria-label='World rotation axis'
+            placeholder='World axis'
+            value={axis || undefined}
+            items={(['X', 'Y', 'Z'] as const).map((value) => ({ value, label: value }))}
+            readOnly={rotationReadOnly}
+            onValueChange={(next) => {
+              if (!rotationReadOnly && (next === 'X' || next === 'Y' || next === 'Z'))
+                setAxis(next);
+            }}
+          />
+        </div>
+        <NumberField
+          name='saved-placement-rotate-degrees'
+          label='Rotation change (°)'
+          value={angle}
+          readOnly={rotationReadOnly}
+          onChange={(next) => {
+            if (!rotationReadOnly) setAngle(next);
+          }}
+        />
+        <Text component='p' size='micro' variant='label'>
+          Sewn edges must stay aligned.
         </Text>
       </div>
       {draft.pieces.map(({ pieceId, pieceLineKey }, index) => (
@@ -631,9 +701,9 @@ function SavedPlacementFields({
                 label={`${pieceId} ${axis} (m)`}
                 value={values[index]![component]!}
                 disabled={busy}
-                readOnly={readOnly || rotate}
+                readOnly={readOnly || rotate || hasAngle}
                 onChange={(value) => {
-                  if (readOnly || rotate) return;
+                  if (readOnly || rotate || hasAngle) return;
                   setValues((current) =>
                     current.map((entry, i) =>
                       i === index
@@ -652,21 +722,9 @@ function SavedPlacementFields({
           type='button'
           size='xs'
           variant='main'
-          disabled={busy || !complete || !changed}
+          disabled={busy || !change}
           onClick={() => {
-            if (busy || !complete || !changed) return;
-            void state.saveSavedPlacementEdit(
-              draft,
-              rotate
-                ? { kind: 'quarter-turn-world-y' }
-                : {
-                    kind: 'translate',
-                    pieces: draft.pieces.map((piece, index) => ({
-                      ...piece,
-                      translationM: [parsed[index]![0]!, parsed[index]![1]!, parsed[index]![2]!],
-                    })),
-                  },
-            );
+            if (!busy && change) void state.saveSavedPlacementEdit(draft, change);
           }}
         >
           {saving ? 'Saving…' : status === 'save-retry' ? 'Retry save placement' : 'Save placement'}
