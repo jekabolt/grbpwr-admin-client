@@ -4,6 +4,7 @@ import {
   createSavedThreePanelSourceV1,
   digestFullAssemblyFixture,
 } from './saved-full-assembly-compile-session-v1.test-fixture';
+import { bboxOf, areaOf } from 'lib/pattern-import/semantics/geom';
 import { writeDxfDetailed } from 'lib/pattern-import/write';
 import { readProtectedLineSplit } from 'lib/pattern-import/write/read-protected-line-split';
 import { readManifest, embedManifest } from 'lib/pattern-import/manifest';
@@ -24,7 +25,9 @@ import {
   isCurrentSavedAddPointReviewClaimV1,
 } from './draft-cad-saved-add-point-review-v1';
 
-async function fixture(stable = false, separateAllowance = true) {
+const garmentRanks = ['XS', 'S', 'M', 'L', 'XL'] as const;
+
+async function fixture(stable = false, separateAllowance = true, fiveRanks = false) {
   const seed = await createSavedThreePanelFixtureV1(2);
   if (stable) {
     const ids: Record<string, string> = { FRONT: 'FP', BACK: 'BP' };
@@ -43,7 +46,56 @@ async function fixture(stable = false, separateAllowance = true) {
     size.seam = size.cut.map((p) => ({ x: sx + (p.x - sx) * 0.8, y: sy + (p.y - sy) * 0.8 }));
     piece.allowance = { ...piece.allowance, meaning: 'both', allowanceMm: 10 };
   }
+  if (fiveRanks) {
+    seed.job.sizes = garmentRanks.map((token, rank) => ({
+      token,
+      rank,
+      sizeId: rank + 5,
+      name: token,
+      sourceLabel: token,
+    }));
+    seed.job.source.sizeEncoding = 'dxf-block';
+    seed.card.sizes = seed.job.sizes.map((size) => ({ ...size, spellings: [size.token] }));
+    for (const piece of seed.job.pieces) {
+      const base = piece.sizes[0]!;
+      piece.sizes = seed.job.sizes.map(({ token, rank, sizeId }) => {
+        // Every rank has distinct dimensions in both axes, even if the selected rank is lost.
+        const grow = (ring: typeof base.cut) =>
+          ring.map(({ x, y }) => ({
+            x: base.bbox.minX + (x - base.bbox.minX) * (1 + rank * 0.04),
+            y: y * (1 + rank * 0.03),
+          }));
+        const cut = grow(base.cut);
+        return {
+          ...structuredClone(base),
+          rank,
+          sizeId,
+          sizeToken: token,
+          cut,
+          seam: grow(base.seam!),
+          bbox: bboxOf(cut),
+          areaMm2: areaOf(cut),
+        };
+      });
+    }
+  }
   seed.written = writeDxfDetailed(seed.job, { now: () => new Date('2026-11-17T00:00:00.000Z') });
+  if (fiveRanks) {
+    const client = new ImportWorkerClient();
+    try {
+      // Begin the edit on canonical output from a previous ordinary Wizard export.
+      const prior = await draftThroughWizardStages(
+        new File([seed.written.dxfText], 'five-original-ranks.dxf', { type: 'image/vnd.dxf' }),
+        seed.card,
+        client,
+      );
+      const saved = prior.scopes[0]!;
+      expect(saved.manifest.gate?.passed).toBe(true);
+      seed.written = { ...seed.written, dxfText: saved.dxfText, manifest: saved.manifest };
+    } finally {
+      client.dispose();
+    }
+  }
   seed.bytes = new TextEncoder().encode(seed.written.dxfText);
   seed.row = {
     ...seed.row,
@@ -122,6 +174,7 @@ async function fixture(stable = false, separateAllowance = true) {
     readCurrent: () => current,
   };
   return {
+    seed,
     current,
     request,
     tx,
@@ -1944,10 +1997,20 @@ it('reopens a native text mark without turning it into size, fold or quantity me
   }
 });
 
-async function checkNativeOutlinePointEdit(tool: 'move-point' | 'delete-point') {
-  const f = await fixture(true, false);
+async function checkNativeOutlinePointEdit(tool: 'move-point' | 'delete-point', fiveRanks = false) {
   vi.stubGlobal('Worker', InProcessTransport);
+  const f = await fixture(true, false, fiveRanks);
   const worker = new ImportWorkerClient();
+  const reviewFiles: File[] = [];
+  const unregister = registerPatternImportDxfPhaseEPatternsFieldCompiledReimportOwnerV1({
+    techCardId: f.current.card.techCardId,
+    readConfirmedImportGeneration: () => f.current.generation,
+    scopeAvailable: (key) => key === f.current.row.scopeKey,
+    reviewAlreadyOpen: () => reviewFiles.length > 0,
+    openExistingImportReview: (review) => {
+      reviewFiles.push(...review.files);
+    },
+  });
   const url = 'https://saved-full-assembly.invalid/moved-outline.dxf';
   let stored = new Uint8Array();
   const upload = vi
@@ -1962,12 +2025,8 @@ async function checkNativeOutlinePointEdit(tool: 'move-point' | 'delete-point') 
       recordPatternImportDxfPhaseEDraftCadMovePointV1,
       recordPatternImportDxfPhaseEDraftCadDeletePointV1,
     } = await import('./draft-cad-canvas-v1');
-    const { compilePatternImportDxfPhaseEDraftCadGeometryV1 } = await import(
-      './draft-cad-geometry-compile-v1'
-    );
     const { parseDxf } = await import('lib/nesting/dxf/parse');
     const { entityToChain } = await import('lib/nesting/dxf/entities');
-    const { bboxOf } = await import('lib/pattern-import/semantics/geom');
     const { projection } = f.compileInput;
     const vertices = buildPatternImportDxfPhaseEDraftCadExactVertexOptionsV1(
       f.initial,
@@ -1977,9 +2036,10 @@ async function checkNativeOutlinePointEdit(tool: 'move-point' | 'delete-point') 
     );
     const [point, next] = vertices;
     if (!point || !next) throw Error('The exact source outline has no adjacent points.');
+    const progress = fiveRanks ? 0.05 : 0.15;
     const shift = {
-      x: (next.pointMm.x - point.pointMm.x) * 0.15,
-      y: (next.pointMm.y - point.pointMm.y) * 0.15,
+      x: (next.pointMm.x - point.pointMm.x) * progress,
+      y: (next.pointMm.y - point.pointMm.y) * progress,
     };
     const pointMm = { x: point.pointMm.x + shift.x, y: point.pointMm.y + shift.y };
     const input = {
@@ -1994,14 +2054,28 @@ async function checkNativeOutlinePointEdit(tool: 'move-point' | 'delete-point') 
         ? recordPatternImportDxfPhaseEDraftCadMovePointV1({ ...input, pointMm })
         : recordPatternImportDxfPhaseEDraftCadDeletePointV1(input);
     expect(edit.recorded, edit.blocker ?? '').toBe(true);
-    const compiled = compilePatternImportDxfPhaseEDraftCadGeometryV1({
+    const compiled = await compileDraftForOrdinaryReviewV1({
       ...f.compileInput,
       session: edit.session,
     });
     if (!compiled.ok) throw Error(JSON.stringify(compiled.blockers));
-    const file = new File([compiled.artifact.dxfText], 'main-cad-compiled.dxf', {
-      type: 'image/vnd.dxf',
-    });
+    expect(
+      await stagePatternImportDxfPhaseECadSemanticCompiledArtifactV1(compiled.artifact, {
+        confirmedImportGenerationAtCompile: f.current.generation,
+      }),
+    ).toBe(true);
+    const handoff = {
+      schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_CAD_COMMAND_COMPILED_REIMPORT_HANDOFF_V1,
+      artifact: compiled.artifact,
+      confirmedImportGenerationAtCompile: f.current.generation,
+      cadSessionCursorAtCompile: edit.session.cursor,
+    };
+    const opened = requestPatternImportDxfPhaseECadCommandCompiledReimportV1(handoff);
+    if (!opened.ok) throw Error(JSON.stringify(opened.blocker));
+    expect(reviewFiles).toHaveLength(1);
+    const [file] = reviewFiles;
+    if (!file) throw Error('The Patterns owner did not open the compiled DXF.');
+    expect(await file.text()).toBe(compiled.artifact.dxfText);
     const reviewed = await draftThroughWizardStages(file, f.current.card, worker);
     const scope = reviewed.scopes[0]!;
     expect(scope.manifest.gate?.passed).toBe(true);
@@ -2045,29 +2119,42 @@ async function checkNativeOutlinePointEdit(tool: 'move-point' | 'delete-point') 
         return 'ok';
       },
     });
+    const confirmApply = vi.fn(() => apply(reviewed));
     const result = await applyDirectDxfReviewedDraftV1(
       reviewed,
       [file],
       undefined,
       () => true,
-      () => apply(reviewed),
+      confirmApply,
     );
+    expect(confirmApply).toHaveBeenCalledOnce();
     if (!result.ok || !result.commitReceipt || !row) throw Error(JSON.stringify(result));
     expect(upload).toHaveBeenCalledTimes(1);
     expect(result.commitReceipt.previousLockVersion).toBe(prior.cardLockVersion);
     expect(row.sha256).toBe(await digestFullAssemblyFixture(stored));
     expect(row.sha256).not.toBe(prior.sha256);
+    expect(result.commitReceipt.scopes).toMatchObject([
+      { patternLineKey: prior.patternLineKey, patternUrl: row.url },
+    ]);
+    expect(row.patternLineKey).toBe(prior.patternLineKey);
     const bytes = Uint8Array.from(stored);
     card.existingPatterns![0] = {
       ...card.existingPatterns![0]!,
       url: row.url,
       lineKey: row.patternLineKey,
-      manifest: scope.manifest,
+      manifest: readManifest(new TextDecoder().decode(bytes))!,
     };
-    const reopened = await createSavedThreePanelSourceV1(
-      { ...(await createSavedThreePanelFixtureV1(2)), bytes, row, card },
-      true,
-    );
+    card.existingPieces = live.pieces.map((piece) => {
+      const { lineKey, name, cutSymmetry } = piece;
+      if (!lineKey || !name || !cutSymmetry) throw Error('Missing committed piece identity.');
+      return { ...piece, lineKey, name, cutSymmetry };
+    });
+    card.existingAliases = live.aliases.map((alias) => ({
+      scopeKey: target.scopeKey,
+      blockName: alias.blockName!,
+      pieceLineKey: alias.pieceLineKey!,
+    }));
+    const reopened = await createSavedThreePanelSourceV1({ ...f.seed, bytes, row, card }, true);
     try {
       expect(reopened.native.row).toEqual(row);
       const normalize = (points: readonly { x: number; y: number }[]) => {
@@ -2081,7 +2168,7 @@ async function checkNativeOutlinePointEdit(tool: 'move-point' | 'delete-point') 
           ? vertices.map((vertex) => (vertex === point ? pointMm : vertex.pointMm))
           : vertices.filter((vertex) => vertex !== point).map(({ pointMm }) => pointMm);
       const block = scope.manifest.blocks.find(
-        ({ identity }) => identity === point.anchor.pieceId,
+        ({ identity, sizeToken }) => identity === point.anchor.pieceId && sizeToken === 'M',
       )!;
       const raw = parseDxf(bytes.buffer, 'mm').dxf.blocks[block.block]!;
       for (const layer of ['1', '14']) {
@@ -2094,13 +2181,75 @@ async function checkNativeOutlinePointEdit(tool: 'move-point' | 'delete-point') 
       }
       const restored = reopened.native.draft.scopes[0]!.writerReplay!.job.pieces.find(
         ({ identity }) => identity === point.anchor.pieceId,
-      )!.sizes[0]!;
+      )!.sizes.find(({ sizeToken }) => sizeToken === 'M')!;
       expect(normalize(restored.cut)).toEqual(normalize(expected));
       expect(normalize(restored.seam!)).toEqual(normalize(expected));
+      if (fiveRanks) {
+        const before = f.source.native.draft.scopes[0]!,
+          after = reopened.native.draft.scopes[0]!;
+        const original = parseDxf(f.request.savedBytes, 'mm').dxf,
+          saved = parseDxf(bytes.buffer, 'mm').dxf;
+        const rankIds = garmentRanks.map((token, rank) => ({ rank, token, sizeId: rank + 5 }));
+        for (const version of [before, scope, after]) {
+          expect(
+            version.manifest.sizes.map(({ rank, token, sizeId }) => ({ rank, token, sizeId })),
+          ).toEqual(rankIds);
+          expect(version.manifest.blocks).toHaveLength(10);
+          expect(version.writerReplay!.job.pieces.map((p) => p.identity).sort()).toEqual([
+            'BP',
+            'FP',
+          ]);
+        }
+        const readNativeRing = (dxf: typeof original, block: string, layer: string) => {
+          const entities = dxf.blocks[block]!.entities.filter(
+            (e) => e.layer === layer && (e.type === 'POLYLINE' || e.type === 'LWPOLYLINE'),
+          );
+          expect(entities).toHaveLength(1);
+          const chain = entityToChain(entities[0]!, 1, 0.001)!;
+          expect(chain.closed).toBe(true);
+          expect(chain.pts.length).toBeGreaterThanOrEqual(4);
+          return chain.pts;
+        };
+        for (const identity of ['BP', 'FP']) {
+          const sizes = (v: typeof before) =>
+            v.writerReplay!.job.pieces.find((p) => p.identity === identity)!.sizes;
+          const prior = sizes(before),
+            decoded = sizes(after);
+          for (const values of [prior, decoded]) {
+            expect(
+              values.map(({ rank, sizeToken: token, sizeId }) => ({ rank, token, sizeId })),
+            ).toEqual(rankIds);
+            expect(new Set(values.map((size) => JSON.stringify(normalize(size.cut)))).size).toBe(5);
+          }
+          for (const { token, sizeId, rank } of rankIds) {
+            const expectedBlock = { identity, sizeToken: token, sizeId };
+            const originalBlocks = before.manifest.blocks.filter(
+              (b) => b.identity === identity && b.sizeToken === token,
+            );
+            expect(originalBlocks).toHaveLength(1);
+            const [originalBlock] = originalBlocks;
+            expect(originalBlock).toMatchObject(expectedBlock);
+            expect(
+              after.manifest.blocks.filter((b) => b.identity === identity && b.sizeToken === token),
+            ).toMatchObject([{ ...expectedBlock, block: originalBlock!.block }]);
+            const edited = identity === point.anchor.pieceId && token === 'M';
+            for (const layer of ['1', '14']) {
+              const originalRing = readNativeRing(original, originalBlock!.block, layer);
+              if (edited) expect(originalRing).toEqual(vertices.map((vertex) => vertex.pointMm));
+              const expectedRing = edited ? expected : originalRing;
+              expect(readNativeRing(saved, originalBlock!.block, layer)).toEqual(expectedRing);
+              const boundary = layer === '1' ? 'cut' : 'seam';
+              expect(prior[rank]![boundary]).toEqual(originalRing);
+              expect(decoded[rank]![boundary]).toEqual(expectedRing);
+            }
+          }
+        }
+      }
     } finally {
       reopened.dispose();
     }
   } finally {
+    unregister();
     upload.mockRestore();
     worker.dispose();
     vi.unstubAllGlobals();
@@ -2110,5 +2259,8 @@ async function checkNativeOutlinePointEdit(tool: 'move-point' | 'delete-point') 
 
 it.each(['move-point', 'delete-point'] as const)(
   'reopens %s from both native paths after ordinary Wizard Apply',
-  checkNativeOutlinePointEdit,
+  (tool) => checkNativeOutlinePointEdit(tool),
 );
+
+it('reopens one M Move with all four other ranks and the sibling piece intact after one ordinary Apply', () =>
+  checkNativeOutlinePointEdit('move-point', true));
