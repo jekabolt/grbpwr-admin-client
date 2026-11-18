@@ -1,8 +1,8 @@
-import { currentHost } from 'lib/host';
+import { currentHost, rootUrl } from 'lib/host';
 import { cn } from 'lib/utility';
 import { type ReactNode, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, HeaderNote, Input, Row, Section, Text, ViewSwitch } from 'ui';
+import { Button, CheckboxCommon, HeaderNote, Input, Row, Section, Text, ViewSwitch } from 'ui';
 
 // The approved «sheet» (V3): a narrow side block (wordmark + mode switch, or the team) beside
 // one form block of label|value rows and a foot with the one action. Phone: one column.
@@ -227,4 +227,55 @@ export function TeamSide({ name, sub = 'lekalo' }: { name: string; sub?: string 
 /** `<slug>.beta.lekalo.studio` after an address field. */
 export function baseSuffix(): string {
   return `.${currentHost().base}`;
+}
+
+/** The legal pages live on the root host; a team host (join) links across to it. */
+function legalHref(doc: 'terms' | 'privacy'): string {
+  return currentHost().kind === 'root' ? `/${doc}` : rootUrl(`/${doc}`);
+}
+
+/** `agree to` + `terms` `privacy` above the foot of sign up and join; the action waits for it. */
+export function AgreeRow({
+  checked,
+  onChange,
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className='flex flex-wrap items-center justify-end gap-1 pt-1.5 max-sm:justify-start'>
+      <label htmlFor='agree' className='inline-flex cursor-pointer items-center gap-1.5'>
+        <CheckboxCommon name='agree' checked={checked} onChange={onChange} className='size-3.5' />
+        <Text component='span'>agree to</Text>
+      </label>
+      {(['terms', 'privacy'] as const).map((doc) => (
+        <Button
+          key={doc}
+          asChild
+          variant='underline'
+          className='text-labelColor hover:text-textColor'
+        >
+          <a href={legalHref(doc)} target='_blank' rel='noreferrer'>
+            {doc}
+          </a>
+        </Button>
+      ))}
+    </div>
+  );
+}
+
+/** The team waits for an operator: its address, nothing to open yet. */
+export function AwaitingApproval({ slug }: { slug: string }) {
+  return (
+    <AuthSheet side={<RootSide mode='signup' />}>
+      <SheetForm title='awaiting approval'>
+        <SheetRow label='address'>
+          <Text component='span' className='break-all font-bold'>
+            {slug}
+            {baseSuffix()}
+          </Text>
+        </SheetRow>
+      </SheetForm>
+    </AuthSheet>
+  );
 }

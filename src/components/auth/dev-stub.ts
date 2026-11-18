@@ -22,6 +22,12 @@ const DEFAULT_FEATURES = [
   'tech_cards',
 ];
 
+const WAITING = { slug: 'linea', name: 'linea', awaitingApproval: true };
+
+function terms(body: string | null): boolean {
+  return !!body && (JSON.parse(body) as { termsAccepted?: boolean }).termsAccepted === true;
+}
+
 function refuse(status: number, message: string): never {
   throw Object.assign(new Error(message), { status });
 }
@@ -37,6 +43,7 @@ export async function stubAnswer(method: string, body: string | null): Promise<u
       return { available: !TAKEN.has(req.slug), suggestion: '' };
     case 'SignUp':
       if (TAKEN.has(req.teamSlug)) refuse(409, 'slug taken');
+      if (!terms(body)) refuse(400, 'terms not accepted');
       return {};
     case 'ResendVerification':
     case 'RequestPasswordReset':
@@ -44,6 +51,8 @@ export async function stubAnswer(method: string, body: string | null): Promise<u
       return {};
     case 'VerifyEmail':
       if (req.code === '000000' || req.token === 'expired') refuse(400, 'invalid or expired code');
+      // 111111 → the team waits for the operator
+      if (req.code === '111111') return { teamSlug: 'linea', awaitingApproval: true };
       return { teamSlug: 'ostra', handoffCode: 'stub-code' };
     case 'SignIn':
       if (req.password === 'linen2025') refuse(401, 'wrong password');
@@ -51,9 +60,11 @@ export async function stubAnswer(method: string, body: string | null): Promise<u
         token: TOKEN,
         teams:
           req.target === 'SIGN_IN_TARGET_ROOT'
-            ? req.login.includes('one@')
-              ? TEAMS.slice(0, 1)
-              : TEAMS
+            ? req.login.includes('wait')
+              ? [WAITING]
+              : req.login.includes('one@')
+                ? TEAMS.slice(0, 1)
+                : [...TEAMS, WAITING]
             : [],
       };
     case 'IssueHandoff':
@@ -72,6 +83,7 @@ export async function stubAnswer(method: string, body: string | null): Promise<u
       if (req.token === 'expired') refuse(404, 'invite not found');
       return { teamName: 'ostra', email: 'mira@ostra.studio', accountExists: false };
     case 'AcceptInvite':
+      if (!terms(body)) refuse(400, 'terms not accepted');
       return { teamSlug: currentHost().slug || 'ostra', handoffCode: 'stub-code' };
     case 'GetCurrentAccount': {
       const h = currentHost();

@@ -76,6 +76,8 @@ export type TeamRef = {
   readOnly: boolean | undefined;
   // ready is false while the team is provisioning.
   ready: boolean | undefined;
+  // awaiting_approval is true while the team waits for an operator's approval; ready is false then.
+  awaitingApproval: boolean | undefined;
 };
 
 export type SignUpRequest = {
@@ -83,6 +85,8 @@ export type SignUpRequest = {
   password: string | undefined;
   teamName: string | undefined;
   teamSlug: string | undefined;
+  // terms_accepted must be true for a new account; the server refuses otherwise.
+  termsAccepted: boolean | undefined;
 };
 
 export type SignUpResponse = {
@@ -107,6 +111,8 @@ export type VerifyEmailRequest = {
 export type VerifyEmailResponse = {
   teamSlug: string | undefined;
   handoffCode: string | undefined;
+  // awaiting_approval is true when the team waits for an operator's approval; handoff_code is empty then.
+  awaitingApproval: boolean | undefined;
 };
 
 export type ResendVerificationRequest = {
@@ -183,6 +189,8 @@ export type AcceptInviteRequest = {
   password: string | undefined;
   // handle is the person's name inside the team when the invited email has no account yet.
   handle: string | undefined;
+  // terms_accepted must be true for a new account; the server refuses otherwise.
+  termsAccepted: boolean | undefined;
 };
 
 export type AcceptInviteResponse = {

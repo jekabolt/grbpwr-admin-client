@@ -1,4 +1,5 @@
 import { authService } from 'api/api';
+import type { VerifyEmailResponse } from 'api/proto-http/auth';
 import { goToUrl, teamUrl } from 'lib/host';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -14,7 +15,9 @@ import {
 } from './api-error';
 import { CODE_LEN, CodeCells, Resend } from './code-cells';
 import {
+  AgreeRow,
   AuthSheet,
+  AwaitingApproval,
   baseSuffix,
   PasswordInput,
   RootSide,
@@ -32,6 +35,13 @@ const DEBOUNCE_MS = 300;
 /** After a confirmed sign-up the team host greets with `email confirmed`. */
 export function signupHandoffUrl(slug: string, code: string): string {
   return teamUrl(slug, `/auth#code=${encodeURIComponent(code)}&from=signup`);
+}
+
+/** A confirmed sign-up either waits for the operator (the slug to show) or leaves for its team. */
+function afterVerify(r: VerifyEmailResponse, fallbackSlug: string): string | null {
+  if (r.awaitingApproval) return r.teamSlug || fallbackSlug;
+  goToUrl(signupHandoffUrl(r.teamSlug ?? '', r.handoffCode ?? ''));
+  return null;
 }
 
 function useSlugCheck(slug: string, name: string): SlugCheck {
@@ -64,13 +74,16 @@ function useSlugCheck(slug: string, name: string): SlugCheck {
 export function SignUp() {
   const [step, setStep] = useState<'form' | 'code'>('form');
   const [email, setEmail] = useState('');
+  const [slug, setSlug] = useState('');
 
-  if (step === 'code') return <ConfirmCode email={email} onChangeEmail={() => setStep('form')} />;
+  if (step === 'code')
+    return <ConfirmCode email={email} slug={slug} onChangeEmail={() => setStep('form')} />;
   return (
     <SignUpForm
       email={email}
       onEmail={setEmail}
-      onSent={() => {
+      onSent={(sent) => {
+        setSlug(sent);
         rememberEmail(email.trim());
         setStep('code');
       }}
@@ -85,12 +98,13 @@ function SignUpForm({
 }: {
   email: string;
   onEmail: (v: string) => void;
-  onSent: () => void;
+  onSent: (slug: string) => void;
 }) {
   const [team, setTeam] = useState('');
   const [address, setAddress] = useState('');
   const edited = useRef(false);
   const [password, setPassword] = useState('');
+  const [agreed, setAgreed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const slug = edited.current ? address : slugify(team);
@@ -100,7 +114,8 @@ function SignUpForm({
     check.status === 'free' &&
     /.+@.+\..+/.test(email.trim()) &&
     password.length >= 8 &&
-    !!team.trim();
+    !!team.trim() &&
+    agreed;
 
   const submit = async () => {
     if (!ready || busy) return;
@@ -112,8 +127,9 @@ function SignUpForm({
         password,
         teamName: team.trim(),
         teamSlug: slug,
+        termsAccepted: true,
       });
-      onSent();
+      onSent(slug);
     } catch (e) {
       setError(
         errMessage(e).includes('taken')
@@ -194,6 +210,7 @@ function SignUpForm({
             autoComplete='new-password'
           />
         </SheetRow>
+        <AgreeRow checked={agreed} onChange={setAgreed} />
         <SheetFoot>
           <SheetSubmit disabled={!ready} loading={busy}>
             create team
@@ -204,7 +221,16 @@ function SignUpForm({
   );
 }
 
-function ConfirmCode({ email, onChangeEmail }: { email: string; onChangeEmail: () => void }) {
+function ConfirmCode({
+  email,
+  slug = '',
+  onChangeEmail,
+}: {
+  email: string;
+  slug?: string;
+  onChangeEmail: () => void;
+}) {
+  const [awaiting, setAwaiting] = useState<string | null>(null);
   const [wrong, setWrong] = useState(false);
   const [busy, setBusy] = useState(false);
   const [round, setRound] = useState(0);
@@ -214,7 +240,7 @@ function ConfirmCode({ email, onChangeEmail }: { email: string; onChangeEmail: (
     setBusy(true);
     try {
       const r = await authService.VerifyEmail({ token: '', email: email.trim(), code });
-      goToUrl(signupHandoffUrl(r.teamSlug ?? '', r.handoffCode ?? ''));
+      setAwaiting(afterVerify(r, slug));
     } catch {
       setWrong(true);
       setRound((n) => n + 1);
@@ -223,6 +249,7 @@ function ConfirmCode({ email, onChangeEmail }: { email: string; onChangeEmail: (
     }
   };
 
+  if (awaiting !== null) return <AwaitingApproval slug={awaiting} />;
   return (
     <AuthSheet side={<RootSide mode='signup' />}>
       <SheetForm title='confirm email' note={wrong ? 'wrong code' : undefined}>
@@ -255,6 +282,7 @@ export function ConfirmLink() {
   const [state, setState] = useState<'checking' | 'expired' | 'code'>(
     token ? 'checking' : 'expired',
   );
+  const [awaiting, setAwaiting] = useState<string | null>(null);
   const [email, setEmail] = useState(rememberedEmail);
   const [busy, setBusy] = useState(false);
 
@@ -264,13 +292,14 @@ export function ConfirmLink() {
     let live = true;
     authService
       .VerifyEmail({ token, email: '', code: '' })
-      .then((r) => live && goToUrl(signupHandoffUrl(r.teamSlug ?? '', r.handoffCode ?? '')))
+      .then((r) => live && setAwaiting(afterVerify(r, '')))
       .catch(() => live && setState('expired'));
     return () => {
       live = false;
     };
   }, [token]);
 
+  if (awaiting !== null) return <AwaitingApproval slug={awaiting} />;
   if (state === 'code')
     return <ConfirmCode email={email} onChangeEmail={() => navigate('/', { replace: true })} />;
 

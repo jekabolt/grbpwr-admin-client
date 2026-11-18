@@ -5,6 +5,7 @@ import { Loader } from 'ui';
 
 import { clearHash, hashParam, isRefusal } from './api-error';
 import {
+  AgreeRow,
   AuthSheet,
   PasswordInput,
   SheetFoot,
@@ -26,6 +27,7 @@ export function Join() {
     token ? 'loading' : 'expired',
   );
   const [name, setName] = useState('');
+  const [agreed, setAgreed] = useState(false);
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState('');
@@ -52,12 +54,17 @@ export function Join() {
   }, [token]);
 
   const submit = async () => {
-    if (password.length < (invite?.accountExists ? 1 : 8) || busy) return;
+    if (password.length < (invite?.accountExists ? 1 : 8) || !agreed || busy) return;
     setBusy(true);
     setNote('');
     try {
       const handle = invite?.accountExists ? undefined : name.trim() || undefined;
-      const r = await authService.AcceptInvite({ token, password, handle });
+      const r = await authService.AcceptInvite({
+        token,
+        password,
+        handle,
+        termsAccepted: true,
+      });
       goToUrl(teamUrl(r.teamSlug ?? '', `/auth#code=${encodeURIComponent(r.handoffCode ?? '')}`));
     } catch (e) {
       setNote(
@@ -106,9 +113,10 @@ export function Join() {
                 autoFocus={invite.accountExists}
               />
             </SheetRow>
+            <AgreeRow checked={agreed} onChange={setAgreed} />
             <SheetFoot>
               <SheetSubmit
-                disabled={password.length < (invite.accountExists ? 1 : 8)}
+                disabled={password.length < (invite.accountExists ? 1 : 8) || !agreed}
                 loading={busy}
               >
                 join

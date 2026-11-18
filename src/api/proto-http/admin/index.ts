@@ -32042,7 +32042,7 @@ export function createAdminServiceClient(
 export type PlatformTeam = {
   slug: string | undefined;
   name: string | undefined;
-  // status is active, read_only, provisioning or pending.
+  // status is active, read_only, provisioning, pending or review (waits for approval).
   status: string | undefined;
   people: number | undefined;
   createdAt: wellKnownTimestamp | undefined;
@@ -32126,6 +32126,29 @@ export type RenameTeamResponse = {
   team: PlatformTeam | undefined;
 };
 
+export type ApproveTeamRequest = {
+  teamSlug: string | undefined;
+};
+
+export type ApproveTeamResponse = {
+  team: PlatformTeam | undefined;
+};
+
+export type DeclineTeamRequest = {
+  teamSlug: string | undefined;
+};
+
+export type DeclineTeamResponse = {
+};
+
+export type EnterTeamRequest = {
+  teamSlug: string | undefined;
+};
+
+export type EnterTeamResponse = {
+  handoffCode: string | undefined;
+};
+
 // PlatformService is the operator console over the control plane. A team is
 // addressed by slug, never by id.
 export interface PlatformService {
@@ -32141,6 +32164,12 @@ export interface PlatformService {
   SetTeamStatus(request: SetTeamStatusRequest): Promise<SetTeamStatusResponse>;
   // RenameTeam changes a team's slug and/or name; the old slug redirects.
   RenameTeam(request: RenameTeamRequest): Promise<RenameTeamResponse>;
+  // ApproveTeam lets a team that waits for approval start provisioning.
+  ApproveTeam(request: ApproveTeamRequest): Promise<ApproveTeamResponse>;
+  // DeclineTeam rejects a team that waits for approval.
+  DeclineTeam(request: DeclineTeamRequest): Promise<DeclineTeamResponse>;
+  // EnterTeam issues a hand-off code that opens the team's workspace for the operator.
+  EnterTeam(request: EnterTeamRequest): Promise<EnterTeamResponse>;
 }
 
 export function createPlatformServiceClient(
@@ -32263,6 +32292,66 @@ export function createPlatformServiceClient(
         service: "PlatformService",
         method: "RenameTeam",
       }) as Promise<RenameTeamResponse>;
+    },
+    ApproveTeam(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.teamSlug) {
+        throw new Error("missing required field request.team_slug");
+      }
+      const path = `api/platform/teams/${request.teamSlug}/approve`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "PlatformService",
+        method: "ApproveTeam",
+      }) as Promise<ApproveTeamResponse>;
+    },
+    DeclineTeam(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.teamSlug) {
+        throw new Error("missing required field request.team_slug");
+      }
+      const path = `api/platform/teams/${request.teamSlug}/decline`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "PlatformService",
+        method: "DeclineTeam",
+      }) as Promise<DeclineTeamResponse>;
+    },
+    EnterTeam(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.teamSlug) {
+        throw new Error("missing required field request.team_slug");
+      }
+      const path = `api/platform/teams/${request.teamSlug}/enter`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "PlatformService",
+        method: "EnterTeam",
+      }) as Promise<EnterTeamResponse>;
     },
   };
 }
