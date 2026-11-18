@@ -15,6 +15,8 @@ import {
 } from './draft-cad-preview-v1';
 import { PatternImportDxfPhaseEDraftCadGridRulersV1 } from './draft-cad-grid-rulers-v1';
 import {
+  listActiveDraftCadNewPiecesV1,
+  permitsDraftCadLocalPieceEditV1,
   recordPatternImportDxfPhaseEDraftCadTransactionV1,
   type PatternImportDxfPhaseEDraftCadCommandV1,
   type PatternImportDxfPhaseEDraftCadSessionV1,
@@ -87,6 +89,7 @@ export type PatternImportDxfPhaseEDraftCadCanvasPropsV1 = Readonly<{
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
   scopeKey?: string;
   activePieceIndex: number;
+  activeDraftPieceId?: string | null;
   activeTool: PatternImportDxfPhaseEDraftCadToolV1;
   arrangeActive?: boolean;
   panActive?: boolean;
@@ -144,6 +147,7 @@ type PointInput = Readonly<{
   session: PatternImportDxfPhaseEDraftCadSessionV1;
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
   activePieceIndex: number;
+  activeDraftPieceId?: string | null;
   activeTool: PatternImportDxfPhaseEDraftCadToolV1;
   pointMm: PtMm;
   pendingPoints: readonly PtMm[];
@@ -838,15 +842,19 @@ export function recordPatternImportDxfPhaseEDraftCadCanvasPointV1(
     input.projection,
     input.activePieceIndex,
   );
-  if (!sourcePiece || !projectedPiece)
+  const draftPiece = input.activeDraftPieceId
+    ? listActiveDraftCadNewPiecesV1(input.session).find(
+        ({ pieceId }) => pieceId === input.activeDraftPieceId,
+      )
+    : undefined;
+  const target = input.activeDraftPieceId ? draftPiece : sourcePiece;
+  if (!projectedPiece || !target)
     return {
-      ...failPointInput(
-        input,
-        'The active exact piece is not available in the projection sealed to this Draft session.',
-        [],
-      ),
+      ...failPointInput(input, 'The active piece is unavailable in the current Draft session.', []),
       pendingDartBase: null,
     };
+  if (draftPiece && !permitsDraftCadLocalPieceEditV1(input.activeTool))
+    return failPointInput(input, 'Apply this piece before using the selected tool.', []);
   if (EXACT_EDGE_TOOLS.has(input.activeTool) && input.activeTool !== 'dart')
     return failPointInput(
       input,
@@ -856,8 +864,8 @@ export function recordPatternImportDxfPhaseEDraftCadCanvasPointV1(
   if (
     input.activeTool === 'spread' &&
     !activeCutLineEntityId(input.session, {
-      pieceId: sourcePiece.pieceId,
-      pieceLineKey: sourcePiece.pieceLineKey,
+      pieceId: target.pieceId,
+      pieceLineKey: target.pieceLineKey,
     })
   )
     return failPointInput(
@@ -919,8 +927,8 @@ export function recordPatternImportDxfPhaseEDraftCadCanvasPointV1(
 
   const ids = nextIds(input.session, input.sequence);
   const nextCommand = commandForPoint(input, ids, {
-    pieceId: sourcePiece.pieceId,
-    pieceLineKey: sourcePiece.pieceLineKey,
+    pieceId: target.pieceId,
+    pieceLineKey: target.pieceLineKey,
   });
   if (!nextCommand)
     return failPointInput(input, 'The active Draft input does not have enough points.');
@@ -1372,6 +1380,7 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
   projection,
   scopeKey,
   activePieceIndex,
+  activeDraftPieceId = null,
   activeTool,
   arrangeActive = false,
   panActive = false,
@@ -1406,12 +1415,18 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
     () => buildPatternImportDxfPhaseEDraftCadPreviewV1(session, projection),
     [projection, session],
   );
-  const piece = activeProjectedPiece(session, projection, activePieceIndex);
+  const projectedPiece = activeProjectedPiece(session, projection, activePieceIndex);
+  const piece = activeDraftPieceId ? null : projectedPiece;
   const sourcePiece = session.source.catalog.pieces[activePieceIndex];
+  const draftPiece = activeDraftPieceId
+    ? listActiveDraftCadNewPiecesV1(session).find(({ pieceId }) => pieceId === activeDraftPieceId)
+    : undefined;
+  const target = activeDraftPieceId ? draftPiece : sourcePiece;
   const primitives = preview.primitives.filter(
     (primitive) =>
-      primitive.target.pieceId === sourcePiece?.pieceId &&
-      primitive.target.pieceLineKey === sourcePiece?.pieceLineKey,
+      primitive.commandId === draftPiece?.commandId ||
+      (primitive.target.pieceId === target?.pieceId &&
+        primitive.target.pieceLineKey === target?.pieceLineKey),
   );
   const sourceMismatch = preview.blockers.some(
     (blocker) => blocker.code === 'source-projection-mismatch',
@@ -1430,13 +1445,12 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
       ),
     [activePieceIndex, projection, session],
   );
+  const canUseActiveTool = activeDraftPieceId
+    ? Boolean(draftPiece) && !activeTopologyTool && permitsDraftCadLocalPieceEditV1(activeTool)
+    : crossScopeConnectActive || !!activeTopologyTool || INPUT_TOOLS.has(activeTool);
   const interactionEnabled =
-    !arrangeActive &&
-    !panActive &&
-    (crossScopeConnectActive || !!activeTopologyTool || INPUT_TOOLS.has(activeTool)) &&
-    !!piece &&
-    !sourceMismatch;
-  const resetKey = `${activeTool}|${activeTopologyTool ?? ''}|${activePieceIndex}|${session.cursor}|${session.source.revision}|${session.source.catalog.canonicalSha256}|${projection.expectedCatalogCanonicalSha256}|${projection.sizeSelectionCanonicalSha256}|${projection.sourceFileId}`;
+    !arrangeActive && !panActive && canUseActiveTool && !!projectedPiece && !sourceMismatch;
+  const resetKey = `${activeTool}|${activeTopologyTool ?? ''}|${activeDraftPieceId ?? activePieceIndex}|${session.cursor}|${session.source.revision}|${session.source.catalog.canonicalSha256}|${projection.expectedCatalogCanonicalSha256}|${projection.sizeSelectionCanonicalSha256}|${projection.sourceFileId}`;
 
   useEffect(() => {
     setPendingPoints([]);
@@ -1444,13 +1458,15 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
     setInputError(null);
   }, [arrangeActive, resetKey]);
 
-  const unavailable = !piece
-    ? 'The active exact piece is not available in the projection sealed to this Draft session.'
-    : !activeTopologyTool && !INPUT_TOOLS.has(activeTool)
-      ? toolInstruction(activeTool, projection.sizeToken)
-      : sourceMismatch
-        ? 'The exact projection does not match this Draft session source.'
-        : null;
+  const unavailable = sourceMismatch
+    ? 'The exact projection does not match this Draft session source.'
+    : !projectedPiece || !target
+      ? 'The active piece is unavailable in the current Draft session.'
+      : activeDraftPieceId && !canUseActiveTool
+        ? 'Apply this piece before using the selected tool.'
+        : !canUseActiveTool
+          ? toolInstruction(activeTool, projection.sizeToken)
+          : null;
   const bbox = arrangeActive
     ? arrangementViewportBounds(projection, arrangement?.transforms ?? {})
     : viewportBounds(piece, primitives, pendingPoints);
@@ -1462,6 +1478,7 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
       session,
       projection,
       activePieceIndex,
+      activeDraftPieceId,
       activeTool,
       pointMm,
       pendingPoints,
@@ -1483,6 +1500,7 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
   return (
     <section
       data-draft-cad-canvas-v1=''
+      data-draft-cad-local-piece={draftPiece?.pieceId}
       data-active-tool={activeTool}
       data-active-topology-tool={activeTopologyTool ?? undefined}
       data-draft-cad-input={interactionEnabled ? 'enabled' : 'blocked'}

@@ -8,6 +8,7 @@ import {
   PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_PRODUCTIVE_TOOLS_V1,
   type PatternImportDxfPhaseEDraftCadSessionV1,
   type PatternImportDxfPhaseEDraftCadToolV1,
+  listActiveDraftCadNewPiecesV1,
 } from './draft-cad-session-v1';
 import { PatternImportDxfPhaseECadWorkbenchToolButtonV1 } from './cad-workbench-tool-button-v1';
 import { PatternImportDxfPhaseECadWorkbenchObjectSidebarV1 } from './cad-workbench-object-sidebar-v1';
@@ -201,26 +202,14 @@ export function PatternImportDxfPhaseEDraftCadEditorShellV1({
     (count, transaction) => count + transaction.commands.length,
     0,
   );
-  const draftNewPieces = activeTransactions.flatMap(({ commands }) =>
-    commands.flatMap((command) =>
-      (command.tool === 'pen' ||
-        command.tool === 'rectangle' ||
-        command.tool === 'circle' ||
-        command.tool === 'ellipse') &&
-      command.payload.newPiece
-        ? [
-            {
-              objectKey: `draft:${command.commandId}`,
-              pieceId: command.payload.newPiece.pieceId,
-              label: command.payload.newPiece.displayName,
-              quantity: 1,
-              focusable: false,
-              statusLabel: 'Draft',
-            },
-          ]
-        : [],
-    ),
-  );
+  const draftNewPieces = listActiveDraftCadNewPiecesV1(session).map((piece) => ({
+    objectKey: `draft:${piece.commandId}`,
+    pieceId: piece.pieceId,
+    label: piece.displayName,
+    quantity: 1,
+    focusable: !arrangeActive && !connectActive,
+    statusLabel: 'Draft',
+  }));
   const pieceCount = session.source.catalog.pieces.length + draftNewPieces.length;
   const openProductiveToolGroup = PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_TOOL_GROUPS_V1.find(
     ({ id }) => id === openToolGroupId,

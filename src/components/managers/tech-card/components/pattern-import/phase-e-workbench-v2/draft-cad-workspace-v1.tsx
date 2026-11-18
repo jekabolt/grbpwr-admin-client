@@ -61,6 +61,7 @@ import {
 import { PatternImportDxfPhaseEDraftCadEditorShellV1 } from './draft-cad-editor-shell-v1';
 import type { PatternImportDxfPhaseEDraftCadGeometryCompileArtifactV1 } from './draft-cad-geometry-compile-v1';
 import {
+  listActiveDraftCadNewPiecesV1,
   redoPatternImportDxfPhaseEDraftCadSessionV1,
   undoPatternImportDxfPhaseEDraftCadSessionV1,
   type PatternImportDxfPhaseEDraftCadSessionV1,
@@ -212,6 +213,20 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
   const [activeTool, setActiveTool] =
     useState<PatternImportDxfPhaseEDraftCadToolV1>('internal-line');
   const [activePieceIndex, setActivePieceIndex] = useState(0);
+  const [selectedDraftPiece, setSelectedDraftPiece] = useState<Readonly<{
+    pieceId: string;
+    commandId: string;
+    catalogSha256: string;
+  }> | null>(null);
+  const draftPieces = useMemo(() => listActiveDraftCadNewPiecesV1(session), [session]);
+  const draftPieceId =
+    selectedDraftPiece?.catalogSha256 === session.source.catalog.canonicalSha256 &&
+    draftPieces.some(
+      ({ pieceId, commandId }) =>
+        pieceId === selectedDraftPiece.pieceId && commandId === selectedDraftPiece.commandId,
+    )
+      ? selectedDraftPiece.pieceId
+      : null;
   const [arrangeActive, setArrangeActive] = useState(false);
   const [panActive, setPanActive] = useState(false);
   const [crossScopeConnectActive, setCrossScopeConnectActive] = useState(false);
@@ -388,6 +403,7 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
     setCrossScopeResult(null);
     setCrossScopeConnecting(false);
     if (active) {
+      setSelectedDraftPiece(null);
       setArrangeActive(false);
       setPanActive(false);
       updateTopologySession((current) =>
@@ -530,7 +546,7 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
       onConnectChange={
         onCrossScopeConnect && !crossScopeConnectDisabled ? changeCrossScopeConnect : undefined
       }
-      selectedPieceIds={selectedPieceIds}
+      selectedPieceIds={draftPieceId ? [draftPieceId] : selectedPieceIds}
       onArrangeSelectionAction={(action) =>
         publishArrangement(
           applyPatternImportDxfPhaseEDraftCadArrangementActionV1(arrangement, action),
@@ -548,7 +564,21 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
       }
       onFocusPiece={(pieceId, toggle) => {
         const index = projection.pieces.findIndex((piece) => piece.pieceId === pieceId);
-        if (index < 0) return;
+        if (index < 0) {
+          const piece = draftPieces.find((candidate) => candidate.pieceId === pieceId);
+          if (!piece) return;
+          setSelectedDraftPiece({
+            pieceId,
+            commandId: piece.commandId,
+            catalogSha256: session.source.catalog.canonicalSha256,
+          });
+          setActiveTool('mark');
+          updateTopologySession((current) =>
+            selectPatternImportDxfPhaseEDraftCadTopologyToolV1(current, null),
+          );
+          return;
+        }
+        setSelectedDraftPiece(null);
         const next = !toggle
           ? [pieceId]
           : selectedPieceIds.includes(pieceId)
@@ -561,6 +591,7 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
       }}
       onArrangeChange={(active) => {
         setArrangeActive(active);
+        if (active) setSelectedDraftPiece(null);
         if (active && selectedPieceIds.length === 0) {
           const activePieceId = projection.pieces[activePieceIndex]?.pieceId;
           if (activePieceId)
@@ -777,6 +808,7 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
             projection={projection}
             scopeKey={topologyScopeKey}
             activePieceIndex={activePieceIndex}
+            activeDraftPieceId={draftPieceId}
             activeTool={activeTool}
             arrangeActive={arrangeActive}
             panActive={panActive}

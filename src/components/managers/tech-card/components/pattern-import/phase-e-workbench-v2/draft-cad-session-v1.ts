@@ -606,6 +606,28 @@ export function createPatternImportDxfPhaseEDraftCadSessionV1(
   });
 }
 
+export function listActiveDraftCadNewPiecesV1(session: PatternImportDxfPhaseEDraftCadSessionV1) {
+  return session.history.slice(0, session.cursor).flatMap(({ commands }) =>
+    commands.flatMap((command) => {
+      if (
+        (command.tool === 'pen' ||
+          command.tool === 'rectangle' ||
+          command.tool === 'circle' ||
+          command.tool === 'ellipse') &&
+        command.payload.newPiece
+      )
+        return [{ commandId: command.commandId, ...command.payload.newPiece }];
+      return [];
+    }),
+  );
+}
+
+export function permitsDraftCadLocalPieceEditV1(
+  tool: PatternImportDxfPhaseEDraftCadToolV1,
+): boolean {
+  return tool === 'mark';
+}
+
 export function recordPatternImportDxfPhaseEDraftCadTransactionV1(
   current: PatternImportDxfPhaseEDraftCadSessionV1,
   input: Readonly<{
@@ -634,11 +656,16 @@ export function recordPatternImportDxfPhaseEDraftCadTransactionV1(
       ({ pieceId, pieceLineKey }) => `${pieceId}\u0000${pieceLineKey}`,
     ),
   );
+  const localPieces = new Set(
+    listActiveDraftCadNewPiecesV1(current).map(
+      ({ pieceId, pieceLineKey }) => `${pieceId}\u0000${pieceLineKey}`,
+    ),
+  );
   if (
-    input.commands.some(
-      ({ target: commandTarget }) =>
-        !pieces.has(`${commandTarget.pieceId}\u0000${commandTarget.pieceLineKey}`),
-    )
+    input.commands.some(({ target: { pieceId, pieceLineKey }, tool }) => {
+      const key = `${pieceId}\u0000${pieceLineKey}`;
+      return !pieces.has(key) && !(permitsDraftCadLocalPieceEditV1(tool) && localPieces.has(key));
+    })
   )
     return Object.freeze({
       ok: false,

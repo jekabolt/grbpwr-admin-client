@@ -831,218 +831,275 @@ it('blocks the compiled review when ordinary saved semantics would rename the se
   }
 });
 
-it('applies a new Pen piece through the ordinary Wizard and reopens both exact native boundaries', async () => {
-  const f = await fixture(true);
-  vi.stubGlobal('Worker', InProcessTransport);
-  const worker = new ImportWorkerClient();
-  const url = 'https://saved-full-assembly.invalid/created-pen-piece.dxf';
-  let stored = new Uint8Array();
-  let committed: DxfProductSavedRowIdentityV1 | undefined;
-  const files: File[] = [];
-  const unregister = registerPatternImportDxfPhaseEPatternsFieldCompiledReimportOwnerV1({
-    techCardId: f.current.card.techCardId,
-    readConfirmedImportGeneration: () => f.current.generation,
-    scopeAvailable: (scopeKey) => scopeKey === f.current.row.scopeKey,
-    reviewAlreadyOpen: () => false,
-    openExistingImportReview: (review) => {
-      expect(review.requireManualApply).toBe(true);
-      files.push(...review.files);
-    },
-  });
-  const upload = vi
-    .spyOn(adminService, 'UploadPattern')
-    .mockImplementation(async ({ raw, filename }) => {
-      stored = Uint8Array.from(atob(raw!), (char) => char.charCodeAt(0));
-      return { url, filename, sizeBytes: stored.length };
-    });
-  try {
-    const { recordPatternImportDxfPhaseEDraftCadCanvasPointV1 } = await import(
-      './draft-cad-canvas-v1'
-    );
-    const { compilePatternImportDxfPhaseEDraftCadGeometryV1 } = await import(
-      './draft-cad-geometry-compile-v1'
-    );
-    const pendingPoints = [
+it.each([
+  [
+    'pen',
+    'DRAFTPEN1',
+    [
       { x: 15, y: 30 },
       { x: 115, y: 30 },
       { x: 115, y: 90 },
       { x: 75, y: 68 },
       { x: 15, y: 90 },
-    ];
-    const edit = recordPatternImportDxfPhaseEDraftCadCanvasPointV1({
-      session: f.initial,
-      projection: f.compileInput.projection,
-      activePieceIndex: 0,
-      activeTool: 'pen',
-      sequence: 0,
-      pendingPoints,
-      pointMm: pendingPoints[4]!,
-      closePen: true,
+    ],
+  ],
+  [
+    'rectangle',
+    'DRAFTRECT1',
+    [
+      { x: 15, y: 30 },
+      { x: 115, y: 90 },
+    ],
+  ],
+  [
+    'circle',
+    'DRAFTCIRCLE1',
+    [
+      { x: 65, y: 60 },
+      { x: 115, y: 60 },
+    ],
+  ],
+  [
+    'ellipse',
+    'DRAFTELLIPSE1',
+    [
+      { x: 65, y: 60 },
+      { x: 115, y: 60 },
+      { x: 65, y: 90 },
+    ],
+  ],
+] as const)(
+  'marks a new %s piece before Apply and reopens the separate saved piece with both native boundaries',
+  async (tool, pieceId, points) => {
+    const f = await fixture(true);
+    vi.stubGlobal('Worker', InProcessTransport);
+    const worker = new ImportWorkerClient();
+    const url = `https://saved-full-assembly.invalid/created-${tool}-piece.dxf`;
+    let stored = new Uint8Array();
+    let committed: DxfProductSavedRowIdentityV1 | undefined;
+    const files: File[] = [];
+    const unregister = registerPatternImportDxfPhaseEPatternsFieldCompiledReimportOwnerV1({
+      techCardId: f.current.card.techCardId,
+      readConfirmedImportGeneration: () => f.current.generation,
+      scopeAvailable: (scopeKey) => scopeKey === f.current.row.scopeKey,
+      reviewAlreadyOpen: () => false,
+      openExistingImportReview: (review) => {
+        expect(review.requireManualApply).toBe(true);
+        files.push(...review.files);
+      },
     });
-    expect(edit.recorded).toBe(true);
-    const compileSource = createPatternImportDxfPhaseEDraftCadCompileSourceV1(
-      f.source.native.draft,
-    );
-    if (!compileSource) throw Error('Missing exact compile source.');
-    const compiled = compilePatternImportDxfPhaseEDraftCadGeometryV1({
-      session: edit.session,
-      projection: f.compileInput.projection,
-      selection: f.compileInput.selection,
-      compileSource,
-    });
-    if (!compiled.ok) throw Error(JSON.stringify(compiled.blockers));
-    expect(
-      await stagePatternImportDxfPhaseECadSemanticCompiledArtifactV1(compiled.artifact, {
-        confirmedImportGenerationAtCompile: f.current.generation,
-      }),
-    ).toBe(true);
-    expect(
-      requestPatternImportDxfPhaseECadCommandCompiledReimportV1({
-        schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_CAD_COMMAND_COMPILED_REIMPORT_HANDOFF_V1,
-        artifact: compiled.artifact,
-        confirmedImportGenerationAtCompile: f.current.generation,
-        cadSessionCursorAtCompile: edit.session.cursor,
-      }).ok,
-    ).toBe(true);
-    expect(files).toHaveLength(1);
-    const [file] = files as [File];
-    const card = structuredClone(f.current.card);
-    const prior = f.current.row;
-    const scope = card.scopes[0]!;
-    const reviewed = await draftThroughWizardStages(file, card, worker, undefined, (initial) => {
-      const proposals = initial.grainProposals ?? [];
-      expect(proposals).toHaveLength(1);
-      const { seed, a, b, evidence } = proposals[0]!;
-      expect(initial.blocked).toMatchObject([{ seed, reason: 'no-grain' }]);
-      return { operatorGrain: { [seed]: { a, b, accepted: evidence } } };
-    });
-    const currentPattern = reviewed.scopes[0]!;
-    const created = currentPattern.writerReplay!.job.pieces.find(
-      ({ identity }) => identity === 'DRAFTPEN1',
-    );
-    expect(created?.allowance.allowanceMm).toBe(0);
-    expect(created?.sizes[0]?.cut).toHaveLength(5);
-    expect(currentPattern.manifest.gate?.passed).toBe(true);
-    const [newPiece] = reviewed.pieces.filter((piece) => piece.basis === 'new');
-    expect(newPiece?.lineKey).toBeTruthy();
-    expect(card.existingPieces.some((piece) => piece.lineKey === newPiece?.lineKey)).toBe(false);
-    expect(upload).not.toHaveBeenCalled();
+    const upload = vi
+      .spyOn(adminService, 'UploadPattern')
+      .mockImplementation(async ({ raw, filename }) => {
+        stored = Uint8Array.from(atob(raw!), (char) => char.charCodeAt(0));
+        return { url, filename, sizeBytes: stored.length };
+      });
+    try {
+      const { recordPatternImportDxfPhaseEDraftCadCanvasPointV1 } = await import(
+        './draft-cad-canvas-v1'
+      );
+      const { compilePatternImportDxfPhaseEDraftCadGeometryV1 } = await import(
+        './draft-cad-geometry-compile-v1'
+      );
+      const pendingPoints = tool === 'pen' ? points : points.slice(0, -1);
+      const pointMm = points[points.length - 1]!;
+      const edit = recordPatternImportDxfPhaseEDraftCadCanvasPointV1({
+        session: f.initial,
+        projection: f.compileInput.projection,
+        activePieceIndex: 0,
+        activeTool: tool,
+        sequence: 0,
+        pendingPoints,
+        pointMm,
+        closePen: tool === 'pen',
+      });
+      expect(edit.recorded).toBe(true);
+      const drill = recordPatternImportDxfPhaseEDraftCadCanvasPointV1({
+        session: edit.session,
+        projection: f.compileInput.projection,
+        activePieceIndex: 0,
+        activeDraftPieceId: pieceId,
+        activeTool: 'mark',
+        sequence: edit.sequence,
+        pendingPoints: [],
+        pointMm: { x: 65, y: 53 },
+      });
+      expect(drill.recorded).toBe(true);
+      expect(drill.session.history[1]?.commands[0]?.target).toEqual({
+        pieceId,
+        pieceLineKey: `draft-${tool}:1`,
+      });
+      const compileSource = createPatternImportDxfPhaseEDraftCadCompileSourceV1(
+        f.source.native.draft,
+      );
+      if (!compileSource) throw Error('Missing exact compile source.');
+      const compiled = compilePatternImportDxfPhaseEDraftCadGeometryV1({
+        session: drill.session,
+        projection: f.compileInput.projection,
+        selection: f.compileInput.selection,
+        compileSource,
+      });
+      if (!compiled.ok) throw Error(JSON.stringify(compiled.blockers));
+      const compiledCut = compiled.artifact.compiledJob.pieces.find(
+        ({ identity }) => identity === pieceId,
+      )?.sizes[0]?.cut;
+      if (!compiledCut) throw Error('The selected new piece did not produce a cut boundary.');
+      expect(
+        await stagePatternImportDxfPhaseECadSemanticCompiledArtifactV1(compiled.artifact, {
+          confirmedImportGenerationAtCompile: f.current.generation,
+        }),
+      ).toBe(true);
+      expect(
+        requestPatternImportDxfPhaseECadCommandCompiledReimportV1({
+          schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_CAD_COMMAND_COMPILED_REIMPORT_HANDOFF_V1,
+          artifact: compiled.artifact,
+          confirmedImportGenerationAtCompile: f.current.generation,
+          cadSessionCursorAtCompile: drill.session.cursor,
+        }).ok,
+      ).toBe(true);
+      expect(files).toHaveLength(1);
+      const [file] = files as [File];
+      const card = structuredClone(f.current.card);
+      const prior = f.current.row;
+      const scope = card.scopes[0]!;
+      const reviewed = await draftThroughWizardStages(file, card, worker, undefined, (initial) => {
+        const proposals = initial.grainProposals ?? [];
+        expect(proposals).toHaveLength(1);
+        const { seed, a, b, evidence } = proposals[0]!;
+        expect(initial.blocked).toMatchObject([{ seed, reason: 'no-grain' }]);
+        return { operatorGrain: { [seed]: { a, b, accepted: evidence } } };
+      });
+      const currentPattern = reviewed.scopes[0]!;
+      const created = currentPattern.writerReplay!.job.pieces.find(
+        ({ identity }) => identity === pieceId,
+      );
+      expect(created?.allowance.allowanceMm).toBe(0);
+      expect(created?.sizes[0]?.cut).toHaveLength(compiledCut.length);
+      expect(created?.sizes[0]?.drills).toHaveLength(1);
+      expect(currentPattern.manifest.gate?.passed).toBe(true);
+      const [newPiece] = reviewed.pieces.filter((piece) => piece.basis === 'new');
+      expect(newPiece?.lineKey).toBeTruthy();
+      expect(card.existingPieces.some((piece) => piece.lineKey === newPiece?.lineKey)).toBe(false);
+      expect(upload).not.toHaveBeenCalled();
 
-    const live: LiveCard = {
-      patterns: [
-        {
-          ...card.existingPatterns![0]!,
+      const live: LiveCard = {
+        patterns: [
+          {
+            ...card.existingPatterns![0]!,
+            fabricPurpose: scope.fabricPurpose,
+            bomLineKey: scope.bomLineKey,
+            sizeId: 7,
+          },
+        ],
+        pieces: card.existingPieces,
+        aliases: card.existingAliases!.map((alias) => ({
+          ...alias,
           fabricPurpose: scope.fabricPurpose,
           bomLineKey: scope.bomLineKey,
-          sizeId: 7,
+        })),
+      };
+      const apply = createCardApply({
+        read: () => live,
+        write: (path, value) => {
+          if (!Array.isArray(value)) throw Error('unexpected form edit');
+          if (path === 'patterns') live.patterns = value;
+          else if (path === 'pieces') live.pieces = value;
+          else if (path === 'pieceDxfAliases') live.aliases = value;
+          else throw Error(path);
         },
-      ],
-      pieces: card.existingPieces,
-      aliases: card.existingAliases!.map((alias) => ({
-        ...alias,
-        fabricPurpose: scope.fabricPurpose,
-        bomLineKey: scope.bomLineKey,
-      })),
-    };
-    const apply = createCardApply({
-      read: () => live,
-      write: (path, value) => {
-        if (!Array.isArray(value)) throw Error('unexpected form edit');
-        if (path === 'patterns') live.patterns = value;
-        else if (path === 'pieces') live.pieces = value;
-        else if (path === 'pieceDxfAliases') live.aliases = value;
-        else throw Error(path);
-      },
-      scopeOf: (row) =>
-        row.bomLineKey === scope.bomLineKey && row.fabricPurpose === scope.fabricPurpose
-          ? scope.scopeKey
-          : '',
-      storageSizeId: 7,
-      readPreviousLockVersion: () => prior.cardLockVersion,
-      save: async () => {
-        const row = live.patterns.find((pattern) => pattern.url === url)!;
-        committed = {
-          ...prior,
-          patternLineKey: row.lineKey!,
-          revision: prior.revision + 1,
-          cardLockVersion: prior.cardLockVersion + 1,
-          url: row.url!,
-          sizeBytes: row.sizeBytes!,
-          sha256: row.sha256!,
-        };
-        return 'ok';
-      },
-    });
-    const applied = await applyDirectDxfReviewedDraftV1(
-      reviewed,
-      [file],
-      undefined,
-      () => true,
-      () => apply(reviewed),
-    );
-    expect(applied.ok && applied.commitReceipt, JSON.stringify(applied)).toBeTruthy();
-    expect(upload).toHaveBeenCalledTimes(1);
-    const row = committed!;
-    expect(row.sha256).toBe(await digestFullAssemblyFixture(stored));
-    const savedManifest = readManifest(new TextDecoder().decode(stored))!;
-    const nativeBlock = savedManifest.blocks.find(({ identity }) => identity === 'DRAFTPEN1')!;
-    expect(nativeBlock.hasSeam).toBe(true);
-    const restored = await createSavedThreePanelSourceV1(
-      {
-        ...(await createSavedThreePanelFixtureV1(2)),
-        bytes: stored,
-        row,
-        card: {
-          ...card,
-          existingPieces: live.pieces.map((piece) => {
-            const { lineKey, name, cutSymmetry } = piece;
-            if (!lineKey || !name || !cutSymmetry) throw Error('Saved piece identity missing.');
-            return { ...piece, lineKey, name, cutSymmetry };
+        scopeOf: (row) =>
+          row.bomLineKey === scope.bomLineKey && row.fabricPurpose === scope.fabricPurpose
+            ? scope.scopeKey
+            : '',
+        storageSizeId: 7,
+        readPreviousLockVersion: () => prior.cardLockVersion,
+        save: async () => {
+          const row = live.patterns.find((pattern) => pattern.url === url)!;
+          committed = {
+            ...prior,
+            patternLineKey: row.lineKey!,
+            revision: prior.revision + 1,
+            cardLockVersion: prior.cardLockVersion + 1,
+            url: row.url!,
+            sizeBytes: row.sizeBytes!,
+            sha256: row.sha256!,
+          };
+          return 'ok';
+        },
+      });
+      const applied = await applyDirectDxfReviewedDraftV1(
+        reviewed,
+        [file],
+        undefined,
+        () => true,
+        () => apply(reviewed),
+      );
+      expect(applied.ok && applied.commitReceipt, JSON.stringify(applied)).toBeTruthy();
+      expect(upload).toHaveBeenCalledTimes(1);
+      const row = committed!;
+      expect(row.sha256).toBe(await digestFullAssemblyFixture(stored));
+      const savedManifest = readManifest(new TextDecoder().decode(stored))!;
+      const nativeBlock = savedManifest.blocks.find(({ identity }) => identity === pieceId)!;
+      expect(nativeBlock.hasSeam).toBe(true);
+      expect(nativeBlock.drills).toBe(1);
+      const restored = await createSavedThreePanelSourceV1(
+        {
+          ...(await createSavedThreePanelFixtureV1(2)),
+          bytes: stored,
+          row,
+          card: {
+            ...card,
+            existingPieces: live.pieces.map((piece) => {
+              const { lineKey, name, cutSymmetry } = piece;
+              if (!lineKey || !name || !cutSymmetry) throw Error('Saved piece identity missing.');
+              return { ...piece, lineKey, name, cutSymmetry };
+            }),
+            existingPatterns: [
+              {
+                ...card.existingPatterns![0]!,
+                url,
+                lineKey: row.patternLineKey,
+                manifest: savedManifest,
+              },
+            ],
+            existingAliases: live.aliases.map(({ blockName, pieceLineKey }) => ({
+              scopeKey: scope.scopeKey,
+              blockName: blockName!,
+              pieceLineKey: pieceLineKey!,
+            })),
+          },
+        },
+        true,
+      );
+      try {
+        const { native } = restored;
+        expect(native.row).toEqual(row);
+        expect(
+          native.nativeSewingReplay?.replayReady,
+          JSON.stringify(native.nativeSewingReplay?.blockers),
+        ).toBe(true);
+        const reread = native.draft.scopes[0]!.writerReplay!.job.pieces.find(
+          ({ identity }) => identity === pieceId,
+        );
+        expect(reread?.allowance.allowanceMm).toBe(0);
+        expect(reread?.sizes[0]?.cut).toHaveLength(compiledCut.length);
+        expect(reread?.sizes[0]?.drills).toHaveLength(1);
+        expect(reread?.sizes[0]?.seam).toEqual(reread?.sizes[0]?.cut);
+        expect(native.draft.aliases).toContainEqual(
+          expect.objectContaining({
+            blockName: pieceId,
+            pieceLineKey: newPiece?.lineKey,
           }),
-          existingPatterns: [
-            {
-              ...card.existingPatterns![0]!,
-              url,
-              lineKey: row.patternLineKey,
-              manifest: savedManifest,
-            },
-          ],
-          existingAliases: live.aliases.map(({ blockName, pieceLineKey }) => ({
-            scopeKey: scope.scopeKey,
-            blockName: blockName!,
-            pieceLineKey: pieceLineKey!,
-          })),
-        },
-      },
-      true,
-    );
-    try {
-      const { native } = restored;
-      expect(native.row).toEqual(row);
-      expect(
-        native.nativeSewingReplay?.replayReady,
-        JSON.stringify(native.nativeSewingReplay?.blockers),
-      ).toBe(true);
-      const reread = native.draft.scopes[0]!.writerReplay!.job.pieces.find(
-        ({ identity }) => identity === 'DRAFTPEN1',
-      );
-      expect(reread?.allowance.allowanceMm).toBe(0);
-      expect(reread?.sizes[0]?.cut).toHaveLength(5);
-      expect(reread?.sizes[0]?.seam).toEqual(reread?.sizes[0]?.cut);
-      expect(native.draft.aliases).toContainEqual(
-        expect.objectContaining({
-          blockName: 'DRAFTPEN1',
-          pieceLineKey: newPiece?.lineKey,
-        }),
-      );
+        );
+      } finally {
+        restored.dispose();
+      }
     } finally {
-      restored.dispose();
+      unregister();
+      upload.mockRestore();
+      worker.dispose();
+      vi.unstubAllGlobals();
+      f.source.dispose();
     }
-  } finally {
-    unregister();
-    upload.mockRestore();
-    worker.dispose();
-    vi.unstubAllGlobals();
-    f.source.dispose();
-  }
-});
+  },
+);

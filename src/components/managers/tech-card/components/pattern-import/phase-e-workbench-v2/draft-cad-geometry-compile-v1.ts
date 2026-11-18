@@ -1,3 +1,4 @@
+import { closestOnPolyline, pointInPolygon } from 'lib/pattern-import/semantics/geom';
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 import type { DxfProductPhaseDSizeSelectionResultV1 } from 'lib/pattern-import/dxf-product-phase-d-size-selection-v1';
 import { readManifest } from 'lib/pattern-import/manifest';
@@ -29,7 +30,10 @@ import type {
   PatternImportDxfPhaseEDraftCadSessionV1,
   PatternImportDxfPhaseEDraftCadToolV1,
 } from './draft-cad-session-v1';
-import { PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_PRODUCTIVE_TOOLS_V1 } from './draft-cad-session-v1';
+import {
+  PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_PRODUCTIVE_TOOLS_V1,
+  permitsDraftCadLocalPieceEditV1,
+} from './draft-cad-session-v1';
 import { executePatternImportDxfPhaseEDraftCadSpreadGeometryV1 } from './draft-cad-spread-geometry-executor-v1';
 
 export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_GEOMETRY_COMPILE_V1 =
@@ -545,13 +549,17 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
   let job = structuredClone(replay.job);
   const createdTopologyIds = new Set(sourceIds);
   const compiledFeatures: PatternImportDxfPhaseEDraftCadCompiledFeatureV1[] = [];
+  const createdPieceLineKeys = new Map<string, string>();
   for (const command of compileCommands) {
     const catalogTargets = session.source.catalog.pieces.filter(
       ({ pieceId, pieceLineKey }) =>
         pieceId === command.target.pieceId && pieceLineKey === command.target.pieceLineKey,
     );
     const writerPieces = job.pieces.filter(({ identity }) => identity === command.target.pieceId);
-    if (catalogTargets.length !== 1 || writerPieces.length !== 1)
+    const exactLocalEdit =
+      permitsDraftCadLocalPieceEditV1(command.tool) &&
+      createdPieceLineKeys.get(command.target.pieceId) === command.target.pieceLineKey;
+    if ((!exactLocalEdit && catalogTargets.length !== 1) || writerPieces.length !== 1)
       return blocked(
         'writer-piece-unavailable',
         `Command target ${command.target.pieceId} does not resolve to one retained PieceSpec.`,
@@ -607,6 +615,7 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
         );
       for (const identity of topologyIds) createdTopologyIds.add(identity);
       job = structuredClone(created.job);
+      createdPieceLineKeys.set(pieceId, pieceLineKey);
       compiledFeatures.push({
         commandId: command.commandId,
         entityId: command.payload.entityId,
@@ -654,6 +663,10 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
         );
       for (const identity of topologyIds) createdTopologyIds.add(identity);
       job = structuredClone(roundPiece.job);
+      createdPieceLineKeys.set(
+        roundPiece.createdPiece.pieceId,
+        roundPiece.createdPiece.pieceLineKey,
+      );
       compiledFeatures.push({
         commandId: command.commandId,
         entityId: command.payload.entityId,
@@ -806,6 +819,16 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
       primitive.kind === 'point' &&
       primitive.indicator === 'drill'
     ) {
+      if (
+        exactLocalEdit &&
+        (!pointInPolygon(primitive.pointMm, size.cut) ||
+          closestOnPolyline(primitive.pointMm, size.cut, true).d < 0.001)
+      )
+        return blocked(
+          'preview-blocked',
+          'Place the drill strictly inside the new cut boundary.',
+          command,
+        );
       size.drills.push({
         kind: 'drill',
         at: { x: primitive.pointMm.x, y: primitive.pointMm.y },
