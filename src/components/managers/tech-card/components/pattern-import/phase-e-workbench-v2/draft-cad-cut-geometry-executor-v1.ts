@@ -323,6 +323,18 @@ function featureSide(
   return sides.size === 1 ? [...sides][0]! : null;
 }
 
+function containsHole(polygon: readonly PtMm[], hole: readonly PtMm[]): boolean {
+  return hole.every((from, index) => {
+    const to = hole[(index + 1) % hole.length]!;
+    return (
+      pointLocation(from, polygon) === 1 &&
+      !polygon.some((a, edge) =>
+        segmentsIntersect(from, to, a, polygon[(edge + 1) % polygon.length]!),
+      )
+    );
+  });
+}
+
 function bbox(points: readonly PtMm[]) {
   return {
     minX: Math.min(...points.map(({ x }) => x)),
@@ -343,11 +355,11 @@ function splitSize(
       code: PatternImportDxfPhaseEDraftCadCutGeometryBlockerCodeV1;
       detail: string;
     }> {
-  if (size.cutLoops?.length || size.continuity || size.repair || size.kinks?.length)
+  if (size.continuity || size.repair || size.kinks?.length)
     return {
       ok: false,
       code: 'unsupported-piece-geometry',
-      detail: `Size ${size.sizeToken} carries derived loops or repair evidence that Cut cannot repartition losslessly.`,
+      detail: `Size ${size.sizeToken} carries repair evidence that Cut cannot repartition losslessly.`,
     };
   if (size.seam && !pointsExactlyEqual(size.seam, size.cut))
     return {
@@ -358,7 +370,7 @@ function splitSize(
   const split = splitPolygon(size.cut, from, to);
   if (!split.ok) return split;
   const [left, right] = split.polygons;
-  const { pointMarks, textMarks, ...base } = size;
+  const { cutLoops, pointMarks, textMarks, ...base } = size;
   const output = [
     {
       ...structuredClone(base),
@@ -393,6 +405,30 @@ function splitSize(
       areaMm2: Math.abs(areaSigned(right)),
     },
   ] as [PieceSizeSpec, PieceSizeSpec];
+  for (const loop of cutLoops ?? []) {
+    const hole = openPolygon(loop);
+    const area = areaSigned(hole);
+    if (
+      hole.length < 3 ||
+      hole.some((point) => !finitePoint(point)) ||
+      !(area < -EPS) ||
+      selfIntersects(hole)
+    )
+      return {
+        ok: false,
+        code: 'unsupported-piece-geometry',
+        detail: `Size ${size.sizeToken} has a secondary cut loop without a simple clockwise hole boundary.`,
+      };
+    const [owner, secondOwner] = output.filter((derived) => containsHole(derived.cut, hole));
+    if (!owner || secondOwner)
+      return {
+        ok: false,
+        code: 'feature-partition-ambiguous',
+        detail: `A hole in size ${size.sizeToken} crosses or touches a resulting cut boundary.`,
+      };
+    (owner.cutLoops ??= []).push(structuredClone(loop));
+    owner.areaMm2 += area;
+  }
   for (const notch of size.notches) {
     const side = featureSide([notch.at, ...notch.seg], split.polygons);
     if (side === null)
@@ -544,10 +580,10 @@ export function executePatternImportDxfPhaseEDraftCadCutGeometryV1(
   const fingerprint = fnv1a64(
     `${source.identity}\u0000${command.target.pieceLineKey}\u0000${normalizedCutKey([from!, to!])}`,
   );
-  const identities = [
-    `${source.identity}__CUT_${fingerprint.slice(0, 10)}_A`,
-    `${source.identity}__CUT_${fingerprint.slice(0, 10)}_B`,
-  ] as const;
+  // The exact DXF curve ID encodes the whole block name. Keep the derived name bounded, with
+  // the original identity and line fully represented in the fingerprint and the visible label.
+  const stem = `C${fingerprint.slice(0, 10).toUpperCase()}`;
+  const identities = [`${stem}A`, `${stem}B`] as const;
   if (
     job.pieces.some(({ identity }) => identities.includes(identity as (typeof identities)[number]))
   )

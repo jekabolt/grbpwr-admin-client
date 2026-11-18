@@ -203,6 +203,7 @@ function rotateSize(size: PieceSizeSpec, pivot: PtMm, radians: number): PieceSiz
   const cut = size.cut.map(point);
   const output = structuredClone(size);
   output.cut = cut;
+  if (size.cutLoops?.length) output.cutLoops = size.cutLoops.map((loop) => loop.map(point));
   output.seam = size.seam?.map(point) ?? null;
   output.notches = size.notches.map((feature) => ({
     ...structuredClone(feature),
@@ -274,11 +275,11 @@ function derivedIdentity(
       pivot: normalizedPoint(spread.payload.pivotMm),
       amountMm: spread.payload.amountMm,
     }),
-  ).slice(0, 10);
-  return [
-    `${source.identity}__SPREAD_${fingerprint}_A`,
-    `${source.identity}__SPREAD_${fingerprint}_B`,
-  ];
+  )
+    .slice(0, 10)
+    .toUpperCase();
+  const stem = `S${fingerprint}`;
+  return [`${stem}A`, `${stem}B`];
 }
 
 /**
