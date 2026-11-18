@@ -28,6 +28,7 @@ import {
 } from './saved-native-surface-stitch-anchor-v1';
 import { resolveSavedNativeAuthoredFoldGeometryV1 } from './saved-native-authored-fold-geometry-v1';
 import { readSavedGarmentLabelStitchAnchorV1 } from './saved-garment-label-stitch-anchor-v1';
+import { readSavedCutStripStitchAnchorV1 } from './saved-cut-strip-stitch-anchor-v1';
 import type { PatternImportDxfPhaseESavedRowCardProjectionV1 } from './saved-row-production-runtime-v1';
 
 type OperationAnchorIdentity = Readonly<{
@@ -67,6 +68,12 @@ export type SavedCompleteGarmentLabelAnchorV1 = OperationAnchorIdentity &
     geometry: ReturnType<typeof readSavedGarmentLabelStitchAnchorV1>;
   }>;
 
+export type SavedCompleteCutStripAnchorV1 = OperationAnchorIdentity &
+  Readonly<{
+    kind: 'cut-strip';
+    binding: Extract<SavedAssemblyPhysicalAnchorV1['source'], { kind: 'cut-strip' }>['binding'];
+    geometry: NonNullable<ReturnType<typeof readSavedCutStripStitchAnchorV1>>;
+  }>;
 type NativeAnchorJob = Readonly<{
   identity: PatternAnchorIdentity;
   anchor: SavedAssemblyPhysicalAnchorV1['anchor'];
@@ -179,6 +186,7 @@ export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
   });
   const jobsByRow = new Map<string, NativeAnchorJob[]>();
   const labels: SavedCompleteGarmentLabelAnchorV1[] = [];
+  const strips: SavedCompleteCutStripAnchorV1[] = [];
   const spans: SavedCompleteNativeStitchAnchorV1[] = [];
   const operationOrders = new Map(
     source.operations.map(({ operationNumber }, index) => [operationNumber, index]),
@@ -221,6 +229,22 @@ export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
             label: binding.label,
             geometry: readSavedGarmentLabelStitchAnchorV1(binding.label, anchor, size.token),
           }),
+        );
+        continue;
+      }
+      if (binding.kind === 'cut-strip') {
+        const geometry = readSavedCutStripStitchAnchorV1(
+          binding.binding,
+          anchor,
+          selectedSizeId,
+          size.token,
+        );
+        if (!geometry)
+          throw new Error(
+            `Saved seam ${seamKey} has no matching cut strip edge for ${size.token}.`,
+          );
+        strips.push(
+          Object.freeze({ ...identity, kind: 'cut-strip', binding: binding.binding, geometry }),
         );
         continue;
       }
@@ -447,6 +471,7 @@ export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
     operations: fresh.operations,
     spans: Object.freeze(spans),
     labelAnchors: Object.freeze(labels),
+    ...(strips.length && { stripAnchors: Object.freeze(strips) }),
     poses: built.operationAnchors.poses,
     ...(fresh.authoredFolds && {
       authoredFoldSourceSha256: fresh.authoredFolds.sourceSha256,

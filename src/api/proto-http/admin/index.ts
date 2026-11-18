@@ -15005,6 +15005,16 @@ export type TechCardSavedAssemblyCompleteSourceV1 = {
   // The existing label wire preserves saved dimensions and fold/stitch settings. An unset dimension
   // stays unknown here, and no label acquires DXF edge authority.
   garmentLabels: common_TechCardGarmentLabel[] | undefined;
+  // Cut-to-length trim referenced by owned seam anchors. The canonical JSON includes these only
+  // when present; old strip-free sources keep exactly the same seal.
+  cutStrips: TechCardSavedAssemblyCutStripSourceV1[] | undefined;
+};
+
+export type TechCardSavedAssemblyCutStripSourceV1 = {
+  strip: common_TechCardCutStrip | undefined;
+  bomSection: string | undefined;
+  bomUnit: string | undefined;
+  bomMaterialId?: number;
 };
 
 export type TechCardSavedAssemblyAuthoredFoldV1 = {

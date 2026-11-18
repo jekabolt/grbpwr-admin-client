@@ -4,6 +4,7 @@ import {
   completeSavedAssemblyRowIdentityV1,
   isVerifiedCompleteSavedAssemblySourceV1,
   type CompleteSavedAssemblySourceV1,
+  type SavedAssemblyCutStripSourceV1,
 } from './saved-assembly-complete-source-rpc-v1';
 
 type ScopedAlias = NonNullable<CompleteSavedAssemblySourceV1['aliases'][number]>;
@@ -23,7 +24,8 @@ export type SavedAssemblyPhysicalAnchorV1 = Readonly<{
         /** The piece's native L14 boundary. An interior attachment has its own explicit path. */
         nativeSewingPath?: SavedAssemblyNativeSewingPathV1 | null;
       }>
-    | Readonly<{ kind: 'garment-label'; label: Label }>;
+    | Readonly<{ kind: 'garment-label'; label: Label }>
+    | Readonly<{ kind: 'cut-strip'; binding: SavedAssemblyCutStripSourceV1 }>;
 }>;
 
 type PhysicalSeam = Readonly<{
@@ -65,6 +67,7 @@ export function bindSavedAssemblyOperationAnchorsV1(
   const labels = new Map(source.garmentLabels.map((label) => [label.lineKey, label]));
   if (labels.has(undefined) || labels.has('') || labels.size !== source.garmentLabels.length)
     throw new TypeError('Saved Assembly garment label identities must be present and unique.');
+  const strips = new Map(source.cutStrips?.map((binding) => [binding.strip?.lineKey, binding]));
   const aliases = new Map<string, ScopedAlias[]>();
   for (const alias of source.aliases) {
     if (!alias.pieceLineKey || !alias.scopeKey || !rowScopes.has(alias.scopeKey))
@@ -135,8 +138,11 @@ export function bindSavedAssemblyOperationAnchorsV1(
         parts.map((anchor, partOrdinal): SavedAssemblyPhysicalAnchorV1 => {
           const pieceLineKey = anchor.pieceLineKey;
           const label = labels.get(pieceLineKey);
+          const strip = strips.get(pieceLineKey);
           const pieceAliases = pieceLineKey ? aliases.get(pieceLineKey) : undefined;
-          if (!pieceLineKey || Boolean(label) === Boolean(pieceAliases))
+          const ownerCount =
+            Number(Boolean(label)) + Number(Boolean(strip)) + Number(Boolean(pieceAliases));
+          if (!pieceLineKey || ownerCount !== 1)
             throw new TypeError('A physical anchor must have one saved geometry owner.');
           const nativeCandidates = pieceAliases?.flatMap(({ scopeKey, blockName }) =>
             scopeKey && blockName
@@ -152,16 +158,18 @@ export function bindSavedAssemblyOperationAnchorsV1(
             anchor,
             source: label
               ? Object.freeze({ kind: 'garment-label' as const, label })
-              : Object.freeze({
-                  kind: 'dxf' as const,
-                  aliases: Object.freeze(pieceAliases!.slice()),
-                  ...(nativeSewingPaths.length
-                    ? {
-                        nativeSewingPath:
-                          nativeCandidates?.length === 1 ? nativeCandidates[0]! : null,
-                      }
-                    : {}),
-                }),
+              : strip
+                ? Object.freeze({ kind: 'cut-strip' as const, binding: strip })
+                : Object.freeze({
+                    kind: 'dxf' as const,
+                    aliases: Object.freeze(pieceAliases!.slice()),
+                    ...(nativeSewingPaths.length
+                      ? {
+                          nativeSewingPath:
+                            nativeCandidates?.length === 1 ? nativeCandidates[0]! : null,
+                        }
+                      : {}),
+                  }),
           });
         }),
       );

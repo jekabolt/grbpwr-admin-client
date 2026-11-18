@@ -275,6 +275,7 @@ async function fixture(
     topologyCanonicalJson: undefined,
     completeSourceV1: {
       ...partial,
+      cutStrips: undefined,
       rows: downloadable,
       canonicalJson: Buffer.from(json).toString('base64'),
       sourceSha256: sha('tech-card-saved-assembly-complete-source/1\0' + json),

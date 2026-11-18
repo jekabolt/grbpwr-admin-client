@@ -15,6 +15,7 @@ const authoredFoldProfile =
 const sourceDomain = 'tech-card-saved-assembly-complete-source/1\0';
 const authoredFoldDomain = 'tech-card-saved-assembly-authored-fold-source/1\0';
 const sha256 = /^[a-f0-9]{64}$/;
+const stableCutStripKey = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
 const revisionToken = /^asm:v1:[a-f0-9]{32}:[1-9][0-9]{0,19}$/;
 const maxSourceBytes = 8 * 1024 * 1024;
 const maxCarrierBytes = 4 * 1024 * 1024;
@@ -42,6 +43,8 @@ type PresentSource<T extends keyof TechCardSavedAssemblyCompleteSourceV1> = NonN
   TechCardSavedAssemblyCompleteSourceV1[T]
 >;
 
+export type SavedAssemblyCutStripSourceV1 = PresentSource<'cutStrips'>[number];
+
 export type CompleteSavedAssemblySourceV1 = Readonly<{
   serverAssemblyRevision: string;
   sourceSha256: string;
@@ -50,6 +53,7 @@ export type CompleteSavedAssemblySourceV1 = Readonly<{
   ownedSeams: Readonly<PresentSource<'ownedSeams'>>;
   aliases: Readonly<PresentSource<'aliases'>>;
   garmentLabels: Readonly<PresentSource<'garmentLabels'>>;
+  cutStrips?: readonly SavedAssemblyCutStripSourceV1[];
   priorCarrier: Readonly<TechCardPatternSemanticSidecar> | null;
   authoredFolds?: SavedAssemblyAuthoredFoldsV1;
 }>;
@@ -333,9 +337,28 @@ export async function readCompleteSavedAssemblySourceV1(
     !Array.isArray(source.rows) ||
     !Array.isArray(source.ownedSeams) ||
     !Array.isArray(source.aliases) ||
-    !Array.isArray(source.garmentLabels)
+    !Array.isArray(source.garmentLabels) ||
+    (source.cutStrips !== undefined &&
+      (!Array.isArray(source.cutStrips) || source.cutStrips.length > 200))
   )
     throw new TypeError('The current complete saved Assembly source is unavailable.');
+  const cutStrips = source.cutStrips ?? [];
+  let previousStripKey = '';
+  for (const binding of cutStrips) {
+    const key = binding?.strip?.lineKey;
+    const bomKey = binding?.strip?.bomLineKey;
+    if (
+      !key ||
+      !stableCutStripKey.test(key) ||
+      key <= previousStripKey ||
+      !bomKey ||
+      !stableCutStripKey.test(bomKey) ||
+      binding.bomUnit !== 'm' ||
+      !binding.bomSection
+    )
+      throw new TypeError('A saved Assembly cut strip has no exact card or material identity.');
+    previousStripKey = key;
+  }
   const rows = source.rows.map((row) => readRow(row, anchorRow));
   const anchor = readRow(response.row, anchorRow);
   if (
@@ -359,6 +382,7 @@ export async function readCompleteSavedAssemblySourceV1(
     ownedSeams: source.ownedSeams,
     aliases: source.aliases,
     garmentLabels: source.garmentLabels,
+    ...(cutStrips.length && { cutStrips }),
   };
   await verifySourceDigest(
     sourceDomain,
@@ -385,6 +409,7 @@ export async function readCompleteSavedAssemblySourceV1(
     ownedSeams: source.ownedSeams,
     aliases: source.aliases,
     garmentLabels: source.garmentLabels,
+    ...(cutStrips.length && { cutStrips }),
     priorCarrier,
     ...(authored && { authoredFolds: authored }),
   });
