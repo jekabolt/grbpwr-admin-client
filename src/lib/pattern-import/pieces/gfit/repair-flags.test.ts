@@ -32,7 +32,7 @@ const ring = (r: number, dw = 6, dh = 8): PtMm[] => {
 
 const FLAGS = [
   'GFIT_EDGE_ACCEPT',
-  'GFIT_LOCAL',
+  'GFIT_LOCAL_OFF',
   'GFIT_LOCAL_CORRIDOR',
   'GRADE_P2_LOOSE',
   'GRADE_DRAW_OFF',
@@ -155,8 +155,15 @@ describe('GFIT_LOCAL_CORRIDOR', () => {
     anchor: true,
   }));
 
+  it('uses local anchors by default and preserves the disabled baseline', () => {
+    expect(repairSize(noisy, 3, [], opts).local).toBeDefined();
+    process.env.GFIT_LOCAL_OFF = '1';
+    const disabled = repairSize(noisy, 3, [], opts);
+    expect(disabled.local).toBeUndefined();
+    expect(disabled.refusals).toContain('no-model');
+  });
+
   const probe = (corridor: boolean) => {
-    process.env.GFIT_LOCAL = '1';
     if (corridor) process.env.GFIT_LOCAL_CORRIDOR = '1';
     else delete process.env.GFIT_LOCAL_CORRIDOR;
     return repairSize(noisy, 3, [], opts);
@@ -230,7 +237,6 @@ describe('GFIT_LOCAL_CORRIDOR', () => {
       { pts: own, kind: 'own' },
       { pts: shifted, kind: 'own' },
     ];
-    process.env.GFIT_LOCAL = '1';
     delete process.env.GFIT_LOCAL_CORRIDOR;
     const off = repairSize(noisy, 3, wall, opts);
     expect(off.ok).toBe(false);
@@ -243,7 +249,6 @@ describe('GFIT_LOCAL_CORRIDOR', () => {
   });
 
   it('refuses an own line that is the neighbour outline', () => {
-    process.env.GFIT_LOCAL = '1';
     process.env.GFIT_LOCAL_CORRIDOR = '1';
     const seen = repairSize(noisy, 3, [], opts);
     expect(seen.local).toBeTruthy();
@@ -262,7 +267,6 @@ describe('GFIT_LOCAL_CORRIDOR', () => {
     const family = [0, 1, 2, 4].map((rank) => ({ rank, outer: body(rank), anchor: true }));
     const wall: GfitWall[] = [{ pts: body(3), kind: 'own', closed: true }];
     const off = repairSize(family, 3, wall, opts);
-    process.env.GFIT_LOCAL = '1';
     process.env.GFIT_LOCAL_CORRIDOR = '1';
     const on = repairSize(family, 3, wall, opts);
     expect(on.ok).toBe(off.ok);
@@ -279,7 +283,6 @@ describe('GFIT_LOCAL_CORRIDOR', () => {
       anchor: true,
     }));
     const wall: GfitWall[] = [{ pts: body(1), kind: 'own', closed: true }];
-    process.env.GFIT_LOCAL = '1';
     const off = repairSize(family, 1, wall, opts);
     process.env.GFIT_LOCAL_CORRIDOR = '1';
     const on = repairSize(family, 1, wall, opts);
@@ -295,7 +298,6 @@ describe('GFIT_LOCAL_CORRIDOR', () => {
       outer: nudge(ring(rank, 2, 2), [0, 4, -4, 0, 4, -4, 0][rank]),
       anchor: true,
     }));
-    process.env.GFIT_LOCAL = '1';
     const off = repairSize(small, 3, [], opts);
     process.env.GFIT_LOCAL_CORRIDOR = '1';
     const on = repairSize(small, 3, [], opts);
@@ -433,7 +435,6 @@ describe('GRADE_P2_LOOSE', () => {
       outer: nudge(ring(rank, dw, 8), [0, 4, -4, 0, 4, -4, 0][rank]),
       anchor: true,
     }));
-    process.env.GFIT_LOCAL = '1';
     const base = repairSize(family, 3, [], opts);
     process.env.GFIT_LOCAL_CORRIDOR = '1';
     const wide = repairSize(family, 3, [], opts);
@@ -477,7 +478,6 @@ describe('GRADE_P2_LOOSE', () => {
       outer: nudge(ring(rank, dw, 8), [0, 4, -4, 0, 4, -4, 0][rank]),
       anchor: true,
     }));
-    process.env.GFIT_LOCAL = '1';
     process.env.GFIT_LOCAL_CORRIDOR = '1';
     const pred = repairSize(family, 3, [], opts).pred ?? [];
     const anchor = family.find((s) => s.rank === 4)!.outer;

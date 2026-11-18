@@ -1632,3 +1632,21 @@ Change: distinguish repeated labels by seed in the cell diff, nest check and pic
 Run: c-m0-m and c-m0-h (40 PDFs each, two workers, matching bundled importer). The two modes of the nest-check fixture passed 27/27 each. Eight cut-line checks covered valid, open, degenerate and crossing rings in both encodings.
 Numbers: set40 closed 3727/4725, open 998; holdout40 closed 2594/3032, open 438. set40 wrote 2 files, 73 blocks; holdout40 wrote 7 files, 663 blocks. Every written block had a closed, nondegenerate layer-1 cut line without a detected crossing. The wizard reached apply on 0/40 and 4/40 respectively. These are different measures: the harness also saves provisional DXF from a stopped run.
 Verdict: use these per-cell results for M1. On set40 the drop from 4752 expected cells to 4725 is entirely MDF476: three size-range labels “L - 2XL” previously appeared as seeds with nine sizes apiece. In Kalla, ignoring seed loses one of two “G - ARMHOLE OUTER FACING” families (10 and 11). An intact written perimeter alone does not verify source-line coverage or that the block belongs to its intended size.
+
+### M1 local anchors — ACCEPTED (18 Nov 2026)
+
+Hypothesis: a bracketed size can follow its own ink even when the full family has an inconsistent grade. Change: local anchors enabled by default, with GFIT_LOCAL_OFF=1 for the baseline; drawing and geometry thresholds unchanged.
+Run: c-m1-m/h versus c-m0-m/h. Closed set40 3727 → 3736 of 4725; holdout40 2594 → 2597 of 3032. Geometry of every previously closed cell identical. No new flags in either nest mode; no new outline in the wrong-close inventory. DXF writes 2 + 7, completed wizard runs 0 + 4 in both variants.
+Pictures: red candidate against the adjacent closed sizes. Each row below passed visual review, both nest checks and the local area order.
+
+| File | Piece | Closed sizes | Visual verdict |
+|---|---|---|---|
+| MDF365 | I sleeves | 6, 10 | Both sleeve edges follow the neighbouring grade |
+| MDF432 | F skirt | XL | Side and hem run between L and 2XL |
+| MDF489 | J sleeve cuffs | S | End lies between the two other cuff lengths |
+| MDF535 | D top front lower | XL | Sloping side between its neighbours |
+| MFD393 | E shoulder straps | 0, 2, 6, 10 | Shared long sides, end length grades in order |
+| MDF372 | H right sleeve lower; B front lower | 30; 28 | New outer edges lie between the respective neighbours |
+| MDF383 | H front center | 2 | Left edge between 0 and 4, other edges shared |
+
+Verdict: accept 12 gains. Area criterion clarified with the owner: each new size must preserve the local area order; no new or worsened inversion. The existing Memoir sleeve inversion 2 → 4 (417.6 → 393.8 cm²) and MDF383 H 24 → 26 remain unchanged. Both remain separate baseline defects.

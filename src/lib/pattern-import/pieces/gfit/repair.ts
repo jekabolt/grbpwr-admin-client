@@ -305,7 +305,9 @@ function repairWith(
   // puts the corridor off the size's own lines and the cover refuses. Not in draw mode (f3, 16 Nov):
   // there the drawn share is the pair's line, unchecked by any drawn wall.
   const local =
-    inconsistent && typeof process !== 'undefined' && !!process.env?.GFIT_LOCAL && !opts.draw;
+    inconsistent &&
+    !opts.draw &&
+    (typeof process === 'undefined' || process.env?.GFIT_LOCAL_OFF !== '1');
   if (!fam.model || (inconsistent && !local && (!opts.draw || worstTrusted > C.gradeAllMaxScore))) {
     res.modelWhy = fam.why ?? 'no-model';
     refuse('no-model');
