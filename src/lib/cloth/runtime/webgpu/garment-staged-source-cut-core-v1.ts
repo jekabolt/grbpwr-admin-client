@@ -5,6 +5,10 @@ import {
   TRIANGLE_REST_FRAME_GPU_V1,
 } from '../../compiler/material-package';
 import {
+  compilePressedCreaseBendRestV1,
+  type PressedCreaseV1,
+} from '../../compiler/pressed-crease-bend-rest-v1';
+import {
   compileContinuumStrainPackageV1,
   compileSimulationPackageV0,
   CONTINUUM_STRAIN_CONSTRAINT_GPU_V1,
@@ -55,6 +59,7 @@ type Input = Readonly<{
   cutTolerances: CutCompile[6];
   continuumMaterials: readonly ContinuumStrainMaterialInputV1[];
   currentPositionsMInvMass: Float32Array;
+  pressedCreases?: readonly PressedCreaseV1[];
   parameters: GarmentMaterialRunParametersV1;
   budgets: GarmentMaterialRunBudgetsV1;
 }>;
@@ -296,7 +301,17 @@ function buildCore(input: Input, signal?: AbortSignal) {
     continuum,
   );
   const coverage = projectSourceCutHingeCoverageV1(cut, bend);
-  const cutBendRest = packXpbdEmbeddedCutBendRestV1(bend.restAnglesRad, coverage);
+  const bendRest = input.pressedCreases?.length
+    ? compilePressedCreaseBendRestV1(
+        mesh,
+        bend,
+        positions,
+        coverage,
+        input.cutByPiece,
+        input.pressedCreases,
+      )
+    : bend.restAnglesRad;
+  const cutBendRest = packXpbdEmbeddedCutBendRestV1(bendRest, coverage);
   const uploads = {
     positions,
     previousPositions: positions.slice(),

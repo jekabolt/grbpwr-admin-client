@@ -1,5 +1,6 @@
 /* global GPUBuffer, GPUBufferUsage, GPUMapMode, GPUComputePipeline, GPUShaderModuleDescriptor */
 
+import { DEFAULT_MEASUREMENT_PARTITIONED_SURFACE_CONTACT_BUDGET_V1 } from 'lib/cloth/body/measurement-surface-self-intersection-v1';
 import { captureActualBodyTriangleGeometryV1 } from 'lib/cloth/body/actual-body-triangle-aabb-tree-v1';
 import {
   MAXIMUM_LOCAL_CUT_WITNESSES_V1,
@@ -251,7 +252,7 @@ export async function continueStagedSourceCutFramesV1(
   if (program.busy || program.elapsedFrames !== start.elapsedFrames)
     throw new Error('The staged checkpoint is busy or has already advanced.');
   const { action, operationOrder, requestedReductionM, maximumReductionM } = command;
-  if (action !== 'activate' && action !== 'contract')
+  if (action !== 'activate' && action !== 'contract' && action !== 'contract-active')
     throw new RangeError('Expected a seam activation or contraction.');
   const stageIndex = previous.stageIndex + (action === 'activate' ? 1 : 0);
   if (operationOrder !== program.frame.seams.stages[stageIndex]?.operationOrder)
@@ -394,7 +395,7 @@ async function executeWindow(program: Program, input: FrameInput, signal?: Abort
       throw new RangeError('The staged validation readback exceeds its copy or buffer budget.');
 
     if (!program.geometry) {
-      const garment = prepareSourceCutContactMeshV1(source.cut, 35_000);
+      const garment = prepareSourceCutContactMeshV1(source.cut, 36_000);
       const body = prepareActualBodySourceCutContactV1(
         source.bodyPositionsM,
         source.bodyTriangles,
@@ -408,9 +409,19 @@ async function executeWindow(program: Program, input: FrameInput, signal?: Abort
       program.geometry = { garment, body };
     }
     const { garment, body } = program.geometry;
+    const cutTriangleCount = garment.topology.reduce((sum, part) => sum + part.triangleCount, 0);
+    // The large layered cut is still checked exhaustively by the same hierarchy and predicates.
+    const layeredCutBudget =
+      cutTriangleCount >= 30_000
+        ? {
+            ...DEFAULT_MEASUREMENT_PARTITIONED_SURFACE_CONTACT_BUDGET_V1,
+            maxCandidatePairs: 1_200_000,
+            maxPairVisits: 4_000_000,
+          }
+        : undefined;
     const checkContact = (positions: Float32Array) => {
       const clearance = body.validateFrame(garment, positions);
-      const self = garment.validateSelfIntersection(positions);
+      const self = garment.validateSelfIntersection(positions, layeredCutBudget);
       const witnessPieces = (triangle: number) =>
         garment.topology.find(
           ({ triangleOffset, triangleCount }) =>
@@ -459,7 +470,7 @@ async function executeWindow(program: Program, input: FrameInput, signal?: Abort
       proposedDisplacementM: number;
       repairedCutPairs?: readonly (readonly [number, number])[];
       acceptedDisplacementM: number;
-      proposalContact: ContactCheck;
+      proposalContact?: ContactCheck;
     }[] = [];
     const validate = (
       positions: Float32Array,
@@ -722,9 +733,13 @@ async function executeWindow(program: Program, input: FrameInput, signal?: Abort
       const limit = program.maximumStepDisplacementM;
       if (limit !== undefined) {
         const proposedDisplacementM = maximumMotionM(startPositions, finalPositions);
-        const proposalContact = checkContact(finalPositions);
+        const aboveLimit = proposedDisplacementM > limit;
+        // A large-cut proposal outside the displacement limit cannot be committed.
+        // Spend the exact candidate budget on states which can still pass admission.
+        const proposalContact =
+          layeredCutBudget && aboveLimit ? undefined : checkContact(finalPositions);
         acceptedContact = proposalContact;
-        if (!proposalContact.passed || proposedDisplacementM > limit) {
+        if (aboveLimit || !proposalContact?.passed) {
           const proposal = {
             positionsMInvMass: finalPositions,
             previousPositionsMInvMass: finalPrevious,
@@ -735,7 +750,8 @@ async function executeWindow(program: Program, input: FrameInput, signal?: Abort
             perParticleLimit === undefined
               ? Math.min(proposedDisplacementM === 0 ? 1 : limit / proposedDisplacementM, 1)
               : 1;
-          if (!proposalContact.passed && scale === 1 && proposedDisplacementM <= limit) scale = 0.5;
+          if (!proposalContact?.passed && scale === 1 && proposedDisplacementM <= limit)
+            scale = 0.5;
           let trial:
             | {
                 motion: ReturnType<typeof scaleMotion>;
@@ -797,7 +813,9 @@ async function executeWindow(program: Program, input: FrameInput, signal?: Abort
             throw new RangeError(
               `No contact-clear displacement within the limit at frame ${step}. ` +
                 `Proposed displacement ${(proposedDisplacementM * 1000).toFixed(3)} mm. ` +
-                describe(proposalContact) +
+                (proposalContact
+                  ? describe(proposalContact)
+                  : 'Raw contact check skipped above the displacement limit.') +
                 ` Smallest tried displacement ${(last.displacementM * 1000).toFixed(3)} mm. ` +
                 describe(last.contact) +
                 ` Witnesses: ${JSON.stringify(last.contact.contactWitnesses ?? {})}`,
@@ -859,7 +877,7 @@ async function executeWindow(program: Program, input: FrameInput, signal?: Abort
             trialCount,
             proposedDisplacementM,
             acceptedDisplacementM: trial.displacementM,
-            proposalContact,
+            ...(proposalContact ? { proposalContact } : {}),
             ...(trial.repairedCutPairs ? { repairedCutPairs: trial.repairedCutPairs } : {}),
           });
         }

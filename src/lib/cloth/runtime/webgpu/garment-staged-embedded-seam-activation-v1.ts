@@ -12,7 +12,7 @@ import { packXpbdSeamSupportRowsV1 } from './xpbd-seam-support-packet-v1';
 
 interface EmbeddedSeamStageIntentV1 {
   readonly operationOrder: number;
-  readonly action: 'activate' | 'contract';
+  readonly action: 'activate' | 'contract' | 'contract-active';
   readonly requestedReductionM: number;
   readonly maximumReductionM: number;
   readonly currentPositionsMInvMass: Float32Array;
@@ -158,9 +158,14 @@ export function prepareStagedEmbeddedSeamActivationV1(
     },
     project(input: EmbeddedSeamStageIntentV1) {
       const stage = stages.find(({ operationOrder }) => operationOrder === input.operationOrder);
-      if (!stage || (input.action !== 'activate' && input.action !== 'contract'))
-        throw new RangeError('Expected an ordered embedded seam operation and stage action.');
       const isActivation = input.action === 'activate';
+      const revisitActive = input.action === 'contract-active';
+      if (!stage || (!isActivation && !revisitActive && input.action !== 'contract'))
+        throw new RangeError('Expected an ordered embedded seam operation and stage action.');
+      if (revisitActive && stage.activeConstraintCount !== totalConstraintCount)
+        throw new RangeError(
+          'The whole set of seams must be active before an assembly contraction.',
+        );
       const activeBefore = isActivation
         ? stage.priorActiveConstraintCount
         : stage.activeConstraintCount;
@@ -207,9 +212,8 @@ export function prepareStagedEmbeddedSeamActivationV1(
           'The embedded seam compliance or time step exceeds the shader domain.',
         );
 
-      const currentGapM = new Float64Array(
-        stage.activeConstraintCount - stage.priorActiveConstraintCount,
-      );
+      const firstTargetRank = revisitActive ? 0 : stage.priorActiveConstraintCount;
+      const currentGapM = new Float64Array(stage.activeConstraintCount - firstTargetRank);
       const rounded = new Float32Array(1);
       const roundedBits = new Uint32Array(rounded.buffer);
       let maximumAppliedReductionM = 0;
@@ -233,11 +237,16 @@ export function prepareStagedEmbeddedSeamActivationV1(
           throw new RangeError(
             'The embedded seam inverse mass and compliance exceed the shader domain.',
           );
-        if (rank < stage.priorActiveConstraintCount) continue;
+        if (rank < firstTargetRank) continue;
+        currentGapM[rank - firstTargetRank] = distanceM;
         rounded[0] = Math.max(0, distanceM - requestedReductionM);
         // Round the target upward when a nearer f32 would exceed the requested contraction.
         if (distanceM - rounded[0] > requestedReductionM) roundedBits[0]++;
-        const next = isActivation ? rounded[0] : Math.min(targetLengthsM[offset], rounded[0]);
+        const prior = targetLengthsM[offset];
+        // A seam that stayed under tension keeps its previous target. This pass budgets new
+        // contraction from the accepted frame without relaxing any of the active stitches.
+        if (revisitActive && rounded[0] >= prior) continue;
+        const next = isActivation ? rounded[0] : Math.min(prior, rounded[0]);
         const applied = Math.max(0, distanceM - next);
         if (
           next >= 1e30 ||
@@ -247,7 +256,6 @@ export function prepareStagedEmbeddedSeamActivationV1(
           throw new RangeError('The embedded seam cannot contract within this frame budget.');
         maximumAppliedReductionM = Math.max(maximumAppliedReductionM, applied);
         targetLengthsM[offset] = next;
-        currentGapM[rank - stage.priorActiveConstraintCount] = distanceM;
       }
 
       const activationParams = packXpbdSeamSolveActivationParamsV1({
