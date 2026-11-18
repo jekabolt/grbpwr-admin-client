@@ -466,6 +466,16 @@ function canonicalVertexId(value: unknown, label: string, expectedSourceCurveId?
   return vertexId;
 }
 
+export function isCanonicalDxfVertexIdV1(value: unknown): value is string {
+  if (typeof value !== 'string' || !value.startsWith(`${VERTEX_ID_PREFIX}/`)) return false;
+  try {
+    canonicalVertexId(value, 'vertexId');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function snapshotInstancePath(
   value: unknown,
   requireFrozen: boolean,
