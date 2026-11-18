@@ -33,7 +33,7 @@ export type SavedNativeCurveIntervalV1 = Readonly<{
 
 // The legacy assembler expresses complete DXF rings in a rounded local frame. This allowance
 // compares every point under one shared translation. It cannot relocate a stored endpoint.
-const legacyRingRoundingMm = 0.002;
+export const savedLegacyDxfRoundingMmV1 = 0.002;
 const maxRingVertices = 256;
 
 export function bindSavedLegacyRingV1(
@@ -56,7 +56,9 @@ export function bindSavedLegacyRingV1(
       const shiftY = points[offset]!.y - legacy[0]![1];
       const sameRing = legacy.every(([x, y], index) => {
         const point = points[(offset + count + index * direction) % count]!;
-        return Math.hypot(point.x - (x + shiftX), point.y - (y + shiftY)) <= legacyRingRoundingMm;
+        return (
+          Math.hypot(point.x - (x + shiftX), point.y - (y + shiftY)) <= savedLegacyDxfRoundingMmV1
+        );
       });
       if (!sameRing) continue;
       if (match)

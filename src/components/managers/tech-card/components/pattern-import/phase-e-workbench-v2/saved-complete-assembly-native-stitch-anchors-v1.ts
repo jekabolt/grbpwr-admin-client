@@ -313,16 +313,17 @@ export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
             else edgesByPath.set(id, [segment]);
           }
         }
-        const grainLayer = jobs.some(({ internalIndex }) => internalIndex !== null)
-          ? buildDxfIndex(
-              {
-                pieces: parsed.pieces,
-                scopeByFile: new Map([[0, member.row.scopeKey]]),
-                warnings: parsed.warnings,
-              },
-              new Set(projection.card.sizes.map(({ token }) => token)),
-            ).grainLayer
-          : '';
+        const grainLayer =
+          jobs.some(({ internalIndex }) => internalIndex !== null) || foldJobs.length > 0
+            ? buildDxfIndex(
+                {
+                  pieces: parsed.pieces,
+                  scopeByFile: new Map([[0, member.row.scopeKey]]),
+                  warnings: parsed.warnings,
+                },
+                new Set(projection.card.sizes.map(({ token }) => token)),
+              ).grainLayer
+            : '';
         for (const { path, anchor, identity, index, internalIndex } of jobs) {
           signal.throwIfAborted();
           const rawBlock = savedNativeStitchRawBlockV1(native.value, path);
@@ -378,7 +379,7 @@ export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
           const block = layersByBlock.get(rawBlock);
           if (!block) throw new Error('A current fold lacks its ordinary saved DXF occurrence.');
           const fold = await resolveSavedNativeAuthoredFoldGeometryV1(
-            { authored, path, block, rawBlock, native: native.value, file },
+            { authored, path, block, rawBlock, grainLayer, native: native.value, file },
             signal,
           );
           resolvedFolds.set(fold.foldKey, fold);

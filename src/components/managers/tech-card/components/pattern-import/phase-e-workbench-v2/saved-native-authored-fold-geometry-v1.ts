@@ -1,3 +1,4 @@
+import { buildAssemblyPiecesFromInput } from 'components/managers/tech-card/techpack/assembly-geometry-build';
 import { seamLoopOf, seamPieceOf, segmentPiece } from 'lib/assembly-skeleton/geometry/segment';
 import type { Pt2 } from 'lib/assembly-skeleton/types';
 import { frameOf, fromUV } from 'lib/folds/geom';
@@ -10,6 +11,7 @@ import type { SavedAssemblyNativeSewingPathV1 } from './saved-full-assembly-nati
 import {
   bindSavedLegacyRingV1,
   readSavedNativeStraightStitchPathsV1,
+  savedLegacyDxfRoundingMmV1,
   type SavedNativeStitchCompilerSourceV1,
 } from './saved-legacy-native-stitch-run-v8';
 
@@ -22,12 +24,13 @@ export async function resolveSavedNativeAuthoredFoldGeometryV1(
     path: SavedAssemblyNativeSewingPathV1;
     block: readonly PieceDTO[];
     rawBlock: string;
+    grainLayer: string;
     native: SavedNativeStitchCompilerSourceV1;
     file: Uint8Array<ArrayBuffer>;
   }>,
   signal: AbortSignal,
 ) {
-  const { authored, path, block, rawBlock, native, file } = input;
+  const { authored, path, block, rawBlock, grainLayer, native, file } = input;
   const fold = foldFromWire(authored.fold);
   const sewing = seamPieceOf(block);
   const cuts = block.filter(({ layer }) => layer === '1');
@@ -55,10 +58,10 @@ export async function resolveSavedNativeAuthoredFoldGeometryV1(
   });
   const rotation = grainRotation(cuts[0]);
   const grainDeg = new Map([[piece.pieceKey, rotation]]);
-  const layOut = (innerLine?: Pt2[]) => {
+  const layOut = (innerLines: readonly Pt2[][] = []) => {
     const resolved = resolveFolds([fold], [piece], {
       grainDeg,
-      innerLines: new Map([[piece.pieceKey, innerLine ? [innerLine] : []]]),
+      innerLines: new Map([[piece.pieceKey, innerLines]]),
     });
     const [geometry] = resolved.folds[piece.pieceKey] ?? [];
     const via = resolved.via[fold.foldKey];
@@ -66,7 +69,12 @@ export async function resolveSavedNativeAuthoredFoldGeometryV1(
   };
 
   let resolved;
-  let nativeFoldPathId: number | undefined;
+  let nativeFoldPathIds: readonly number[] | undefined;
+  const frame = frameOf(piece, rotation);
+  const absolute = (uv: Pt2) => {
+    const [x, y] = fromUV(frame, uv);
+    return Object.freeze([x + shiftX, y + shiftY] as const);
+  };
   if (fold.source === 'dxf' && !fold.edge) {
     const candidates = [];
     for (const { paths, styles } of native.nativeRead.read.doc.pages) {
@@ -83,51 +91,75 @@ export async function resolveSavedNativeAuthoredFoldGeometryV1(
         )
           continue;
         const line = mark.pts.map(({ x, y }): Pt2 => [x - shiftX, y - shiftY]);
-        const match = layOut(line);
+        const match = layOut([line]);
         if (match?.via === 'inner') candidates.push({ mark, match });
       }
     }
-    if (candidates.length !== 1)
-      throw new Error(
-        candidates.length
-          ? `The saved drawn fold matches more than one original L8 path (${candidates.map(({ mark }) => mark.id).join(', ')}).`
-          : 'The saved drawn fold has no matching original L8 path in this size.',
-      );
-    const [{ mark, match }] = candidates;
-    const exact = await readSavedNativeStraightStitchPathsV1(file, path, [mark.id], signal);
-    const segments = exact.descriptors.toSorted(
-      (a, b) => a.path.startPointIndex - b.path.startPointIndex,
+    const assembly = buildAssemblyPiecesFromInput(
+      { pieces: [{ lineKey: piece.pieceKey, name: path.blockName, materials: [] }], bomItems: [] },
+      new Map([
+        [
+          piece.pieceKey,
+          {
+            piece: cuts[0],
+            layers: [...block],
+            block: path.blockName,
+            size: path.sizeToken,
+          },
+        ],
+      ]),
+      grainLayer,
     );
-    if (
-      segments.length !== mark.pts.length - 1 ||
-      segments.some(({ path: source, startMm, endMm }, i) => {
-        const start = mark.pts[i];
-        const end = mark.pts[i + 1];
-        return (
-          source.sourcePathId !== mark.id ||
-          source.closed ||
-          source.startPointIndex !== i ||
-          source.endPointIndex !== i + 1 ||
-          start.x !== startMm[0] ||
-          start.y !== startMm[1] ||
-          end.x !== endMm[0] ||
-          end.y !== endMm[1]
-        );
-      })
-    )
-      throw new Error('The saved fold mark differs from the exact original L8 segments.');
-    resolved = match;
-    nativeFoldPathId = mark.id;
+    const drawing = assembly.pieces.get(piece.pieceKey);
+    const ordinary = layOut(drawing?.inner.map((line) => line.map(([x, y]): Pt2 => [x, -y])));
+    if (!candidates.length || ordinary?.via !== 'inner')
+      throw new Error('The saved drawn fold has no matching original L8 path in this size.');
+    const { a, b, flipAt } = ordinary.geometry;
+    const reference = [a, b, flipAt].map(absolute);
+    const distinct = candidates.some(({ match: { geometry } }) =>
+      [geometry.a, geometry.b, geometry.flipAt]
+        .map(absolute)
+        .some(
+          ([x, y], index) =>
+            Math.hypot(x - reference[index][0], y - reference[index][1]) >
+            savedLegacyDxfRoundingMmV1,
+        ),
+    );
+    if (distinct)
+      throw new Error('The saved drawn fold matches more than one distinct original L8 line.');
+
+    // Corroborate the ordinary resolved line against all distinct raw drawing occurrences.
+    // Coincident strokes can share one drafting meaning while retaining each original ID.
+    nativeFoldPathIds = Object.freeze(candidates.map(({ mark }) => mark.id).sort((a, b) => a - b));
+    const exact = await readSavedNativeStraightStitchPathsV1(file, path, nativeFoldPathIds, signal);
+    for (const { mark } of candidates) {
+      const segments = exact.descriptors
+        .filter(({ path: source }) => source.sourcePathId === mark.id)
+        .toSorted((a, b) => a.path.startPointIndex - b.path.startPointIndex);
+      if (
+        segments.length !== mark.pts.length - 1 ||
+        segments.some(({ path: source, startMm, endMm }, i) => {
+          const start = mark.pts[i];
+          const end = mark.pts[i + 1];
+          return (
+            source.closed ||
+            source.startPointIndex !== i ||
+            source.endPointIndex !== i + 1 ||
+            start.x !== startMm[0] ||
+            start.y !== startMm[1] ||
+            end.x !== endMm[0] ||
+            end.y !== endMm[1]
+          );
+        })
+      )
+        throw new Error('The saved fold mark differs from the exact original L8 segments.');
+    }
+    resolved = ordinary;
   } else {
     resolved = layOut();
   }
   if (!resolved) throw new Error('The saved fold cannot be laid on the current pattern size.');
   signal.throwIfAborted();
-  const frame = frameOf(piece, rotation);
-  const absolute = (uv: Pt2) => {
-    const [x, y] = fromUV(frame, uv);
-    return Object.freeze([x + shiftX, y + shiftY] as const);
-  };
   const { geometry, via } = resolved;
   return Object.freeze({
     operationNumber: authored.operationNumber,
@@ -138,7 +170,7 @@ export async function resolveSavedNativeAuthoredFoldGeometryV1(
     sourceFingerprint: authored.sourceFingerprint,
     kind: geometry.kind,
     via,
-    nativeFoldPathId,
+    nativeFoldPathIds,
     lineMm: Object.freeze([absolute(geometry.a), absolute(geometry.b)] as const),
     movingPointMm: absolute(geometry.flipAt),
   });
