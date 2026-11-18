@@ -1253,6 +1253,13 @@ export type PieceCandidate = {
    * Recorded (D5): piece note, manifest `kinkStraightened`, passport. Absent = none.
    */
   placeMarks?: { id: ChainId; at: PtMm; mm: number; spanMm: number }[];
+  /**
+   * LADDER_JUDGE: why a cell withdrawn off a rescued rung was kept or opened, and the nest verdict
+   * of the outline it had (`ok` / `trunc` / `over` / `both` / `unjudged`). Written to cells.json.
+   * Absent on a cell the judge did not consider.
+   */
+  ladderReason?: 'refill-identical' | 'refill-differs' | 'judge';
+  ladderNest?: 'ok' | 'trunc' | 'over' | 'both' | 'unjudged';
 };
 
 /**

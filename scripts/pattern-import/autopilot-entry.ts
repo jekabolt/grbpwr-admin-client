@@ -1219,6 +1219,8 @@ export async function runCase(c: Case, mutate: string | null) {
           // the pred's source: the two anchor sizes, and whether it reaches past them (a hint)
           predFrom: c.gradeHint?.from ?? null,
           predExtrapolated: c.gradeHint ? !!c.gradeHint.extrapolated : null,
+          // LADDER_JUDGE: why this cell was kept or opened, and the nest verdict of its outline
+          ...(c.ladderReason ? { reason: c.ladderReason, nest: c.ladderNest ?? null } : {}),
           derivedMm: Math.round(
             (c.derived ?? []).reduce((a, d) => a + len(d.pts as { x: number; y: number }[]), 0),
           ),

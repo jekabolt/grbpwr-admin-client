@@ -1182,3 +1182,126 @@ cleared-by-unjudged = not a fix), with flags / judged / unjudged stated, the bli
   - Not a threshold to tune (f3): for a 'stops' end within 3 mm of PAST_MM, let the knife's outcome
     decide — knife, fill, area on the grade, else veto. The same try-and-check would catch Verona H
     (the leak's area is off the grade). Any cutoff between 3 and 6 mm only moves the coin.
+
+## 16 Nov 2026 — LADDER_RESCUE (a rescued line that is a rung of a ranked ladder) — IN CODE, measuring (probe flag `LADDER_RESCUE=1`)
+
+- **Trigger:** a rescued 'ignore' line (`walls.ts` `rescuedIgnored`) walls every rank it touches.
+  When it runs parallel to ranked lines of ≥ 2 ranks it is itself some size's line in the wrong pen,
+  and a size that closed on it often closed on ANOTHER size's line (Reims M LOWER SKIRT: five sizes
+  at exactly 993 cm²; Venice E TOP FRONT MIDDLE 2/6 at 84/89 vs ~200).
+- **Rule (`pieces/ladder.ts`, pass in `fill.ts` after `repairPass`, graded sheets only):** rung =
+  rescued, unranked, open, ≥ 15 mm, ranked parallels (mean 2–60 mm, sd < 1 mm, length ±25 %) of ≥ 2
+  ranks. A closed cell "uses" it when ≥ 15 of its 1 mm samples lie within 1 mm of the outline. One
+  local trend per cell from the family's clean closed cells (iterative leave-one-out, floored at
+  max(3, ½ closed); an outlier at the floor = collapsed, no fire). Off trend → withdraw and refill
+  without the rung (no derived bridges, no cascade: all verdicts from the pre-pass state).
+- **Dry run (scripts `fires4.py`, set40 `m-group`):** 16 withdraws, all pictured wrong
+  (`/private/tmp/patimport-runs/media/global-ladder-rescue-dryrun-2026-11-16/set40-v3`).
+- **Neighbour guard (f3):** a fire whose trend neighbour sits in an inversion pair (> 3 % against the
+  grade) with its adjacent clean neighbours is `suppressed:neighbour`. Moves 1 of 16: Memoir A H 26,
+  whose trend ran through 16 and 30 — both truncated, both in the clean set. 26 IS wrong; the fire
+  was right by luck, and that is not evidence. Repaired (`from == 'repair'`) trend neighbours: 0/16.
+- **Dropped before code:** a family inversion guard as a verdict (≥ 2 inversions or step ratio > 3
+  on ≥ 3 pairs → collapse) would have killed 9 of the 16 pictured fires: inversions count wrong
+  cells, they do not tell one bad line from two ladders. Kept as diag flags only (17 families, picture
+  leads). The longest smooth increasing ladder (fa) picks the WRONG ladder in Kalla E TOP FRONT
+  (low 0/2/6/10/14 + a jump, 11 vs 11): area cannot choose between two ladders — nesting against the
+  drawn lines must.
+- **Triage of the 67 cells the clean set rejected:** sorted by dev/tol, top 14 pictured. 15 wrong
+  added to the inventory (lane `LADDER_RESCUE-triage`). Three families are two interleaved ladders
+  (Kalla E TOP FRONT: 00/4/8/12/16/20… on the outer edge, 0/2/6/10/14/30 on the inner CF line;
+  Selenite I SKIRT: a flat ~15000 cluster; Silverstone G/E 4XL on 5XL's line, 5XL on 3XL's). There
+  the rejected list names the HONEST cells: a rejected list is not a wrong list.
+- **Scope (for the owner):** area cannot see truncations that stay on trend (Leah A/B, MDF438 B:
+  104 inventory cells sit on a smooth ladder) and iterative rejection lets same-direction
+  truncations into the clean set (Memoir A H 16/30); the guard catches them only when they invert
+  against each other. This pass does not reach those cells.
+- **7-file run (`global-lr7-base` vs `global-lr7-on`):** closed 1109 → 1101, 8 lost, 0 gained, 0
+  moved. The 8 are exactly the mayOpen withdraws (Kalla O 0, Venice E 2/6, Reims M 12/18/24/26/32),
+  all in the wrong-closes inventory; `refilled` = 0. With `LADDER_DEBUG=1` (`global-lr7-dbg`) EVERY
+  refill without the rung gave the SAME area (Memoir B L 22/24/26 174→174, Ambrosia F 16 1515→1515,
+  Kalla O 0 308→308 …): the rung is not the wall — a chain coincident with it is. The 8 openings
+  rested on area alone.
+- **LADDER_JUDGE (flag, default off, no run yet):** a mayOpen cell opens only when the refill differs
+  (`reason: refill-differs`) or the nest judge calls the old outline trunc / over / both
+  (`reason: judge`); an identical refill with the judge `ok` or `unjudged` keeps
+  (`reason: refill-identical`). The judge reads the pre-pass closed outlines (no cascade).
+- **Nest judge (`pieces/nest-judge.ts`):** nest-check's bracket rule ported one to one (two passes,
+  robust step by default); `nest-judge.test.ts` = parity on the 27 labelled cells, plain and robust
+  (54/54). `onNeighbour` (closed on the neighbour's drawn line) is DIAG ONLY: on existing set40
+  walls-dump it catches 2 of 9 expected cells (Memoir B L SHOULDER 24/26; misses L SHOULDER 22,
+  Kitchen F 3XL, Reims M ×5), and the plain rule flooded Memoir B (stepped grading: one line ranked to
+  one size of a pair). Coverage 2/9 — not a witness. Next rule (f3): a pile-up (≥ 3 ranks close on
+  one line, or the family is not paired elsewhere), not own-line absence; probe needs the owner's OK.
+  New leads, not inventory: Memoir B L SHOULDER 0/2, Reims C 24, Reims D 20.
+- **Prediction for the LADDER_JUDGE run (f3, written before it):** Reims M 12/18/24/26/32 sit on one
+  line and are each other's trend neighbours, so with an identical refill the bracket sees lo / hi on
+  that same line: M 18 `trunc` (opens), the rest `ok` or `unjudged`. Without a fallback up to 4 of
+  v3's correct openings go back to wrong closes (status quo, but a loss against v3 — the pile-up
+  blind spot). Fallback in code: `unjudged` + dev ≥ 3·tol → open (`reason: area-unjudged`). Still
+  exposed: Reims M cells the judge calls `ok`. A read-only dry run of the judge on the 8 pre-pass
+  outlines (existing lr7 cells) answers it before the run — needs the owner's OK.
+- **Bracket of suspects (f3):** a judge `ok` whose lo or hi is itself withdrawn in this pass is read
+  as `unjudged` (`bracketSuspect`); with dev ≥ 3·tol it then opens with `reason:
+  judge-bracket-suspect`. Covers the Reims M `ok` gap above; the run shows how often it fires.
+
+### 16 Nov, later — pile-up rule for on-neighbour — DROPPED on saved cells (no runs)
+
+Probe `scratchpad/pileup/pile.py` over `m-glocal` / `h-glocal` cells.json + `wdall-{m,h}` walls-dump:
+a closed outline "runs on" a chain where ≥ 20 mm of its 3 mm samples lie within 0.6 mm of it.
+Measured against the 41 confirmed wrong closes of `global-closed-wrong-candidates.json` (all set40;
+holdout has no labels, so only flag counts there):
+
+| rule | set40 flagged (of 3684 closed) | confirmed caught | holdout flagged |
+|---|---|---|---|
+| B: ≥ 3 ranks on one ranked chain, owner excluded | 3447 | 40 / 41 | 2331 |
+| A: B + a closed rank between them not on that chain | 1033 | 14 / 41 | 290 |
+| C: ≥ 3 ranks on the SAME stretch (≥ 20 mm) + a closed rank between them off it | 366 | 3 / 41 | 118 |
+
+A shared edge drawn once and ranked to one size (Leah's mechanism) is a pile-up by this definition,
+and it is everywhere: B flags 94 % of closed cells. Each narrowing loses the wrong closes faster than
+the honest ones. Chain sharing does not separate wrong from honest; on-neighbour stays diag only.
+
+### LADDER_JUDGE — ACCEPTED (18 Nov 2026)
+
+Hypothesis: a withdrawn rung cell opens only when the refill differs or the nest judge says trunc / over / both; an identical refill that the judge calls ok or unjudged stays closed, except the two fallbacks (`area-unjudged`, `judge-bracket-suspect`). The 16 Nov prediction: Reims M 18 is `trunc`, the other four are `ok` or `unjudged`, and the fallbacks put those four back to open.
+Change: none. Flags only, on the uncommitted `pieces/fill.ts`, `pieces/ladder.ts`, `pieces/nest-judge.ts` in this worktree. `src/lib/pattern-import/CLAUDE.md` not touched.
+Run: three shots, `--par 2`, list `global-ladder7-list.txt`, out `global-lj7-{base,rescue,judge}`. Then `dxf-check.mjs` on each (no DXF: the shot still stops at the resolver, `wrote 0`, `bad 0`). `cells.json` does not store `reason` / `judge`; those lines are a log-only repeat of the three files that moved (`LADDER_DEBUG=1 SHOT_STDOUT=1`, out `global-lj7-judge-dbg`). That repeat matches the official judge cell for cell (0 diffs).
+Numbers: closed 1109 → 1101 → 1101 (dxf-check, of 1422). Rescue lost 8, gained 0. Judge lost the same 8, gained 0. Nothing else moved. Per file the loss is Kalla 262→261, Venice 113→111, Reims 186→181; Memoir A/B, Ambrosia, Reef unchanged.
+
+The 8 are the 16 Nov eight, all in `global-closed-wrong-candidates.json`. Judge left all 8 open. Two pieces are both labelled `M - LOWER SKIRT`; the one that moved is seed 0 (the rescued-rung pile-up, 993 cm²). Seed 1's 12 and 32 stayed closed.
+
+| cell | reason | nest | in the wrong-closed list | picture of the base closure |
+|---|---|---|---|---|
+| Kalla O SKIRT FRONT POCKET 0 (seed 15) | judge | trunc | yes | неверно — half the pocket, a seam down the middle, 308 cm² against 527 / 545 |
+| Venice E TOP FRONT MIDDLE 2 (seed 6) | judge | trunc | yes | неверно — stops on a horizontal, the flare below is missing, 84 cm² against ~200 |
+| Venice E TOP FRONT MIDDLE 6 (seed 6) | judge | trunc | yes | неверно — same cut, 89 cm² against ~200 |
+| Reims M LOWER SKIRT 12 (seed 0) | refill-differs | ok | yes | неверно — hem of the small sizes; 10 and 14 run longer |
+| Reims M LOWER SKIRT 18 (seed 0) | refill-differs | trunc | yes | неверно — same hem; 16 and 20 run longer |
+| Reims M LOWER SKIRT 24 (seed 0) | refill-differs | unjudged | yes | неверно — same hem as 26; 22 runs longer |
+| Reims M LOWER SKIRT 26 (seed 0) | refill-differs | ok | yes | неверно — same hem as 24; 28 runs longer |
+| Reims M LOWER SKIRT 32 (seed 0) | refill-differs | unjudged | yes | неверно — hem short of 30 |
+
+No cell is closed in judge and open in base, so there is no reverse picture. Rescue (judge off) has no `reason` string; it opened these 8 on the area withdraw. Refill areas: Kalla 308=308, Venice 84=84 and 89=89, Reims all five 993→971 cm² (2.2 %, outside the 0.1 % identical band). The 971 outline was still off the trend, so the pass dropped it and left a leak. No cell took `area-unjudged` or `judge-bracket-suspect`.
+
+Prediction against fact, Reims M seed 0:
+
+| cell | predicted | fact |
+|---|---|---|
+| 12 | ok or unjudged; a fallback reopens it | judge `ok`. Opened, but by `refill-differs`, not a fallback |
+| 18 | trunc, opens | judge `trunc`. Opened by `refill-differs` (trunc would also have opened it) |
+| 24 | ok or unjudged; a fallback reopens it | judge `unjudged`. Opened by `refill-differs`, not a fallback |
+| 26 | ok or unjudged; `judge-bracket-suspect` covers an `ok` | judge `ok`. Opened by `refill-differs`. The ok-gap fallback did not fire |
+| 32 | ok or unjudged; a fallback reopens it | judge `unjudged`. Opened by `refill-differs`, not a fallback |
+
+The nest kinds match the prediction. The premise does not: the refill is not identical, so the fallbacks were not what returned the four, and this run does not show that they work.
+
+Verdict: accepted on the stated gate. Judge opened no cell whose base closure is right, opened the same 8 wrong closures as rescue, and every one of them is in the wrong-closed list. Lesson: do not treat the 16 Nov "identical refill" note as still true — on this code the five Reims cells move because the refill changes, and the ok-gap fallback is still untested.
+
+### LADDER_JUDGE default on — ACCEPTED (18 Nov 2026)
+
+Hypothesis: the judge can ship on, because the two area fallbacks (`area-unjudged`, `judge-bracket-suspect`) never opened a cell and the 7-file open set is the eight wrong closures.
+Change: `ladderOn` / `ladderJudgeOn` are on unless `LADDER_RESCUE_OFF=1` / `LADDER_JUDGE_OFF=1` (no `process` — the browser — stays on). The fallback branch and the bracket-of-suspects rewrite are deleted: an identical refill with nest `ok` or `unjudged` keeps. A judged cell carries `ladderReason` / `ladderNest`, written to cells.json as `reason` / `nest`.
+Run: `global-ladder7-list.txt`, no flags, out `global-lj7-default`; then `LADDER_JUDGE_OFF=1 LADDER_RESCUE_OFF=1`, out `global-lj7-off`. `nest-judge.test.ts` 60/60, `pieces/` 92/92.
+Numbers: default vs `global-lj7-judge` — closed 1101 = 1101, 0 outcome diffs. Off vs `global-lj7-base` — closed 1109 = 1109, 0 diffs. The eight opened cells now carry reason and nest in cells.json: Kalla O 0 `judge/trunc`; Venice E 2 and 6 `judge/trunc`; Reims M seed 0 sizes 12 `refill-differs/ok`, 18 `refill-differs/trunc`, 24 `refill-differs/unjudged`, 26 `refill-differs/ok`, 32 `refill-differs/unjudged`.
+Verdict: the fallbacks are out because they closed no hole. The pass stays on. Leah check is after the merge into `fix-pattern-pdf-open-lines`.

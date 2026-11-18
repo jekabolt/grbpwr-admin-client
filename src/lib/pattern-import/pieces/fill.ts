@@ -77,6 +77,18 @@ import {
 } from './walls';
 import { rankLooks } from './identity';
 import { gradeP2Off, repairPass, type RepairDiag } from './gfit/repair-hook';
+import {
+  cleanSet,
+  familyFlags,
+  ladderJudgeOn,
+  ladderOn,
+  ladderRungs,
+  ladderVerdict,
+  outlineArea,
+  rungsUsed,
+  type LadderVerdict,
+} from './ladder';
+import { judgeNest, type NestVerdict } from './nest-judge';
 import type { OverlayLines } from '../sizes/overlay';
 
 export type RankFrom = NonNullable<PieceCandidate['rankFrom']>;
@@ -135,6 +147,38 @@ export type FillDiag = {
   };
   /** GRADE P2 (hook A): sizes repaired from their family's grade, and the refusals by reason. */
   repair?: RepairDiag;
+  /**
+   * LADDER_RESCUE (pieces/ladder.ts): every closed cell that runs along a ladder rung, with its
+   * verdict and, for a withdrawal, what the refill without the rung gave — 'refilled' (closed on
+   * the trend), 'opened' (left a leak: allowed only ≥ 2 tolerances off), 'kept' (the rung stays).
+   * `rejected`: per seed, the ranks the clean set dropped as off its own trend.
+   */
+  ladder?: {
+    cells: (LadderVerdict & {
+      seed: number;
+      rank: number;
+      rungs: ChainId[];
+      areaMm2: number;
+      result?: 'refilled' | 'opened' | 'kept';
+      refillAreaMm2?: number;
+      /**
+       * LADDER_JUDGE: why a mayOpen cell was kept or opened. 'refill-identical' = the refill
+       * without the rung closed the same outline (the rung is not the wall) and the nest judge does
+       * not call the old outline trunc / over (`unjudged` counts as not-proven: keep).
+       */
+      reason?: 'refill-identical' | 'refill-differs' | 'judge';
+      /** Nest verdict of the pre-pass outline (`judgeNest`). Absent when the judge did not run. */
+      judge?: NestVerdict['kind'];
+    })[];
+    /** Diag flags too (`familyFlags`: inversions, ratioRun): picture leads, never a verdict. */
+    rejected: {
+      seed: number;
+      ranks: number[];
+      collapsed: boolean;
+      inversions: number;
+      ratioRun: number;
+    }[];
+  };
   ms: number;
 };
 
@@ -1449,6 +1493,141 @@ function fillOneSheet(
     return { area: my + slope * (r - mx), tol: 0.05 + 0.02 * near };
   };
 
+  /**
+   * LADDER_RESCUE (pieces/ladder.ts). Every verdict and every trend comes from the state BEFORE
+   * this pass: a refilled cell never moves another cell's trend here (no cascade). Each withdrawn
+   * cell is filled again on its rank without its rung(s), with no derived bridges — a bridge across
+   * the withdrawn rung would be a back door to the same wrong line, so a refill that only a bridge
+   * would close counts as open. The refill is taken when it closes within the tolerance; a leak (or
+   * a close still off the trend) replaces the old cell only when that sat ≥ 2 tolerances off;
+   * otherwise the rung stays.
+   */
+  /**
+   * LADDER_JUDGE: may a withdrawn mayOpen cell open? Open when the refill differs (it found another
+   * wall), or when the nest judge calls the old outline trunc / over / both. An identical refill
+   * with the judge silent (`ok` or `unjudged`) keeps. The area fallbacks (`area-unjudged`,
+   * `judge-bracket-suspect`) never opened a cell on the 7-file run and are gone.
+   */
+  const judgeOpens = (
+    cell: NonNullable<FillDiag['ladder']>['cells'][number],
+    f: { sid: number; rank: number },
+    refill: number | null,
+    judged: Map<number, Map<number, NestVerdict>>,
+  ): boolean => {
+    const identical = refill !== null && Math.abs(refill - cell.areaMm2) <= 1e-3 * cell.areaMm2;
+    const kind = judged.get(f.sid)?.get(f.rank)?.kind ?? 'unjudged';
+    cell.judge = kind;
+    if (!identical) {
+      cell.reason = 'refill-differs';
+      return true;
+    }
+    if (kind === 'trunc' || kind === 'over' || kind === 'both') {
+      cell.reason = 'judge';
+      return true;
+    }
+    cell.reason = 'refill-identical';
+    return false;
+  };
+
+  const ladderPass = (excl: Set<ChainId>) => {
+    const rungs = ladderRungs(set, model, (r) => rescuedItems(r).map((it) => it.chain));
+    if (!rungs.size) return;
+    const lad: NonNullable<FillDiag['ladder']> = { cells: [], rejected: [] };
+    diag.ladder = lad;
+    const fire: { sid: number; rank: number; rungs: ChainId[]; at: number }[] = [];
+    for (const s of use) {
+      if (dropped.has(s.id)) continue;
+      const closed = (cands.get(s.id) ?? []).filter(
+        (c) => c.outcome === 'closed' && c.outer.length > 2,
+      );
+      const ra = closed.map((c) => ({ rank: c.rank, area: outlineArea(c.outer) }));
+      const fam = cleanSet(ra);
+      const flags = familyFlags(ra);
+      if (fam.rejected.length || fam.collapsed || flags.inversions >= 2 || flags.ratioRun >= 3)
+        lad.rejected.push({ seed: s.id, ranks: fam.rejected, collapsed: fam.collapsed, ...flags });
+      for (const c of closed) {
+        const used = rungsUsed(rungs, c.rank, c.outer);
+        if (!used.length) continue;
+        const areaMm2 = outlineArea(c.outer);
+        const v = ladderVerdict(fam, c.rank, areaMm2);
+        lad.cells.push({ ...v, seed: s.id, rank: c.rank, rungs: used, areaMm2 });
+        if (v.kind === 'withdraw')
+          fire.push({ sid: s.id, rank: c.rank, rungs: used, at: lad.cells.length - 1 });
+      }
+    }
+    const judgeOn = ladderJudgeOn();
+    // the judge reads the PRE-pass state, like the verdicts (no cascade)
+    const judged = new Map<number, Map<number, NestVerdict>>();
+    if (judgeOn)
+      for (const sid of new Set(fire.map((f) => f.sid))) {
+        const closed = (cands.get(sid) ?? []).filter(
+          (c) => c.outcome === 'closed' && c.outer.length > 2,
+        );
+        judged.set(sid, judgeNest(closed.map((c) => ({ rank: c.rank, outer: c.outer }))).verdicts);
+      }
+    for (const f of fire) {
+      const cell = lad.cells[f.at];
+      const t = cell.trend!;
+      const own = key(f.sid, f.rank);
+      // rankPass fills every seed of the rank: only this seed's result is taken, the others' diag
+      // entries are put back
+      const before = new Map(diag.cand);
+      const res = rankPass(f.rank, new Set([...excl, ...f.rungs]));
+      for (const [k, v] of before) if (k !== own) diag.cand.set(k, v);
+      const c = res.out.get(f.sid);
+      const list = cands.get(f.sid)!;
+      const i = list.findIndex((x) => x.rank === f.rank);
+      if (i < 0) continue;
+      const a = c && c.outcome === 'closed' && c.outer.length > 2 ? outlineArea(c.outer) : null;
+      if (c && a !== null) cell.refillAreaMm2 = a;
+      if (c && a !== null && Math.abs(a - t.area) <= t.tol * t.area) {
+        list[i] = c;
+        cell.result = 'refilled';
+      } else if (cell.mayOpen && judgeOn && !judgeOpens(cell, f, a, judged)) {
+        if (before.has(own)) diag.cand.set(own, before.get(own)!);
+        cell.result = 'kept';
+      } else if (cell.mayOpen) {
+        const s = use.find((x) => x.id === f.sid)!;
+        list[i] =
+          c && c.outcome === 'leak'
+            ? c
+            : {
+                seed: f.sid,
+                rank: f.rank,
+                outer: [],
+                walls: [],
+                inside: [],
+                textsInside: [],
+                outcome: 'leak',
+                areaMm2: 0,
+                bbox: { minX: 0, minY: 0, maxX: 0, maxY: 0 },
+                sourceCoverage: 0,
+                p95Mm: 0,
+                rankFrom: 'class',
+                leakAt: shift(s.at, f.rank),
+              };
+        diag.cand.delete(own);
+        cell.result = 'opened';
+      } else {
+        if (before.has(own)) diag.cand.set(own, before.get(own)!);
+        cell.result = 'kept';
+      }
+      // the published cell carries the judge's reason and nest verdict (cells.json)
+      if (cell.reason && i >= 0) {
+        const cur = list[i];
+        list[i] = { ...cur, ladderReason: cell.reason, ladderNest: cell.judge };
+      }
+    }
+    if (typeof process !== 'undefined' && process.env?.LADDER_DEBUG)
+      for (const c of lad.cells)
+        console.log(
+          `LADDER s${c.seed} r${c.rank} ${c.kind}${c.why ? ':' + c.why : ''} area=${Math.round(c.areaMm2 / 100)}` +
+            ` trend=${c.trend ? Math.round(c.trend.area / 100) : '-'} dev=${c.dev?.toFixed(3) ?? '-'}` +
+            ` mayOpen=${!!c.mayOpen} -> ${c.result ?? '-'} refill=${c.refillAreaMm2 ? Math.round(c.refillAreaMm2 / 100) : '-'}` +
+            (c.reason ? ` reason=${c.reason} judge=${c.judge}` : ''),
+        );
+  };
+
   const excl = new Set<ChainId>(userExcl);
   /**
    * D3: per family, every candidate closed through continuity walls is checked against the
@@ -1542,6 +1721,10 @@ function fillOneSheet(
       new Set([...dropped, ...(graded?.skip ?? [])]),
     );
   }
+  // LADDER_RESCUE: a cell closed on a rescued ladder rung and off its family's trend is filled again
+  // without the rung — after every closing pass (the state the dry run judged), before the leak
+  // mouths (an opened cell gets one). Graded sheets on F4's own walls only.
+  if (model.mode === 'graded' && !graded?.walls && !solved && ladderOn()) ladderPass(excl);
   // leak mouths: per rank, walk from the seed until it leaves the piece as another rank closed it
   // (or, with no closed rank, the thickened-wall closure)
   for (let r = 0; r < nRanks; r++) {
