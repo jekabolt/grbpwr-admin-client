@@ -4,6 +4,9 @@ import { createPatternImportDxfProductSavedRuntimeSeedV1Fixture } from 'lib/clot
 import { parseDxf } from 'lib/nesting/dxf/parse';
 import { entityToChain } from 'lib/nesting/dxf/entities';
 import { projectPatternImportDxfProductPhaseEAssemblyV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
+import { signedArea } from 'lib/pattern-import/semantics/geom';
+import type { PtMm } from 'lib/pattern-import/types';
+import { writeDxfDetailed } from 'lib/pattern-import/write';
 import { expect, it } from 'vitest';
 
 import { createPatternImportDxfPhaseEBoundDraftCadSessionV1 } from './draft-cad-binding-v1';
@@ -14,6 +17,7 @@ import {
 } from './draft-cad-canvas-v1';
 import { createPatternImportDxfPhaseEDraftCadCompileSourceV1 } from './draft-cad-compile-source-v1';
 import { compilePatternImportDxfPhaseEDraftCadGeometryV1 } from './draft-cad-geometry-compile-v1';
+import { resizeDraftCadSelectedSizeEdgeV1 } from './draft-cad-edge-length-geometry-v1';
 import {
   redoPatternImportDxfPhaseEDraftCadSessionV1,
   undoPatternImportDxfPhaseEDraftCadSessionV1,
@@ -141,6 +145,72 @@ it('refuses a missing exact edge or a collapsed length before recording anything
     expect(result.recorded).toBe(false);
     expect(result.session).toBe(session);
   }
+});
+
+it('keeps a native clockwise hole at its exact coordinates and refuses clipping it', async () => {
+  const { session, projection, selection, draft, edge } = await setup();
+  const edit = recordPatternImportDxfPhaseEDraftCadCanvasBoundaryPickV1({
+    session,
+    projection,
+    activeTool: 'edge-length',
+    activePieceIndex: 0,
+    baseKey: edge.key,
+    sequence: 0,
+    resize: {
+      fixed: 'start',
+      lengthMm: 0.8 * Math.hypot(edge.toMm.x - edge.fromMm.x, edge.toMm.y - edge.fromMm.y),
+    },
+  });
+  const command = edit.session.history[0]!.commands[0]!;
+  if (command.tool !== 'edge-length') throw Error('The exact edge edit was not recorded.');
+  const job = structuredClone(draft.scopes[0]!.writerReplay!.job);
+  const piece = job.pieces.find(({ identity }) => identity === command.target.pieceId)!;
+  const size = piece.sizes.find(({ sizeToken }) => sizeToken === 'M')!;
+  const center = {
+    x: size.cut.reduce((sum, point) => sum + point.x, 0) / size.cut.length,
+    y: size.cut.reduce((sum, point) => sum + point.y, 0) / size.cut.length,
+  };
+  const holeAt = ({ x, y }: PtMm) => [
+    { x: x - 1, y: y - 1 },
+    { x: x - 1, y: y + 1 },
+    { x: x + 1, y: y + 1 },
+    { x: x + 1, y: y - 1 },
+  ];
+  const safeHole = holeAt(center);
+  const safe = resizeDraftCadSelectedSizeEdgeV1(
+    { ...size, cutLoops: [safeHole] },
+    command,
+    projection,
+    selection.phaseD,
+  );
+  if (!safe.ok) throw Error(safe.detail);
+  expect(safe.size.cutLoops).toEqual([safeHole]);
+  expect(safe.size.areaMm2).toBe(Math.abs(signedArea(safe.size.cut)) - 4);
+  piece.sizes.splice(piece.sizes.indexOf(size), 1, safe.size);
+  const output = writeDxfDetailed(job);
+  const raw = parseDxf(new TextEncoder().encode(output.dxfText).buffer, 'mm');
+  const block = output.manifest.blocks.find(
+    ({ identity, sizeToken }) => identity === piece.identity && sizeToken === 'M',
+  )!;
+  const paths = raw.dxf.blocks[block.block]!.entities.filter(
+    ({ layer, type }) => layer === '1' && type === 'POLYLINE',
+  );
+  expect(paths.map((path) => signedArea(entityToChain(path, 1, 0.001)!.pts))).toContain(-4);
+
+  const nearMovingCorner = {
+    x: 0.95 * edge.toMm.x + 0.05 * center.x,
+    y: 0.95 * edge.toMm.y + 0.05 * center.y,
+  };
+  const clipped = resizeDraftCadSelectedSizeEdgeV1(
+    { ...size, cutLoops: [holeAt(nearMovingCorner)] },
+    command,
+    projection,
+    selection.phaseD,
+  );
+  expect(clipped).toEqual({
+    ok: false,
+    detail: 'The resized outline would cross or touch a retained cut hole.',
+  });
 });
 
 it('closes a concave Pen outline into its own exact native cut and sewing block', async () => {

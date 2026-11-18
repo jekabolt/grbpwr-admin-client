@@ -1,5 +1,6 @@
 import type { DxfProductPhaseDSizeSelectionResultV1 } from 'lib/pattern-import/dxf-product-phase-d-size-selection-v1';
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
+import { ringSelfIntersects, ringStrictlyInside, ringsOverlap } from 'lib/fusing-dxf/spline';
 import {
   bboxOf,
   footOnSegment,
@@ -85,14 +86,7 @@ export function resizeDraftCadSelectedSizeEdgeV1(
     return { ok: false, detail: 'The two ordered edge vertices are no longer adjacent.' };
 
   const primary = contour.role === 'cut-boundary' ? source.cut : source.seam;
-  if (
-    !primary ||
-    source.cutLoops?.length ||
-    source.offset ||
-    source.continuity ||
-    source.repair ||
-    source.kinks?.length
-  )
+  if (!primary || source.offset || source.continuity || source.repair || source.kinks?.length)
     return {
       ok: false,
       detail: 'This outline requires its retained topology or allowance editor.',
@@ -104,6 +98,21 @@ export function resizeDraftCadSelectedSizeEdgeV1(
     return {
       ok: false,
       detail: 'Separate cut and sewing contours require a paired allowance edit.',
+    };
+  const holes = (source.cutLoops ?? []).map(ring);
+  if (
+    holes.some(
+      (hole, index) =>
+        hole.length < 3 ||
+        !(signedArea(hole) < -EPS) ||
+        ringSelfIntersects(hole) ||
+        !ringStrictlyInside(hole, cut) ||
+        holes.slice(0, index).some((other) => ringsOverlap(other, hole)),
+    )
+  )
+    return {
+      ok: false,
+      detail: 'Resize requires unambiguous clockwise holes inside the original cut.',
     };
 
   const from = contour.vertices[start]!.pointMm;
@@ -152,6 +161,8 @@ export function resizeDraftCadSelectedSizeEdgeV1(
     return { ok: false, detail: 'Move the text anchor inside the resized outline.' };
   if (source.pointMarks?.some(({ at }) => !pointInPolygon(at, nextRing)))
     return { ok: false, detail: 'Move the construction point inside the resized outline.' };
+  if (holes.some((hole) => !ringStrictlyInside(hole, nextRing)))
+    return { ok: false, detail: 'The resized outline would cross or touch a retained cut hole.' };
 
   const size = structuredClone(source);
   const copyLoop = (previous: readonly PtMm[]) => {
@@ -162,6 +173,6 @@ export function resizeDraftCadSelectedSizeEdgeV1(
   size.cut = copyLoop(source.cut);
   if (source.seam) size.seam = copyLoop(source.seam);
   size.bbox = bboxOf(nextRing);
-  size.areaMm2 = Math.abs(area);
+  size.areaMm2 = Math.abs(area) + holes.reduce((total, hole) => total + signedArea(hole), 0);
   return { ok: true, size };
 }
