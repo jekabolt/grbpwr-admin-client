@@ -14,7 +14,13 @@ import { capturePatternImportDxfProductCurrentSavedReplayV1 } from 'lib/cloth/do
 import { PATTERN_IMPORT_DXF_PRODUCT_SEMANTIC_SIDECAR_MEDIA_TYPE_V1 } from 'lib/cloth/domain/pattern-import-dxf-product-semantic-sidecar-v1';
 import { buildPatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import { selectPatternImportDxfProductDraftPhaseDSizeV1 } from 'lib/cloth/domain/pattern-import-dxf-product-draft-phase-d-selection-v1';
-import { projectPatternImportDxfProductPhaseEAssemblyV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
+import {
+  buildPatternImportDxfProductPhaseEAssemblyChoicesV1,
+  createPatternImportDxfProductPhaseEAssemblyWorkbenchStateV1,
+  projectPatternImportDxfProductPhaseEAssemblyV1,
+  proposePatternImportDxfProductPhaseEAssemblyV1,
+  type PatternImportDxfProductPhaseEAssemblyWorkbenchStateV1,
+} from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 import {
   createDxfProductSavedReprocessOwnerV1,
   DXF_PRODUCT_SAVED_REPROCESS_REQUEST_V1,
@@ -602,6 +608,97 @@ it.each(['contourSig', 'sample', 'measured range', 'piece locator'] as const)(
     });
   },
 );
+
+it('refuses casting a real saved native partial seam into whole-edge semantic choices', async () => {
+  const a = authored.edge('line-FRONT', 0, false);
+  const b = authored.edge('line-BACK', 0, true);
+  const runLengthMm = b.piece.edges[0]!.lenMm;
+  const declaredRange = [0.175, 0.68] as const;
+  const pieces = [a.piece, b.piece];
+  const partial = rowFromHand(
+    [{ target: a.target }],
+    [{ target: b.target, range: [declaredRange[0] * runLengthMm, declaredRange[1] * runLengthMm] }],
+    new Map(pieces.map((piece) => [piece.pieceKey, piece])),
+    { pieces, grainDeg: null, nameOf: (key) => key, size: sizeToken },
+    { seamKey: 'contained', direction: 'reversed' },
+  );
+  if (!partial) throw new Error('The ordinary AO writer refused the contained interval.');
+  const wire = toWire(partial);
+  expect(wire).toMatchObject({
+    kind: 'TECH_CARD_SEAM_KIND_PARTIAL',
+    direction: 'TECH_CARD_SEAM_DIRECTION_REVERSED',
+    anchoredSize: sizeToken,
+    sideA: { parts: [{ edgeHint: a.target, rangeFrom: 0, rangeTo: 0 }] },
+    sideB: {
+      parts: [{ edgeHint: b.target, rangeFrom: declaredRange[0], rangeTo: declaredRange[1] }],
+    },
+  });
+  const current = await savedSource(seed, [wire]);
+  const source = buildPatternImportDxfPhaseEAssemblyOrderSourceV1(
+    current.operations,
+    [fromWire(wire)!],
+    0,
+  );
+  if (!source) throw new Error('The ordinary Assembly Order cannot select the partial seam.');
+  const adapted = adaptPatternImportDxfPhaseEWorkbenchExistingAssemblyV1(
+    source.assembly,
+    source.selectedOperationNumber,
+    source.selectedSeamKey,
+  );
+  if (!adapted.ok) throw new Error(JSON.stringify(adapted.blockers));
+  const proposed = proposePatternImportDxfProductPhaseEAssemblyV1(
+    authored.catalog,
+    adapted.existingAssembly,
+  );
+  if (!proposed.ok) throw new Error(JSON.stringify(proposed.blockers));
+  const { proposal } = proposed;
+  expect(proposal.sides[1].evidence.range).toEqual(declaredRange);
+  // Even fully confirmed whole endpoint choices cannot authorize erasing the saved sub-range.
+  const wholeChoice = (index: 0 | 1, boundaryVertexIds: readonly [string, string]) => {
+    const { pieceId } = proposal.sides[index];
+    const contourId = authored.catalog.pieces
+      .find((piece) => piece.pieceId === pieceId)!
+      .contours.find((contour) => contour.role === 'sewing-boundary')!.contourId;
+    return {
+      pieceId,
+      contourId,
+      startBoundaryVertexId: boundaryVertexIds[0],
+      endBoundaryVertexId: boundaryVertexIds[1],
+      direction: index === 0 ? ('forward' as const) : ('reverse' as const),
+      confirmed: true,
+    };
+  };
+  const sides = [wholeChoice(0, a.boundaryVertexIds), wholeChoice(1, b.boundaryVertexIds)] as const;
+  const material = { id: 'diagnostic', label: 'Diagnostic', materialRevision: '1' };
+  const state: PatternImportDxfProductPhaseEAssemblyWorkbenchStateV1 = {
+    ...createPatternImportDxfProductPhaseEAssemblyWorkbenchStateV1(
+      authored.catalog,
+      proposal,
+      { documentId: 'current-native-pattern', revision: 'current-saved-row' },
+      1,
+    ),
+    documentRevisionConfirmed: true,
+    physicalSurface: { mode: 'sewing-surface', seamAllowancePhysical: false },
+    physicalSurfaceConfirmed: true,
+    operationStage: 0,
+    operationConfirmed: true,
+    sides,
+    materialSelections: [
+      { pieceId: sides[0].pieceId, optionId: material.id, confirmed: true },
+      { pieceId: sides[1].pieceId, optionId: material.id, confirmed: true },
+    ],
+    tolerance: { endpointMm: 1, fullLengthMm: 1, fullLengthRelative: 0, confirmed: true },
+  };
+  expect(
+    buildPatternImportDxfProductPhaseEAssemblyChoicesV1(authored.catalog, proposal, state, [
+      material,
+    ]),
+  ).toMatchObject({
+    ok: false,
+    choices: null,
+    blockers: [{ code: 'native-contained-range-not-supported' }],
+  });
+});
 
 it('rejects a positive native edge when both directed fingerprints quantize to the same wire', async () => {
   const short = await createSavedThreePanelFixtureV1(2, { ambiguousShortEdge: true });

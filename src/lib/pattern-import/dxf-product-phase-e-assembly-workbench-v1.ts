@@ -264,6 +264,7 @@ export type PatternImportDxfProductPhaseEAssemblyChoicesBlockerCodeV1 =
   | 'operation-unconfirmed'
   | 'side-choice-unconfirmed'
   | 'side-choice-invalid'
+  | 'native-contained-range-not-supported'
   | 'material-choice-unconfirmed'
   | 'material-choice-invalid'
   | 'tolerance-unconfirmed'
@@ -911,6 +912,19 @@ export function buildPatternImportDxfProductPhaseEAssemblyChoicesV1(
       blockers,
       'operation-unconfirmed',
       'The existing operation identity/order and an explicit Phase-E stage require confirmation.',
+    );
+
+  if (
+    proposal.sides.some(
+      ({ evidence }) =>
+        evidence.edgeHint.startsWith(`${evidence.pieceLineKey}#dxf:`) &&
+        (evidence.range[0] !== 0 || evidence.range[1] !== 1),
+    )
+  )
+    addBlocker(
+      blockers,
+      'native-contained-range-not-supported',
+      'This exact native seam uses a portion of a saved edge. The current pattern metadata can save whole edges only.',
     );
 
   const expectedRole =
