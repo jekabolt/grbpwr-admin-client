@@ -30,6 +30,7 @@ import { Button, CheckboxCommon, Pill, Text } from 'ui';
 
 import type { TechCardFormData } from '../../schema';
 import { BodyPicker, modelFacts, modelName } from '../../design/render/model-picker';
+import { CadMannequinPatternOffsetControlsV1 } from './cad-mannequin-pattern-offset-controls-v1';
 import {
   buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1,
   type PatternImportDxfPhaseECadMannequinPatternOverlayDecorationV1,
@@ -44,6 +45,7 @@ import type { CadWorkbenchPhysicalHostV1 } from './cad-workbench-physical-host-v
 
 export const PATTERN_IMPORT_DXF_PHASE_E_CAD_MANNEQUIN_MODEL_PICKER_V1 =
   'pattern-import-dxf-phase-e-cad-mannequin-model-picker/1' as const;
+const ZERO_PATTERN_OFFSET_M = [0, 0, 0] as const;
 
 export const PATTERN_IMPORT_DXF_PHASE_E_CAD_MANNEQUIN_MODEL_PICKER_CLAIMS_V1 = Object.freeze({
   techCardBaseModelFieldReused: true,
@@ -678,6 +680,21 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
         : null,
     [handlePatternTransform, patternPieceScene, patternTool, patternTransforms],
   );
+  const offsetPiece =
+    patternTool === 'translate' &&
+    patternOverlayResult?.ok &&
+    arrangementKey &&
+    onSaveMannequinArrangement &&
+    !loading &&
+    !error &&
+    !poseLoading &&
+    !poseError &&
+    !poseEditing &&
+    !disabled
+      ? patternOverlayResult.overlay.pieces.find(
+          ({ selected, scopeKey }) => selected && scopeKey === arrangementSource?.scopeKey,
+        )
+      : undefined;
   const sceneOverlayBridge =
     patternPieceScene?.sceneOverlay?.status === 'available'
       ? patternPieceScene.sceneOverlay.bridge
@@ -795,6 +812,28 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
           poseEditing={poseEditing}
           poseEditingDisabled={!poseBinding || Boolean(poseError)}
           onPoseEditingChange={setPoseEditing}
+        />
+      ) : null}
+      {offsetPiece ? (
+        <CadMannequinPatternOffsetControlsV1
+          key={JSON.stringify([
+            arrangementKey,
+            offsetPiece.pieceKey,
+            offsetPiece.lane,
+            offsetPiece.laneIndex,
+          ])}
+          offsetM={offsetPiece.transform?.offsetM ?? ZERO_PATTERN_OFFSET_M}
+          onApply={(axis, valueM) => {
+            if (arrangementCurrent.current.key !== arrangementKey) return;
+            const offsetM: [number, number, number] = [
+              ...(offsetPiece.transform?.offsetM ?? ZERO_PATTERN_OFFSET_M),
+            ];
+            offsetM[axis] = valueM;
+            handlePatternTransform(offsetPiece.pieceKey, {
+              offsetM,
+              rotationRad: offsetPiece.transform?.rotationRad ?? 0,
+            });
+          }}
         />
       ) : null}
       {onSaveMannequinArrangement && selected && patternPieceScene ? (

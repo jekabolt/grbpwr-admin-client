@@ -33,6 +33,12 @@ const UNIT = Object.freeze({
   Readonly<{ mmPerUnit: number; decimals: number }>
 >);
 
+export function patternImportDxfPhaseEMillimetresPerUnitV1(
+  unit: PatternImportDxfPhaseEMeasurementUnitV1,
+): number {
+  return UNIT[unit].mmPerUnit;
+}
+
 function finiteMm(value: number, name: string): void {
   if (!Number.isFinite(value)) throw new TypeError(`${name} must be a finite millimetre value.`);
 }
