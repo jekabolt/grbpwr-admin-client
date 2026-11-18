@@ -5,6 +5,7 @@ import {
 } from 'lib/cloth/domain/dxf-assembly-handoff-v1';
 import {
   DXF_EXACT_NATIVE_CROSS_ROW_SEAM_GRID_V1,
+  type DxfExactNativeCrossRowSeamGridRequestV1,
   DXF_EXACT_NATIVE_EASED_SEAM_FEED_V1,
   buildDxfExactNativeCrossRowSeamGridV1,
 } from 'lib/cloth/domain/dxf-exact-native-seam-grid-v1';
@@ -28,6 +29,7 @@ import {
 import { canonicalizePatternImportDxfPhaseESavedAssemblyValueV1 as canonical } from './saved-assembly-topology-hash-v1';
 import type { SavedAssemblyNativeSewingPathV1 } from './saved-full-assembly-native-boundaries-v1';
 import { prepareSavedFullAssemblyCompleteNativeRowsV1 } from './saved-full-assembly-complete-native-rows-v1';
+import { readSavedCompleteAssemblyPhysicalCutV8 } from './saved-complete-assembly-physical-cut-v8';
 import { resolveSavedLegacyNativeStitchRunV8 } from './saved-legacy-native-stitch-run-v8';
 
 export const SAVED_COMPLETE_ASSEMBLY_NATIVE_REVIEW_V8 =
@@ -251,6 +253,7 @@ export async function prepareSavedCompleteAssemblyNativeStitchReviewV8(
   selected: SourceSelection,
   dictionary: NonNullable<Parameters<CompletePreparation>[3]>,
   signal: AbortSignal,
+  includePhysicalCuts = false,
 ) {
   signal.throwIfAborted();
   const {
@@ -276,12 +279,10 @@ export async function prepareSavedCompleteAssemblyNativeStitchReviewV8(
   const ownedSeamKeys = operation?.seamKeys;
   if (!operation || ownedSeamKeys?.length !== 2)
     throw new Error('This review requires one owned physical seam and its recorded pose.');
-  const complete = await prepareSavedFullAssemblyCompleteNativeRowsV1(
-    source,
-    projection,
-    signal,
-    dictionary,
-  );
+  const complete = await prepareSavedFullAssemblyCompleteNativeRowsV1(source, projection, signal, {
+    ...dictionary,
+    includeGeneratedCutGeometry: false,
+  });
   const [physical] = complete.operationAnchors.physical.filter(
     (entry) => entry.operationNumber === operationNumber,
   );
@@ -424,10 +425,10 @@ export async function prepareSavedCompleteAssemblyNativeStitchReviewV8(
     minSegmentMm: 2,
     maxSegmentMm: 40,
     sides: [a.span, b.span] as const,
-  };
+  } satisfies DxfExactNativeCrossRowSeamGridRequestV1;
   // The in-process handoff vertices are also referenced by the sampling projection. The
   // persisted request is a JSON tree, so materialize that tree before replay and hashing.
-  const gridWire: unknown = JSON.parse(JSON.stringify(gridRequest));
+  const gridWire: DxfExactNativeCrossRowSeamGridRequestV1 = JSON.parse(JSON.stringify(gridRequest));
   const grid = await buildDxfExactNativeCrossRowSeamGridV1(gridWire, signal);
   if (!grid.ok) throw new Error(grid.blockers[0].detail);
   const document = {
@@ -446,6 +447,29 @@ export async function prepareSavedCompleteAssemblyNativeStitchReviewV8(
     },
   };
   const encoded = canonical(document);
+  const cuts = includePhysicalCuts
+    ? await Promise.all(
+        boundSides.map(async ({ native, path }) => {
+          const originals = complete.originalCutPaths.filter(
+            (cut) =>
+              cut.row.patternLineKey === path.row.patternLineKey &&
+              cut.pieceId === path.pieceId &&
+              cut.pieceLineKey === path.pieceLineKey &&
+              cut.sizeToken === path.sizeToken,
+          );
+          if (originals.length !== 1)
+            throw new Error('The saved seam requires one exact finished cut per original piece.');
+          return readSavedCompleteAssemblyPhysicalCutV8(
+            source,
+            projection,
+            native,
+            path,
+            originals[0]!,
+            signal,
+          );
+        }),
+      )
+    : null;
   return {
     document,
     bytes: encoder.encode(encoded),
@@ -455,6 +479,8 @@ export async function prepareSavedCompleteAssemblyNativeStitchReviewV8(
       signal,
     ),
     grid: grid.witness,
+    gridRequest: gridWire,
+    cuts,
   };
 }
 type ReviewClient = Pick<
@@ -570,6 +596,7 @@ export async function restoreSavedCompleteAssemblyNativeStitchReviewV8(
   projection: Parameters<CompletePreparation>[1],
   dictionary: NonNullable<Parameters<CompletePreparation>[3]>,
   signal: AbortSignal,
+  includePhysicalCuts = false,
 ) {
   const carrier = source.priorCarrier;
   if (
@@ -611,6 +638,7 @@ export async function restoreSavedCompleteAssemblyNativeStitchReviewV8(
     },
     dictionary,
     signal,
+    includePhysicalCuts,
   );
   if (
     rebuilt.sha256 !== carrier.sidecarSha256 ||
@@ -618,4 +646,48 @@ export async function restoreSavedCompleteAssemblyNativeStitchReviewV8(
   )
     throw new Error('The saved review differs from the fresh complete native preparation.');
   return rebuilt;
+}
+
+/** Rebuild the physical inputs only from a fresh saved review, and recheck their source seal. */
+export async function readSavedCompleteAssemblyNativePhysicalSourceV8(
+  createClient: CreateReviewClient,
+  source: CompleteSavedAssemblySourceV1,
+  projection: Parameters<CompletePreparation>[1],
+  dictionary: NonNullable<Parameters<CompletePreparation>[3]>,
+  expected: Readonly<{ sha256: string; operationNumber: number }>,
+  signal: AbortSignal,
+) {
+  const restored = await restoreSavedCompleteAssemblyNativeStitchReviewV8(
+    source,
+    projection,
+    dictionary,
+    signal,
+    true,
+  );
+  const { document, gridRequest, grid, cuts, sha256 } = restored;
+  if (
+    sha256 !== expected.sha256 ||
+    document.selection.operationNumber !== expected.operationNumber ||
+    cuts?.length !== 2
+  )
+    throw new Error('The active saved review no longer owns both original cuts.');
+  const { anchorRow, serverAssemblyRevision, completeSourceSha256 } = document.bindings;
+  const current = await readCompleteSavedAssemblySourceV1(
+    createClient(signal),
+    completeSavedAssemblyRowIdentityV1(anchorRow),
+    {
+      expectedServerAssemblyRevision: serverAssemblyRevision,
+      expectedCompleteSourceSha256: completeSourceSha256,
+    },
+    signal,
+  );
+  if (current.priorCarrier?.sidecarSha256 !== sha256)
+    throw new Error('The saved review changed while preparing the staged cloth.');
+  return Object.freeze({
+    document,
+    gridRequest,
+    grid,
+    cuts: Object.freeze([cuts[0]!, cuts[1]!] as const),
+    sha256,
+  });
 }

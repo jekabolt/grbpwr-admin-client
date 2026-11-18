@@ -1,6 +1,7 @@
 import { useSavedClothPhysicalHostV1 } from '../phase-e-workbench-v2/use-saved-cloth-physical-host-v1';
 import { CadWorkbenchPhysicalHostProductionMountV1 } from '../phase-e-workbench-v2/cad-workbench-physical-host-production-mount-v1';
 import type { CadWorkbenchPhysicalHostV1 } from '../phase-e-workbench-v2/cad-workbench-physical-host-v1';
+import type { SavedCrossMaterialReviewForPreviewV8 } from '../phase-e-workbench-v2/saved-complete-assembly-native-review-action-v8';
 import {
   readSavedCadMannequinArrangementV1,
   readSavedCadMannequinModelIdV1,
@@ -1586,6 +1587,10 @@ const SavedCompleteAssemblyNativeReviewActionV8 = lazy(
   () => import('../phase-e-workbench-v2/saved-complete-assembly-native-review-action-v8'),
 );
 
+const SavedCompleteAssemblyNativePreviewControlsV8 = lazy(
+  () => import('../phase-e-workbench-v2/saved-complete-assembly-native-preview-controls-v8'),
+);
+
 /** Real Assembly Order mount. No fresh session is invented after a saved-card reload. */
 export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
   techCardId,
@@ -2360,8 +2365,40 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
     },
     [frozen, savedProjection, savedClothPhysicalHost.retry],
   );
+  const [crossMaterialReview, setCrossMaterialReview] =
+    useState<SavedCrossMaterialReviewForPreviewV8 | null>(null);
+  const [displayedBodyInput, setDisplayedBodyInput] =
+    useState<Parameters<CadWorkbenchPhysicalHostV1['onDisplayedBodyInputV1']>[0]>(null);
+  const [acceptedCloth, setAcceptedCloth] = useState<CadWorkbenchPhysicalHostV1['acceptedCloth']>();
+  const onDisplayedBodyInputV1 = useCallback<CadWorkbenchPhysicalHostV1['onDisplayedBodyInputV1']>(
+    (body) => {
+      setDisplayedBodyInput(body);
+      savedClothPhysicalHost.onDisplayedBodyInputV1(body);
+    },
+    [savedClothPhysicalHost.onDisplayedBodyInputV1],
+  );
+  const activeCrossMaterialReview =
+    crossMaterialReview?.cardId === techCardId &&
+    crossMaterialReview?.lockVersion === savedCard.data?.lockVersion &&
+    crossMaterialReview?.operationNumber === selectedOperationNumber
+      ? crossMaterialReview
+      : null;
+  const crossMaterialPreviewControls = activeCrossMaterialReview ? (
+    <Suspense fallback={null}>
+      <SavedCompleteAssemblyNativePreviewControlsV8
+        key={activeCrossMaterialReview.sha256}
+        review={activeCrossMaterialReview}
+        body={displayedBodyInput}
+        disabled={frozen}
+        onAcceptedCloth={setAcceptedCloth}
+      />
+    </Suspense>
+  ) : null;
   const physicalHost: CadWorkbenchPhysicalHostV1 = {
-    onDisplayedBodyInputV1: savedClothPhysicalHost.onDisplayedBodyInputV1,
+    onDisplayedBodyInputV1,
+    acceptedCloth:
+      activeCrossMaterialReview && acceptedCloth?.isCurrent() ? acceptedCloth : undefined,
+    panel: crossMaterialPreviewControls,
     arrangementSourceKey: JSON.stringify([
       physicalRow,
       savedProjection.ok ? savedProjection.selectedOperationNumber : null,
@@ -2379,13 +2416,14 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
         signal,
       );
     },
-    viewport: (interaction) => (
-      <CadWorkbenchPhysicalHostProductionMountV1
-        state={savedClothPhysicalHost}
-        disabled={frozen}
-        interaction={interaction}
-      />
-    ),
+    viewport: (interaction) =>
+      crossMaterialPreviewControls ?? (
+        <CadWorkbenchPhysicalHostProductionMountV1
+          state={savedClothPhysicalHost}
+          disabled={frozen}
+          interaction={interaction}
+        />
+      ),
   };
   const prepareSavedAllMaterialScopeStaging = useCallback<
     NonNullable<PatternImportDxfPhaseEMultiseamSavedSessionV2['prepareAllMaterialScopeStaging']>
@@ -2595,7 +2633,12 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
   }, [entryRoute, onOpenChange, workbenchRequested]);
   if (!source || !selected) return null;
   const persisted = savedCard.data;
-  const [physicalKey, poseKey] = selectedSeamKeys;
+  // The ordinary card form separates placements from the physical seam keys.
+  const crossMaterialKeys = [
+    ...selectedSeamKeys,
+    ...(selected.poseKeys ?? []).map((key) => key.trim()).filter(Boolean),
+  ];
+  const [physicalKey, poseKey] = crossMaterialKeys;
   const physical = server.find((seam) => seam.seamKey === physicalKey);
   const recordedPose = poses.find((pose) => pose.seamKey === poseKey);
   const storedOperation = persisted?.techCard?.operations?.find(
@@ -2608,7 +2651,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
     persisted.id === techCardId &&
     seamWriterCardId === techCardId &&
     seamWriterLockVersion === persisted.lockVersion &&
-    selectedSeamKeys.length === 2 &&
+    crossMaterialKeys.length === 2 &&
     storedOperation?.seamKeys?.length === 2 &&
     storedOperation.seamKeys[0] === physicalKey &&
     storedOperation.seamKeys[1] === poseKey &&
@@ -2649,7 +2692,8 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
             ].join(':')}
             techCard={persisted}
             operationNumber={selectedOperationNumber}
-            seamKeys={selectedSeamKeys}
+            seamKeys={crossMaterialKeys}
+            onVerifiedReview={setCrossMaterialReview}
             authority={savedAllScopeAuthority}
             orderSizeIds={orderSizeIds}
             sizeNameById={sizeNameById}
@@ -2658,7 +2702,9 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
         </Suspense>
       );
   }
-  if (savedBrowseFallback) {
+  // Confirmed cross-material rows have review authority but no selected-row V3/V4 prepared scene.
+  // Use the existing saved-pattern table and its real mannequin stage for that operation.
+  if (savedBrowseFallback || savedCrossMaterialActions) {
     const savedEmptyOperation =
       exactSavedEmptyOperation &&
       !savedProjection.ok &&
@@ -2775,7 +2821,6 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
         readSavedTopologyAnnotations={readSavedTopologyAnnotations}
         exactNApplicationOwner={exactNApplicationOwner}
         savedNativeExactNActions={savedNativeExactNActions}
-        savedCrossMaterialActions={savedCrossMaterialActions}
         operationRouteBlocker={
           selectedSeamKeys.length > 2 && !exactNBoundarySession
             ? {

@@ -9,6 +9,7 @@ import { buildPatternImportDxfPhaseESavedCardContextV1 } from './saved-card-prod
 import {
   persistSavedCompleteAssemblyNativeStitchReviewV8,
   prepareSavedCompleteAssemblyNativeStitchReviewV8,
+  readSavedCompleteAssemblyNativePhysicalSourceV8,
   restoreSavedCompleteAssemblyNativeStitchReviewV8,
 } from './saved-complete-assembly-native-stitch-review-v8';
 import type { PatternImportDxfPhaseEZeroOperationSavedCardAuthorityRuntimeV1 as Authority } from './zero-operation-saved-card-authority-v1';
@@ -16,6 +17,15 @@ import { resolvePatternImportDxfPhaseEZeroOperationSavedDxfCapabilityV1 } from '
 
 type Pairing = 'start-to-start' | 'start-to-end';
 type Prepared = Awaited<ReturnType<typeof prepareSavedCompleteAssemblyNativeStitchReviewV8>>;
+export type SavedCrossMaterialReviewForPreviewV8 = Readonly<{
+  cardId: number;
+  lockVersion: number;
+  operationNumber: number;
+  sha256: string;
+  load: (signal: AbortSignal) => ReturnType<typeof readSavedCompleteAssemblyNativePhysicalSourceV8>;
+  verify: (signal: AbortSignal) => Promise<void>;
+}>;
+
 type Review = Pick<Prepared, 'document' | 'sha256' | 'grid'>;
 
 const pairings = [
@@ -85,6 +95,7 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
   orderSizeIds,
   sizeNameById,
   disabled,
+  onVerifiedReview,
 }: {
   techCard: common_TechCard;
   operationNumber: number;
@@ -93,6 +104,7 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
   orderSizeIds: (ids: number[]) => number[];
   sizeNameById: ReadonlyMap<number, string>;
   disabled: boolean;
+  onVerifiedReview?: (review: SavedCrossMaterialReviewForPreviewV8 | null) => void;
 }) {
   const id = useId();
   const { dictionary, loading } = useDictionary();
@@ -101,10 +113,18 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
   const [pairing, setPairing] = useState<Pairing | ''>('');
   const [state, setState] = useState<
     | { status: 'loading' | 'saving' }
-    | { status: 'reviewed' | 'reopened'; review: Review }
+    | { status: 'reviewed'; review: Review }
+    | { status: 'reopened'; review: Review; preview: SavedCrossMaterialReviewForPreviewV8 }
     | { status: 'error'; detail: string }
     | null
   >(null);
+  const verifiedPreview = !disabled && state?.status === 'reopened' ? state.preview : null;
+  useEffect(() => {
+    onVerifiedReview?.(verifiedPreview);
+    return () => {
+      if (verifiedPreview) onVerifiedReview?.(null);
+    };
+  }, [onVerifiedReview, verifiedPreview]);
   const busy = state?.status === 'loading' || state?.status === 'saving';
   const inFlight = useRef<AbortController | null>(null);
   useEffect(() => () => inFlight.current?.abort(), []);
@@ -180,6 +200,47 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
         throw new Error(
           'The selected operation changed. Reload Assembly Order and choose it again.',
         );
+      function publishRestored(
+        restored: Awaited<ReturnType<typeof restoreSavedCompleteAssemblyNativeStitchReviewV8>>,
+        current: typeof source,
+      ) {
+        signal.throwIfAborted();
+        if (restored.document.selection.operationNumber !== operationNumber)
+          throw new Error('The saved review belongs to a different Assembly Order operation.');
+        const { sha256 } = restored;
+        setState({
+          status: 'reopened',
+          review: restored,
+          preview: {
+            cardId: exact.row.techCardId,
+            lockVersion: exact.row.cardLockVersion,
+            operationNumber,
+            sha256,
+            load: (active) =>
+              readSavedCompleteAssemblyNativePhysicalSourceV8(
+                abortableAdminService,
+                current,
+                projection,
+                sizeAuthority,
+                { sha256, operationNumber },
+                active,
+              ),
+            async verify(active) {
+              const latest = await readCompleteSavedAssemblySourceV1(
+                abortableAdminService(active),
+                exact.row,
+                {
+                  expectedServerAssemblyRevision: current.serverAssemblyRevision,
+                  expectedCompleteSourceSha256: current.sourceSha256,
+                },
+                active,
+              );
+              if (latest.priorCarrier?.sidecarSha256 !== sha256)
+                throw new Error('The reviewed sewing runs changed during the cloth preview.');
+            },
+          },
+        });
+      }
       if (action === 'save') {
         const saved = await persistSavedCompleteAssemblyNativeStitchReviewV8(
           abortableAdminService,
@@ -201,7 +262,7 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
           sizeAuthority,
           signal,
         );
-        setState({ status: 'reopened', review: reopened });
+        publishRestored(reopened, saved.current);
       } else if (action === 'reopen' || source.priorCarrier) {
         const reopened = await restoreSavedCompleteAssemblyNativeStitchReviewV8(
           source,
@@ -209,9 +270,7 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
           sizeAuthority,
           signal,
         );
-        if (reopened.document.selection.operationNumber !== operationNumber)
-          throw new Error('The saved review belongs to a different Assembly Order operation.');
-        setState({ status: 'reopened', review: reopened });
+        publishRestored(reopened, source);
       } else {
         const review = await prepareSavedCompleteAssemblyNativeStitchReviewV8(
           source,

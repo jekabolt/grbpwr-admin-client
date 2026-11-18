@@ -204,6 +204,7 @@ export type PatternImportDxfPhaseECadMannequinModelPickerViewPropsV1 = Readonly<
   poseError?: unknown;
   onRetryPose?: () => void;
   onDisplayedBodyInputV1?: CadMannequinDisplayedBodyInputObserverV1;
+  acceptedCloth?: CadWorkbenchPhysicalHostV1['acceptedCloth'];
   onSaveMannequinArrangement?: CadWorkbenchPhysicalHostV1['onSaveMannequinArrangement'];
   onReadMannequinArrangement?: CadWorkbenchPhysicalHostV1['onReadMannequinArrangement'];
   arrangementSourceKey?: string;
@@ -460,6 +461,7 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
   poseError = null,
   onRetryPose,
   onDisplayedBodyInputV1,
+  acceptedCloth,
   onSaveMannequinArrangement,
   onReadMannequinArrangement,
   arrangementSourceKey,
@@ -953,10 +955,13 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
               onDisplayedBodySnapshotV1={observesBody ? handleDisplayedBodySnapshot : undefined}
               directPoseViewportEditingEnabledV9={poseEditing}
               hideDirectPoseControlV9
+              acceptedCloth={acceptedCloth}
               variant='workbench'
               viewPreset={viewPreset}
               patternPieceOverlay={
-                patternOverlayResult?.ok ? patternOverlayResult.overlay : undefined
+                !acceptedCloth && patternOverlayResult?.ok
+                  ? patternOverlayResult.overlay
+                  : undefined
               }
             />
           </div>
@@ -988,6 +993,7 @@ export function PatternImportDxfPhaseECadMannequinModelPickerV1({
   stagedPieces = null,
   patternPieceScene = null,
   onDisplayedBodyInputV1,
+  acceptedCloth,
   onSaveMannequinArrangement,
   onReadMannequinArrangement,
   onReadSavedMannequinModelId,
@@ -998,6 +1004,7 @@ export function PatternImportDxfPhaseECadMannequinModelPickerV1({
   stagedPieces?: ReactNode;
   patternPieceScene?: PatternImportDxfPhaseECadMannequinPatternPieceSceneV1 | null;
   onDisplayedBodyInputV1?: CadMannequinDisplayedBodyInputObserverV1;
+  acceptedCloth?: CadWorkbenchPhysicalHostV1['acceptedCloth'];
   onSaveMannequinArrangement?: CadWorkbenchPhysicalHostV1['onSaveMannequinArrangement'];
   onReadMannequinArrangement?: CadWorkbenchPhysicalHostV1['onReadMannequinArrangement'];
   onReadSavedMannequinModelId?: CadWorkbenchPhysicalHostV1['onReadSavedMannequinModelId'];
@@ -1071,6 +1078,7 @@ export function PatternImportDxfPhaseECadMannequinModelPickerV1({
       poseError={poseSession.error}
       onRetryPose={poseSession.retry}
       onDisplayedBodyInputV1={onDisplayedBodyInputV1}
+      acceptedCloth={acceptedCloth}
       onSaveMannequinArrangement={onSaveMannequinArrangement}
       onReadMannequinArrangement={onReadMannequinArrangement}
       arrangementSourceKey={arrangementSourceKey}

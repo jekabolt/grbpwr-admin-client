@@ -6,12 +6,19 @@ import {
 } from 'lib/cloth/runtime/webgpu/xpbd-device-session';
 
 type PreviewResult = Readonly<{ ok: boolean; detail?: string }>;
-type PreviewHost = Readonly<{
-  run16(lease: XpbdDeviceLease, signal: AbortSignal): Promise<PreviewResult>;
-  run32(lease: XpbdDeviceLease, signal: AbortSignal): Promise<PreviewResult>;
-  mountPreview(canvas: HTMLCanvasElement, signal: AbortSignal): Promise<PreviewResult>;
+export type CadWorkbenchBoundedClothPreviewHostV1 = Readonly<{
+  runBounded(lease: XpbdDeviceLease, signal: AbortSignal): Promise<PreviewResult>;
   stopPreview(): Promise<void>;
 }>;
+
+type PreviewHost =
+  | Readonly<{
+      run16(lease: XpbdDeviceLease, signal: AbortSignal): Promise<PreviewResult>;
+      run32(lease: XpbdDeviceLease, signal: AbortSignal): Promise<PreviewResult>;
+      mountPreview(canvas: HTMLCanvasElement, signal: AbortSignal): Promise<PreviewResult>;
+      stopPreview(): Promise<void>;
+    }>
+  | CadWorkbenchBoundedClothPreviewHostV1;
 type PreviewDevice = Pick<XpbdDeviceSession, 'acquireExclusive' | 'dispose'>;
 type CreatePreviewDevice = (
   canvas: HTMLCanvasElement,
@@ -54,6 +61,7 @@ export function createCadWorkbenchPreviewLifecycleV1(
         return;
       }
       try {
+        if (turn.lease && 'runBounded' in turn.host) turn.controller.abort();
         if (turn.lease) await turn.host.stopPreview();
       } finally {
         // Let the host release its retained frame bridges before aborting their caller signal.
@@ -97,7 +105,7 @@ export function createCadWorkbenchPreviewLifecycleV1(
     async start(
       host: PreviewHost,
       computeCanvas: HTMLCanvasElement,
-      previewCanvas: HTMLCanvasElement,
+      previewCanvas: HTMLCanvasElement | null,
       publish: PreviewTurn['publish'],
     ) {
       if (current?.pending) return;
@@ -128,15 +136,22 @@ export function createCadWorkbenchPreviewLifecycleV1(
         const lease = device.acquireExclusive();
         turn.lease = lease;
 
-        const frame16 = await host.run16(lease, signal);
-        if (!isCurrent(turn)) return;
-        requireSuccessful(frame16);
-        const frame32 = await host.run32(lease, signal);
-        if (!isCurrent(turn)) return;
-        requireSuccessful(frame32);
-        const mounted = await host.mountPreview(previewCanvas, signal);
-        if (!isCurrent(turn)) return;
-        requireSuccessful(mounted);
+        if ('runBounded' in host) {
+          const staged = await host.runBounded(lease, signal);
+          if (!isCurrent(turn)) return;
+          requireSuccessful(staged);
+        } else {
+          if (!previewCanvas) throw new Error('The cloth preview display is unavailable.');
+          const frame16 = await host.run16(lease, signal);
+          if (!isCurrent(turn)) return;
+          requireSuccessful(frame16);
+          const frame32 = await host.run32(lease, signal);
+          if (!isCurrent(turn)) return;
+          requireSuccessful(frame32);
+          const mounted = await host.mountPreview(previewCanvas, signal);
+          if (!isCurrent(turn)) return;
+          requireSuccessful(mounted);
+        }
 
         turn.pending = false;
         publish({ pending: false, error: null });

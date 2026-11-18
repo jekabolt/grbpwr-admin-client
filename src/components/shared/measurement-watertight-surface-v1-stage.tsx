@@ -1,4 +1,4 @@
-import { useEffect, useRef, type KeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, type KeyboardEvent } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
@@ -131,6 +131,14 @@ export interface MeasurementSurfacePatternPieceOverlayV1 {
     transform: MeasurementSurfacePatternPieceTransformV1,
   ) => void;
 }
+
+/** An accepted frame in the displayed body's world-metre geometry. */
+export type MeasurementSurfaceAcceptedClothV1 = Readonly<{
+  positionsM: Float32Array;
+  frameNumber: number;
+  ranges: readonly Readonly<{ triangleOffset: number; triangleCount: number; color: number }>[];
+  isCurrent: () => boolean;
+}>;
 
 export const MEASUREMENT_SURFACE_PATTERN_PIECE_PROJECTED_HIT_RECEIPT_V1 =
   'measurement-surface-pattern-piece-projected-hit-receipt-v1' as const;
@@ -385,6 +393,7 @@ interface StageRuntime {
   patternPieceBindings: ReadonlyMap<string, MeasurementSurfacePatternPieceSceneBindingV1>;
   patternPieceGuides: readonly MeasurementSurfacePatternPieceSceneGuideBindingV1[];
   readonly syncPatternPieceOverlay: (key: string) => void;
+  readonly syncAcceptedCloth: () => void;
   readonly updateLivePositions: (positions: Float32Array) => MeasurementSurfaceLivePositionUpdateV1;
   readonly syncMeasurementGuide: (
     guide: MeasurementSurfaceActiveMeasurementGuideV1 | undefined,
@@ -1496,6 +1505,7 @@ export function MeasurementWatertightSurfaceV1Stage({
   onDisplayedGeometryV1,
   unifiedJointInteraction = false,
   patternPieceOverlay,
+  acceptedCloth,
   measurementGuide,
   measurementGuidePresentation = 'interactive',
   measurementGuideCameraView,
@@ -1529,6 +1539,7 @@ export function MeasurementWatertightSurfaceV1Stage({
   unifiedJointInteraction?: boolean;
   /** Optional caller-owned exact pattern projection rendered inside this existing Three scene. */
   patternPieceOverlay?: MeasurementSurfacePatternPieceOverlayV1;
+  acceptedCloth?: MeasurementSurfaceAcceptedClothV1;
   /** Focus-driven visual measurement line. It is a guide, never a tape or fit claim. */
   measurementGuide?: MeasurementSurfaceActiveMeasurementGuideV1;
   /** Capture-only framing renders the exact guide close-up at a supersampled resolution. */
@@ -1558,6 +1569,7 @@ export function MeasurementWatertightSurfaceV1Stage({
   >(null);
   const observesDisplayedGeometryRef = useRef(onDisplayedGeometryV1 !== undefined);
   const patternPieceOverlayRef = useRef(patternPieceOverlay);
+  const acceptedClothRef = useRef(acceptedCloth);
   const measurementGuideRef = useRef(measurementGuide);
   const measurementGuideCameraViewRef = useRef(measurementGuideCameraView);
   // Survives stage rebuilds so a blur after a rebuild still restores the owner's camera.
@@ -1575,6 +1587,7 @@ export function MeasurementWatertightSurfaceV1Stage({
   if (onDisplayedGeometryV1) onDisplayedGeometryRef.current = onDisplayedGeometryV1;
   observesDisplayedGeometryRef.current = onDisplayedGeometryV1 !== undefined;
   patternPieceOverlayRef.current = patternPieceOverlay;
+  acceptedClothRef.current = acceptedCloth;
   measurementGuideRef.current = measurementGuide;
   measurementGuideCameraViewRef.current = measurementGuideCameraView;
   const patternPieceOverlayRenderKey = patternPieceOverlay
@@ -1660,6 +1673,19 @@ export function MeasurementWatertightSurfaceV1Stage({
     let bodyRadius = 0;
     let cameraFitRadius = 0;
     let patternPieceLayer: THREE.Group | null = null;
+    let acceptedClothMesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial[]> | null =
+      null;
+    let mountedCloth: MeasurementSurfaceAcceptedClothV1 | undefined;
+    const removeAcceptedCloth = () => {
+      const previous = acceptedClothMesh;
+      acceptedClothMesh = null;
+      mountedCloth = undefined;
+      delete canvas.dataset.acceptedClothFrame;
+      if (!previous) return;
+      previous.removeFromParent();
+      previous.geometry.dispose();
+      for (const material of previous.material) material.dispose();
+    };
     let mountedPatternPieceKey = patternPieceOverlayRenderKeyRef.current;
     let measurementGuideLayer: THREE.Group | null = null;
     let measurementGuideBindings: readonly MeasurementSurfaceGuideSceneBindingV1[] = Object.freeze(
@@ -2331,6 +2357,7 @@ export function MeasurementWatertightSurfaceV1Stage({
       transformAnchor?.removeFromParent();
       disposeJointEditorLayer(runtime?.jointLayer ?? null);
       disposePatternPieceLayerV1(patternPieceLayer);
+      removeAcceptedCloth();
       disposeMeasurementSurfaceGuideLayerV1(measurementGuideLayer);
       geometry?.dispose();
       surfaceMaterial?.dispose();
@@ -3035,6 +3062,52 @@ export function MeasurementWatertightSurfaceV1Stage({
         scheduleRender();
       };
 
+      const syncAcceptedCloth = () => {
+        if (disposed || !scene) return;
+        const source = acceptedClothRef.current;
+        const next = source?.isCurrent() === true ? source : undefined;
+        if (next === mountedCloth) return;
+        removeAcceptedCloth();
+        if (!next || !next.positionsM.length || next.positionsM.length % 9 !== 0) {
+          scheduleRender();
+          return;
+        }
+        let triangle = 0;
+        if (
+          !next.positionsM.every(Number.isFinite) ||
+          !next.ranges.length ||
+          next.ranges.some((range) => {
+            if (
+              range.triangleOffset !== triangle ||
+              range.triangleCount <= 0 ||
+              !Number.isSafeInteger(range.triangleCount)
+            )
+              return true;
+            triangle += range.triangleCount;
+            return false;
+          }) ||
+          triangle * 9 !== next.positionsM.length
+        ) {
+          scheduleRender();
+          return;
+        }
+        const clothGeometry = new THREE.BufferGeometry();
+        clothGeometry.setAttribute(
+          'position',
+          new THREE.BufferAttribute(next.positionsM.slice(), 3),
+        );
+        clothGeometry.computeVertexNormals();
+        const materials = next.ranges.map(({ triangleOffset, triangleCount, color }, index) => {
+          clothGeometry.addGroup(triangleOffset * 3, triangleCount * 3, index);
+          return new THREE.MeshStandardMaterial({ color, roughness: 0.75, side: THREE.DoubleSide });
+        });
+        acceptedClothMesh = new THREE.Mesh(clothGeometry, materials);
+        scene.add(acceptedClothMesh);
+        canvas.dataset.acceptedClothFrame = String(next.frameNumber);
+        mountedCloth = next;
+        scheduleRender();
+      };
+
       const syncPatternPieceOverlay = (key: string) => {
         const runtime = runtimeRef.current;
         if (disposed || !runtime || !controls || !scene) return;
@@ -3241,6 +3314,7 @@ export function MeasurementWatertightSurfaceV1Stage({
         patternPieceBindings: patternPieceScene.bindings,
         patternPieceGuides: patternPieceScene.guides,
         syncPatternPieceOverlay,
+        syncAcceptedCloth,
         updateLivePositions,
         syncMeasurementGuide,
         syncGuideCamera: () => syncGuideCamera(),
@@ -3259,6 +3333,7 @@ export function MeasurementWatertightSurfaceV1Stage({
         updateLivePositions(liveDisplayPositionsRef.current);
       }
       syncMeasurementGuide(measurementGuideRef.current);
+      syncAcceptedCloth();
       wire.visible = overlays.wireframe;
       normals.visible = overlays.normals;
       landmarks.visible = overlays.landmarks;
@@ -3310,6 +3385,8 @@ export function MeasurementWatertightSurfaceV1Stage({
       });
     };
   }, [exclusiveContextGroup]);
+
+  useLayoutEffect(() => runtimeRef.current?.syncAcceptedCloth(), [acceptedCloth]);
 
   useEffect(() => {
     runtimeRef.current?.releaseGuideCamera();

@@ -1306,6 +1306,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
             <PatternImportDxfPhaseECadMannequinModelPickerV1
               disabled={disabled}
               onDisplayedBodyInputV1={physicalHost?.onDisplayedBodyInputV1}
+              acceptedCloth={physicalHost?.acceptedCloth}
               onSaveMannequinArrangement={physicalHost?.onSaveMannequinArrangement}
               onReadMannequinArrangement={physicalHost?.onReadMannequinArrangement}
               onReadSavedMannequinModelId={physicalHost?.onReadSavedMannequinModelId}

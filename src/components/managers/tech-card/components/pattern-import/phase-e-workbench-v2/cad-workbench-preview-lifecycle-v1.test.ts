@@ -114,6 +114,37 @@ describe('workbench preview lifecycle', () => {
     expect(lifecycle.isIdle()).toBe(true);
   });
 
+  it('aborts and drains a bounded cloth turn before releasing its one lease', async () => {
+    const session = device();
+    const drained = deferred<typeof ok>();
+    const publish = vi.fn();
+    let runSignal: AbortSignal | undefined;
+    const bounded = {
+      runBounded: vi.fn(async (_lease: XpbdDeviceLease, signal: AbortSignal) => {
+        runSignal = signal;
+        return drained.promise;
+      }),
+      stopPreview: vi.fn(async () => {
+        if (!runSignal) return;
+        expect(runSignal.aborted).toBe(true);
+        await drained.promise;
+      }),
+    };
+    const lifecycle = createCadWorkbenchPreviewLifecycleV1(async () => session);
+    const started = lifecycle.start(bounded, computeCanvas, null, publish);
+    await vi.waitFor(() => expect(bounded.runBounded).toHaveBeenCalledOnce());
+    expect(bounded.runBounded).toHaveBeenCalledWith(session.lease, runSignal);
+    const stopped = lifecycle.cancel(bounded);
+    await vi.waitFor(() => expect(runSignal?.aborted).toBe(true));
+    expect(session.lease.release).not.toHaveBeenCalled();
+    expect(session.dispose).not.toHaveBeenCalled();
+    drained.resolve(ok);
+    await Promise.all([started, stopped]);
+    expect(session.lease.release).toHaveBeenCalledOnce();
+    expect(session.dispose).toHaveBeenCalledOnce();
+    expect(publish).toHaveBeenCalledExactlyOnceWith({ pending: true, error: null });
+  });
+
   it('disposes a device returned after a host change before reusing its compute canvas', async () => {
     const previousHost = host();
     const nextHost = host();

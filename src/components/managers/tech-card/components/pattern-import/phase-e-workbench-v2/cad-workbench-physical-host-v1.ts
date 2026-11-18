@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import type { MeasurementSurfaceAcceptedClothV1 } from 'components/shared/measurement-watertight-surface-v1-stage';
 import type { DxfGarmentObservedBoundaryEdgeV1 } from 'components/cloth-simulation-spike/dxf-garment-observed-unsewn-edges-v1';
 import type {
   SavedGenericDurablePhysicalPreviewHitV1,
@@ -79,6 +80,7 @@ export function bindCadWorkbenchPhysicalPreviewSelectionV1(
 /** One mounted CAD route supplies the current picker input and its in-viewport cloth preview. */
 export type CadWorkbenchPhysicalHostV1 = Readonly<{
   onDisplayedBodyInputV1: (input: ModelDisplayedTriangleBodyOwnedInputV1 | null) => void;
+  acceptedCloth?: MeasurementSurfaceAcceptedClothV1;
   arrangementSourceKey?: string;
   onReadSavedMannequinModelId?: (signal: AbortSignal) => Promise<number | null>;
   onSaveMannequinArrangement?: (

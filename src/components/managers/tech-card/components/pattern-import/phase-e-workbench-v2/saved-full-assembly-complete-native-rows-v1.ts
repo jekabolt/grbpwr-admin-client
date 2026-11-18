@@ -32,6 +32,7 @@ type GeneratedFusingInputs = Readonly<{
   card: common_TechCard;
   sizeDictionary: readonly common_Size[];
   selectedSizeId: number;
+  includeGeneratedCutGeometry?: boolean;
 }>;
 
 /** Prepares garment sources and verified generated cut layers from the same saved Assembly seal. */
@@ -123,7 +124,7 @@ export async function prepareSavedFullAssemblyCompleteNativeRowsV1(
   const [first] = members;
   if (!first) throw new Error('The complete Assembly has no native garment member rows.');
   const fusingLayers = [];
-  if (fusingInput && generatedRows.length) {
+  if (fusingInput && generatedRows.length && fusingInput.includeGeneratedCutGeometry !== false) {
     const main = members.find(({ row }) => row.scopeKey === 'main');
     if (!main) throw new Error('Generated fusing requires the exact main garment row.');
     const host = hosts.createCanonical();
@@ -203,7 +204,7 @@ export async function prepareSavedFullAssemblyCompleteNativeRowsV1(
     originalSewingPaths,
     operationAnchors: bindSavedAssemblyOperationAnchorsV1(
       source,
-      new Set(fusingLayers.map(({ fusingRow }) => fusingRow.scopeKey)),
+      new Set(generatedRows.map(({ scopeKey }) => scopeKey)),
       originalSewingPaths,
     ),
   });
