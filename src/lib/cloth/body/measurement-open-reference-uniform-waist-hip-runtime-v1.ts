@@ -22,6 +22,7 @@ import {
   type UniformWaistHipSolverModeResultV1,
 } from './measurement-open-reference-uniform-waist-hip-solver-v1';
 import type { MeasurementOpenReferenceDisplayQualityGateResultV1 } from './measurement-open-reference-display-quality-gate-v1';
+import { applyFemaleHipBackShareV1 } from './measurement-open-reference-female-hip-back-v1';
 import { evaluateMeasurementOpenReferenceDisplayQualityInWorkerV1 } from './measurement-open-reference-display-quality-worker-v1';
 import type { MeasurementOpenReferenceDisplayQualityWorkerOptionsV1 } from './measurement-open-reference-display-quality-worker-protocol-v1';
 import type { MeasurementSurfaceMeshV1 } from './measurement-watertight-surface-v1';
@@ -40,6 +41,8 @@ export interface MeasurementOpenReferenceUniformWaistHipRuntimeDiagnosticV1 {
     | UniformWaistHipSolverDiagnosticCodeV1
     | 'base-mismatch'
     | 'base-not-uniform'
+    | 'hip-back-share-applied'
+    | 'hip-back-share-rejected'
     | 'range-widened'
     | 'range-widening-rejected'
     | 'runtime-unavailable';
@@ -292,6 +295,9 @@ export async function createMeasurementOpenReferenceUniformWaistHipRuntimeV1(opt
       })
     : null;
   const solved = widened?.solved ?? bounded;
+  // The hip back runs as its own main-thread task, so a frame can paint between it and the solve.
+  if (basis.kind === 'female') await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  const hipBack = femaleHipBackV1({ basis, measurements, openReference, modes, solved });
   const represented = solved.representedMeasurements;
   const status =
     represented.length === REQUESTED_PROXIES.length
@@ -299,10 +305,11 @@ export async function createMeasurementOpenReferenceUniformWaistHipRuntimeV1(opt
       : represented.length > 0
         ? ('partial' as const)
         : ('unrepresented' as const);
+  const positionsM = hipBack?.positionsM ?? solved.positionsM;
   const mesh = Object.freeze({
     ...openReference.mesh,
-    positions: solved.positionsM,
-    byteLength: solved.positionsM.byteLength + openReference.mesh.indices.byteLength,
+    positions: positionsM,
+    byteLength: positionsM.byteLength + openReference.mesh.indices.byteLength,
   });
   return runtimeResult({
     status,
@@ -320,10 +327,55 @@ export async function createMeasurementOpenReferenceUniformWaistHipRuntimeV1(opt
         }),
       ),
       ...(widened?.diagnostics ?? []),
+      ...(hipBack?.diagnostic ? [hipBack.diagnostic] : []),
     ],
     // The local gate stays the bound receipt (pose runtime v2 recomputes and compares it).
-    qualityGate: solved.qualityGate,
+    qualityGate: hipBack?.qualityGate ?? solved.qualityGate,
   });
+}
+
+/**
+ * Female base only: moves the hip back share to the HSRD-100 female mean after the waist/hip solve,
+ * keeping the tape girth of every level, the hip station included. The gate is recomputed on the final positions against the
+ * same uniform positions pose runtime v2 uses, so the receipt stays bound. Male and neutral, an
+ * unsafe solve, or a rejected change return null and the solved body stands as it was.
+ */
+function femaleHipBackV1(options: {
+  readonly basis: MakeHumanOpenReferenceBasisV1;
+  readonly measurements: CanonicalBodyMeasurementsMm;
+  readonly openReference: MeasurementOpenReferenceDisplayArtifactV1;
+  readonly modes: { readonly modes: readonly UniformWaistHipModeV1[] };
+  readonly solved: UniformWaistHipSolverResultV1;
+}): {
+  readonly positionsM?: Float32Array;
+  readonly qualityGate?: MeasurementOpenReferenceDisplayQualityGateResultV1;
+  readonly diagnostic?: MeasurementOpenReferenceUniformWaistHipRuntimeDiagnosticV1;
+} | null {
+  if (options.basis.kind !== 'female' || !options.solved.qualityGate.safe) return null;
+  const station = (key: UniformWaistHipKeyV1) =>
+    options.modes.modes.find(({ measurementKey }) => measurementKey === key)?.stationOriginM;
+  const hipStationM = station('hipCircumferenceMm');
+  const waistStationM = station('waistCircumferenceMm');
+  if (!hipStationM || !waistStationM) return null;
+  const result = applyFemaleHipBackShareV1({
+    positionsM: options.solved.positionsM,
+    uniformPositionsM: options.openReference.mesh.positions,
+    triangleIndices: options.basis.indices,
+    heightM: options.measurements.heightMm / 1000,
+    hipStationM,
+    waistStationM,
+  });
+  if (result.status === 'unchanged') return null;
+  const diagnostic = Object.freeze({
+    code:
+      result.status === 'applied'
+        ? ('hip-back-share-applied' as const)
+        : ('hip-back-share-rejected' as const),
+    measurementKey: null,
+    message: result.message,
+  });
+  if (result.status !== 'applied' || !result.qualityGate) return { diagnostic };
+  return { positionsM: result.positionsM, qualityGate: result.qualityGate, diagnostic };
 }
 
 /**
