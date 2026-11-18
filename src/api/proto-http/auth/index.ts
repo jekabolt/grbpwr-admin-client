@@ -2,6 +2,15 @@
 /* eslint-disable camelcase */
 // @ts-nocheck
 
+// SignInTarget is where a SignIn token is meant to be used.
+export type SignInTarget =
+  | "SIGN_IN_TARGET_UNKNOWN"
+  // root: lists teams, valid only for IssueHandoff.
+  | "SIGN_IN_TARGET_ROOT"
+  // team: the team named by Grpc-Metadata-X-Team.
+  | "SIGN_IN_TARGET_TEAM"
+  // console: the operator console.
+  | "SIGN_IN_TARGET_CONSOLE";
 // LoginRequest is the request message for the Login RPC.
 export type LoginRequest = {
   // username is the username of the user.
@@ -58,6 +67,127 @@ export type ChangePasswordResponse = {
   authToken: string | undefined;
 };
 
+// TeamRef is one team the signed-in user belongs to.
+export type TeamRef = {
+  slug: string | undefined;
+  name: string | undefined;
+  // role is owner or member.
+  role: string | undefined;
+  readOnly: boolean | undefined;
+  // ready is false while the team is provisioning.
+  ready: boolean | undefined;
+};
+
+export type SignUpRequest = {
+  email: string | undefined;
+  password: string | undefined;
+  teamName: string | undefined;
+  teamSlug: string | undefined;
+};
+
+export type SignUpResponse = {
+};
+
+export type CheckTeamSlugRequest = {
+  slug: string | undefined;
+  name: string | undefined;
+};
+
+export type CheckTeamSlugResponse = {
+  available: boolean | undefined;
+  suggestion: string | undefined;
+};
+
+export type VerifyEmailRequest = {
+  token: string | undefined;
+  email: string | undefined;
+  code: string | undefined;
+};
+
+export type VerifyEmailResponse = {
+  teamSlug: string | undefined;
+  handoffCode: string | undefined;
+};
+
+export type ResendVerificationRequest = {
+  email: string | undefined;
+};
+
+export type ResendVerificationResponse = {
+};
+
+export type SignInRequest = {
+  // login is an email or a handle.
+  login: string | undefined;
+  password: string | undefined;
+  target: SignInTarget | undefined;
+};
+
+export type SignInResponse = {
+  token: string | undefined;
+  teams: TeamRef[] | undefined;
+};
+
+export type IssueHandoffRequest = {
+  teamSlug: string | undefined;
+};
+
+export type IssueHandoffResponse = {
+  url: string | undefined;
+  code: string | undefined;
+};
+
+export type ExchangeHandoffRequest = {
+  code: string | undefined;
+};
+
+export type ExchangeHandoffResponse = {
+  token: string | undefined;
+};
+
+export type SignOutRequest = {
+};
+
+export type SignOutResponse = {
+};
+
+export type RequestPasswordResetRequest = {
+  email: string | undefined;
+};
+
+export type RequestPasswordResetResponse = {
+};
+
+export type ResetPasswordRequest = {
+  token: string | undefined;
+  email: string | undefined;
+  code: string | undefined;
+  newPassword: string | undefined;
+};
+
+export type ResetPasswordResponse = {
+};
+
+export type GetInviteRequest = {
+  token: string | undefined;
+};
+
+export type GetInviteResponse = {
+  teamName: string | undefined;
+  email: string | undefined;
+  accountExists: boolean | undefined;
+};
+
+export type AcceptInviteRequest = {
+  token: string | undefined;
+  password: string | undefined;
+};
+
+export type AcceptInviteResponse = {
+  teamSlug: string | undefined;
+  handoffCode: string | undefined;
+};
+
 export interface AuthService {
   // Authenticate a user. Returns a JWT token if the user is authenticated.
   Login(request: LoginRequest): Promise<LoginResponse>;
@@ -67,6 +197,30 @@ export interface AuthService {
   Delete(request: DeleteRequest): Promise<DeleteResponse>;
   // ChangePassword changes the password for the user. Can be updated by user or admin.
   ChangePassword(request: ChangePasswordRequest): Promise<ChangePasswordResponse>;
+  // SignUp creates a pending user and a pending team and sends a verify letter.
+  SignUp(request: SignUpRequest): Promise<SignUpResponse>;
+  // CheckTeamSlug tells whether a team address is free and suggests one.
+  CheckTeamSlug(request: CheckTeamSlugRequest): Promise<CheckTeamSlugResponse>;
+  // VerifyEmail confirms an email by link token or by email + six-digit code.
+  VerifyEmail(request: VerifyEmailRequest): Promise<VerifyEmailResponse>;
+  // ResendVerification sends a new verify letter.
+  ResendVerification(request: ResendVerificationRequest): Promise<ResendVerificationResponse>;
+  // SignIn authenticates by email or handle and returns a token for the target.
+  SignIn(request: SignInRequest): Promise<SignInResponse>;
+  // IssueHandoff turns a root token into a single-use code for a team origin.
+  IssueHandoff(request: IssueHandoffRequest): Promise<IssueHandoffResponse>;
+  // ExchangeHandoff swaps a hand-off code for a team token; the slug travels in Grpc-Metadata-X-Team.
+  ExchangeHandoff(request: ExchangeHandoffRequest): Promise<ExchangeHandoffResponse>;
+  // SignOut revokes the session of the calling token.
+  SignOut(request: SignOutRequest): Promise<SignOutResponse>;
+  // RequestPasswordReset sends a reset letter (generic response).
+  RequestPasswordReset(request: RequestPasswordResetRequest): Promise<RequestPasswordResetResponse>;
+  // ResetPassword sets a new password by link token or by email + code.
+  ResetPassword(request: ResetPasswordRequest): Promise<ResetPasswordResponse>;
+  // GetInvite describes an invite by its link token.
+  GetInvite(request: GetInviteRequest): Promise<GetInviteResponse>;
+  // AcceptInvite joins the invited team; a new user sets a password.
+  AcceptInvite(request: AcceptInviteRequest): Promise<AcceptInviteResponse>;
 }
 
 type RequestType = {
@@ -154,6 +308,210 @@ export function createAuthServiceClient(
         service: "AuthService",
         method: "ChangePassword",
       }) as Promise<ChangePasswordResponse>;
+    },
+    SignUp(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/auth/sign-up`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AuthService",
+        method: "SignUp",
+      }) as Promise<SignUpResponse>;
+    },
+    CheckTeamSlug(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/auth/check-team-slug`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AuthService",
+        method: "CheckTeamSlug",
+      }) as Promise<CheckTeamSlugResponse>;
+    },
+    VerifyEmail(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/auth/verify-email`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AuthService",
+        method: "VerifyEmail",
+      }) as Promise<VerifyEmailResponse>;
+    },
+    ResendVerification(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/auth/resend-verification`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AuthService",
+        method: "ResendVerification",
+      }) as Promise<ResendVerificationResponse>;
+    },
+    SignIn(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/auth/sign-in`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AuthService",
+        method: "SignIn",
+      }) as Promise<SignInResponse>;
+    },
+    IssueHandoff(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/auth/issue-handoff`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AuthService",
+        method: "IssueHandoff",
+      }) as Promise<IssueHandoffResponse>;
+    },
+    ExchangeHandoff(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/auth/exchange-handoff`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AuthService",
+        method: "ExchangeHandoff",
+      }) as Promise<ExchangeHandoffResponse>;
+    },
+    SignOut(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/auth/sign-out`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AuthService",
+        method: "SignOut",
+      }) as Promise<SignOutResponse>;
+    },
+    RequestPasswordReset(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/auth/request-password-reset`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AuthService",
+        method: "RequestPasswordReset",
+      }) as Promise<RequestPasswordResetResponse>;
+    },
+    ResetPassword(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/auth/reset-password`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AuthService",
+        method: "ResetPassword",
+      }) as Promise<ResetPasswordResponse>;
+    },
+    GetInvite(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/auth/get-invite`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AuthService",
+        method: "GetInvite",
+      }) as Promise<GetInviteResponse>;
+    },
+    AcceptInvite(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/auth/accept-invite`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AuthService",
+        method: "AcceptInvite",
+      }) as Promise<AcceptInviteResponse>;
     },
   };
 }

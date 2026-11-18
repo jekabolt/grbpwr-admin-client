@@ -16113,6 +16113,20 @@ export type GetCurrentAccountRequest = {
 
 export type GetCurrentAccountResponse = {
   account: AdminAccount | undefined;
+  // workspace is the team the token belongs to.
+  workspace: Workspace | undefined;
+};
+
+// Workspace is the calling team as the admin shell sees it.
+export type Workspace = {
+  slug: string | undefined;
+  name: string | undefined;
+  // role is owner or member.
+  role: string | undefined;
+  // features are the enabled feature keys of the team.
+  features: string[] | undefined;
+  // read_only is true while the team is suspended.
+  readOnly: boolean | undefined;
 };
 
 export type ListAccountSectionsRequest = {
@@ -20361,6 +20375,75 @@ export type GetAiSpendReportResponse = {
   byActor: AiSpendActorRow[] | undefined;
 };
 
+// TeamMember is one member of the calling team.
+export type TeamMember = {
+  username: string | undefined;
+  email: string | undefined;
+  // role is owner or member.
+  role: string | undefined;
+  lastSeenAt: wellKnownTimestamp | undefined;
+  // you is true for the calling account.
+  you: boolean | undefined;
+};
+
+// TeamInvite is one invite of the calling team.
+export type TeamInvite = {
+  // invite_ref is an opaque handle for revoke/resend; never shown.
+  inviteRef: string | undefined;
+  email: string | undefined;
+  role: string | undefined;
+  sentAt: wellKnownTimestamp | undefined;
+  expiresAt: wellKnownTimestamp | undefined;
+  // status is pending, accepted, revoked or expired.
+  status: string | undefined;
+};
+
+export type ListTeamMembersRequest = {
+};
+
+export type ListTeamMembersResponse = {
+  members: TeamMember[] | undefined;
+  invites: TeamInvite[] | undefined;
+};
+
+export type InviteTeamMemberRequest = {
+  email: string | undefined;
+  role: string | undefined;
+};
+
+export type InviteTeamMemberResponse = {
+  invite: TeamInvite | undefined;
+};
+
+export type RevokeTeamInviteRequest = {
+  inviteRef: string | undefined;
+};
+
+export type RevokeTeamInviteResponse = {
+};
+
+export type ResendTeamInviteRequest = {
+  inviteRef: string | undefined;
+};
+
+export type ResendTeamInviteResponse = {
+};
+
+export type RemoveTeamMemberRequest = {
+  username: string | undefined;
+};
+
+export type RemoveTeamMemberResponse = {
+};
+
+export type SetTeamMemberRoleRequest = {
+  username: string | undefined;
+  role: string | undefined;
+};
+
+export type SetTeamMemberRoleResponse = {
+};
+
 export interface AdminService {
   // Retrieves a key-value dictionary.
   GetDictionary(request: GetDictionaryRequest): Promise<GetDictionaryResponse>;
@@ -22488,6 +22571,18 @@ export interface AdminService {
   // provider × model, and beside it, per provider, their number from the provider's cost API where
   // one exists and a key is set.
   GetAiSpendReport(request: GetAiSpendReportRequest): Promise<GetAiSpendReportResponse>;
+  // ListTeamMembers returns the calling team's members and its open invites.
+  ListTeamMembers(request: ListTeamMembersRequest): Promise<ListTeamMembersResponse>;
+  // InviteTeamMember sends an invite letter to join the calling team.
+  InviteTeamMember(request: InviteTeamMemberRequest): Promise<InviteTeamMemberResponse>;
+  // RevokeTeamInvite cancels an open invite.
+  RevokeTeamInvite(request: RevokeTeamInviteRequest): Promise<RevokeTeamInviteResponse>;
+  // ResendTeamInvite sends the invite letter again.
+  ResendTeamInvite(request: ResendTeamInviteRequest): Promise<ResendTeamInviteResponse>;
+  // RemoveTeamMember removes a member from the calling team.
+  RemoveTeamMember(request: RemoveTeamMemberRequest): Promise<RemoveTeamMemberResponse>;
+  // SetTeamMemberRole sets a member's role (owner or member).
+  SetTeamMemberRole(request: SetTeamMemberRoleRequest): Promise<SetTeamMemberRoleResponse>;
 }
 
 type RequestType = {
@@ -31826,6 +31921,348 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "GetAiSpendReport",
       }) as Promise<GetAiSpendReportResponse>;
+    },
+    ListTeamMembers(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/team/members`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListTeamMembers",
+      }) as Promise<ListTeamMembersResponse>;
+    },
+    InviteTeamMember(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/team/invites`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "InviteTeamMember",
+      }) as Promise<InviteTeamMemberResponse>;
+    },
+    RevokeTeamInvite(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.inviteRef) {
+        throw new Error("missing required field request.invite_ref");
+      }
+      const path = `api/admin/team/invites/${request.inviteRef}/revoke`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "RevokeTeamInvite",
+      }) as Promise<RevokeTeamInviteResponse>;
+    },
+    ResendTeamInvite(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.inviteRef) {
+        throw new Error("missing required field request.invite_ref");
+      }
+      const path = `api/admin/team/invites/${request.inviteRef}/resend`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ResendTeamInvite",
+      }) as Promise<ResendTeamInviteResponse>;
+    },
+    RemoveTeamMember(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.username) {
+        throw new Error("missing required field request.username");
+      }
+      const path = `api/admin/team/members/${request.username}/remove`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "RemoveTeamMember",
+      }) as Promise<RemoveTeamMemberResponse>;
+    },
+    SetTeamMemberRole(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.username) {
+        throw new Error("missing required field request.username");
+      }
+      const path = `api/admin/team/members/${request.username}/role`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetTeamMemberRole",
+      }) as Promise<SetTeamMemberRoleResponse>;
+    },
+  };
+}
+// PlatformTeam is one team as the console sees it.
+export type PlatformTeam = {
+  slug: string | undefined;
+  name: string | undefined;
+  // status is active, read_only, provisioning or pending.
+  status: string | undefined;
+  people: number | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  // features are the enabled feature keys.
+  features: string[] | undefined;
+  // ai_spend_month_usd is the current month's AI spend, decimal string.
+  aiSpendMonthUsd: string | undefined;
+  aiUnpricedCallsMonth: number | undefined;
+  schemaOk: boolean | undefined;
+};
+
+// PlatformMember is one member of a team as the console sees it.
+export type PlatformMember = {
+  handle: string | undefined;
+  email: string | undefined;
+  role: string | undefined;
+  lastSeenAt: wellKnownTimestamp | undefined;
+};
+
+// FeatureInfo is one entry of the feature catalog.
+export type FeatureInfo = {
+  key: string | undefined;
+  title: string | undefined;
+  group: string | undefined;
+  defaultOn: boolean | undefined;
+  teamOneOnly: boolean | undefined;
+};
+
+export type ListTeamsRequest = {
+  query: string | undefined;
+};
+
+export type ListTeamsResponse = {
+  teams: PlatformTeam[] | undefined;
+  // ai_spend_month_total_usd is the fleet total, decimal string.
+  aiSpendMonthTotalUsd: string | undefined;
+};
+
+export type GetTeamRequest = {
+  teamSlug: string | undefined;
+};
+
+export type GetTeamResponse = {
+  team: PlatformTeam | undefined;
+  members: PlatformMember[] | undefined;
+};
+
+export type ListFeaturesRequest = {
+};
+
+export type ListFeaturesResponse = {
+  features: FeatureInfo[] | undefined;
+};
+
+export type SetTeamFeatureRequest = {
+  teamSlug: string | undefined;
+  feature: string | undefined;
+  enabled: boolean | undefined;
+};
+
+export type SetTeamFeatureResponse = {
+  team: PlatformTeam | undefined;
+};
+
+export type SetTeamStatusRequest = {
+  teamSlug: string | undefined;
+  readOnly: boolean | undefined;
+};
+
+export type SetTeamStatusResponse = {
+  team: PlatformTeam | undefined;
+};
+
+export type RenameTeamRequest = {
+  teamSlug: string | undefined;
+  newSlug: string | undefined;
+  newName: string | undefined;
+};
+
+export type RenameTeamResponse = {
+  team: PlatformTeam | undefined;
+};
+
+// PlatformService is the operator console over the control plane. A team is
+// addressed by slug, never by id.
+export interface PlatformService {
+  // ListTeams returns every team with its people, features and AI spend.
+  ListTeams(request: ListTeamsRequest): Promise<ListTeamsResponse>;
+  // GetTeam returns one team and its members.
+  GetTeam(request: GetTeamRequest): Promise<GetTeamResponse>;
+  // ListFeatures returns the feature catalog.
+  ListFeatures(request: ListFeaturesRequest): Promise<ListFeaturesResponse>;
+  // SetTeamFeature switches one feature of a team on or off.
+  SetTeamFeature(request: SetTeamFeatureRequest): Promise<SetTeamFeatureResponse>;
+  // SetTeamStatus suspends a team (read only) or makes it active again.
+  SetTeamStatus(request: SetTeamStatusRequest): Promise<SetTeamStatusResponse>;
+  // RenameTeam changes a team's slug and/or name; the old slug redirects.
+  RenameTeam(request: RenameTeamRequest): Promise<RenameTeamResponse>;
+}
+
+export function createPlatformServiceClient(
+  handler: RequestHandler
+): PlatformService {
+  return {
+    ListTeams(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/platform/teams`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.query) {
+        queryParams.push(`query=${encodeURIComponent(request.query.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "PlatformService",
+        method: "ListTeams",
+      }) as Promise<ListTeamsResponse>;
+    },
+    GetTeam(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.teamSlug) {
+        throw new Error("missing required field request.team_slug");
+      }
+      const path = `api/platform/teams/${request.teamSlug}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "PlatformService",
+        method: "GetTeam",
+      }) as Promise<GetTeamResponse>;
+    },
+    ListFeatures(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/platform/features`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "PlatformService",
+        method: "ListFeatures",
+      }) as Promise<ListFeaturesResponse>;
+    },
+    SetTeamFeature(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.teamSlug) {
+        throw new Error("missing required field request.team_slug");
+      }
+      const path = `api/platform/teams/${request.teamSlug}/features`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "PlatformService",
+        method: "SetTeamFeature",
+      }) as Promise<SetTeamFeatureResponse>;
+    },
+    SetTeamStatus(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.teamSlug) {
+        throw new Error("missing required field request.team_slug");
+      }
+      const path = `api/platform/teams/${request.teamSlug}/status`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "PlatformService",
+        method: "SetTeamStatus",
+      }) as Promise<SetTeamStatusResponse>;
+    },
+    RenameTeam(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.teamSlug) {
+        throw new Error("missing required field request.team_slug");
+      }
+      const path = `api/platform/teams/${request.teamSlug}/rename`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "PlatformService",
+        method: "RenameTeam",
+      }) as Promise<RenameTeamResponse>;
     },
   };
 }
