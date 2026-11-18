@@ -64,6 +64,10 @@ export type PatternImportDxfPhaseEZeroConnectExactAnchorGeometryResultV1 =
 
 type CandidateSide =
   PatternImportDxfPhaseECadTableZeroConnectCandidateV1['connection']['sides'][number];
+type ExactAnchorEdge = Pick<
+  CandidateSide,
+  'pieceId' | 'pieceLineKey' | 'contourId' | 'boundaryVertexIds'
+>;
 type CatalogPiece = PatternImportDxfProductPhaseEAuthoringCatalogV1['pieces'][number];
 type ProjectionPiece = PatternImportDxfProductPhaseEAssemblyProjectionV1['pieces'][number];
 
@@ -134,7 +138,7 @@ function currentSource(input: {
 }
 
 function exactPiece(
-  side: CandidateSide,
+  side: ExactAnchorEdge,
   catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1,
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1,
 ):
@@ -164,8 +168,9 @@ function exactPiece(
   });
 }
 
-function buildSelectedPiece(
-  side: CandidateSide,
+/** Builds one tagged edge for the existing persisted seam anchor serializer. */
+export function buildPatternImportDxfPhaseEExactAnchorEdgeV1(
+  side: ExactAnchorEdge,
   catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1,
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1,
 ):
@@ -302,7 +307,7 @@ function buildSelectedPiece(
   // The existing seam writer serializes this edge key into a 64-rune diagnostic hint.
   // Full native contour and vertex identities remain in exactDxfBoundary and the sidecar.
   const contourOrdinal = piece.catalogPiece.contours.indexOf(catalogContour);
-  const target = `${side.pieceLineKey}#dxf:${contourOrdinal.toString(36)}:${edgeOrdinal.toString(36)}`;
+  const target = exactEdgeHint(side.pieceLineKey, contourOrdinal, edgeOrdinal);
   if (Array.from(target).length > 64)
     return Object.freeze({
       ok: false as const,
@@ -357,6 +362,30 @@ function buildSelectedPiece(
   return Object.freeze({ ok: true as const, piece: exactPieceGeometry, target });
 }
 
+function exactEdgeHint(pieceLineKey: string, contourOrdinal: number, edgeOrdinal: number): string {
+  return `${pieceLineKey}#dxf:${contourOrdinal.toString(36)}:${edgeOrdinal.toString(36)}`;
+}
+
+/** A saved locator yields candidates only. The complete anchor independently checks the edge. */
+export function readPatternImportDxfPhaseEExactAnchorEdgeHintV1(
+  pieceLineKey: string,
+  hint: string,
+): Readonly<{ contourOrdinal: number; edgeOrdinal: number }> | null {
+  const prefix = `${pieceLineKey}#dxf:`;
+  if (!hint.startsWith(prefix) || Array.from(hint).length > 64) return null;
+  const ordinals = hint.slice(prefix.length).match(/^([0-9a-z]+):([0-9a-z]+)$/);
+  if (!ordinals) return null;
+  const contourOrdinal = Number.parseInt(ordinals[1]!, 36);
+  const edgeOrdinal = Number.parseInt(ordinals[2]!, 36);
+  if (
+    !Number.isSafeInteger(contourOrdinal) ||
+    !Number.isSafeInteger(edgeOrdinal) ||
+    exactEdgeHint(pieceLineKey, contourOrdinal, edgeOrdinal) !== hint
+  )
+    return null;
+  return { contourOrdinal, edgeOrdinal };
+}
+
 /**
  * Builds the minimum legacy anchor geometry from sealed exact identities. Projection coordinates
  * serialize the existing StoredSeam samples only; they never select the edge.
@@ -398,10 +427,10 @@ export function buildPatternImportDxfPhaseEZeroConnectExactAnchorGeometryV1(inpu
         'exact-anchor-piece-pair-invalid',
         'The selected pair must contain two distinct exact pieces with explicit directions.',
       );
-    const first = buildSelectedPiece(sideA, catalog, projection);
+    const first = buildPatternImportDxfPhaseEExactAnchorEdgeV1(sideA, catalog, projection);
     if (!first.ok)
       return Object.freeze({ ok: false as const, geometry: null, blocker: first.blocker });
-    const second = buildSelectedPiece(sideB, catalog, projection);
+    const second = buildPatternImportDxfPhaseEExactAnchorEdgeV1(sideB, catalog, projection);
     if (!second.ok)
       return Object.freeze({ ok: false as const, geometry: null, blocker: second.blocker });
     return Object.freeze({

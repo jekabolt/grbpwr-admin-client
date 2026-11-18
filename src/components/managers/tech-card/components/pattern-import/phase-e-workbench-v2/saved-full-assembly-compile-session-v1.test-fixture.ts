@@ -56,7 +56,7 @@ export const digestFullAssemblyFixture = async (bytes: Uint8Array) =>
   Buffer.from(await crypto.subtle.digest('SHA-256', Uint8Array.from(bytes).buffer)).toString('hex');
 export async function createSavedThreePanelFixtureV1(
   pieceCount: 2 | 3 = 3,
-  options: { wizardExport?: boolean } = {},
+  options: { wizardExport?: boolean; ambiguousShortEdge?: boolean } = {},
 ) {
   const original = await createThreePanelDxfMaterialCompileFixtureV1();
   const ids = IDS.slice(0, pieceCount);
@@ -65,6 +65,20 @@ export async function createSavedThreePanelFixtureV1(
       x: v.positionMm[0],
       y: v.positionMm[1],
     }));
+    if (options.ambiguousShortEdge && index === 0) {
+      for (const point of vertices) {
+        point.x *= 20;
+        point.y *= 20;
+      }
+      const first = vertices[0]!;
+      const second = vertices[1]!;
+      const last = vertices.at(-1)!;
+      const nearCorner = (neighbor: (typeof vertices)[number]) => ({
+        x: first.x + (neighbor.x - first.x) / 3_100,
+        y: first.y + (neighbor.y - first.y) / 3_100,
+      });
+      vertices.splice(0, 1, nearCorner(last), nearCorner(second));
+    }
     return {
       identity,
       code: identity,
@@ -271,11 +285,11 @@ class InProcessClient implements ImportClient {
     this.sessions.clear();
   }
 }
-export async function createSavedThreePanelSourceV1(
+export function createSavedThreePanelReprocessHostV1(
   seed: SavedThreePanelFixtureV1,
   nativeSewingReplay = false,
 ) {
-  const host = createPatternImportDxfPhaseESavedDxfReprocessHostV1({
+  return createPatternImportDxfPhaseESavedDxfReprocessHostV1({
     resolveCard: async () => ({
       card: structuredClone(seed.card),
       cardLockVersion: seed.row.cardLockVersion,
@@ -289,6 +303,13 @@ export async function createSavedThreePanelSourceV1(
         headers: { 'content-length': String(seed.bytes.length) },
       })) as typeof fetch,
   });
+}
+
+export async function createSavedThreePanelSourceV1(
+  seed: SavedThreePanelFixtureV1,
+  nativeSewingReplay = false,
+) {
+  const host = createSavedThreePanelReprocessHostV1(seed, nativeSewingReplay);
   const owner = createDxfProductSavedNativeReprocessOwnerV1(host);
   const native = await owner.run({
     schemaVersion: DXF_PRODUCT_SAVED_REPROCESS_REQUEST_V1,
