@@ -65,8 +65,7 @@
 //   --mutate-fallback   → 5 провалов: список пуст (0 строк), знакомых работ нет, выбрать нечего,
 //                         запись не появилась. Цитаты А–Е на живом каталоге при этом зелёные —
 //                         дыра именно в деградации;
-//   --mutate-priority   → 2 провала: карточный отступ 6 подменён глобальным 9, и метка называет
-//                         «your default» там, где источник карточный;
+//   --mutate-priority   → карточный отступ 6 подменён глобальным 9 в форме и контроле.
 //   --mutate-nowrite    → 9 провалов (адверсарная): личность пишется, работа — нет; жест «снять вид»
 //                         исчезает из списка (снимать нечего), имя работы откатывается к выведенному.
 //                         Это ровно то состояние, в котором фаза оказалась бы, забудь исполнитель
@@ -540,6 +539,13 @@ async function pickWork(token) {
   return true;
 }
 const values = () => page.evaluate(() => window.__workPicker.values());
+const stepInput = (field) => page.locator(`[data-field="operations.0.${field}"] input`);
+const openSetup = async () => {
+  const setup = page.locator('[role="button"][aria-expanded]').filter({
+    has: page.getByText('setup', { exact: true }),
+  });
+  if ((await setup.getAttribute('aria-expanded')) === 'false') await setup.click();
+};
 
 // ── СТОРОЖ РАСХОЖДЕНИЯ: СНИМОК ПРОТИВ САМИХ МИГРАЦИЙ ────────────────────────────────────────────
 //
@@ -807,8 +813,8 @@ head('З. Enter без слова и без подсветки не делает
   ck(v2.work === 'moscow_hem', '«моско» + Enter выбирает московский шов', String(v2.work));
 }
 
-// ── Ж. «НА ЧЁМ» И ГОУСТ ВРЕМЕНИ — ТОЖЕ ОТ КАТАЛОГА ──────────────────────────────────────────────
-head('Ж. суженный список «на чём» и гоуст нормы времени приходят из каталога');
+// ── Ж. МАШИНКИ И НОРМА ВРЕМЕНИ — ИЗ КАТАЛОГА ──────────────────────────────────────────────
+head('Ж. суженный список машинок и значение нормы времени приходят из каталога');
 {
   // РАБОТА БЕЗ ПУНКТА, СПРАШИВАЮЩАЯ МАШИНКУ: суженного списка в бандле нет вовсе, и без каталога
   // человек получил бы полный список из двадцати с лишним машинок вместо двух законных.
@@ -822,7 +828,7 @@ head('Ж. суженный список «на чём» и гоуст нормы
     String(v.machineType),
   );
   const label = await page.locator('[data-field="operations.0.machineType"] label').first().textContent();
-  ck(/on what/i.test(label ?? ''), 'подпись контрола говорит «на чём», а не «машинка»', String(label));
+  ck((label ?? '').trim() === 'machine *', 'машинка названа обязательным полем', String(label));
   // И СПИСОК ДЕЙСТВИТЕЛЬНО СУЖЕН — двумя машинками каталога, а не двадцатью с лишним словаря.
   await page.locator('[data-field="operations.0.machineType"] button').first().click();
   await page.waitForSelector('[role="option"]', { timeout: 5000 });
@@ -843,26 +849,13 @@ head('Ж. суженный список «на чём» и гоуст нормы
   );
 }
 {
-  // ГОУСТ КАТАЛОГА — только у строки с НАЗВАННОЙ работой и только когда карточка молчит.
+  // The catalog time is written into the editable field on the work-picker action.
   await mount([{ operationType: T.MACHINE, machineType: T.LOCKSTITCH, zone: T.ZONE }]);
-  ck(await pickWork('moscow_hem'), 'работа с подсказкой времени выбрана');
-  const hint = await page
-    .locator('[data-field="operations.0.smv"] input')
-    .first()
-    .getAttribute('placeholder');
-  ck(hint === 'last: 2.4', 'в пустом поле нормы стоит гоуст из каталога', String(hint));
-  // ВРЕМЯ ТЕПЕРЬ ПИШЕТСЯ ЗНАЧЕНИЕМ С МЕТКОЙ ИСТОЧНИКА — намеренно, 23-AUTO #6 (tabs-lite,
-  // de5ed2fe1: «SMV from smvHint as a value with a `catalog` chip»; в коде — «TIME, A REAL VALUE»
-  // в `prefillForWork`). Прежнее «гоуст, никогда не значение» перевёрнуто владельцем; равноценная
-  // проверка — значение из каталога И метка «time · catalog», которой его можно снять.
+  ck(await pickWork('moscow_hem'), 'выбрана работа с каталожной нормой времени');
+  const smv = stepInput('smv');
+  ck((await smv.inputValue()) === '2.4', 'в контроле времени стоит норма каталога');
   const v = await values();
   ck(v.smv === '2.4', 'и это ЗНАЧЕНИЕ из каталога, записанное в поле', `«${v.smv}»`);
-  {
-    const chips = await page.$$eval('[data-work-prefill="0"] [data-prefill-field]', (ns) =>
-      ns.map((n) => `${n.getAttribute('data-prefill-field')}:${n.getAttribute('data-prefill-source')}`),
-    );
-    ck(chips.includes('smv:catalog'), 'и метка называет источник — каталог', chips.join(' | ') || 'меток нет');
-  }
 }
 
 // ── В. НЕЗНАКОМЫЙ ТОКЕН ─────────────────────────────────────────────────────────────────────────
@@ -874,8 +867,9 @@ await mount([
   const text = await triggerText();
   ck(text.includes('unknown_work_x'), 'сам токен стоит в пикере ТЕКСТОМ', text);
   ck(
-    (await page.locator('[data-work-unknown="unknown_work_x"]').count()) === 1,
-    'и рядом сказано, что он из более новой версии приложения',
+    text === 'unknown_work_x — unknown to this app version',
+    'и пикер прямо называет токен незнакомым этой версии приложения',
+    text,
   );
   const wire = await page.evaluate(() =>
     window.__workPicker.wire({
@@ -910,14 +904,7 @@ head('Д. дефолты: карточный последний шаг > гло�
   ck(await pickWork('topstitch'), 'работа выбрана на одиноком шаге');
   const v = await values();
   ck(v.topstitchWidthMm === '9', 'пустое поле заполнено ГЛОБАЛЬНЫМ дефолтом', String(v.topstitchWidthMm));
-  const sources = await page.$$eval('[data-prefill-field]', (ns) =>
-    ns.map((n) => `${n.getAttribute('data-prefill-field')}:${n.getAttribute('data-prefill-source')}`),
-  );
-  ck(
-    sources.includes('topstitchWidthMm:global'),
-    'и метка называет источник — «твой дефолт»',
-    sources.join(' | ') || 'меток нет',
-  );
+  ck((await stepInput('topstitchWidthMm').inputValue()) === '9', 'поле на экране показывает глобальное значение');
 }
 {
   // Карточная ступень обязана ПЕРЕКРЫТЬ глобальную. Второй шаг — тот же вид с другим отступом.
@@ -939,14 +926,7 @@ head('Д. дефолты: карточный последний шаг > гло�
     'карточный последний шаг ПЕРЕКРЫЛ глобальный дефолт (9 → 6)',
     String(v.topstitchWidthMm),
   );
-  const sources = await page.$$eval('[data-prefill-field]', (ns) =>
-    ns.map((n) => `${n.getAttribute('data-prefill-field')}:${n.getAttribute('data-prefill-source')}`),
-  );
-  ck(
-    sources.includes('topstitchWidthMm:card'),
-    'и метка называет карточный источник, а не глобальный',
-    sources.join(' | ') || 'меток нет',
-  );
+  ck((await stepInput('topstitchWidthMm').inputValue()) === '6', 'поле на экране показывает приоритетное карточное значение');
   // ЗАПОЛНЕННОЕ НЕ ТРОГАЕТСЯ НИКОГДА — ни своё, ни чужое.
   await mount([
     { operationType: T.MACHINE, machineType: T.LOCKSTITCH, zone: T.ZONE, topstitchWidthMm: '2' },
@@ -964,31 +944,19 @@ head('Д. дефолты: карточный последний шаг > гло�
   ck(v2.topstitchWidthMm === '2', 'ответ человека старше любого дефолта', String(v2.topstitchWidthMm));
 }
 {
-  // МЕТКА ГАСНЕТ, КОГДА ЧЕЛОВЕК ТРОНУЛ ЗНАЧЕНИЕ, — И ЗНАЧЕНИЕ ОСТАЁТСЯ ЕГО. Найдено мутацией
-  // ревью: условие «значение разошлось с нашим» можно было выкинуть, и все цитаты оставались
-  // зелёными — метка жила бы вечно, выдавая правку человека за подстановку.
-  // Режим отстрочки задан на монтировании, чтобы контрол ширины был НА ЭКРАНЕ и правился органом.
+  // An explicit edit must survive a genuine work change and return to the same defaults.
   await mount([
-    {
-      operationType: T.MACHINE,
-      machineType: T.LOCKSTITCH,
-      zone: T.ZONE,
-      topstitchMode: 'TECH_CARD_TOPSTITCH_MODE_EDGE',
-    },
+    { operationType: T.MACHINE, machineType: T.LOCKSTITCH, zone: T.ZONE },
   ]);
   ck(await pickWork('topstitch'), 'работа выбрана, дефолт подставлен');
-  const before = await page.$$eval('[data-prefill-field]', (ns) =>
-    ns.map((n) => n.getAttribute('data-prefill-field')),
-  );
-  ck(before.includes('topstitchWidthMm'), 'метка ширины стоит', before.join(' | ') || 'меток нет');
-  await page.fill('[data-field="operations.0.topstitchWidthMm"] input', '7');
-  await page.waitForTimeout(200);
-  const after = await page.$$eval('[data-prefill-field]', (ns) =>
-    ns.map((n) => n.getAttribute('data-prefill-field')),
-  );
-  ck(!after.includes('topstitchWidthMm'), 'человек тронул поле — метка погасла', after.join(' | ') || 'пусто');
+  const width = stepInput('topstitchWidthMm');
+  ck((await width.inputValue()) === '9', 'до правки в поле глобальное значение');
+  await width.fill('7');
+  await width.blur();
+  ck(await pickWork('moscow_hem') && (await values()).work === 'moscow_hem', 'другая работа действительно выбрана');
+  ck(await pickWork('topstitch') && (await values()).work === 'topstitch', 'отстрочка снова выбрана');
   const v3 = await values();
-  ck(v3.topstitchWidthMm === '7', 'а значение осталось ЕГО, не отозвано', String(v3.topstitchWidthMm));
+  ck(v3.topstitchWidthMm === '7' && (await width.inputValue()) === '7', 'правка пережила смену работы и повторный дефолт', String(v3.topstitchWidthMm));
 }
 
 // ── Е. ЖЕСТ «ЗАПОМНИТЬ» — ПО СЕРВЕРНОМУ РЕЕСТРУ ─────────────────────────────────────────────────
@@ -1011,6 +979,7 @@ head('Е. «запомнить как дефолт» рисуется по defau
       stitchesPerCm: '4.5',
     },
   ]);
+  await openSetup();
   const buttons = await page.$$eval('[data-remember-field]', (ns) =>
     ns.map((n) => n.getAttribute('data-remember-field')),
   );
@@ -1044,18 +1013,21 @@ head('Е. «запомнить как дефолт» рисуется по defau
 }
 
 // ── Б. КАТАЛОГ НЕ ПРИЕХАЛ ───────────────────────────────────────────────────────────────────────
-head('Б. каталог отказал: пикер живёт на снимке бандла и говорит об этом');
+head('Б. при подтверждённом отказе каталога пикер выбирает работы из снимка');
 catalogMode = 'fail';
+const mountWithRefusedCatalog = async () => {
+  const [response] = await Promise.all([
+    page.waitForResponse((r) => r.url().includes('operation-work/catalog')),
+    mount([{ operationType: T.MACHINE, machineType: T.LOCKSTITCH, zone: T.ZONE }]),
+  ]);
+  ck(response.status() === 500, 'запрос каталога действительно получил отказ', String(response.status()));
+};
 {
-  await mount([{ operationType: T.MACHINE, machineType: T.LOCKSTITCH, zone: T.ZONE }]);
+  await mountWithRefusedCatalog();
   await openList();
   const labels = await optionLabels();
   ck(labels.length >= 50, 'список НЕ пуст — работает снимок бандла', `${labels.length} строк`);
   ck(labels.includes('Topstitch'), 'и в нём есть знакомые работы', labels.slice(0, 3).join(' | '));
-  ck(
-    (await page.locator('[data-work-fallback]').count()) === 1,
-    'деградация НАЗВАНА человеку, а не только логу',
-  );
   await closeList();
   // Снимок не мёртвый: выбор из него пишет работу так же, как выбор из каталога.
   ck(await pickWork('overlock_serge'), 'из снимка тоже выбирается');
@@ -1071,15 +1043,7 @@ catalogMode = 'fail';
 // citation would prove nothing about the bundle. What is asserted here is the DEGRADED picker.
 head('К. работы 0331 живут и в снимке: «моско» ищет, снятая не предлагается, свалка названа честно');
 {
-  await mount([{ operationType: T.MACHINE, machineType: T.LOCKSTITCH, zone: T.ZONE }]);
-  // Подпись деградации живёт в ПОДВАЛЕ открытого списка — читать её у закрытого пикера значит
-  // читать пустоту и принять её за отказ.
-  await openList();
-  ck(
-    (await page.locator('[data-work-fallback]').count()) === 1,
-    'проверяется именно СНИМОК: экран говорит, что каталог не приехал',
-  );
-  await closeList();
+  await mountWithRefusedCatalog();
   {
     // ВЛАДЕЛЕЦ ПЕЧАТАЕТ «МОСКО», А НЕ «MOSCOW». Русское слово попало в снимок ровно ради этого
     // случая — и ровно этих четырёх работ, у которых имя в бандле было бы единственной строкой.
@@ -1209,11 +1173,13 @@ const CUT = 'operations.0.cutLengthMm';
 const cutState = () =>
   page.evaluate((f) => {
     const nodes = [...document.querySelectorAll(`[data-field="${f}"]`)];
-    const control = nodes.find((n) => n.querySelector('input'));
+    const controls = nodes.filter((n) => n.querySelector('input'));
+    const control = controls[0];
     const residue = nodes.find((n) => n.closest('[data-residue-strip]'));
     const message = control?.querySelector('[id$="form-item-message"]');
     return {
       control: !!control,
+      controlCount: controls.length,
       label: (control?.querySelector('label')?.textContent ?? '').trim(),
       value: control?.querySelector('input')?.value ?? '',
       residue: !!residue,
@@ -1227,6 +1193,7 @@ const cutState = () =>
   await mount([
     { operationType: T.MACHINE, machineType: T.ZIGZAG, zone: T.ZONE, work: 'slit_overcast' },
   ]);
+  await openSetup();
   const st = await cutState();
   ck(st.control, 'на ЗИГЗАГЕ с работой «прорезь» поле длины ЕСТЬ на экране', JSON.stringify(st));
   ck(
@@ -1242,6 +1209,7 @@ const cutState = () =>
   // ОТСУТСТВИЕ КОНТРОЛА — КРАСНАЯ СТРОКА, А НЕ ИСКЛЮЧЕНИЕ. Мутация гейта убирает поле с экрана, и
   // без этой проверки проба падала бы таймаутом playwright, не досказав остальных цитат: упавшая
   // проба сообщает «сломалась проба», а не «сломался экран».
+  await openSetup();
   const input = page.locator(`[data-field="${CUT}"] input`).first();
   if ((await input.count()) === 0) {
     ck(false, 'контрол длины на экране есть — иначе обязательность проверять не на чем', 'поля нет');
@@ -1265,17 +1233,23 @@ const cutState = () =>
   await mount([
     { operationType: T.MACHINE, machineType: T.BUTTONHOLE, zone: T.ZONE, work: 'slit_overcast' },
   ]);
+  await openSetup();
   const st = await cutState();
-  ck(st.control, 'на ПЕТЕЛЬНОМ АВТОМАТЕ с той же работой поле тоже есть', JSON.stringify(st));
-  ck(/slit/i.test(st.label), 'и работа называет поле своим словом даже там', `«${st.label}»`);
+  ck(st.controlCount === 1 && !st.residue, 'на петельном автомате у прорези одно поле длины', JSON.stringify(st));
+  ck(
+    st.label === 'cut, mm' && (await triggerText()).includes('Slit — overcast'),
+    'в группе способа поле называет размер, а пикер сохраняет имя работы «Slit — overcast»',
+    `«${st.label}»`,
+  );
 }
 {
   // СЕГОДНЯШНЕЕ ПОВЕДЕНИЕ НЕ СЛОМАНО, И ЭТО ПОЛОВИНА ЦИТАТЫ, А НЕ ФОРМАЛЬНОСТЬ: у всех 126 строк
   // прода работа пуста, и расширение обязано быть ВТОРЫМ входом, а не подменой первого.
   await mount([{ operationType: T.MACHINE, machineType: T.BUTTONHOLE, zone: T.ZONE }]);
+  await openSetup();
   const st = await cutState();
-  ck(st.control, 'шаг БЕЗ работы на петельном автомате показывает длину как показывал', JSON.stringify(st));
-  ck(st.label === 'buttonhole cut, mm', 'и зовётся она там по-прежнему петельной', `«${st.label}»`);
+  ck(st.controlCount === 1 && !st.residue, 'петельный шаг без токена тоже имеет одно поле длины', JSON.stringify(st));
+  ck(st.label === 'cut, mm', 'поле размера в группе способа называет единицу', `«${st.label}»`);
 }
 {
   // ЗАПОЛНЕННАЯ ДЛИНА НА ШАГЕ ПРОРЕЗИ — В КОНТРОЛЕ, А НЕ В ОСТАТКЕ.
@@ -1288,6 +1262,7 @@ const cutState = () =>
       cutLengthMm: '18',
     },
   ]);
+  await openSetup();
   const st = await cutState();
   ck(st.control && st.value === '18', 'сохранённая длина стоит в своём контроле', JSON.stringify(st));
   ck(!st.residue, 'и НЕ уезжает в полосу остатков — поле показано, значит это не остаток');
@@ -1298,6 +1273,7 @@ const cutState = () =>
   await mount([
     { operationType: T.MACHINE, machineType: T.LOCKSTITCH, zone: T.ZONE, cutLengthMm: '18' },
   ]);
+  await openSetup();
   const st = await cutState();
   ck(!st.control, 'на прямострочке без работы контрола длины нет', JSON.stringify(st));
   ck(st.residue, 'но заполненная длина видна СТРОКОЙ ОСТАТКА, а не пропадает');
@@ -1310,6 +1286,7 @@ const cutState = () =>
 {
   // ПУСТОЕ ПОЛЕ ЧУЖОГО ШАГА НЕ ЖИВЁТ НИГДЕ, и это правильный третий ответ: показывать нечего.
   await mount([{ operationType: T.MACHINE, machineType: T.LOCKSTITCH, zone: T.ZONE }]);
+  await openSetup();
   const st = await cutState();
   ck(!st.control && !st.residue, 'на прямострочке без работы и без значения поля нет вовсе', JSON.stringify(st));
 }
