@@ -58,7 +58,10 @@ export function registerPatternImportDxfPhaseEPatternsFieldCompiledReimportOwner
       const manualApply =
         addPoint ||
         pairedAllowance ||
-        artifact.compiledFeatures.some(({ output }) => output === 'piece-create');
+        artifact.compiledFeatures.some(
+          ({ output }) =>
+            output === 'piece-create' || output === 'moved-vertex' || output === 'deleted-vertex',
+        );
       const file = addPoint
         ? takeCompiledSavedAddPointFileV1(artifact)
         : new File([artifact.dxfText], compiledFileName(artifact), { type: 'image/vnd.dxf' });

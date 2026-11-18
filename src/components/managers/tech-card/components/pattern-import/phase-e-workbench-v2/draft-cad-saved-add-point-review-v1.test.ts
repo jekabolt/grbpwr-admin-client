@@ -2008,6 +2008,7 @@ async function checkNativeOutlinePointEdit(tool: 'move-point' | 'delete-point', 
     scopeAvailable: (key) => key === f.current.row.scopeKey,
     reviewAlreadyOpen: () => reviewFiles.length > 0,
     openExistingImportReview: (review) => {
+      expect(review.requireManualApply).toBe(true);
       reviewFiles.push(...review.files);
     },
   });
