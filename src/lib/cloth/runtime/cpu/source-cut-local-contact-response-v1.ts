@@ -11,6 +11,7 @@ type Motion = {
 
 const axes = [0, 1, 2] as const;
 export const MAXIMUM_LOCAL_CUT_WITNESSES_V1 = 8;
+export const MAXIMUM_LOCAL_CUT_RETREAT_WITNESSES_V1 = 32;
 const MINIMUM_LOCAL_GAP_M = 0.000025;
 
 function subtract(a: Vec3, b: Vec3): Vec3 {
@@ -130,5 +131,43 @@ export function separateSourceCutWitnessesV1(
     positionsMInvMass: positions,
     previousPositionsMInvMass: previous,
     velocities: proposal.velocities,
+  };
+}
+
+/** Hold the carriers supporting rejected faces at their last accepted positions. */
+export function retreatSourceCutWitnessMotionV1(
+  mesh: ContactMesh,
+  acceptedPositions: Float32Array,
+  proposal: Motion,
+  witnesses: readonly (readonly [number, number])[],
+  heldParticles: ReadonlySet<number>,
+) {
+  if (witnesses.length > MAXIMUM_LOCAL_CUT_RETREAT_WITNESSES_V1)
+    throw new RangeError('Too many cut witnesses for local motion retreat.');
+  const offsets = new Set(heldParticles);
+  for (const faces of witnesses) {
+    for (const face of faces) {
+      for (const corner of mesh.triangleCornerSupports(face)) {
+        for (const axis of axes) {
+          if (corner.weights[axis] > 0) offsets.add(corner.particleOffsets[axis]);
+        }
+      }
+    }
+  }
+  if (offsets.size === heldParticles.size) return undefined;
+  const positions = proposal.positionsMInvMass.slice();
+  const previous = proposal.previousPositionsMInvMass.slice();
+  const velocities = proposal.velocities.slice();
+  for (const offset of offsets) {
+    for (const axis of axes) {
+      const index = offset + axis;
+      positions[index] = acceptedPositions[index];
+      previous[index] = acceptedPositions[index];
+      velocities[index] = 0;
+    }
+  }
+  return {
+    motion: { positionsMInvMass: positions, previousPositionsMInvMass: previous, velocities },
+    heldParticles: offsets,
   };
 }

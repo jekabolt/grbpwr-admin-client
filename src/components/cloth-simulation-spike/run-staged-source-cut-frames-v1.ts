@@ -1,9 +1,11 @@
-/* global GPUBuffer, GPUBufferUsage, GPUMapMode, GPUComputePipeline, GPUShaderModuleDescriptor */
+/* global GPUBuffer, GPUBufferUsage, GPUDevice, GPUMapMode, GPUComputePipeline, GPUShaderModuleDescriptor */
 
 import { DEFAULT_MEASUREMENT_PARTITIONED_SURFACE_CONTACT_BUDGET_V1 } from 'lib/cloth/body/measurement-surface-self-intersection-v1';
 import { captureActualBodyTriangleGeometryV1 } from 'lib/cloth/body/actual-body-triangle-aabb-tree-v1';
 import {
+  MAXIMUM_LOCAL_CUT_RETREAT_WITNESSES_V1,
   MAXIMUM_LOCAL_CUT_WITNESSES_V1,
+  retreatSourceCutWitnessMotionV1,
   separateSourceCutWitnessesV1,
 } from 'lib/cloth/runtime/cpu/source-cut-local-contact-response-v1';
 import { prepareSourceCutContactMeshV1 } from 'lib/cloth/runtime/cpu/source-cut-contact-mesh-v1';
@@ -146,6 +148,7 @@ type Program = {
     body: ReturnType<typeof prepareActualBodySourceCutContactV1>;
   };
   acceptedFrame?: PhysicalFrame;
+  compiledPipelines?: Awaited<ReturnType<typeof compileStagedPipelines>>;
 };
 type WindowReceipt = Awaited<ReturnType<typeof executeWindow>>['receipt'];
 type Checkpoint = {
@@ -246,21 +249,56 @@ export async function continueStagedSourceCutFramesV1(
   command: StageCommand,
   signal?: AbortSignal,
 ) {
+  return advanceStagedSourceCutFrames(receipt, command, signal);
+}
+
+/** Resumes an accepted in-memory checkpoint after the preceding lease has ended. */
+export async function resumeStagedSourceCutFramesV1(
+  receipt: WindowReceipt,
+  command: StageCommand,
+  ownedLease: RunRequest['ownedLease'],
+  signal?: AbortSignal,
+) {
+  return advanceStagedSourceCutFrames(receipt, command, signal, { ownedLease });
+}
+
+async function advanceStagedSourceCutFrames(
+  receipt: WindowReceipt,
+  command: StageCommand,
+  signal?: AbortSignal,
+  replacement?: Readonly<{ ownedLease: RunRequest['ownedLease'] }>,
+) {
   const previous = checkpoints.get(receipt);
   if (!previous) throw new TypeError('An accepted staged window receipt is required.');
-  const { program, start, targetLengthsM, activeConstraintCount } = previous;
-  if (program.busy || program.elapsedFrames !== start.elapsedFrames)
+  const { program: precedingProgram, start, targetLengthsM, activeConstraintCount } = previous;
+  if (precedingProgram.busy || precedingProgram.elapsedFrames !== start.elapsedFrames)
     throw new Error('The staged checkpoint is busy or has already advanced.');
   const { action, operationOrder, requestedReductionM, maximumReductionM } = command;
   if (action !== 'activate' && action !== 'contract' && action !== 'contract-active')
     throw new RangeError('Expected a seam activation or contraction.');
   const stageIndex = previous.stageIndex + (action === 'activate' ? 1 : 0);
-  if (operationOrder !== program.frame.seams.stages[stageIndex]?.operationOrder)
+  if (operationOrder !== precedingProgram.frame.seams.stages[stageIndex]?.operationOrder)
     throw new RangeError(
       'The next window must contract the current seam or activate its successor.',
     );
 
-  program.busy = true;
+  let program = precedingProgram;
+  if (replacement) {
+    const oldLease = inspectOwnedActiveXpbdDeviceLeaseV1(precedingProgram.ownedLease);
+    if (oldLease.ok || oldLease.code !== 'inactive')
+      throw new Error('Release the preceding XPBD lease before resuming the staged program.');
+    if (!inspectOwnedActiveXpbdDeviceLeaseV1(replacement.ownedLease).ok)
+      throw new TypeError('Resuming a staged program requires a new active owned XPBD lease.');
+    // Preserve the source guard, verified geometry, and cumulative work already charged.
+    // A different lease must compile its own device-bound pipelines.
+    program = {
+      ...precedingProgram,
+      ownedLease: replacement.ownedLease,
+      compiledPipelines: undefined,
+    };
+  }
+
+  precedingProgram.busy = true;
   try {
     const result = await executeWindow(
       program,
@@ -282,7 +320,7 @@ export async function continueStagedSourceCutFramesV1(
     checkpoints.delete(receipt);
     return next;
   } finally {
-    program.busy = false;
+    precedingProgram.busy = false;
   }
 }
 
@@ -314,6 +352,82 @@ function publishCheckpoint(
   program.elapsedFrames = elapsedFrames;
   program.acceptedFrame = lastPhysicalFrame;
   return receipt;
+}
+
+async function compileStagedPipelines(
+  device: GPUDevice,
+  usesBodyQuery: boolean,
+  current: () => void,
+) {
+  const cutBendSha = await sha256(new TextEncoder().encode(XPBD_EMBEDDED_CUT_BEND_WGSL_V1));
+  const cutContinuumSha = await sha256(new TextEncoder().encode(CONTINUUM_STRAIN_CUT_WGSL_V1));
+  if (cutBendSha !== XPBD_EMBEDDED_CUT_BEND_SOURCE_SHA256_V1)
+    throw new Error('The cut bend shader differs from its fixed source.');
+  if (cutContinuumSha !== CONTINUUM_STRAIN_CUT_SOURCE_SHA256_V1)
+    throw new Error('The cut continuum shader differs from its fixed source.');
+  current();
+  const jobs = {
+    predict: [xpbdPredictShaderDescriptorV1(), getXpbdPredictPipelineIdentityV1()],
+    velocity: [
+      xpbdMaterialVelocityShaderDescriptorV2(),
+      getXpbdMaterialVelocityPipelineIdentityV2(),
+    ],
+    distance: [xpbdDistanceShaderDescriptorV1(), getXpbdDistancePipelineIdentityV1()],
+    cutBend: [
+      { code: XPBD_EMBEDDED_CUT_BEND_WGSL_V1 },
+      Promise.resolve({ entryPoint: XPBD_EMBEDDED_CUT_BEND_ENTRY_POINT_V1, sha256: cutBendSha }),
+    ],
+    cutContinuum: [
+      { code: CONTINUUM_STRAIN_CUT_WGSL_V1 },
+      Promise.resolve({ entryPoint: 'main', sha256: cutContinuumSha }),
+    ],
+    embeddedSeam: [
+      xpbdSeamSolveEmbeddedShaderDescriptorV1(),
+      getXpbdSeamSolveEmbeddedPipelineIdentityV1(),
+    ],
+    scalarReset: [
+      xpbdInitializationCoreResetShaderDescriptorV1('bend'),
+      getXpbdInitializationCoreResetPipelineIdentityV1('bend'),
+    ],
+    distanceReset: [
+      xpbdInitializationCoreResetShaderDescriptorV1('distance'),
+      getXpbdInitializationCoreResetPipelineIdentityV1('distance'),
+    ],
+    continuumReset: [
+      xpbdInitializationCoreResetShaderDescriptorV1('continuum'),
+      getXpbdInitializationCoreResetPipelineIdentityV1('continuum'),
+    ],
+    ...(usesBodyQuery
+      ? await stagedNearestBodyContactShadersV1()
+      : {
+          bodyContact: [
+            actualBodyContactPortableShaderDescriptorV1(),
+            getActualBodyContactPortablePipelineIdentityV1(),
+          ] as const,
+        }),
+  } as const;
+  const identities = await Promise.all(Object.values(jobs).map(([, identity]) => identity));
+  current();
+  const shaders = {} as Record<keyof typeof jobs, GPUComputePipeline>;
+  const namedJobs = Object.keys(jobs) as (keyof typeof jobs)[];
+  for (const [index, name] of namedJobs.entries()) {
+    const descriptor: GPUShaderModuleDescriptor = jobs[name][0];
+    const module = device.createShaderModule(descriptor);
+    const info = await module.getCompilationInfo();
+    current();
+    const error = info.messages.find((message) => message.type === 'error');
+    if (error) throw new Error(name + ' WGSL: ' + error.message);
+    shaders[name] = await device.createComputePipelineAsync({
+      layout: 'auto',
+      compute: { module, entryPoint: identities[index].entryPoint },
+    });
+    current();
+  }
+  return {
+    usesBodyQuery,
+    shaders,
+    identities: Object.fromEntries(namedJobs.map((name, i) => [name, identities[i]])),
+  };
 }
 
 async function executeWindow(program: Program, input: FrameInput, signal?: AbortSignal) {
@@ -434,7 +548,9 @@ async function executeWindow(program: Program, input: FrameInput, signal?: Abort
               cloth: self.intersections
                 .slice(
                   0,
-                  program.enableLocalClothContactResponse ? MAXIMUM_LOCAL_CUT_WITNESSES_V1 : 2,
+                  program.enableLocalClothContactResponse
+                    ? MAXIMUM_LOCAL_CUT_RETREAT_WITNESSES_V1
+                    : 2,
                 )
                 .map(({ triangleA, triangleB, kind }) => ({
                   pieces: [witnessPieces(triangleA), witnessPieces(triangleB)],
@@ -456,6 +572,45 @@ async function executeWindow(program: Program, input: FrameInput, signal?: Abort
       };
     };
     type ContactCheck = ReturnType<typeof checkContact>;
+    function retreatCappedCutMotion(
+      base: Float32Array,
+      motion: ReturnType<typeof scaleMotion>,
+      initial: ContactCheck,
+      displacementLimit: number,
+    ) {
+      let contact = initial;
+      let heldParticles = new Set<number>();
+      for (let pass = 0; pass < 2; pass++) {
+        if (
+          contact.bodyIntersections ||
+          contact.bodyPairsWithoutClearance ||
+          !contact.contactWitnesses?.cloth.length
+        )
+          break;
+        current();
+        const witnesses = contact.contactWitnesses.cloth.map(({ triangles }) => triangles);
+        const next = retreatSourceCutWitnessMotionV1(
+          garment,
+          base,
+          motion,
+          witnesses,
+          heldParticles,
+        );
+        if (!next) break;
+        heldParticles = next.heldParticles;
+        const displacementM = maximumMotionM(base, next.motion.positionsMInvMass);
+        if (displacementM > displacementLimit + 1e-7) break;
+        contact = checkContact(next.motion.positionsMInvMass);
+        if (contact.passed)
+          return {
+            motion: next.motion,
+            contact,
+            displacementM,
+            heldParticleCount: heldParticles.size,
+          };
+      }
+      return undefined;
+    }
     const describe = (result: ContactCheck) =>
       `Found ${result.bodyIntersections} body intersections and ${result.clothIntersections} cloth intersections. Clearance was unproved for ${result.bodyPairsWithoutClearance} body pairs.`;
     const initialPhaseTrace: {
@@ -469,8 +624,10 @@ async function executeWindow(program: Program, input: FrameInput, signal?: Abort
       trialCount: number;
       proposedDisplacementM: number;
       repairedCutPairs?: readonly (readonly [number, number])[];
+      heldParticleCount?: number;
       acceptedDisplacementM: number;
       proposalContact?: ContactCheck;
+      firstCappedTrialContact?: ContactCheck;
     }[] = [];
     const validate = (
       positions: Float32Array,
@@ -504,74 +661,17 @@ async function executeWindow(program: Program, input: FrameInput, signal?: Abort
     const validated = [measure(lastPhysicalFrame, source.positionsMInvMass)];
     current();
 
-    const cutBendSha = await sha256(new TextEncoder().encode(XPBD_EMBEDDED_CUT_BEND_WGSL_V1));
-    const cutContinuumSha = await sha256(new TextEncoder().encode(CONTINUUM_STRAIN_CUT_WGSL_V1));
-    if (cutBendSha !== XPBD_EMBEDDED_CUT_BEND_SOURCE_SHA256_V1)
-      throw new Error('The cut bend shader differs from its fixed source.');
-    if (cutContinuumSha !== CONTINUUM_STRAIN_CUT_SOURCE_SHA256_V1)
-      throw new Error('The cut continuum shader differs from its fixed source.');
-    current();
-    const jobs = {
-      predict: [xpbdPredictShaderDescriptorV1(), getXpbdPredictPipelineIdentityV1()],
-      velocity: [
-        xpbdMaterialVelocityShaderDescriptorV2(),
-        getXpbdMaterialVelocityPipelineIdentityV2(),
-      ],
-      distance: [xpbdDistanceShaderDescriptorV1(), getXpbdDistancePipelineIdentityV1()],
-      cutBend: [
-        { code: XPBD_EMBEDDED_CUT_BEND_WGSL_V1 },
-        Promise.resolve({ entryPoint: XPBD_EMBEDDED_CUT_BEND_ENTRY_POINT_V1, sha256: cutBendSha }),
-      ],
-      cutContinuum: [
-        { code: CONTINUUM_STRAIN_CUT_WGSL_V1 },
-        Promise.resolve({ entryPoint: 'main', sha256: cutContinuumSha }),
-      ],
-      embeddedSeam: [
-        xpbdSeamSolveEmbeddedShaderDescriptorV1(),
-        getXpbdSeamSolveEmbeddedPipelineIdentityV1(),
-      ],
-      scalarReset: [
-        xpbdInitializationCoreResetShaderDescriptorV1('bend'),
-        getXpbdInitializationCoreResetPipelineIdentityV1('bend'),
-      ],
-      distanceReset: [
-        xpbdInitializationCoreResetShaderDescriptorV1('distance'),
-        getXpbdInitializationCoreResetPipelineIdentityV1('distance'),
-      ],
-      continuumReset: [
-        xpbdInitializationCoreResetShaderDescriptorV1('continuum'),
-        getXpbdInitializationCoreResetPipelineIdentityV1('continuum'),
-      ],
-      ...(frame.bodyQueryBytes
-        ? await stagedNearestBodyContactShadersV1()
-        : {
-            bodyContact: [
-              actualBodyContactPortableShaderDescriptorV1(),
-              getActualBodyContactPortablePipelineIdentityV1(),
-            ] as const,
-          }),
-    } as const;
-    const identities = await Promise.all(Object.values(jobs).map(([, identity]) => identity));
-    current();
     device.pushErrorScope('validation');
     openScopes++;
     device.pushErrorScope('out-of-memory');
     openScopes++;
-    const shaders = {} as Record<keyof typeof jobs, GPUComputePipeline>;
-    const namedJobs = Object.keys(jobs) as (keyof typeof jobs)[];
-    for (const [index, name] of namedJobs.entries()) {
-      const descriptor: GPUShaderModuleDescriptor = jobs[name][0];
-      const module = device.createShaderModule(descriptor);
-      const info = await module.getCompilationInfo();
-      current();
-      const error = info.messages.find((message) => message.type === 'error');
-      if (error) throw new Error(name + ' WGSL: ' + error.message);
-      shaders[name] = await device.createComputePipelineAsync({
-        layout: 'auto',
-        compute: { module, entryPoint: identities[index].entryPoint },
-      });
-      current();
-    }
+    // An accepted program owns one lease and one fixed shader set.
+    const reusedPipelines = program.compiledPipelines;
+    const usesBodyQuery = Boolean(frame.bodyQueryBytes);
+    if (reusedPipelines && reusedPipelines.usesBodyQuery !== usesBodyQuery)
+      throw new Error('The staged contact pipeline mode changed.');
+    const compiledPipelines =
+      reusedPipelines ?? (await compileStagedPipelines(device, usesBodyQuery, current));
     const create = (name: string, size: number, usage: number) => {
       current();
       const buffer = device.createBuffer({ label: name, size, usage });
@@ -582,7 +682,7 @@ async function executeWindow(program: Program, input: FrameInput, signal?: Abort
     const bound = bindGarmentStagedSourceCutFrameV1(
       frame,
       device,
-      shaders,
+      compiledPipelines.shaders,
       ({ name, kind, bytes }) => {
         computeUploadBytes += bytes.byteLength;
         if (computeUploadBytes > frame.gpuBytes) throw new RangeError('Unadmitted staged upload.');
@@ -758,9 +858,11 @@ async function executeWindow(program: Program, input: FrameInput, signal?: Abort
                 contact: ContactCheck;
                 displacementM: number;
                 repairedCutPairs?: readonly (readonly [number, number])[];
+                heldParticleCount?: number;
               }
             | undefined;
           let smallestTrial: { contact: ContactCheck; displacementM: number } | undefined;
+          let firstCappedTrialContact: ContactCheck | undefined;
           let trialCount = 0;
           for (; trialCount < 6; scale *= 0.5) {
             current();
@@ -769,6 +871,8 @@ async function executeWindow(program: Program, input: FrameInput, signal?: Abort
             const displacementM = maximumMotionM(startPositions, motion.positionsMInvMass);
             const contact = checkContact(motion.positionsMInvMass);
             smallestTrial = { contact, displacementM };
+            if (trialCount === 1 && perParticleLimit !== undefined && !contact.passed)
+              firstCappedTrialContact = contact;
             if (contact.passed && displacementM <= limit + 1e-7) {
               trial = { motion, contact, displacementM };
               break;
@@ -806,6 +910,15 @@ async function executeWindow(program: Program, input: FrameInput, signal?: Abort
                   }
                 }
               }
+            }
+            if (
+              trialCount === 1 &&
+              perParticleLimit !== undefined &&
+              program.enableLocalClothContactResponse
+            ) {
+              // Keep the original capped motion on carriers outside the rejected faces.
+              trial = retreatCappedCutMotion(startPositions, motion, contact, limit);
+              if (trial) break;
             }
           }
           if (!trial) {
@@ -878,7 +991,9 @@ async function executeWindow(program: Program, input: FrameInput, signal?: Abort
             proposedDisplacementM,
             acceptedDisplacementM: trial.displacementM,
             ...(proposalContact ? { proposalContact } : {}),
+            ...(firstCappedTrialContact ? { firstCappedTrialContact } : {}),
             ...(trial.repairedCutPairs ? { repairedCutPairs: trial.repairedCutPairs } : {}),
+            ...(trial.heldParticleCount ? { heldParticleCount: trial.heldParticleCount } : {}),
           });
         }
       }
@@ -895,6 +1010,7 @@ async function executeWindow(program: Program, input: FrameInput, signal?: Abort
           .join(' '),
       );
     current();
+    program.compiledPipelines = compiledPipelines;
     return {
       assertCurrent: current,
       targetLengthsM: source.seamTargetLengthsM,
@@ -906,7 +1022,8 @@ async function executeWindow(program: Program, input: FrameInput, signal?: Abort
         safeguardedSteps,
         ...(bodyQueryWork.length ? { bodyQueryWork } : {}),
         deviceIdentity: lease.identity,
-        shaderIdentities: Object.fromEntries(namedJobs.map((name, i) => [name, identities[i]])),
+        shaderIdentities: structuredClone(compiledPipelines.identities),
+        pipelineCompilations: reusedPipelines ? 0 : Object.keys(compiledPipelines.shaders).length,
         positionsMInvMass: finalPositions.slice(),
         previousPositionsMInvMass: finalPrevious.slice(),
         velocities: finalVelocity.slice(),
