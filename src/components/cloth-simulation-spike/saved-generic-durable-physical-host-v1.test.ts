@@ -2,6 +2,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { Buffer } from 'node:buffer';
 import {
   act,
+  Children,
   createElement,
   isValidElement,
   type ComponentProps,
@@ -74,6 +75,12 @@ import type {
 } from './dxf-garment-observed-strain-heatmap-preview-v1';
 import { bindCadWorkbenchPhysicalPreviewSelectionV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/cad-workbench-physical-host-v1';
 import { CadWorkbenchPhysicalHostControlsV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/cad-workbench-physical-host-controls-v1';
+import { CadWorkbenchFirstPhysicalAuthoringV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/cad-workbench-first-physical-authoring-v1';
+import {
+  bindSavedFullAssemblyGenericFirstAuthoringV1,
+  type SavedFullAssemblyTablePiecePlacementV1,
+} from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-full-assembly-generic-first-authoring-v1';
+import { persistCurrentSavedGenericObservedPhysicalHostV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-full-assembly-physical-document-production-v1';
 import {
   PATTERN_IMPORT_DXF_PRODUCT_PHASE_E_AUTHORING_CATALOG_V1,
   computePatternImportDxfProductPhaseEAuthoringCatalogSha256V1,
@@ -615,14 +622,9 @@ async function encodedStorage(
     current: exact.carrier.bindings,
   };
 }
-async function fixture(withAnnotations = false) {
-  const observed = await sessionFixture();
-  cleanup.push(() => observed.input.dispose());
-  const body = createSavedModelDisplayedTriangleBodySessionV2(async () =>
-    structuredClone(observed.state.model),
-  );
-  await body.observe(observed.input);
-  cleanup.push(() => body.dispose());
+async function compiledObservedFixture(
+  body: ReturnType<typeof createSavedModelDisplayedTriangleBodySessionV2>,
+) {
   const native = await createSavedThreePanelSourceV1(seed);
   cleanup.push(native.dispose);
   const pre = createSavedGenericObservedPhysicalHostV1({ row: seed.row, bodySession: body });
@@ -651,6 +653,17 @@ async function fixture(withAnnotations = false) {
   };
   requireOk(await pre.consume({ ...raw, intent }));
   const author = requireOk(await pre.projectAuthoringContext(1));
+  return { pre, author };
+}
+async function fixture(withAnnotations = false) {
+  const observed = await sessionFixture();
+  cleanup.push(() => observed.input.dispose());
+  const body = createSavedModelDisplayedTriangleBodySessionV2(async () =>
+    structuredClone(observed.state.model),
+  );
+  await body.observe(observed.input);
+  cleanup.push(() => body.dispose());
+  const { pre, author } = await compiledObservedFixture(body);
   const doc: DxfGarmentPhysicalInitializationV1 = {
     schemaVersion: DXF_GARMENT_PHYSICAL_INITIALIZATION_V1,
     graphCanonicalSha256: author.graphCanonicalSha256,
@@ -1782,6 +1795,206 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
     });
     expect(device.destroy).not.toHaveBeenCalled();
     expect((await f.body.projectCurrentBody()).status).toBe('projected');
+  }, 120000);
+
+  it('mounts explicit physical placement and reloads the exact observed target and rigid transforms through V7', async () => {
+    const f = await fixture();
+    const prior = {
+      ...f.storage.v6,
+      postSaveReceiptSha256: semanticDocument(seed.row).persistence.receiptSealSha256,
+    };
+    outer = prior;
+    const baseClient = vi.mocked(abortableAdminService).getMockImplementation()!;
+    const put = vi.fn(async (request: PutTechCardPatternSemanticSidecarRequest) => {
+      expect(request.expectedPreviousSidecarSha256).toBe(prior.sidecarSha256);
+      expect(request.expectedCardLockVersion).toBe(seed.row.cardLockVersion);
+      expect(request.expectedSavedRowRevision).toBe(seed.row.revision);
+      outer = {
+        ...prior,
+        sidecarBytes: request.sidecarBytes,
+        sidecarSha256: request.sidecarSha256,
+        mediaType: request.mediaType,
+        byteLength: Buffer.from(request.sidecarBytes!, 'base64').length,
+      };
+      return { semanticSidecar: structuredClone(outer) };
+    });
+    vi.mocked(abortableAdminService).mockImplementation((signal) => ({
+      ...baseClient(signal),
+      GetTechCardPatternSemanticSidecar: async () => ({ semanticSidecar: structuredClone(outer) }),
+      PutTechCardPatternSemanticSidecar: put,
+    }));
+    const actor = await compiledObservedFixture(f.body);
+    const generation = actor.author.sourceGeneration;
+    const save = vi
+      .fn<(placements: readonly SavedFullAssemblyTablePiecePlacementV1[]) => Promise<void>>()
+      .mockResolvedValue(undefined);
+    type AuthoringProps = ComponentProps<typeof CadWorkbenchFirstPhysicalAuthoringV1>;
+    type State = AuthoringProps['state'];
+    const state: State = {
+      profile: '',
+      setProfile: () => undefined,
+      selected: null,
+      bodySession: f.body,
+      onDisplayedBodyInputV1: f.body.onDisplayedBodyInputV1,
+      host: null,
+      durableSnapshot: null,
+      sourceStatus: 'placement-required',
+      sourceError: null,
+      retry: vi.fn(),
+      firstAuthoring: {
+        status: 'placement-required',
+        bootstrap: {} as NonNullable<State['firstAuthoring']['bootstrap']>,
+        sourceGeometry: actor.author.sourceGeometry,
+        error: null,
+      },
+      startFirstAuthoring: async () => {},
+      compileFirstAuthoring: async () => {},
+      saveFirstAuthoring: save,
+    };
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    vi.stubGlobal('window', { event: undefined, location: { origin: 'http://fixture.local' } });
+    cleanup.push(() => vi.unstubAllGlobals());
+    const view = mountAnnotationFixtureView((current: State) => {
+      const root = CadWorkbenchFirstPhysicalAuthoringV1({ state: current });
+      const fields = Children.toArray(root?.props.children).find(
+        (item): item is ReactElement<AuthoringProps> =>
+          isValidElement(item) &&
+          typeof item.type === 'function' &&
+          item.type.name === 'PlacementAuthoring',
+      );
+      if (!fields || typeof fields.type !== 'function')
+        throw new Error('The mounted physical placement form is absent.');
+      return (fields.type as (props: AuthoringProps) => ReactNode)(fields.props);
+    });
+    await view.render(state);
+    const field = (name: string) => visitMountedTree(view.output(), (item) => item.name === name);
+    const enter = (name: string, key: 'onChange' | 'onValueChange', value: string) =>
+      act(async () => {
+        const handler = field(name)?.[key] as ((entry: string) => void) | undefined;
+        if (!handler) throw new Error(`Mounted placement field is absent: ${name}`);
+        handler(value);
+      });
+    const pieces = actor.author.sourceGeometry.pieces;
+    const oldPlacements = f.context.physicalInitialization.document.placements;
+    // Rotate the seam-coherent fixture as a whole while choosing new exact source pivots.
+    const positionAtPivot = (pieceId: string, pivot: readonly [number, number, number]) => {
+      const old = oldPlacements.find((placement) => placement.pieceId === pieceId)!;
+      return pivot.map(
+        (coordinate, axis) => coordinate - old.sourceOriginM[axis]! + old.translationM[axis]!,
+      );
+    };
+    const firstPivot = pieces[0]!.contours[0]!.vertices[0]!.positionM;
+    const firstWorldX = positionAtPivot(pieces[0]!.pieceId, firstPivot)[0]!;
+    for (const [index, piece] of pieces.entries()) {
+      const contour = piece.contours[0]!;
+      await enter(`placement-contour-${piece.pieceId}`, 'onValueChange', contour.contourId);
+      await enter(
+        `placement-vertex-${piece.pieceId}`,
+        'onValueChange',
+        contour.vertices[0]!.vertexId,
+      );
+      const [x, y, z] = positionAtPivot(piece.pieceId, contour.vertices[0]!.positionM);
+      for (const [axis, value] of [
+        ['rx', '0'],
+        ['ry', '90'],
+        ['rz', '0'],
+        ['x', String(z! + 1)],
+        ['y', String(y)],
+        ['z', index === 0 ? '-0' : String(firstWorldX - x!)],
+      ])
+        await enter(`placement-${axis}-${piece.pieceId}`, 'onChange', value!);
+    }
+    const submit = visitMountedTree(view.output(), (item) => item.children === 'Save placement')
+      ?.onClick as (() => void) | undefined;
+    await act(async () => submit?.());
+    expect(
+      visitMountedTree(view.output(), (item) => item.variant === 'errorLabel')?.children,
+    ).toBeUndefined();
+    expect(save).toHaveBeenCalledTimes(1);
+    const placements = save.mock.calls[0]![0];
+    expect(placements[0]?.translationM[2]).toBe(0);
+    expect(placements[1]?.rotationRowMajor).toEqual([0, 0, 1, 0, 1, 0, -1, 0, 0]);
+    const request = { placements, expectedGeneration: generation };
+    expect(
+      await bindSavedFullAssemblyGenericFirstAuthoringV1(actor.pre, {
+        ...request,
+        expectedGeneration: generation + 1,
+      }),
+    ).toMatchObject({ ok: false });
+    expect(
+      await bindSavedFullAssemblyGenericFirstAuthoringV1(actor.pre, {
+        ...request,
+        placements: [
+          { ...placements[0]!, pivot: { ...placements[0]!.pivot, positionM: [1, 1, 1] } },
+          ...placements.slice(1),
+        ],
+      }),
+    ).toMatchObject({ ok: false, detail: expect.stringMatching(/pivot identity or exact source/) });
+    const unsupportedSideAndLayer = { ...placements[0]!, side: 'front', layer: 1 };
+    expect(
+      await bindSavedFullAssemblyGenericFirstAuthoringV1(actor.pre, {
+        ...request,
+        placements: [unsupportedSideAndLayer, ...placements.slice(1)],
+      }),
+    ).toMatchObject({ ok: false, detail: expect.stringMatching(/additional fields/) });
+    const bound = requireOk(await bindSavedFullAssemblyGenericFirstAuthoringV1(actor.pre, request));
+    expect(bound.document.observedTarget).toEqual(actor.author.observedTarget);
+    for (const [host, expectedGeneration] of [
+      [actor.pre, generation + 1],
+      [{ ...actor.pre }, generation],
+    ] as const)
+      expect(
+        await persistCurrentSavedGenericObservedPhysicalHostV1(host, expectedGeneration),
+      ).toMatchObject({
+        ok: false,
+        writeOutcome: 'not-attempted',
+      });
+    const changedPose = await sessionFixture(731, 10);
+    cleanup.push(() => changedPose.input.dispose());
+    await f.body.observe(changedPose.input);
+    const changedTarget = requireOk(
+      await bodyApi.projectCurrentSavedModelGenericObservedTargetV1(f.body),
+    );
+    expect(changedTarget.canonicalSha256).not.toBe(actor.author.observedTarget.canonicalSha256);
+    expect(
+      await persistCurrentSavedGenericObservedPhysicalHostV1(actor.pre, generation),
+    ).toMatchObject({
+      ok: false,
+      writeOutcome: 'not-attempted',
+    });
+    expect(put).not.toHaveBeenCalled();
+    expect(outer).toEqual(prior);
+
+    await f.body.observe(f.observed.input);
+    const replacement = await compiledObservedFixture(f.body);
+    const expected = requireOk(
+      await bindSavedFullAssemblyGenericFirstAuthoringV1(replacement.pre, {
+        placements,
+        expectedGeneration: replacement.author.sourceGeneration,
+      }),
+    );
+    const persisted = requireOk(
+      await persistCurrentSavedGenericObservedPhysicalHostV1(
+        replacement.pre,
+        replacement.author.sourceGeneration,
+      ),
+    );
+    expect(persisted.writeOutcome).toBe('verified');
+    expect(put).toHaveBeenCalledTimes(1);
+    const restored = await freshPhysicalFixtureHost(f.body);
+    requireOk(await restored.host.restore(restored.request));
+    const reopened = physicalReader.projectSavedFullAssemblyPhysicalSnapshotV1(restored.reader);
+    expect(reopened.physicalInitialization).toEqual(expected.document);
+    expect(reopened.physicalInitialization.observedTarget).toEqual(
+      replacement.author.observedTarget,
+    );
+    expect(reopened.physicalInitializationCanonicalSha256).toBe(expected.initializationSha256);
+    expect(Object.keys(reopened.physicalInitialization.placements[0]!).sort()).toEqual([
+      'pieceId',
+      'rotationRowMajor',
+      'sourceOriginM',
+      'translationM',
+    ]);
   }, 120000);
 
   it('renders adapter and retained-frame device failure, then restores and cleans up the same saved arrangement', async () => {

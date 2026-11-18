@@ -31,9 +31,8 @@ const emptySide = (): SideDraft => ({
 const finite = (value: string, positive = false): number | null => {
   if (!value.trim()) return null;
   const parsed = Number(value);
-  return Number.isFinite(parsed) && !Object.is(parsed, -0) && (!positive || parsed > 0)
-    ? parsed
-    : null;
+  if (!Number.isFinite(parsed) || (positive && parsed <= 0)) return null;
+  return parsed === 0 ? 0 : parsed;
 };
 
 function FieldLabel({ htmlFor, children }: { htmlFor: string; children: ReactNode }) {
@@ -387,7 +386,8 @@ function PlacementAuthoring({ state, disabled }: { state: HostState; disabled: b
   return (
     <div className='space-y-stack' data-cad-first-placement-authoring=''>
       <Text component='p' size='micro' variant='label'>
-        Select an exact source pivot and enter the mannequin-space transform in metres.
+        Select an exact source pivot. Enter rotation in degrees and world position in metres. +X
+        points to the mannequin’s left, +Y up and +Z forward.
       </Text>
       {geometry.pieces.map((piece) => {
         const draft = drafts[piece.pieceId] ?? {
