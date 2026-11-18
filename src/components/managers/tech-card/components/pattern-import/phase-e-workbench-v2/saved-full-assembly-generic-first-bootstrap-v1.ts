@@ -31,6 +31,7 @@ import type { SavedFullAssemblyCompileRequestV1 } from './saved-full-assembly-co
 import {
   disposeSavedFullAssemblySnapshotV1,
   projectSavedFullAssemblySnapshotV1,
+  savedFullAssemblyNonUnitRatioDetailV1,
   readSavedFullAssemblySnapshotV1,
   type SavedFullAssemblySnapshotProjectionV1,
 } from './saved-full-assembly-snapshot-production-v1';
@@ -124,6 +125,7 @@ export class SavedFullAssemblyGenericFirstBootstrapErrorV1 extends Error {
       | 'cancelled'
       | 'current-v6-required'
       | 'genuine-stitch-required'
+      | 'unsupported-fullness-ratio'
       | 'single-size-required'
       | 'native-reprocess-blocked'
       | 'native-source-invalid'
@@ -439,6 +441,8 @@ export const prepareSavedFullAssemblyGenericFirstBootstrapV1 = Object.freeze(
             ? 'Saved V6 bindings differ from the current row or Assembly revision.'
             : decodedV6.blockers[0].detail,
         );
+      const ratioBlocker = savedFullAssemblyNonUnitRatioDetailV1(snapshot);
+      if (ratioBlocker) fail('unsupported-fullness-ratio', ratioBlocker);
       const selectedSize = sizeToken(snapshot);
       const sourceSnapshot =
         createPatternImportDxfPhaseESavedAssemblySnapshotProductionRpcV1(seedOperationNumber);

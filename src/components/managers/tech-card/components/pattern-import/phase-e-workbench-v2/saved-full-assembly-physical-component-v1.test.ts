@@ -76,7 +76,7 @@ const snapshot = Object.freeze({
   claims: {},
 }) as unknown as SavedFullAssemblySnapshotProjectionV1;
 
-async function build(inputGraph = graph) {
+async function build(inputGraph = graph, assemblySnapshot = snapshot) {
   const physicalBytes = encoder.encode('{"physical":"fixture"}');
   const physicalSha = await digest(physicalBytes);
   const expectAoOnly = (value: unknown) => {
@@ -110,7 +110,7 @@ async function build(inputGraph = graph) {
     graphCanonicalSha256: sha('b'),
     compileInputSha256: sha('c'),
     physicalInitializationBytes: physicalBytes,
-    assemblySnapshot: snapshot,
+    assemblySnapshot,
   });
 }
 
@@ -205,6 +205,37 @@ describe('Saved Full Assembly physical component V1', () => {
     if (decoded.ok) return;
     expect(decoded.blockers[0].code).toBe('assembly-order-digest-mismatch');
   });
+
+  it.each(['0.90', '1.00', '1.15'])(
+    'enforces the equal physical profile for stored ratio %s',
+    async (ratio) => {
+      const wireSnapshot = {
+        ...snapshot,
+        operationsPayloadCanonicalJson: JSON.stringify([
+          {
+            operationNumber: 10,
+            seamKeys: ['confirmed-seam'],
+            stitching: { fullnessRatio: { value: ratio } },
+          },
+          { operationNumber: 20, seamKeys: [], stitching: { fullnessRatio: { value: '1.15' } } },
+        ]),
+      };
+      fingerprintMock.mockClear();
+      const result = await build(graph, wireSnapshot);
+      if (ratio === '1.00') {
+        expect(result.ok).toBe(true);
+        expect(fingerprintMock).toHaveBeenCalledOnce();
+      } else {
+        expect(result).toMatchObject({
+          ok: false,
+          blockers: [
+            { code: 'unsupported-fullness-ratio', detail: expect.stringContaining('operation 10') },
+          ],
+        });
+        expect(fingerprintMock).not.toHaveBeenCalled();
+      }
+    },
+  );
 
   it('does not accept a structural owner lookalike', async () => {
     const result = await build();

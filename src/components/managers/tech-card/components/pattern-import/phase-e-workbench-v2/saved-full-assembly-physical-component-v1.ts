@@ -9,7 +9,10 @@ import type {
 } from 'lib/cloth/domain/dxf-exact-assembly-graph-v1';
 import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 
-import type { SavedFullAssemblySnapshotProjectionV1 } from './saved-full-assembly-snapshot-production-v1';
+import {
+  savedFullAssemblyNonUnitRatioDetailV1,
+  type SavedFullAssemblySnapshotProjectionV1,
+} from './saved-full-assembly-snapshot-production-v1';
 
 export const SAVED_FULL_ASSEMBLY_PHYSICAL_COMPONENT_V1 =
   'saved-full-assembly-physical-component/1' as const;
@@ -418,6 +421,8 @@ async function verifyDocument(
   const aoContentSha256 = await fingerprintSavedFullAssemblyAoContentV1(snapshot, signal);
   if (document.bindings.aoContentSha256 !== aoContentSha256)
     fail('assembly-order-digest-mismatch', 'Complete Assembly Order content digest differs.');
+  const ratioBlocker = savedFullAssemblyNonUnitRatioDetailV1(snapshot);
+  if (ratioBlocker) fail('unsupported-fullness-ratio', ratioBlocker);
   const fingerprint = await fingerprintDxfExactAssemblyGraphV1(
     { graph: document.graph, assemblySnapshot: aoSnapshot },
     signal,

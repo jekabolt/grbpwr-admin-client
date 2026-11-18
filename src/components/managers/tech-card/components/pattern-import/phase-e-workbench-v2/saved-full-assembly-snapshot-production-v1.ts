@@ -1,5 +1,8 @@
 import { abortableAdminService } from 'api/api';
-import type { GetTechCardSavedAssemblySnapshotRequest } from 'api/proto-http/admin';
+import type {
+  GetTechCardSavedAssemblySnapshotRequest,
+  GetTechCardSavedAssemblySnapshotResponse,
+} from 'api/proto-http/admin';
 import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 import type { DxfExactAssemblyGraphAoSnapshotV1 } from 'lib/cloth/domain/dxf-exact-assembly-graph-v1';
 import { mapPatternImportDxfPhaseESavedAssemblySnapshotRpcResponseV1 } from './saved-assembly-snapshot-rpc-bridge-v1';
@@ -22,6 +25,25 @@ export const SAVED_FULL_ASSEMBLY_SNAPSHOT_CLAIMS_V1 = Object.freeze({
   productAuthority: false,
   runtimeAuthority: false,
 } as const);
+
+export function savedFullAssemblyNonUnitRatioDetailV1(
+  snapshot: SavedFullAssemblySnapshotProjectionV1,
+): string | null {
+  const wire = JSON.parse(
+    snapshot.operationsPayloadCanonicalJson,
+  ) as GetTechCardSavedAssemblySnapshotResponse['operations'];
+  const unequal = wire?.find((operation) => {
+    const ratio = operation.stitching?.fullnessRatio;
+    return (
+      !!operation.seamKeys?.length &&
+      ratio != null &&
+      (typeof ratio.value !== 'string' || !/^1(?:\.0+)?$/.test(ratio.value))
+    );
+  });
+  return unequal
+    ? `Assembly operation ${unequal.operationNumber} uses a fullness ratio. The current physical profile requires a ratio of 1.`
+    : null;
+}
 export type SavedFullAssemblySnapshotRequestV1 = Readonly<{
   row: DxfProductSavedRowIdentityV1;
   seedOperationNumber: number;
