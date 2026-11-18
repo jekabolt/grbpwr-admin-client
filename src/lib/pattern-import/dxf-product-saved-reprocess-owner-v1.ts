@@ -394,7 +394,9 @@ function deepFreezeOwned<T>(value: T, seen = new Set<object>()): T {
   return Object.freeze(value);
 }
 
-async function validateAndRedactDraft(
+/** Verifies the ordinary writer's full output against the saved row and redacts the raw text.
+ * Callers operating on a published draft must first take a private snapshot before awaiting. */
+export async function validateAndRedactSavedDxfDraftV1(
   draft: CardDraft,
   row: DxfProductSavedRowIdentityV1,
   sourceFileId: string,
@@ -695,7 +697,7 @@ export function createDxfProductSavedReprocessOwnerV1(host: DxfProductSavedRepro
           row,
           sourceFileId,
         );
-      const validated = await validateAndRedactDraft(
+      const validated = await validateAndRedactSavedDxfDraftV1(
         rebuilt.draft,
         row,
         sourceFileId,

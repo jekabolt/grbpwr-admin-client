@@ -26,57 +26,68 @@ function ringMatches(ring: readonly PtMm[], native: readonly PtMm[]) {
   );
 }
 /** Every affected size must be a single original block with the same complete straight cut and hole rings. */
-export async function checkSavedParallelSpreadSourceV1(source: Source, pieceId: string) {
+export async function readSavedNativeCutEdgesV1(source: Source, pieceIds: readonly string[]) {
   const { draft, nativeRead, row, sourceFileId } = source;
   const scope = one(draft.scopes.filter((s) => s.target.scopeKey === row.scopeKey));
-  const piece = one(scope?.writerReplay?.job.pieces.filter((p) => p.identity === pieceId) ?? []);
-  requireSource(
-    scope && piece && !scope.writerReplay?.retainedLineSplit,
-    'The original saved piece is unavailable.',
-  );
-  const blocks = scope.manifest.blocks.filter((b) => b.identity === pieceId);
-  requireSource(
-    blocks.length === piece.sizes.length &&
-      !scope.manifest.blocks.some((b) => b.protectedLineSplit),
-    'The saved size blocks are ambiguous or contain a protected vertex.',
-  );
   const page = nativeRead.read.doc.pages[0]!,
     paths = new Map(page.paths.map((p) => [p.id, p]));
   const counts = new Map<number, number>();
-  for (const size of piece.sizes) {
-    const b = one(blocks.filter((b) => b.sizeToken === size.sizeToken && b.sizeId === size.sizeId));
-    const rank = one(
-      scope.manifest.sizes.filter((s) => s.token === size.sizeToken && s.sizeId === size.sizeId),
-    );
-    const group =
-      b &&
-      one(nativeRead.read.meta.groups.filter((g) => g.kind === 'insert' && g.block === b.block));
+  requireSource(
+    pieceIds.length > 0 && new Set(pieceIds).size === pieceIds.length,
+    'Select distinct original pieces.',
+  );
+  const selected = pieceIds.map((pieceId) => {
+    const piece = one(scope?.writerReplay?.job.pieces.filter((p) => p.identity === pieceId) ?? []);
     requireSource(
-      b &&
-        rank?.rank === size.rank &&
-        group &&
-        group.transform.a === 1 &&
-        group.transform.b === 0 &&
-        group.transform.c === 0 &&
-        group.transform.d === 1,
-      'A saved size block or its native coordinate frame changed.',
+      scope && piece && !scope.writerReplay?.retainedLineSplit,
+      'The original saved piece is unavailable.',
     );
-    const all = group.paths
-      .map((id) => paths.get(id))
-      .filter((p) => p && page.styles[p.style]?.layer === '1');
-    const rings = [size.cut, ...(size.cutLoops ?? [])];
-    requireSource(all.length === rings.length, 'The native cut or hole count changed.');
-    for (const ring of rings) {
-      const path = one(
-        all.filter((p) => p?.closed && p.src.block === b.block && ringMatches(ring, p.pts)),
+    const blocks = scope.manifest.blocks.filter((b) => b.identity === pieceId);
+    requireSource(
+      blocks.length === piece.sizes.length &&
+        !scope.manifest.blocks.some((b) => b.protectedLineSplit),
+      'The saved size blocks are ambiguous or contain a protected vertex.',
+    );
+    const outerPaths = new Map<string, number>();
+    for (const size of piece.sizes) {
+      const b = one(
+        blocks.filter((b) => b.sizeToken === size.sizeToken && b.sizeId === size.sizeId),
       );
+      const rank = one(
+        scope.manifest.sizes.filter((s) => s.token === size.sizeToken && s.sizeId === size.sizeId),
+      );
+      const group =
+        b &&
+        one(nativeRead.read.meta.groups.filter((g) => g.kind === 'insert' && g.block === b.block));
       requireSource(
-        path && !counts.has(path.id),
-        'A cut or hole lost its exact directed native ring.',
+        b &&
+          rank?.rank === size.rank &&
+          group &&
+          group.transform.a === 1 &&
+          group.transform.b === 0 &&
+          group.transform.c === 0 &&
+          group.transform.d === 1,
+        'A saved size block or its native coordinate frame changed.',
       );
-      counts.set(path.id, ring.length);
+      const all = group.paths
+        .map((id) => paths.get(id))
+        .filter((p) => p && page.styles[p.style]?.layer === '1');
+      const rings = [size.cut, ...(size.cutLoops ?? [])];
+      requireSource(all.length === rings.length, 'The native cut or hole count changed.');
+      for (const ring of rings) {
+        const path = one(
+          all.filter((p) => p?.closed && p.src.block === b.block && ringMatches(ring, p.pts)),
+        );
+        requireSource(
+          path && !counts.has(path.id),
+          'A cut or hole lost its exact directed native ring.',
+        );
+        counts.set(path.id, ring.length);
+        if (ring === size.cut) outerPaths.set(size.sizeToken, path.id);
+      }
     }
-  }
+    return { piece, scope, outerPaths };
+  });
   const edges = await projectDxfSourceNativeStraightEdgeSelectedPathsV1(nativeRead.owner, {
     schemaVersion: DXF_SOURCE_NATIVE_STRAIGHT_EDGE_SELECTED_PATHS_REQUEST_V1,
     sourceFileId,
@@ -108,4 +119,18 @@ export async function checkSavedParallelSpreadSourceV1(source: Source, pieceId: 
     [...counts].every(([id, n]) => indices.get(id)?.size === n),
     'The saved original cut or hole has missing intervals.',
   );
+  return selected.map(({ piece, scope, outerPaths }) => ({
+    piece,
+    scope,
+    edges: piece.sizes.map((size) => ({
+      size,
+      descriptors: edges.projection.descriptors.filter(
+        (edge) => edge.path.sourcePathId === outerPaths.get(size.sizeToken),
+      ),
+    })),
+  }));
+}
+
+export async function checkSavedParallelSpreadSourceV1(source: Source, pieceId: string) {
+  await readSavedNativeCutEdgesV1(source, [pieceId]);
 }
