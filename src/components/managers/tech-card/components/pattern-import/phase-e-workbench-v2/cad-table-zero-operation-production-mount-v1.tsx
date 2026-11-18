@@ -1419,11 +1419,19 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
       mannequin={({ sources, activeScopeKey, stagingBlocked, acceptedCloth, sizeMatches }) => (
         <div className='flex h-full min-h-0 flex-col'>
           {physicalHost?.panel ? (
-            <div className='shrink-0'>{physicalHost.panel(sizeMatches)}</div>
+            <div
+              role='region'
+              aria-label='Cloth preview controls'
+              tabIndex={0}
+              className='max-h-[min(11rem,30%)] shrink-0 overflow-y-auto overscroll-y-contain'
+            >
+              {physicalHost.panel(sizeMatches)}
+            </div>
           ) : null}
           <div className='min-h-0 flex-1'>
             <PatternImportDxfPhaseECadMannequinModelPickerV1
               disabled={disabled}
+              reserveViewportHeight={Boolean(physicalHost?.panel)}
               onDisplayedBodyInputV1={physicalHost?.onDisplayedBodyInputV1}
               acceptedCloth={acceptedCloth}
               onSaveMannequinArrangement={physicalHost?.onSaveMannequinArrangement}

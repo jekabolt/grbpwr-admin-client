@@ -139,6 +139,9 @@ describe('physical host production receivers', () => {
     expect(attribute(zero.tree, hosts[0], 'savedReviewSize')).toBe('physicalHost?.savedReviewSize');
     expect(zero.text).toContain('if (!tableSizeMatchesReview) return undefined;');
     expect(attribute(zero.tree, pickers[0], 'acceptedCloth')).toBe('acceptedCloth');
+    expect(attribute(zero.tree, pickers[0], 'reserveViewportHeight')).toBe(
+      'Boolean(physicalHost?.panel)',
+    );
     expect(zero.text).toContain('acceptedCloth: selectableCloth');
     expect(zero.text).toContain(
       'selectCadTableAcceptedClothPieceV1(session, row, prepared.projection, hit)',
@@ -178,7 +181,15 @@ describe('physical host production receivers', () => {
     expect(branch.condition.getText(zero.tree)).toBe('physicalHost?.panel');
     expect(branch.whenFalse.kind).toBe(ts.SyntaxKind.NullKeyword);
     const dockClasses = classes(zero.tree, panel.openingElement);
-    expect(dockClasses).toContain('shrink-0');
+    expect(dockClasses).toEqual(
+      expect.arrayContaining([
+        'max-h-[min(11rem,30%)]',
+        'shrink-0',
+        'overflow-y-auto',
+        'overscroll-y-contain',
+      ]),
+    );
+    expect(attribute(zero.tree, panel.openingElement, 'tabIndex')).toBe('0');
     expect(dockClasses.join(' ')).not.toMatch(
       /(?:^|[\s:])(?:absolute|fixed|sticky|pointer-events-none)(?:$|\s)/,
     );
@@ -192,6 +203,30 @@ describe('physical host production receivers', () => {
     );
     expect(panelChildren).toHaveLength(1);
     expect(panel.children.filter((child) => !ts.isJsxText(child))).toEqual(panelChildren);
+  });
+
+  it('reserves height on the actual Workbench stage and lets the containing model column scroll', () => {
+    const picker = source('./cad-workbench-mannequin-model-picker-v1.tsx');
+    const previews = elements(picker.tree, 'ModelOpenReferencePreviewFromInput');
+    expect(previews).toHaveLength(1);
+    expect(attribute(picker.tree, previews[0], 'reserveWorkbenchViewportHeight')).toBe(
+      'reserveViewportHeight',
+    );
+    expect(attribute(picker.tree, previews[0], 'key')).toBe('selectedRevision');
+    expect(picker.text).toContain(
+      "reserveViewportHeight ? ' overflow-y-auto overscroll-y-contain' : ''",
+    );
+    expect(picker.text).toContain("reserveViewportHeight ? 'min-h-72' : 'min-h-0 overflow-hidden'");
+
+    const model = source('../../../../model/components/model-open-reference-preview.tsx');
+    const stages = elements(model.tree, 'MeasurementWatertightSurfaceV1Stage');
+    const props = stages.map((stage) => attribute(model.tree, stage, 'className'));
+    expect(props.filter((prop) => prop?.includes('reserveWorkbenchViewportHeight'))).toHaveLength(
+      1,
+    );
+    expect(props.join(' ')).toContain(
+      'order-1 h-full min-h-56 w-full flex-1 border border-hairline',
+    );
   });
 
   it('drives the existing preview controls with the active table grade and verified review', () => {

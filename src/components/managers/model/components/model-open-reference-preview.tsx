@@ -468,6 +468,8 @@ export interface ModelOpenReferencePreviewProps {
    */
   readonly headerStatusV9?: ModelOpenReferencePreviewHeaderControlV1;
   readonly variant?: 'form' | 'workbench' | 'card';
+  /** The containing Workbench column can scroll when its controls leave limited space. */
+  readonly reserveWorkbenchViewportHeight?: boolean;
   /** Existing renderer camera preset. Orbit and wheel zoom remain direct viewport gestures. */
   readonly viewPreset?: MeasurementSurfaceViewPreset;
   /** Caller-owned exact pattern pieces rendered by the existing mannequin Three stage. */
@@ -2465,6 +2467,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
   measurementGuidePresentation = 'interactive',
   patternPieceOverlay,
   acceptedCloth,
+  reserveWorkbenchViewportHeight = false,
   variant = 'form',
   viewPreset = 'front',
 }: ModelOpenReferencePreviewFromInputProps & {
@@ -4187,7 +4190,9 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
                   card
                     ? 'pointer-events-none h-full min-h-0 w-full border border-hairline'
                     : workbench
-                      ? 'order-1 h-full min-h-0 w-full border border-hairline'
+                      ? reserveWorkbenchViewportHeight
+                        ? 'order-1 h-full min-h-56 w-full flex-1 border border-hairline'
+                        : 'order-1 h-full min-h-0 w-full border border-hairline'
                       : headerOwned
                         ? 'order-1 aspect-[6/5] max-h-[calc(100dvh-17rem)] min-h-80 w-full border border-hairline'
                         : editor.minimalViewportUi

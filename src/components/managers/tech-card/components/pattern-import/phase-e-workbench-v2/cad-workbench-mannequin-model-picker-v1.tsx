@@ -205,6 +205,7 @@ export type PatternImportDxfPhaseECadMannequinModelPickerViewPropsV1 = Readonly<
   onRetryPose?: () => void;
   onDisplayedBodyInputV1?: CadMannequinDisplayedBodyInputObserverV1;
   acceptedCloth?: CadWorkbenchPhysicalHostV1['acceptedCloth'];
+  reserveViewportHeight?: boolean;
   onSaveMannequinArrangement?: CadWorkbenchPhysicalHostV1['onSaveMannequinArrangement'];
   onReadMannequinArrangement?: CadWorkbenchPhysicalHostV1['onReadMannequinArrangement'];
   arrangementSourceKey?: string;
@@ -462,6 +463,7 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
   onRetryPose,
   onDisplayedBodyInputV1,
   acceptedCloth,
+  reserveViewportHeight = false,
   onSaveMannequinArrangement,
   onReadMannequinArrangement,
   arrangementSourceKey,
@@ -743,7 +745,7 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
 
   return (
     <section
-      className='flex h-full min-h-0 flex-col gap-2'
+      className={`flex h-full min-h-0 flex-col gap-2${reserveViewportHeight ? ' overflow-y-auto overscroll-y-contain' : ''}`}
       aria-label='Mannequin model'
       data-cad-mannequin-model-picker=''
       data-cad-mannequin-model-id={selected?.id ?? undefined}
@@ -933,7 +935,7 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
         </div>
       ) : (
         <div
-          className='relative flex min-h-0 flex-1 flex-col overflow-hidden p-2'
+          className={`relative flex flex-1 flex-col p-2 ${reserveViewportHeight ? 'min-h-72' : 'min-h-0 overflow-hidden'}`}
           data-cad-measurement-model-preview=''
         >
           <div className='mb-2 flex flex-wrap items-baseline justify-between gap-2'>
@@ -956,6 +958,7 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
               directPoseViewportEditingEnabledV9={poseEditing}
               hideDirectPoseControlV9
               acceptedCloth={acceptedCloth}
+              reserveWorkbenchViewportHeight={reserveViewportHeight}
               variant='workbench'
               viewPreset={viewPreset}
               patternPieceOverlay={
@@ -994,6 +997,7 @@ export function PatternImportDxfPhaseECadMannequinModelPickerV1({
   patternPieceScene = null,
   onDisplayedBodyInputV1,
   acceptedCloth,
+  reserveViewportHeight = false,
   onSaveMannequinArrangement,
   onReadMannequinArrangement,
   onReadSavedMannequinModelId,
@@ -1005,6 +1009,7 @@ export function PatternImportDxfPhaseECadMannequinModelPickerV1({
   patternPieceScene?: PatternImportDxfPhaseECadMannequinPatternPieceSceneV1 | null;
   onDisplayedBodyInputV1?: CadMannequinDisplayedBodyInputObserverV1;
   acceptedCloth?: CadWorkbenchPhysicalHostV1['acceptedCloth'];
+  reserveViewportHeight?: boolean;
   onSaveMannequinArrangement?: CadWorkbenchPhysicalHostV1['onSaveMannequinArrangement'];
   onReadMannequinArrangement?: CadWorkbenchPhysicalHostV1['onReadMannequinArrangement'];
   onReadSavedMannequinModelId?: CadWorkbenchPhysicalHostV1['onReadSavedMannequinModelId'];
@@ -1079,6 +1084,7 @@ export function PatternImportDxfPhaseECadMannequinModelPickerV1({
       onRetryPose={poseSession.retry}
       onDisplayedBodyInputV1={onDisplayedBodyInputV1}
       acceptedCloth={acceptedCloth}
+      reserveViewportHeight={reserveViewportHeight}
       onSaveMannequinArrangement={onSaveMannequinArrangement}
       onReadMannequinArrangement={onReadMannequinArrangement}
       arrangementSourceKey={arrangementSourceKey}
