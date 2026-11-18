@@ -766,10 +766,8 @@ export const OPERATION_KIND_BY_ID: ReadonlyMap<string, OperationKind> = new Map(
 // пишут свою личность из самого каталога (глагол + машинка) — см. `applyWorkItem`. Заводить им
 // пункты здесь значило бы вернуть словарь работ в бандл, из которого фаза его и вынимает.
 //
-// ЧТО ИЗ ЭТОГО НЕ СЛЕДУЕТ: будто без каталога их нет вовсе. Снимок-фолбэк несёт их отдельной
-// дельтой (`CATALOG_ONLY_WORKS` в `operation-work.ts`) — вместе со снятием `gather_ease` и честным
-// именем свалки, потому что вывести их отсюда не из чего. Пункт и работа — две разные
-// идентичности, и отсутствие первой не отменяет второй.
+// The offline work vocabulary is generated from the catalog migrations, including works without
+// a corresponding kind here. Kind identity remains independent of a work token.
 export const KIND_WORK_TOKEN: Readonly<Record<string, string>> = {
   A1: 'join_lockstitch',
   A2: 'topstitch',

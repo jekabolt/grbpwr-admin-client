@@ -13,27 +13,27 @@
 //
 // ЦИТАТЫ:
 //   А — ввод «моско» по фикстуре ответа сервера находит московский шов (и он единственный);
-//   Б — каталог ОТКАЗАЛ: пикер живёт на снимке бандла, список не пуст, деградация НАЗВАНА;
+//   Б — каталог ОТКАЗАЛ: пикер живёт на снимке бандла, проверен ответ 500 и доступный список работ;
 //   В — токен, которого бандл не знает, виден ТЕКСТОМ и уезжает обратно тем же токеном;
 //   Г — выбор пишет РАБОТУ и ЛИЧНОСТЬ (в том числе у работы, пункта под которую в бандле нет);
-//   Д — приоритет дефолтов: карточный последний шаг перекрывает глобальный, метка называет источник;
+//   Д — приоритет дефолтов: карточный последний шаг перекрывает глобальный в форме и в поле;
 //   Е — жест «запомнить как дефолт» рисуется ПО СЕРВЕРНОМУ РЕЕСТРУ: поле, выкинутое из
 //       `default_fields`, кнопки не получает, а поле, которого нет в клиентском списке свойств, —
 //       получает. Обе половины нужны: одна ловит «рисуем по своему списку», вторая — «рисуем по
 //       обоим сразу»;
-//   Ж — суженный список «на чём» и гоуст нормы времени тоже приходят из каталога: у работы, пункта
+//   Ж — суженный список машинок и значение нормы времени приходят из каталога: у работы, пункта
 //       под которую в бандле нет, сузить список нечем, и без каталога человек получил бы двадцать
 //       шесть машинок словаря вместо двух законных;
 //   З (ревью R6) — клавиатура не выбирает вслепую: Enter при пустом запросе БЕЗ подсветки молчит
 //       (первой строкой стоит «— no kind —», и рефлекторный Enter снимал бы вид, не меняя
 //       триггера), а «набрал слово + Enter» остаётся одним жестом;
-//   И (ревью R6) — метка «prefilled» ГАСНЕТ, когда человек тронул значение (и значение остаётся
-//       его); щит осведомлённости operation_work_aware объявлен на КАЖДОЙ записи. Обе половины
-//       найдены мутациями ревью: без них подмена условия метки и aware=false оставались зелёными.
+//   И (ревью R6) — ручное значение сохраняется после повторного выбора работы. Флаг
+//       operation_work_aware объявлен на каждой записи.
 //   К (0331) — СНИМОК ДОГНАЛ КАТАЛОГ, и проверяется он ПРИ ОТКАЗЕ каталога: «моско» и «прорезь»
 //       находят две работы, которых владелец просил по имени; снятая `gather_ease` не предлагается,
 //       но шаг, уже её несущий, читается ярлыком; свалка зовётся «Join / seam». Сторож сверх цитаты
-//       читает САМИ миграции и сравнивает с ними снимок построчно (см. `readSeededWorks`);
+//       читает САМИ миграции и сравнивает снимок построчно. В 0437/0458 проверяются поиск вытачки,
+//       порядок и отдельная запись ручной навески бирки;
 //   Л (Д5) — ВТО-ось держит выбор человека так же, как машинная: выбранный утюг переживает смену
 //       вида на Steam, а пустое оборудование вид всё-таки заполняет.
 //   М (0331) — ДЛИНА ПРОРЕЗИ ЖИВЁТ ПО ДВУМ ВХОДАМ, И РОВНО В ОДНОМ МЕСТЕ ЗА РАЗ. Работа
@@ -53,7 +53,7 @@
 //   node scripts/work-picker-probe.mjs --mutate-nowrite     выбор пишет ЛИЧНОСТЬ, но не работу → Г красная
 //   node scripts/work-picker-probe.mjs --mutate-clientlist  жест рисуется по КЛИЕНТСКОМУ списку → Е красная
 //   node scripts/work-picker-probe.mjs --mutate-narrow      «на чём» сужается пунктом бандла → Ж красная
-//   node scripts/work-picker-probe.mjs --mutate-snapshot    дельта 0331 из снимка убрана → К красная
+//   node scripts/work-picker-probe.mjs --mutate-snapshot    работа 0437 пропала, порядок снова ошибочен → К красная
 //   node scripts/work-picker-probe.mjs --mutate-presskeep   ВТО-оборудование пишется безусловно → Л красная
 //   node scripts/work-picker-probe.mjs --mutate-slitgate    гейт длины снова спрашивает ОДНУ машинку → М красная
 //   node scripts/work-picker-probe.mjs --mutate-slitlabel   ярлык длины снова «buttonhole cut, mm» → М красная
@@ -86,12 +86,13 @@
 import { build as esbuild } from './probe-esbuild.mjs';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readSeededWorks } from './generate-operation-work-snapshot.mjs';
 
 const MUTATE_SYN = process.argv.includes('--mutate-syn');
 const MUTATE_FALLBACK = process.argv.includes('--mutate-fallback');
@@ -223,23 +224,13 @@ if (MUTATE_CLIENTLIST)
   plugins.push(patcher(/operations-field\.tsx$/, [[CLIENTLIST_FIX, CLIENTLIST_BROKEN]], 'tsx'));
 if (MUTATE_NARROW)
   plugins.push(patcher(/operations-field\.tsx$/, [[NARROW_FIX, NARROW_BROKEN]], 'tsx'));
-// C5 / Д5 — ДВЕ МУТАЦИИ ФАЗЫ 0331. Первая откатывает дельту снимка целиком (четыре работы, снятие
-// предка и честное имя свалки) и обязана покрасить цитату К вместе со сторожем: снимок снова
-// отстаёт от каталога ровно так, как отстал в день выкатки. Вторая возвращает БЕЗУСЛОВНУЮ запись
-// ВТО-оборудования и обязана покрасить цитату Л: утюг владельца снова молча заменяется отпаривателем.
-const SNAPSHOT_FIX = `    const relabelled = RELABELLED_WORKS[item.token];
-    items.push({
-      ...item,
-      ...(relabelled ? { label: relabelled } : null),
-      retired: RETIRED_WORKS.has(item.token),
-    });
-  }
-  items.push(...CATALOG_ONLY_WORKS);`;
-const SNAPSHOT_BROKEN = `    items.push(item);
-  }
-  void CATALOG_ONLY_WORKS;
-  void RETIRED_WORKS;
-  void RELABELLED_WORKS;`;
+// Restore the observed missing 0437 entry and old kind-based ranks in the offline reader.
+const SNAPSHOT_FIX = 'const bundledWorkItems = parseWorkItems(workSnapshot);';
+const SNAPSHOT_BROKEN = `const bundledWorkItems = parseWorkItems(
+  workSnapshot.filter((work) => work.token !== 'dart').map((work) =>
+    work.token === 'hang_tag' ? { ...work, sort: 530 } : work.token === 'other' ? { ...work, sort: 540 } : work,
+  ),
+);`;
 const PRESSKEEP_FIX = `  if (out.pressEquipment && pressAnswered(pressOnStep)) out.pressEquipment = pressOnStep;`;
 const PRESSKEEP_BROKEN = `  void pressOnStep;
   void pressAnswered;`;
@@ -547,86 +538,8 @@ const openSetup = async () => {
   if ((await setup.getAttribute('aria-expanded')) === 'false') await setup.click();
 };
 
-// ── СТОРОЖ РАСХОЖДЕНИЯ: СНИМОК ПРОТИВ САМИХ МИГРАЦИЙ ────────────────────────────────────────────
-//
-// THE SNAPSHOT IS COMPARED WITH THE SEED ITSELF, NOT WITH A SECOND COPY OF IT. The catalog is data
-// that grows by migration; the bundle snapshot is a hand-carried delta on top of a derived list.
-// Those two drift APART SILENTLY — that is the whole defect 0331 produced within minutes of being
-// deployed — and no assertion written from memory catches it, because whoever forgets the snapshot
-// forgets the assertion in the same breath.
-//
-// SO THE MIGRATIONS ARE PARSED. Every `NNNN_*.sql` in the backend tree, Up section only, three
-// tables (`operation_work`, `_machine`, `_syn`) plus the two UPDATEs that retire and relabel. A
-// work seeded there and missing here turns this red; so does a label changed on one side only.
-//
-// NOT FOUND — SKIPPED, NOT FAILED, the same rule playwright gets above: a guard that cannot read
-// its source has not observed anything, and printing a refusal would be a statement about the code
-// it never looked at.
-//
-// STAGE IS DELIBERATELY NOT COMPARED. The snapshot groups by the bundle's own families (`fam_A`),
-// the catalog by its stages (`join_seam`) — a stated, commented divergence (see `bundleItem`), not
-// a drift. Synonyms are compared only where the snapshot carries any: the derived rows carry none
-// on purpose, and the four catalog-only works carry the migration's words verbatim.
-function readSeededWorks() {
-  const dir = [resolve(REPO, '..', 'grbpwr-products-manager', 'internal/store/sql')].find((d) =>
-    existsSync(d),
-  );
-  if (!dir) return null;
-  const works = new Map();
-  const machines = new Map();
-  const syn = new Map();
-  const push = (map, key, value) => {
-    if (!map.has(key)) map.set(key, []);
-    map.get(key).push(value);
-  };
-  for (const f of readdirSync(dir)
-    .filter((f) => /^\d{4}_.*\.sql$/.test(f))
-    .sort()) {
-    // Up ONLY: the Down section of 0331 deletes exactly the rows Up creates, and reading it would
-    // net the delta to zero.
-    const up = readFileSync(resolve(dir, f), 'utf8').split('-- +migrate Down')[0];
-    const body = up
-      .split('\n')
-      .filter((l) => !l.trimStart().startsWith('--'))
-      .join('\n');
-    for (const raw of body.split(';')) {
-      const s = raw.trim();
-      if (/^INSERT INTO operation_work \(/.test(s)) {
-        for (const m of s.matchAll(
-          /\(\s*'([^']*)',\s*'([^']*)',\s*'([^']*)',\s*'([^']*)',\s*'([^']*)',\s*(?:'([^']*)'|NULL),\s*(\d+)\s*\)/g,
-        )) {
-          works.set(m[1], {
-            token: m[1],
-            verb: m[2],
-            label: m[4],
-            machineMode: m[5],
-            defaultMachine: m[6] ?? '',
-            sort: +m[7],
-            retired: false,
-          });
-        }
-      } else if (/^INSERT INTO operation_work_machine/.test(s)) {
-        for (const m of s.matchAll(/\(\s*'([^']*)',\s*'([^']*)'\s*\)/g)) push(machines, m[1], m[2]);
-      } else if (/^INSERT INTO operation_work_syn/.test(s)) {
-        for (const m of s.matchAll(/\(\s*'([^']*)',\s*'([^']*)'\s*\)/g)) push(syn, m[1], m[2]);
-      } else if (/^UPDATE operation_work SET retired_at = CURRENT_TIMESTAMP/.test(s)) {
-        const t = s.match(/token = '([^']*)'/);
-        if (t && works.has(t[1])) works.get(t[1]).retired = true;
-      } else if (/^UPDATE operation_work SET label =/.test(s)) {
-        const l = s.match(/SET label = '([^']*)'/);
-        const t = s.match(/token = '([^']*)'/);
-        if (l && t && works.has(t[1])) works.get(t[1]).label = l[1];
-      }
-    }
-  }
-  if (works.size === 0) return null;
-  for (const [t, w] of works) {
-    w.machines = machines.get(t) ?? [];
-    w.syn = syn.get(t) ?? [];
-  }
-  return [...works.values()];
-}
-
+// Compare the actual runtime snapshot with the optional paired checkout's seed, including its
+// search terms and stage assignments. The generator and the guard read the same migration input.
 // ── 0. СНИМОК БАНДЛА ПОЛОН ──────────────────────────────────────────────────────────────────────
 head('0. сшивка «пункт ↔ токен»: снимок бандла покрывает весь список авторинга');
 await mount([{ operationType: T.MACHINE, machineType: T.LOCKSTITCH, zone: T.ZONE }]);
@@ -654,6 +567,7 @@ ck(inv.tokens === inv.uniq, 'токены не повторяются', `${inv.t
       }
       if (b.label !== w.label) diffs.push(`${w.token}: ярлык «${b.label}» ≠ «${w.label}»`);
       if (b.verb !== w.verb) diffs.push(`${w.token}: глагол ${b.verb} ≠ ${w.verb}`);
+      if (b.stage !== w.stage) diffs.push(`${w.token}: стадия ${b.stage} ≠ ${w.stage}`);
       if (b.machineMode !== w.machineMode)
         diffs.push(`${w.token}: режим ${b.machineMode} ≠ ${w.machineMode}`);
       if (b.defaultMachine !== w.defaultMachine)
@@ -662,8 +576,7 @@ ck(inv.tokens === inv.uniq, 'токены не повторяются', `${inv.t
       if (!!b.retired !== !!w.retired) diffs.push(`${w.token}: снятие ${b.retired} ≠ ${w.retired}`);
       if (norm(b.machines) !== norm(w.machines))
         diffs.push(`${w.token}: машинки [${norm(b.machines)}] ≠ [${norm(w.machines)}]`);
-      // Синонимы — только там, где снимок их вообще несёт (см. шапку сторожа).
-      if (b.syn.length && norm(b.syn) !== norm(w.syn))
+      if (norm(b.syn) !== norm(w.syn))
         diffs.push(`${w.token}: синонимы разошлись с миграцией`);
     }
     const seededTokens = new Set(seeded.map((w) => w.token));
@@ -1026,7 +939,8 @@ const mountWithRefusedCatalog = async () => {
   await mountWithRefusedCatalog();
   await openList();
   const labels = await optionLabels();
-  ck(labels.length >= 50, 'список НЕ пуст — работает снимок бандла', `${labels.length} строк`);
+  const offeredSnapshotCount = inv.list.filter((work) => !work.retired).length;
+  ck(labels.length === offeredSnapshotCount, 'пикер показывает все доступные работы снимка', `${labels.length} строк`);
   ck(labels.includes('Topstitch'), 'и в нём есть знакомые работы', labels.slice(0, 3).join(' | '));
   await closeList();
   // Снимок не мёртвый: выбор из него пишет работу так же, как выбор из каталога.
@@ -1045,8 +959,6 @@ head('К. работы 0331 живут и в снимке: «моско» ище
 {
   await mountWithRefusedCatalog();
   {
-    // ВЛАДЕЛЕЦ ПЕЧАТАЕТ «МОСКО», А НЕ «MOSCOW». Русское слово попало в снимок ровно ради этого
-    // случая — и ровно этих четырёх работ, у которых имя в бандле было бы единственной строкой.
     const { labels } = await search('моско');
     ck(
       labels.includes('Hem — rolled (Moscow)'),
@@ -1114,6 +1026,39 @@ head('К. работы 0331 живут и в снимке: «моско» ище
     ck(v.work === 'moscow_hem', 'её токен записан', String(v.work));
     ck(v.machineType === T.LOCKSTITCH, 'и машинка взята из снимка, а не оставлена прежней', String(v.machineType));
   }
+}
+
+// 0437 seeded Dart and 0458 seeded Hang tag. The same controls must author both on a 500.
+head('К. каталог 0437/0458: поиск, порядок и запись после отказа');
+{
+  await mountWithRefusedCatalog();
+  await openList();
+  const tokens = await page.$$eval('[data-combobox-option]', (nodes) =>
+    nodes.map((node) => node.getAttribute('data-combobox-option')),
+  );
+  const ordered = (before, after) => tokens.includes(before) && tokens.indexOf(before) < tokens.indexOf(after);
+  ck(ordered('join_lockstitch', 'dart') && ordered('dart', 'pleat'), 'вытачка стоит между швом и складкой');
+  ck(ordered('tag_attach', 'hang_tag') && ordered('hang_tag', 'fold'), '«Hang tag» остаётся рядом с другими отделочными работами');
+  await closeList();
+
+  const { labels } = await search('вытачка');
+  ck(labels.includes('Dart'), 'работа 0437 находится по русскому синониму', labels.join(' | '));
+  await closeList();
+  ck(await pickWork('dart'), 'вытачка выбирается из снимка');
+  const dart = await values();
+  ck(
+    dart.work === 'dart' && dart.operationType === T.MACHINE && dart.machineType === T.LOCKSTITCH,
+    'в форму записаны точный токен, глагол и машинка вытачки',
+    `${dart.work} / ${dart.operationType} / ${dart.machineType}`,
+  );
+  ck(await pickWork('hang_tag'), '«Hang tag» выбирается из снимка отдельно от «Attach tag»');
+  const tag = await values();
+  const wire = await page.evaluate((op) => window.__workPicker.wire(op), tag);
+  ck(
+    tag.operationType === 'TECH_CARD_OPERATION_TYPE_HANDWORK' && wire?.work === 'hang_tag',
+    'навеска бирки остаётся ручной работой и уезжает со своим токеном',
+    `${tag.operationType} / ${wire?.work}`,
+  );
 }
 
 // ── Л (Д5). СМЕНА ВИДА НЕ ПЕРЕСТАВЛЯЕТ ШАГ НА ДРУГОЙ УТЮГ ───────────────────────────────────────
