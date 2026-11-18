@@ -139,7 +139,7 @@ export function retreatSourceCutWitnessMotionV1(
   mesh: ContactMesh,
   acceptedPositions: Float32Array,
   proposal: Motion,
-  witnesses: readonly (readonly [number, number])[],
+  witnesses: readonly (readonly [number] | readonly [number, number])[],
   heldParticles: ReadonlySet<number>,
 ) {
   if (witnesses.length > MAXIMUM_LOCAL_CUT_RETREAT_WITNESSES_V1)

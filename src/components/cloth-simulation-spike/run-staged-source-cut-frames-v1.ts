@@ -536,6 +536,20 @@ async function executeWindow(program: Program, input: FrameInput, signal?: Abort
     const checkContact = (positions: Float32Array) => {
       const clearance = body.validateFrame(garment, positions);
       const self = garment.validateSelfIntersection(positions, layeredCutBudget);
+      const bodyTriangleCount = source.bodyTriangles.length / 3;
+      const localBodyCutFaces =
+        program.enableLocalClothContactResponse &&
+        clearance.surface.crossings.intersectionCount + clearance.surface.unprovenPairCount <=
+          MAXIMUM_LOCAL_CUT_RETREAT_WITNESSES_V1
+          ? [
+              ...new Set([
+                ...clearance.surface.crossings.intersections.map(
+                  ({ triangleB }) => triangleB - bodyTriangleCount,
+                ),
+                ...clearance.surface.unprovenPairs.map(({ cutTriangle }) => cutTriangle),
+              ]),
+            ]
+          : [];
       const witnessPieces = (triangle: number) =>
         garment.topology.find(
           ({ triangleOffset, triangleCount }) =>
@@ -568,11 +582,18 @@ async function executeWindow(program: Program, input: FrameInput, signal?: Abort
         bodyIntersections: clearance.surface.crossings.intersectionCount,
         bodyPairsWithoutClearance: clearance.surface.unprovenPairCount,
         clothIntersections: self.intersectionCount,
+        localBodyCutFaces,
         ...(contactWitnesses ? { contactWitnesses } : {}),
       };
     };
     type ContactCheck = ReturnType<typeof checkContact>;
-    function retreatCappedCutMotion(
+    async function checkCandidateContact(positions: Float32Array) {
+      // Let UI input and cancellation run between complete geometric checks.
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      current();
+      return checkContact(positions);
+    }
+    async function retreatCappedCutMotion(
       base: Float32Array,
       motion: ReturnType<typeof scaleMotion>,
       initial: ContactCheck,
@@ -582,13 +603,18 @@ async function executeWindow(program: Program, input: FrameInput, signal?: Abort
       let heldParticles = new Set<number>();
       for (let pass = 0; pass < 2; pass++) {
         if (
-          contact.bodyIntersections ||
-          contact.bodyPairsWithoutClearance ||
-          !contact.contactWitnesses?.cloth.length
+          !contact.contactWitnesses ||
+          contact.clothIntersections > MAXIMUM_LOCAL_CUT_RETREAT_WITNESSES_V1 ||
+          ((contact.bodyIntersections || contact.bodyPairsWithoutClearance) &&
+            !contact.localBodyCutFaces.length)
         )
           break;
         current();
-        const witnesses = contact.contactWitnesses.cloth.map(({ triangles }) => triangles);
+        const witnesses = [
+          ...contact.contactWitnesses.cloth.map(({ triangles }) => triangles),
+          ...contact.localBodyCutFaces.map((face) => [face] as const),
+        ];
+        if (!witnesses.length || witnesses.length > MAXIMUM_LOCAL_CUT_RETREAT_WITNESSES_V1) break;
         const next = retreatSourceCutWitnessMotionV1(
           garment,
           base,
@@ -600,7 +626,7 @@ async function executeWindow(program: Program, input: FrameInput, signal?: Abort
         heldParticles = next.heldParticles;
         const displacementM = maximumMotionM(base, next.motion.positionsMInvMass);
         if (displacementM > displacementLimit + 1e-7) break;
-        contact = checkContact(next.motion.positionsMInvMass);
+        contact = await checkCandidateContact(next.motion.positionsMInvMass);
         if (contact.passed)
           return {
             motion: next.motion,
@@ -837,7 +863,7 @@ async function executeWindow(program: Program, input: FrameInput, signal?: Abort
         // A large-cut proposal outside the displacement limit cannot be committed.
         // Spend the exact candidate budget on states which can still pass admission.
         const proposalContact =
-          layeredCutBudget && aboveLimit ? undefined : checkContact(finalPositions);
+          layeredCutBudget && aboveLimit ? undefined : await checkCandidateContact(finalPositions);
         acceptedContact = proposalContact;
         if (aboveLimit || !proposalContact?.passed) {
           const proposal = {
@@ -870,7 +896,7 @@ async function executeWindow(program: Program, input: FrameInput, signal?: Abort
             trialCount++;
             const motion = scaleMotion(startPositions, proposal, scale, perParticleLimit);
             const displacementM = maximumMotionM(startPositions, motion.positionsMInvMass);
-            const contact = checkContact(motion.positionsMInvMass);
+            const contact = await checkCandidateContact(motion.positionsMInvMass);
             smallestTrial = { contact, displacementM };
             if (trialCount === 1 && perParticleLimit !== undefined && !contact.passed)
               firstCappedTrialContact = contact;
@@ -899,7 +925,7 @@ async function executeWindow(program: Program, input: FrameInput, signal?: Abort
                   separated.positionsMInvMass,
                 );
                 if (repairedDisplacement <= limit + 1e-7) {
-                  const repairedContact = checkContact(separated.positionsMInvMass);
+                  const repairedContact = await checkCandidateContact(separated.positionsMInvMass);
                   if (repairedContact.passed) {
                     trial = {
                       motion: separated,
@@ -918,7 +944,7 @@ async function executeWindow(program: Program, input: FrameInput, signal?: Abort
               program.enableLocalClothContactResponse
             ) {
               // Try local retreat again after global backtracking has isolated a smaller contact set.
-              trial = retreatCappedCutMotion(startPositions, motion, contact, limit);
+              trial = await retreatCappedCutMotion(startPositions, motion, contact, limit);
               if (trial) break;
             }
           }
