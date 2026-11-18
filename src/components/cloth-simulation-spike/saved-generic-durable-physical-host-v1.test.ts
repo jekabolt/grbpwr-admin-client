@@ -2019,6 +2019,7 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
     const canvas = { setPointerCapture: vi.fn() } as unknown as HTMLCanvasElement;
     const caller = new AbortController();
     const mounted = requireOk(await f.host.mountPreview(canvas, caller.signal));
+    const previewEventsAtMount = [...ports.previewEvents];
     const frameReportSha256 = mounted.receipt.frameReportSha256;
     const garment = {
       kind: 'garment',
@@ -2307,6 +2308,14 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
     interaction = null;
     await act(async () => route.render(createElement(Controls)));
     expect(selectOutline).toHaveBeenLastCalledWith(null, undefined, undefined);
+    expect(f.host.getSnapshot()).toBe(admitted);
+    expect(f.host.getSnapshot().numeric.previewReceipt).toBe(mounted.receipt);
+    expect(f.host.getSnapshot().numeric.frame32Report).toBe(currentReport);
+    expect(ports.previewEvents).toEqual(previewEventsAtMount);
+    expect(ports.calls.map(({ frame }) => frame)).toEqual([16, 32]);
+    expect(readCount).toBe(readCountBeforeClick);
+    expect(mountedLegend()).not.toBeNull();
+    expect(mountedMeasurements()).not.toBeNull();
 
     pick.mockImplementationOnce(() => {
       caller.abort();
@@ -2341,11 +2350,13 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
     // The body turn can be revoked independently of a render carrying the last cloth snapshot.
     retainedSnapshot = f.host.getSnapshot();
     const originalBody = f.body.getSnapshot();
+    const disposedBeforeBodyChange = ports.previewDisposed;
     await f.body.observe(null);
     await drawControls();
     expect(mountedLegend()).toBeNull();
     expect(mountedMeasurements()).toBeNull();
     expect(mountedCanvas()?.className).toContain('hidden');
+    expect(ports.previewDisposed).toBe(disposedBeforeBodyChange + 1);
     await f.body.observe(f.observed.input);
     const rebound = f.body.getSnapshot();
     expect(rebound.status).toBe('observed-body-bound');
@@ -2356,6 +2367,7 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
     expect(mountedLegend()).toBeNull();
     expect(mountedMeasurements()).toBeNull();
     expect(mountedCanvas()?.className).toContain('hidden');
+    expect(ports.previewDisposed).toBe(disposedBeforeBodyChange + 1);
   }, 120000);
 
   it('refuses fresh saved-row drift and clears physical children without revoking the borrowed body', async () => {
@@ -2363,6 +2375,9 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
     requireOk(await f.host.restore(f.request));
     const { lease } = await borrowedLease();
     requireOk(await f.host.run16(lease));
+    requireOk(await f.host.run32(lease));
+    requireOk(await f.host.mountPreview({} as HTMLCanvasElement));
+    const disposedBeforeSavedRowChange = ports.previewDisposed;
     editWire = (wire) => {
       wire.row.savedRowRevision++;
     };
@@ -2374,5 +2389,8 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
     });
     expect([...ports.live.values()].every((x) => x.signal.aborted)).toBe(true);
     expect((await f.body.projectCurrentBody()).status).toBe('projected');
+    expect(ports.previewDisposed).toBe(disposedBeforeSavedRowChange + 1);
+    await f.host.stopPreview();
+    expect(ports.previewDisposed).toBe(disposedBeforeSavedRowChange + 1);
   }, 120000);
 });

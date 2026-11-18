@@ -382,8 +382,9 @@ interface StageRuntime {
   readonly sectionPlanes: THREE.Group;
   readonly controls: OrbitControls;
   readonly scene: THREE.Scene;
-  readonly patternPieceBindings: ReadonlyMap<string, MeasurementSurfacePatternPieceSceneBindingV1>;
-  readonly patternPieceGuides: readonly MeasurementSurfacePatternPieceSceneGuideBindingV1[];
+  patternPieceBindings: ReadonlyMap<string, MeasurementSurfacePatternPieceSceneBindingV1>;
+  patternPieceGuides: readonly MeasurementSurfacePatternPieceSceneGuideBindingV1[];
+  readonly syncPatternPieceOverlay: (key: string) => void;
   readonly updateLivePositions: (positions: Float32Array) => MeasurementSurfaceLivePositionUpdateV1;
   readonly syncMeasurementGuide: (
     guide: MeasurementSurfaceActiveMeasurementGuideV1 | undefined,
@@ -1591,6 +1592,8 @@ export function MeasurementWatertightSurfaceV1Stage({
         ]),
       ])
     : '';
+  const patternPieceOverlayRenderKeyRef = useRef(patternPieceOverlayRenderKey);
+  patternPieceOverlayRenderKeyRef.current = patternPieceOverlayRenderKey;
 
   useEffect(() => {
     displayedGeometryReadyRef.current = false;
@@ -1657,6 +1660,7 @@ export function MeasurementWatertightSurfaceV1Stage({
     let bodyRadius = 0;
     let cameraFitRadius = 0;
     let patternPieceLayer: THREE.Group | null = null;
+    let mountedPatternPieceKey = patternPieceOverlayRenderKeyRef.current;
     let measurementGuideLayer: THREE.Group | null = null;
     let measurementGuideBindings: readonly MeasurementSurfaceGuideSceneBindingV1[] = Object.freeze(
       [],
@@ -1816,6 +1820,30 @@ export function MeasurementWatertightSurfaceV1Stage({
         targets: Object.freeze(targets),
       });
       contextCanvas.dataset.patternPieceHitReceipt = JSON.stringify(receipt);
+    }
+
+    function publishPatternPieceMetadata(bindingCount: number) {
+      if (!contextCanvas) return;
+      const overlay = patternPieceOverlayRef.current;
+      const guides = overlay?.guides ?? [];
+      contextCanvas.dataset.patternPieceCount = String(bindingCount);
+      contextCanvas.dataset.patternSeamSides = [
+        ...new Set(overlay?.pieces.flatMap(({ seams }) => seams.map(({ side }) => side)) ?? []),
+      ]
+        .sort()
+        .join(',');
+      contextCanvas.dataset.patternCorrespondenceGuideCount = String(
+        guides.filter(({ kind }) => kind === 'correspondence').length,
+      );
+      contextCanvas.dataset.patternThreadGuideCount = String(
+        guides.filter(({ kind }) => kind === 'thread').length,
+      );
+      contextCanvas.dataset.patternThreadColors = [
+        ...new Set(guides.flatMap(({ thread }) => (thread ? [thread.colorCss] : []))),
+      ].join(',');
+      contextCanvas.dataset.selectedPatternPiece =
+        overlay?.pieces.find(({ selected }) => selected)?.pieceId ?? '';
+      contextCanvas.dataset.patternPieceTool = overlay?.tool ?? 'off';
     }
 
     function pointerAngleAroundPatternPiece(
@@ -2472,14 +2500,19 @@ export function MeasurementWatertightSurfaceV1Stage({
       );
       patternPieceLayer = patternPieceScene.layer;
       if (patternPieceLayer) scene.add(patternPieceLayer);
-      let radius = bodyGeometryRadius;
-      if (patternPieceLayer) {
+      const fitRadius = () => {
+        if (!patternPieceLayer) return bodyGeometryRadius;
         const patternSphere = new THREE.Box3()
           .setFromObject(patternPieceLayer)
           .getBoundingSphere(new THREE.Sphere());
-        if (!patternSphere.isEmpty())
-          radius = Math.max(radius, patternSphere.center.distanceTo(center) + patternSphere.radius);
-      }
+        return patternSphere.isEmpty()
+          ? bodyGeometryRadius
+          : Math.max(
+              bodyGeometryRadius,
+              patternSphere.center.distanceTo(center) + patternSphere.radius,
+            );
+      };
+      let radius = fitRadius();
       cameraFitRadius = radius;
 
       landmarks = createLandmarks(frame);
@@ -2539,35 +2572,7 @@ export function MeasurementWatertightSurfaceV1Stage({
       contextCanvas.dataset.hoveredJointGroup = '';
       contextCanvas.dataset.selectedJointVisibility = 'none';
       contextCanvas.dataset.transformHoverAxis = 'none';
-      contextCanvas.dataset.patternPieceCount = String(patternPieceScene.bindings.size);
-      contextCanvas.dataset.patternSeamSides = [
-        ...new Set(
-          patternPieceOverlayRef.current?.pieces.flatMap(({ seams }) =>
-            seams.map(({ side }) => side),
-          ) ?? [],
-        ),
-      ]
-        .sort()
-        .join(',');
-      contextCanvas.dataset.patternCorrespondenceGuideCount = String(
-        (patternPieceOverlayRef.current?.guides ?? []).filter(
-          ({ kind }) => kind === 'correspondence',
-        ).length,
-      );
-      contextCanvas.dataset.patternThreadGuideCount = String(
-        (patternPieceOverlayRef.current?.guides ?? []).filter(({ kind }) => kind === 'thread')
-          .length,
-      );
-      contextCanvas.dataset.patternThreadColors = [
-        ...new Set(
-          (patternPieceOverlayRef.current?.guides ?? []).flatMap(({ thread }) =>
-            thread ? [thread.colorCss] : [],
-          ),
-        ),
-      ].join(',');
-      contextCanvas.dataset.selectedPatternPiece =
-        patternPieceOverlayRef.current?.pieces.find(({ selected }) => selected)?.pieceId ?? '';
-      contextCanvas.dataset.patternPieceTool = patternPieceOverlayRef.current?.tool ?? 'off';
+      publishPatternPieceMetadata(patternPieceScene.bindings.size);
       contextCanvas.dataset.patternPieceGesture = 'idle';
 
       contextLostHandler = (event) => {
@@ -3007,6 +3012,39 @@ export function MeasurementWatertightSurfaceV1Stage({
         scheduleRender();
       };
 
+      const syncPatternPieceOverlay = (key: string) => {
+        const runtime = runtimeRef.current;
+        if (disposed || key === mountedPatternPieceKey || !runtime || !controls || !scene) return;
+        try {
+          const replacement = createPatternPieceLayerV1(
+            patternPieceOverlayRef.current,
+            center,
+            bodyGeometryRadius,
+          );
+          finishPatternPieceGesture('cancel');
+          const savedCamera = snapshotStageCamera();
+          if (patternPieceLayer) scene.remove(patternPieceLayer);
+          disposePatternPieceLayerV1(patternPieceLayer);
+          patternPieceLayer = replacement.layer;
+          if (patternPieceLayer) scene.add(patternPieceLayer);
+          runtime.patternPieceBindings = replacement.bindings;
+          runtime.patternPieceGuides = replacement.guides;
+          mountedPatternPieceKey = key;
+          publishPatternPieceMetadata(replacement.bindings.size);
+
+          const previousRadius = radius;
+          radius = fitRadius();
+          cameraFitRadius = radius;
+          controls.minDistance = radius * 1.15;
+          controls.maxDistance = radius * 12;
+          if (savedCamera && radius !== previousRadius) restoreCamera(savedCamera);
+          scheduleRender();
+        } catch (reason: unknown) {
+          cleanup();
+          onStatusRef.current('error', reason instanceof Error ? reason.message : String(reason));
+        }
+      };
+
       const zoomBy = (factor: number) => {
         if (!controls || !camera || !Number.isFinite(factor) || factor <= 0) return;
         const offset = camera.position.clone().sub(controls.target);
@@ -3176,6 +3214,7 @@ export function MeasurementWatertightSurfaceV1Stage({
         scene,
         patternPieceBindings: patternPieceScene.bindings,
         patternPieceGuides: patternPieceScene.guides,
+        syncPatternPieceOverlay,
         updateLivePositions,
         syncMeasurementGuide,
         syncGuideCamera: () => syncGuideCamera(),
@@ -3218,10 +3257,13 @@ export function MeasurementWatertightSurfaceV1Stage({
     frame,
     interactive,
     lod,
-    patternPieceOverlayRenderKey,
     measurementGuidePresentation,
     retainVisibleCanvasOnRebuild,
   ]);
+
+  useEffect(() => {
+    runtimeRef.current?.syncPatternPieceOverlay(patternPieceOverlayRenderKey);
+  }, [patternPieceOverlayRenderKey]);
 
   useEffect(() => {
     contextReleaseGenerationRef.current += 1;
