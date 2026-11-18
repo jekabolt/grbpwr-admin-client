@@ -21,6 +21,7 @@ export async function prepareCurrentSavedCrossMaterialPlacementV9(
     body: ModelDisplayedTriangleBodyOwnedInputV1;
     centerMm: readonly [number, number, number];
     isCurrent: () => boolean;
+    previousPlacementSha256?: string;
   }>,
   signal: AbortSignal,
 ) {
@@ -78,6 +79,7 @@ export async function prepareCurrentSavedCrossMaterialPlacementV9(
       body: binding,
       authoredCenterMm: [x, y, z],
       placement: compiled.placement,
+      previousPlacementSha256: input.previousPlacementSha256,
     },
     signal,
   );

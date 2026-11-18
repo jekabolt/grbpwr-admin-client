@@ -28,13 +28,15 @@ type PlacementClient = Pick<
 >;
 type CurrentBody = ReturnType<typeof readCurrentSavedNeutralPlacementModelV1>;
 type Prepared = Awaited<ReturnType<typeof buildSavedCrossMaterialPlacementDocumentV9>>;
+type SavedPlacement = Awaited<ReturnType<typeof readSavedCrossMaterialPlacementDocumentV9>>;
 
-/** Transitions exact V8 into initial placement through the established single-row CAS. */
+/** Saves placement through the established single-row CAS, retaining exact V8 sewing ownership. */
 export async function persistSavedCrossMaterialPlacementV9(
   createClient: (signal: AbortSignal) => PlacementClient,
   prepared: Prepared,
   readCurrentBody: (signal: AbortSignal) => CurrentBody,
   signal: AbortSignal,
+  previousPlacement?: SavedPlacement,
 ) {
   signal.throwIfAborted();
   const submitted = structuredClone(prepared);
@@ -51,32 +53,46 @@ export async function persistSavedCrossMaterialPlacementV9(
     expectedCompleteSourceSha256: completeSourceSha256,
   };
   const previous = submitted.document.writeCas.expectedPreviousSidecarSha256;
+  const previousBase64 = previousPlacement?.base64 ?? prior.base64;
   const previousText = utf8.decode(
-    Uint8Array.from(atob(prior.base64), (char) => char.charCodeAt(0)),
+    Uint8Array.from(atob(previousBase64), (char) => char.charCodeAt(0)),
   );
+  const previousMediaType = previousPlacement
+    ? SAVED_COMPLETE_ASSEMBLY_PLACEMENT_MEDIA_V9
+    : SAVED_COMPLETE_ASSEMBLY_NATIVE_MEDIA_V8;
   const expectedText = utf8.decode(submitted.bytes);
-  if (prior.sha256 !== previous)
-    throw new Error('The initial placement requires its unchanged exact saved V8.');
+  if (
+    previous !== (previousPlacement?.sha256 ?? prior.sha256) ||
+    (previousPlacement &&
+      (prior.sha256 !== previousPlacement.review.sha256 ||
+        canonical(submitted.placement.body) !== canonical(previousPlacement.world.body) ||
+        canonical(submitted.placement.placement.centerMm) ===
+          canonical(previousPlacement.world.placement.centerMm) ||
+        submitted.placement.placement.directedCut.positionsInvMassFloat32LeSha256 ===
+          previousPlacement.world.placement.directedCut.positionsInvMassFloat32LeSha256))
+  )
+    throw new Error('Saving a changed placement requires the same saved seam and mannequin.');
 
   const previousPostSaveReceiptSha256 =
-    await computePatternImportDxfPhaseEDomainSeparatedCanonicalSha256V1(
+    previousPlacement?.postSaveReceiptSha256 ??
+    (await computePatternImportDxfPhaseEDomainSeparatedCanonicalSha256V1(
       'tech-card-complete-source-native-review/1',
       JSON.parse(previousText),
       undefined,
       signal,
-    );
+    ));
   const writer = createPatternImportDxfProductCompositeSidecarStorageWriterV3(
     { createClient },
     {
       requestSchemaVersion: requestSchema,
       receiptSchemaVersion: receiptSchema,
       mediaType: SAVED_COMPLETE_ASSEMBLY_PLACEMENT_MEDIA_V9,
-      acceptedCurrentMediaTypes: [SAVED_COMPLETE_ASSEMBLY_NATIVE_MEDIA_V8],
+      acceptedCurrentMediaTypes: [previousMediaType],
       label: 'Cross-material initial placement',
       async prepare(request, current) {
         if (
           current.status !== 'present' ||
-          current.mediaType !== SAVED_COMPLETE_ASSEMBLY_NATIVE_MEDIA_V8 ||
+          current.mediaType !== previousMediaType ||
           current.sha256 !== previous ||
           utf8.decode(current.bytes) !== previousText
         )
@@ -103,10 +119,10 @@ export async function persistSavedCrossMaterialPlacementV9(
         ]);
         const saved = current.priorCarrier;
         if (
-          saved?.mediaType !== SAVED_COMPLETE_ASSEMBLY_NATIVE_MEDIA_V8 ||
+          saved?.mediaType !== previousMediaType ||
           saved.sidecarSha256 !== previous ||
           saved.postSaveReceiptSha256 !== previousPostSaveReceiptSha256 ||
-          saved.sidecarBytes !== prior.base64 ||
+          saved.sidecarBytes !== previousBase64 ||
           canonical(body) !== canonical(submitted.placement.body)
         )
           throw new Error('The saved review or displayed mannequin changed before placement save.');

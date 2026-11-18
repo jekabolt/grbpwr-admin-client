@@ -12,6 +12,7 @@ import {
   type CadWorkbenchBoundedClothPreviewHostV1,
   type CadWorkbenchPreviewStatusV1,
 } from './cad-workbench-preview-lifecycle-v1';
+import { canonicalizePatternImportDxfPhaseESavedAssemblyValueV1 as canonical } from './saved-assembly-topology-hash-v1';
 import type { SavedCrossMaterialReviewForPreviewV8 } from './saved-complete-assembly-native-review-action-v8';
 
 export default function SavedCompleteAssemblyNativePreviewControlsV8({
@@ -39,6 +40,7 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
   });
   const [acceptedFrame, setAcceptedFrame] = useState<number | null>(null);
   const savedCenter = review.placement?.placement.centerMm;
+  const [editing, setEditing] = useState(false);
   const [x, setX] = useState(() => String(savedCenter?.[0] ?? 0));
   const [y, setY] = useState(() => String(savedCenter?.[1] ?? 1010));
   const [z, setZ] = useState(() => String(savedCenter?.[2] ?? 220));
@@ -85,7 +87,7 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
           },
           signal,
         );
-        if (restored.sha256 !== review.sha256)
+        if (canonical(restored.placement) !== canonical(review.placement))
           throw new Error(
             'The current mannequin and cuts could not reproduce the saved placement.',
           );
@@ -182,6 +184,7 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
   const preview = () => {
     if (
       disabled ||
+      editing ||
       placementSave.current ||
       !validCenter ||
       !body?.isCurrent() ||
@@ -192,9 +195,8 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
   };
 
   async function savePlacement() {
-    if (disabled || status.pending || placementSave.current || !validCenter || !body?.isCurrent())
+    if (disabled || status.pending || placementSave.current || !canSave || !body?.isCurrent())
       return;
-    if (!review.savePlacement) return;
     const controller = new AbortController();
     placementSave.current = controller;
     setPlacementStatus({ pending: true, error: null });
@@ -223,6 +225,20 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
   }
 
   const busy = disabled || status.pending || placementStatus.pending;
+  const canSave =
+    validCenter &&
+    (!savedCenter ||
+      (editing && [x, y, z].some((value, index) => Number(value) !== savedCenter[index])));
+
+  function cancelEdit() {
+    if (!savedCenter) return;
+    setX(String(savedCenter[0]));
+    setY(String(savedCenter[1]));
+    setZ(String(savedCenter[2]));
+    setEditing(false);
+    setPlacementStatus({ pending: false, error: null });
+  }
+
   return (
     <section
       aria-label='Cross-material cloth preview'
@@ -243,7 +259,7 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
               value={value}
               inputMode='decimal'
               disabled={busy}
-              readOnly={!!review.placement}
+              readOnly={!!review.placement && !editing}
               onChange={(event: ChangeEvent<HTMLInputElement>) => setValue(event.target.value)}
             />
           </label>
@@ -252,7 +268,7 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
           type='button'
           variant='main'
           size='xs'
-          disabled={busy || !validCenter || !body?.isCurrent()}
+          disabled={busy || editing || !validCenter || !body?.isCurrent()}
           onClick={preview}
         >
           {status.pending
@@ -261,15 +277,26 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
               ? 'Preview cloth'
               : 'Refresh cloth'}
         </Button>
-        {review.savePlacement && (
+        {(!review.placement || editing) && (
           <Button
             type='button'
             variant='secondary'
             size='xs'
-            disabled={busy || !validCenter || !body?.isCurrent()}
+            disabled={busy || !canSave || !body?.isCurrent()}
             onClick={() => void savePlacement()}
           >
             {placementStatus.pending ? 'Saving placement…' : 'Save placement'}
+          </Button>
+        )}
+        {review.placement && (
+          <Button
+            type='button'
+            variant='secondary'
+            size='xs'
+            disabled={busy}
+            onClick={editing ? cancelEdit : () => setEditing(true)}
+          >
+            {editing ? 'Cancel placement edit' : 'Edit placement'}
           </Button>
         )}
       </div>

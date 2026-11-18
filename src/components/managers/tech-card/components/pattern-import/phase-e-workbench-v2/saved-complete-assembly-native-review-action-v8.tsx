@@ -26,7 +26,7 @@ type Prepared = Awaited<ReturnType<typeof prepareSavedCompleteAssemblyNativeStit
 type RestoredPlacement = Awaited<ReturnType<typeof readSavedCrossMaterialPlacementDocumentV9>>;
 type PlacementInput = Omit<
   Parameters<typeof prepareCurrentSavedCrossMaterialPlacementV9>[0],
-  'loadReview'
+  'loadReview' | 'previousPlacementSha256'
 >;
 export type SavedCrossMaterialReviewForPreviewV8 = Readonly<{
   cardId: number;
@@ -36,7 +36,7 @@ export type SavedCrossMaterialReviewForPreviewV8 = Readonly<{
   load: (signal: AbortSignal) => ReturnType<typeof readSavedCompleteAssemblyNativePhysicalSourceV8>;
   verify: (signal: AbortSignal) => Promise<void>;
   placement?: RestoredPlacement['world'];
-  savePlacement?: (input: PlacementInput, signal: AbortSignal) => Promise<void>;
+  savePlacement: (input: PlacementInput, signal: AbortSignal) => Promise<void>;
 }>;
 
 type Review = Pick<Prepared, 'document' | 'sha256' | 'grid'>;
@@ -244,35 +244,34 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
             sha256: carrierSha256,
             load,
             placement: placement?.world,
-            savePlacement: placement
-              ? undefined
-              : async (input, active) => {
-                  const [
-                    { prepareCurrentSavedCrossMaterialPlacementV9 },
-                    { persistSavedCrossMaterialPlacementV9 },
-                    { readCurrentSavedNeutralPlacementModelV1 },
-                  ] = await Promise.all([
-                    import('./saved-cross-material-placement-prepare-v9'),
-                    import('./saved-cross-material-placement-storage-v9'),
-                    import('./saved-cross-material-placement-model-binding-v1'),
-                  ]);
-                  const prepared = await prepareCurrentSavedCrossMaterialPlacementV9(
-                    { ...input, loadReview: load },
-                    active,
-                  );
-                  const saved = await persistSavedCrossMaterialPlacementV9(
-                    abortableAdminService,
-                    prepared,
-                    (signal) => {
-                      if (!input.isCurrent())
-                        throw new Error('The displayed mannequin or saved review changed.');
-                      return readCurrentSavedNeutralPlacementModelV1(input.body, signal);
-                    },
-                    active,
-                  );
-                  if (input.isCurrent())
-                    publishRestored(restored, saved.source, saved.reopened, active);
+            async savePlacement(input, active) {
+              const [
+                { prepareCurrentSavedCrossMaterialPlacementV9 },
+                { persistSavedCrossMaterialPlacementV9 },
+                { readCurrentSavedNeutralPlacementModelV1 },
+              ] = await Promise.all([
+                import('./saved-cross-material-placement-prepare-v9'),
+                import('./saved-cross-material-placement-storage-v9'),
+                import('./saved-cross-material-placement-model-binding-v1'),
+              ]);
+              const prepared = await prepareCurrentSavedCrossMaterialPlacementV9(
+                { ...input, loadReview: load, previousPlacementSha256: placement?.sha256 },
+                active,
+              );
+              const saved = await persistSavedCrossMaterialPlacementV9(
+                abortableAdminService,
+                prepared,
+                (signal) => {
+                  if (!input.isCurrent())
+                    throw new Error('The displayed mannequin or saved review changed.');
+                  return readCurrentSavedNeutralPlacementModelV1(input.body, signal);
                 },
+                active,
+                placement,
+              );
+              if (input.isCurrent())
+                publishRestored(restored, saved.source, saved.reopened, active);
+            },
             async verify(active) {
               const latest = await readCompleteSavedAssemblySourceV1(
                 abortableAdminService(active),

@@ -52,6 +52,7 @@ export async function buildSavedCrossMaterialPlacementDocumentV9(
     body: Body;
     authoredCenterMm: CenterMm;
     placement: Placement;
+    previousPlacementSha256?: string;
   }>,
   signal: AbortSignal,
 ) {
@@ -59,10 +60,12 @@ export async function buildSavedCrossMaterialPlacementDocumentV9(
   const review = structuredClone(confirmed.review);
   const body = structuredClone(confirmed.body);
   const placement = structuredClone(confirmed.placement);
+  const previousPlacementSha256 = confirmed.previousPlacementSha256;
   const centerMm = confirmed.authoredCenterMm.map((value) => (value === 0 ? 0 : value));
   const selection = review.document.selection;
   if (
     centerMm.length !== 3 ||
+    (previousPlacementSha256 !== undefined && !shaPattern.test(previousPlacementSha256)) ||
     centerMm.some((value) => !Number.isFinite(value) || Math.abs(value) > 10_000) ||
     !Number.isSafeInteger(body.modelId) ||
     body.modelId < 1 ||
@@ -150,7 +153,7 @@ export async function buildSavedCrossMaterialPlacementDocumentV9(
     encoding: 'canonical-json-utf8' as const,
     profile: SAVED_COMPLETE_ASSEMBLY_PLACEMENT_PROFILE_V1,
     bindings: review.document.bindings,
-    writeCas: { expectedPreviousSidecarSha256: prior.sha256 },
+    writeCas: { expectedPreviousSidecarSha256: previousPlacementSha256 ?? prior.sha256 },
     components: [prior, physical] as const,
   };
   const bytes = encoder.encode(canonical(document, maximumCarrierBytes));
@@ -262,7 +265,8 @@ export async function readSavedCrossMaterialPlacementDocumentV9(
     carrier.byteLength !== bytes.byteLength ||
     canonical(expectedReview) !== canonical(review) ||
     canonical(expectedPhysical) !== canonical(physical) ||
-    document.writeCas.expectedPreviousSidecarSha256 !== expectedReview.sha256
+    !shaPattern.test(document.writeCas.expectedPreviousSidecarSha256) ||
+    document.writeCas.expectedPreviousSidecarSha256 === sha256
   )
     throw new Error('The placement and retained V8 bytes failed the known readback check.');
 
@@ -283,5 +287,11 @@ export async function readSavedCrossMaterialPlacementDocumentV9(
   )
     throw new Error('The stored placement differs from the exact saved native review.');
 
-  return { sha256, world, review: { text: reviewText, sha256: expectedReview.sha256 } };
+  return {
+    sha256,
+    postSaveReceiptSha256: receipt,
+    base64: carrier.sidecarBytes,
+    world,
+    review: { text: reviewText, sha256: expectedReview.sha256 },
+  };
 }
