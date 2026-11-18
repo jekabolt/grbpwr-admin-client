@@ -900,29 +900,63 @@ console.log(
 // ─── НАМЕРЕННЫЙ ДРЕЙФ ПОСЛЕ a9ca7819: ВЫПИСАН ПОИМЁННО И ТОЧНЫМИ ЗНАЧЕНИЯМИ ─────────────────────
 //
 // Слепок остаётся деревом a9ca7819 — переснимать его другим коммитом значило бы потерять само
-// доказательство экстракции R7-Б. Но с тех пор `src/` НАМЕРЕННО поменял строку шага ровно двумя
-// способами, и ни один из них к экстракции отношения не имеет:
-//   1. у строки появились четыре поля, и выбор работы их НЕ пишет — они обязаны стоять в своих
+// доказательство экстракции R7-Б. Ниже перечислены изменения строки шага, внесённые позже:
+//   1. у строки появились поля, и выбор работы в этой батарее их НЕ пишет — они обязаны стоять в своих
 //      пустых значениях и ДО, и ПОСЛЕ нажатия: `draft` (c39f6b856, черновик скелета),
 //      `review` (43be1e9f5, метки перезаливки DXF), `assemblyBlockDetached` (0fc96f0c3, отвязка
-//      шага от узла, mockup-ok), `historyKey` (f01f908ae, отмена ревью);
+//      шага от узла, mockup-ok), `historyKey` (f01f908ae, отмена ревью), `labelKeys` (ca11e274a,
+//      ссылки на этикетки), `buttonHoles`, `seamKind` и `workVariant` (0436, параметры вида шага);
 //   2. «Topstitch» опознаётся режимом, а не классом шва (f55805d93, «Picking Topstitch writes
 //      topstitch mode=edge instead of ornamental seam class»): пикер пишет `topstitchMode = EDGE`
 //      и класс шва НЕ трогает — шаг держит тот, что на нём стоял.
-// Слепок проецируется через эти два правила, и дальше сравнение ПОБАЙТНОЕ, как и было: любое
+//   3. Смена типа машины снимает неподходящий профиль или привязывает единственный подходящий
+//      (33f27d33f, отклонение profile_type_mismatch). В батарее это четыре перехода S8; сохранение
+//      профиля при прежнем типе машины сравнивается без исключений.
+// После этой проекции сравнение остаётся ПОБАЙТНЫМ: любое
 // другое расхождение, в том числе иное значение нового поля или иной класс шва у отстрочки,
 // по-прежнему красное.
-const DRIFT_FIELDS = { assemblyBlockDetached: false, draft: false, historyKey: '', review: '' };
+const DRIFT_FIELDS = {
+  assemblyBlockDetached: false,
+  buttonHoles: 0,
+  draft: false,
+  historyKey: '',
+  labelKeys: [],
+  review: '',
+  seamKind: '',
+  workVariant: '',
+};
 const TOPSTITCH_WORK = 'topstitch';
-function projectBaseline(snapshot, { token, stateBefore, found } = {}) {
+const PROFILE_STATE = 'S8-свой-профиль-машинки';
+const PROFILE_AFTER_MACHINE_CHANGE = {
+  overlock_serge: { machineType: T.OVERLOCK, machineProfileKey: '' },
+  coverstitch: { machineType: T.COVERSTITCH, machineProfileKey: 'CS-1' },
+  zigzag: { machineType: T.ZIGZAG, machineProfileKey: '' },
+  slit_overcast: { machineType: T.BUTTONHOLE, machineProfileKey: 'BH-1' },
+};
+function projectBaseline(snapshot, { stateKey, token, stateBefore, found } = {}) {
   const o = JSON.parse(snapshot);
-  for (const [f, v] of Object.entries(DRIFT_FIELDS)) {
+  // The mounted seam tolerance input registers an unset field outside emptyOperation.
+  // It is part of the live form snapshot, but not the default-field list compared below.
+  for (const [f, v] of Object.entries({ ...DRIFT_FIELDS, seamToleranceMm: undefined })) {
     if (f in o) dieNotRun(`слепок уже несёт поле ${f} — проекция дрейфа устарела`);
     o[f] = v;
   }
   if (token === TOPSTITCH_WORK && found) {
     o.topstitchMode = 'TECH_CARD_TOPSTITCH_MODE_EDGE';
     o.seamClass = JSON.parse(stateBefore).seamClass;
+  }
+  if (stateKey === PROFILE_STATE && Object.hasOwn(PROFILE_AFTER_MACHINE_CHANGE, token)) {
+    const before = JSON.parse(stateBefore);
+    const expected = PROFILE_AFTER_MACHINE_CHANGE[token];
+    if (
+      !found ||
+      before.machineType !== T.LOCKSTITCH ||
+      before.machineProfileKey !== 'MINE-M' ||
+      o.machineType !== expected.machineType ||
+      o.machineProfileKey !== before.machineProfileKey
+    )
+      dieNotRun(`исторический переход ${stateKey} · ${token} больше не совпадает с исходным слепком`);
+    o.machineProfileKey = expected.machineProfileKey;
   }
   return compact(o);
 }
@@ -937,7 +971,7 @@ ck(live.errors.length === 0, 'страница не бросила ни одно
 ck(live.drift.length === 0, 'стенд детерминирован: снимок ДО зависит только от состояния', live.drift.join(', '));
 ck(
   canon(live.fields) === canon([...BASELINE.fields, ...Object.keys(DRIFT_FIELDS)].sort()),
-  'список полей строки шага тот же — плюс ровно четыре намеренно добавленных',
+  'список полей строки шага тот же — плюс только поимённо указанные поля',
   `${live.fields?.length} против ${BASELINE.fields?.length} + ${Object.keys(DRIFT_FIELDS).length}`,
 );
 
@@ -947,7 +981,9 @@ const explain = (a, b) => {
   const y = JSON.parse(b ?? '{}');
   const out = [];
   for (const f of new Set([...Object.keys(x), ...Object.keys(y)])) {
-    if (canon(x[f]) !== canon(y[f])) out.push(`${f}: ${canon(x[f])} → ${canon(y[f])}`);
+    const before = Object.hasOwn(x, f) ? canon(x[f]) : '<absent>';
+    const after = Object.hasOwn(y, f) ? canon(y[f]) : '<absent>';
+    if (before !== after) out.push(`${f}: ${before} → ${after}`);
   }
   return out;
 };
@@ -978,6 +1014,7 @@ const explain = (a, b) => {
   for (const key of Object.keys(BASELINE.after)) {
     const [stateKey, token] = key.split(' · ');
     const was = projectBaseline(BASELINE.after[key], {
+      stateKey,
       token,
       stateBefore: BASELINE.before[stateKey],
       found: BASELINE.found[key],
@@ -1223,11 +1260,11 @@ head('Ц-МАШИНКА · стоящая на шаге машинка важн�
   );
 }
 
-// ─── Ц-ССЫЛКА: СВЯЗЬ С ПРОФИЛЕМ ПИШЕТСЯ ТОЛЬКО В ПУСТОЙ КЛЮЧ ─────────────────────────────────
-head('Ц-ССЫЛКА · профиль парка привязывается ключом, и только когда он один и место пусто');
+// ─── Ц-ССЫЛКА: СВЯЗЬ С ПРОФИЛЕМ ПИШЕТСЯ ДЛЯ ТЕКУЩЕГО ТИПА МАШИНЫ ────────────────────────
+head('Ц-ССЫЛКА · профиль парка привязывается ключом подходящей машины');
 {
   const blank = STATES.find((s) => s.key === 'S1-пустой');
-  const mine = STATES.find((s) => s.key === 'S8-свой-профиль-машинки');
+  const mine = STATES.find((s) => s.key === PROFILE_STATE);
   const iron = STATES.find((s) => s.key === 'S7-утюг');
   const minePress = STATES.find((s) => s.key === 'S9-свой-профиль-вто');
 
@@ -1248,9 +1285,18 @@ head('Ц-ССЫЛКА · профиль парка привязывается к
   const l4 = applyPure(mine.step, 'join_lockstitch', CAT_A);
   ck(
     l4.links.machineProfileKey === undefined,
-    'уже стоящая ссылка технолога не перебивается',
+    'при прежнем типе машины ссылка технолога не перебивается',
     canon(l4.links),
   );
+  for (const [token, expected] of Object.entries(PROFILE_AFTER_MACHINE_CHANGE)) {
+    const changed = applyPure(mine.step, token, CAT_A);
+    ck(
+      changed.writes.machineType === expected.machineType &&
+        changed.links.machineProfileKey === expected.machineProfileKey,
+      `${token}: старый профиль заменён подходящим или очищен`,
+      canon(changed.links),
+    );
+  }
   // ОСЬ ВТО. Отпариватель пункта G4 НЕ вытесняет названный человеком утюг, и связь пишется по тому
   // оборудованию, которое в итоге стоит.
   const l5 = applyPure(iron.step, 'press_steam', CAT_A);
