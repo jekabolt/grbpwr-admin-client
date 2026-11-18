@@ -863,8 +863,9 @@ async function executeWindow(program: Program, input: FrameInput, signal?: Abort
             | undefined;
           let smallestTrial: { contact: ContactCheck; displacementM: number } | undefined;
           let firstCappedTrialContact: ContactCheck | undefined;
+          const maximumTrials = 6;
           let trialCount = 0;
-          for (; trialCount < 6; scale *= 0.5) {
+          for (; trialCount < maximumTrials; scale *= 0.5) {
             current();
             trialCount++;
             const motion = scaleMotion(startPositions, proposal, scale, perParticleLimit);
@@ -912,11 +913,11 @@ async function executeWindow(program: Program, input: FrameInput, signal?: Abort
               }
             }
             if (
-              trialCount === 1 &&
+              (trialCount === 1 || trialCount === maximumTrials) &&
               perParticleLimit !== undefined &&
               program.enableLocalClothContactResponse
             ) {
-              // Keep the original capped motion on carriers outside the rejected faces.
+              // Try local retreat again after global backtracking has isolated a smaller contact set.
               trial = retreatCappedCutMotion(startPositions, motion, contact, limit);
               if (trial) break;
             }
