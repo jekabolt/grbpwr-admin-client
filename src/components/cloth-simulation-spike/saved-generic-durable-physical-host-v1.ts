@@ -7,6 +7,7 @@ import {
   inspectOwnedActiveXpbdDeviceLeaseV1,
   type XpbdDeviceLease,
 } from 'lib/cloth/runtime/webgpu/xpbd-device-session';
+import type { SavedFullAssemblyPhysicalDocumentPersistenceResultV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-full-assembly-physical-document-production-v1';
 import type { SavedFullAssemblyCompileIntentV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-full-assembly-compile-session-v1';
 import {
   readSavedFullAssemblyPhysicalSnapshotV1,
@@ -119,6 +120,14 @@ export type SavedV7PlacementEditV1 = Readonly<{
   binding: SavedGenericDurablePhysicalBindingV1;
   pieces: readonly SavedV7PieceTranslationV1[];
 }>;
+export class SavedV7PlacementPersistenceErrorV1 extends Error {
+  constructor(
+    readonly result: Extract<SavedFullAssemblyPhysicalDocumentPersistenceResultV1, { ok: false }>,
+  ) {
+    super(result.blockers[0].detail);
+  }
+}
+
 export type SavedGenericDurablePhysicalHostSnapshotV1 = Readonly<{
   version: typeof SAVED_GENERIC_DURABLE_PHYSICAL_HOST_V1;
   status:
@@ -889,7 +898,7 @@ export function createSavedGenericDurablePhysicalHostV1(
             op.controller.signal,
           );
           check(op, a.epoch);
-          if (!result.ok) throw new Error(result.blockers[0].detail);
+          if (!result.ok) throw new SavedV7PlacementPersistenceErrorV1(result);
           return result;
         });
         return done.value;

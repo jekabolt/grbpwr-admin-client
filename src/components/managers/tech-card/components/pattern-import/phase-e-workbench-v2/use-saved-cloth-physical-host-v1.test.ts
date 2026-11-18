@@ -48,9 +48,15 @@ vi.mock('./saved-full-assembly-physical-snapshot-production-v1', () => {
 vi.mock('./saved-full-assembly-generic-native-handoff-v1', () => ({
   prepareSavedFullAssemblyGenericNativeHandoffV1: mocks.prepare,
 }));
-vi.mock('components/cloth-simulation-spike/saved-generic-durable-physical-host-v1', () => ({
-  createSavedGenericDurablePhysicalHostV1: mocks.createHost,
-}));
+vi.mock(
+  'components/cloth-simulation-spike/saved-generic-durable-physical-host-v1',
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import('components/cloth-simulation-spike/saved-generic-durable-physical-host-v1')
+    >()),
+    createSavedGenericDurablePhysicalHostV1: mocks.createHost,
+  }),
+);
 vi.mock(
   'components/managers/models/components/saved-model-displayed-triangle-body-query-session-v2',
   () => ({
@@ -69,9 +75,13 @@ vi.mock('./saved-full-assembly-generic-first-authoring-v1', () => ({
   bindSavedFullAssemblyGenericFirstAuthoringV1: mocks.bindFirst,
 }));
 vi.mock('./saved-full-assembly-physical-document-production-v1', () => ({
+  SAVED_FULL_ASSEMBLY_PHYSICAL_DOCUMENT_PERSISTENCE_V1:
+    'saved-full-assembly-physical-document-persistence/1',
   persistCurrentSavedGenericObservedPhysicalHostV1: mocks.persistFirst,
 }));
 
+import { SavedV7PlacementPersistenceErrorV1 } from 'components/cloth-simulation-spike/saved-generic-durable-physical-host-v1';
+import { SAVED_FULL_ASSEMBLY_PHYSICAL_DOCUMENT_PERSISTENCE_V1 } from './saved-full-assembly-physical-document-production-v1';
 import { SavedFullAssemblyPhysicalSnapshotErrorV1 } from './saved-full-assembly-physical-snapshot-production-v1';
 import {
   classifySavedClothPhysicalRestoreErrorV1,
@@ -353,6 +363,156 @@ it('edits only a current idle or failed V7 and reloads after one explicit save',
     await act(async () => root.unmount());
   }
 });
+
+it.each(['prior', 'intended', 'different', 'body', 'operation'] as const)(
+  'retains the uncertain placement save and reconciles current %s authority',
+  async (outcome) => {
+    const root = createRoot(reactContainer() as never);
+    let latest: ReturnType<typeof useSavedClothPhysicalHostV1>;
+    const binding = Object.freeze({
+      sourceGeneration: 1,
+      graphCanonicalSha256: 'a'.repeat(64),
+      compileInputSha256: 'b'.repeat(64),
+      physicalInitializationCanonicalSha256: 'c'.repeat(64),
+      outerSha256: 'd'.repeat(64),
+      freshSnapshotSha256: 'e'.repeat(64),
+    });
+    const intendedSha = 'f'.repeat(64);
+    const draft = {
+      binding,
+      pieces: [{ pieceId: 'FRONT', pieceLineKey: 'front', translationM: [1, 2, 3] as const }],
+    };
+    const renewed = { ...draft };
+    const retained = [{ ...draft.pieces[0]!, translationM: [1.25, 2, 3] as const }];
+    const actor = (outerSha256 = binding.outerSha256) => {
+      const snapshot = {
+        status: 'ready',
+        binding: { ...binding, outerSha256 },
+        numeric: { cleanupPending: false },
+      };
+      return {
+        restore: mocks.restore,
+        dispose: vi.fn().mockResolvedValue(true),
+        getSnapshot: () => snapshot,
+        subscribe: () => () => undefined,
+        preparePlacementEdit: vi.fn().mockResolvedValue(renewed),
+        savePlacementEdit: vi.fn().mockResolvedValue({ ok: true }),
+      };
+    };
+    let releaseRestore: (() => void) | undefined;
+    let bodySnapshot: { status: string; generation: number } = { ...mocks.bodySnapshot };
+    let notifyBody: (() => void) | undefined;
+    mocks.createBodySession.mockReturnValue({
+      subscribe: (listener: () => void) => {
+        notifyBody = listener;
+        return () => undefined;
+      },
+      getSnapshot: () => bodySnapshot,
+      onDisplayedBodyInputV1: () => undefined,
+      dispose: () => undefined,
+    });
+    const displayed = actor();
+    const initial = actor();
+    initial.preparePlacementEdit.mockResolvedValue(draft);
+    initial.savePlacementEdit.mockRejectedValue(
+      new SavedV7PlacementPersistenceErrorV1({
+        ok: false,
+        schemaVersion: SAVED_FULL_ASSEMBLY_PHYSICAL_DOCUMENT_PERSISTENCE_V1,
+        writeOutcome: 'unknown',
+        intendedOuterSha256: intendedSha,
+        receipt: null,
+        blockers: [{ code: 'transport', detail: 'Readback unavailable.' }],
+      }),
+    );
+    const confirmed = actor(
+      outcome === 'prior'
+        ? binding.outerSha256
+        : outcome === 'intended'
+          ? intendedSha
+          : '9'.repeat(64),
+    );
+    confirmed.restore = vi.fn().mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releaseRestore = () => resolve({ ok: true });
+        }),
+    );
+    const cold = actor(intendedSha);
+    mocks.createHost
+      .mockReturnValueOnce(displayed)
+      .mockReturnValueOnce(initial)
+      .mockReturnValueOnce(confirmed)
+      .mockReturnValueOnce(cold);
+    function Harness({ operation = 10 }: { operation?: number }) {
+      latest = useSavedClothPhysicalHostV1({
+        row,
+        selectedOperationNumber: operation,
+        cardProjection: cardProjection as never,
+      });
+      return null;
+    }
+    try {
+      await act(async () => root.render(createElement(Harness)));
+      await act(async () => latest!.startSavedPlacementEdit(() => true));
+      let first: Promise<void>;
+      await act(async () => {
+        first = latest!.saveSavedPlacementEdit(draft, retained);
+        // The second click arrives before the mounted form can paint its disabled state.
+        await latest!.saveSavedPlacementEdit(draft, retained);
+      });
+      expect(latest!.placementEditor.status).toBe('saving');
+      expect(initial.savePlacementEdit).toHaveBeenCalledExactlyOnceWith(
+        draft,
+        retained,
+        expect.any(AbortSignal),
+      );
+      expect(initial.dispose).toHaveBeenCalledOnce();
+      if (outcome === 'operation')
+        await act(async () => root.render(createElement(Harness, { operation: 20 })));
+      if (outcome === 'body') {
+        await act(async () => {
+          bodySnapshot = { ...bodySnapshot, generation: 2 };
+          notifyBody?.();
+        });
+      }
+      await act(async () => {
+        releaseRestore?.();
+        await first!;
+      });
+      expect(confirmed.savePlacementEdit).not.toHaveBeenCalled();
+      if (outcome === 'prior') {
+        expect(latest!.placementEditor).toMatchObject({ status: 'save-retry', draft: renewed });
+        await act(async () => {
+          const retry = latest!.saveSavedPlacementEdit(renewed, draft.pieces);
+          await latest!.saveSavedPlacementEdit(renewed, draft.pieces);
+          await retry;
+        });
+        expect(confirmed.savePlacementEdit).toHaveBeenCalledExactlyOnceWith(
+          renewed,
+          retained,
+          expect.any(AbortSignal),
+        );
+        expect(latest!.host).toBe(cold);
+      } else if (outcome === 'different') {
+        expect(latest!.placementEditor).toMatchObject({
+          status: 'blocked',
+          draft,
+          error: 'The saved placement has changed. Reload the current cloth.',
+        });
+        await act(async () => latest!.saveSavedPlacementEdit(draft, retained));
+        expect(confirmed.savePlacementEdit).not.toHaveBeenCalled();
+        await act(async () => latest!.retry());
+        expect(latest!.host).toBe(cold);
+      } else {
+        expect(latest!.placementEditor.status).toBe('idle');
+        expect(latest!.host).toBe(cold);
+      }
+      expect(confirmed.dispose).toHaveBeenCalledOnce();
+    } finally {
+      await act(async () => root.unmount());
+    }
+  },
+);
 
 describe('first physical authoring source lifetime', () => {
   let root: ReturnType<typeof createRoot>;

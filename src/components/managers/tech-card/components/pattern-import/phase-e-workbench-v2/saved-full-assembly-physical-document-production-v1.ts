@@ -59,6 +59,8 @@ export type SavedFullAssemblyPhysicalDocumentPersistenceResultV1 =
       ok: false;
       schemaVersion: typeof SAVED_FULL_ASSEMBLY_PHYSICAL_DOCUMENT_PERSISTENCE_V1;
       writeOutcome: 'not-attempted' | 'unknown' | 'acknowledged-unverified';
+      /** Exact candidate sent through the sole CAS when a write may have reached storage. */
+      intendedOuterSha256: string | null;
       receipt: null;
       blockers: readonly [SavedFullAssemblyPhysicalDocumentPersistenceBlockerV1];
     }>;
@@ -352,6 +354,7 @@ function blocked(
     SavedFullAssemblyPhysicalDocumentPersistenceResultV1,
     { ok: false }
   >['writeOutcome'] = 'not-attempted',
+  intendedOuterSha256: string | null = null,
 ): Extract<SavedFullAssemblyPhysicalDocumentPersistenceResultV1, { ok: false }> {
   const failure =
     error instanceof PhysicalDocumentPersistenceFailureV1
@@ -364,6 +367,7 @@ function blocked(
     ok: false as const,
     schemaVersion: SAVED_FULL_ASSEMBLY_PHYSICAL_DOCUMENT_PERSISTENCE_V1,
     writeOutcome,
+    intendedOuterSha256,
     receipt: null,
     blockers: Object.freeze([
       Object.freeze({ code: failure.code, detail: failure.message }),
@@ -442,7 +446,11 @@ export async function persistCurrentSavedGenericObservedPhysicalHostV1(
               `${primary.detail} Readback: ${error.message}`,
             )
           : error;
-      return blocked(failure, stored.ok ? 'acknowledged-unverified' : stored.writeOutcome);
+      return blocked(
+        failure,
+        stored.ok ? 'acknowledged-unverified' : stored.writeOutcome,
+        next.encoded.canonicalSha256,
+      );
     }
   } catch (error) {
     return blocked(error);

@@ -50,12 +50,14 @@ function NumberField({
   value,
   onChange,
   disabled,
+  readOnly,
 }: Readonly<{
   name: string;
   label: string;
   value: string;
   onChange: (value: string) => void;
   disabled?: boolean;
+  readOnly?: boolean;
 }>) {
   return (
     <div>
@@ -65,6 +67,7 @@ function NumberField({
         type='number'
         value={value}
         disabled={disabled}
+        readOnly={readOnly}
         autoComplete='off'
         onChange={(event: ChangeEvent<HTMLInputElement>) => onChange(event.target.value)}
       />
@@ -572,12 +575,12 @@ function SavedPlacementTranslations({
   draft,
   state,
   disabled,
-  saving,
+  status,
 }: {
   draft: SavedV7PlacementEditV1;
   state: HostState;
   disabled: boolean;
-  saving: boolean;
+  status: 'editing' | 'saving' | 'save-retry' | 'blocked';
 }) {
   const [values, setValues] = useState(() =>
     draft.pieces.map(({ translationM }) => translationM.map(String)),
@@ -587,7 +590,9 @@ function SavedPlacementTranslations({
   const changed = parsed.some((entry, index) =>
     entry.some((value, axis) => value !== draft.pieces[index]!.translationM[axis]),
   );
+  const saving = status === 'saving';
   const busy = disabled || saving;
+  const readOnly = status !== 'editing';
   return (
     <div className='space-y-stack'>
       <Text component='p' size='micro' variant='label'>
@@ -606,38 +611,42 @@ function SavedPlacementTranslations({
                 label={`${pieceId} ${axis} (m)`}
                 value={values[index]![component]!}
                 disabled={busy}
-                onChange={(value) =>
+                readOnly={readOnly}
+                onChange={(value) => {
+                  if (readOnly) return;
                   setValues((current) =>
                     current.map((entry, i) =>
                       i === index
                         ? entry.map((previous, j) => (j === component ? value : previous))
                         : entry,
                     ),
-                  )
-                }
+                  );
+                }}
               />
             ))}
           </div>
         </div>
       ))}
-      <Button
-        type='button'
-        size='xs'
-        variant='main'
-        disabled={busy || !complete || !changed}
-        onClick={() => {
-          if (busy || !complete || !changed) return;
-          void state.saveSavedPlacementEdit(
-            draft,
-            draft.pieces.map((piece, index) => ({
-              ...piece,
-              translationM: [parsed[index]![0]!, parsed[index]![1]!, parsed[index]![2]!],
-            })),
-          );
-        }}
-      >
-        {saving ? 'Saving…' : 'Save placement'}
-      </Button>
+      {status !== 'blocked' ? (
+        <Button
+          type='button'
+          size='xs'
+          variant='main'
+          disabled={busy || !complete || !changed}
+          onClick={() => {
+            if (busy || !complete || !changed) return;
+            void state.saveSavedPlacementEdit(
+              draft,
+              draft.pieces.map((piece, index) => ({
+                ...piece,
+                translationM: [parsed[index]![0]!, parsed[index]![1]!, parsed[index]![2]!],
+              })),
+            );
+          }}
+        >
+          {saving ? 'Saving…' : status === 'save-retry' ? 'Retry save placement' : 'Save placement'}
+        </Button>
+      ) : null}
     </div>
   );
 }
@@ -675,29 +684,25 @@ export function CadWorkbenchSavedPlacementEditorV1({
         <Text component='p' size='micro' role='status'>
           Verifying saved placement…
         </Text>
-      ) : editor.status === 'blocked' ? (
-        <div className='space-y-2'>
-          <Text component='p' size='micro' role='alert' variant='errorLabel'>
-            {editor.error}
-          </Text>
-          <Button
-            type='button'
-            size='xs'
-            variant='secondary'
-            disabled={disabled}
-            onClick={state.retry}
-          >
-            Reload saved cloth
-          </Button>
-        </div>
-      ) : editor.draft ? (
+      ) : null}
+      {editor.error ? (
+        <Text component='p' size='micro' role='alert' variant='errorLabel'>
+          {editor.error}
+        </Text>
+      ) : null}
+      {editor.draft ? (
         <SavedPlacementTranslations
           key={editor.draft.binding.outerSha256}
           state={state}
           draft={editor.draft}
           disabled={disabled}
-          saving={editor.status === 'saving'}
+          status={editor.status}
         />
+      ) : null}
+      {editor.status === 'blocked' || editor.status === 'save-retry' ? (
+        <Button type='button' size='xs' variant='secondary' onClick={state.retry}>
+          Reload saved cloth
+        </Button>
       ) : null}
     </section>
   );

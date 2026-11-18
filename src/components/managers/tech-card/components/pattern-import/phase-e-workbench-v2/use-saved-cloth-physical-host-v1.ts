@@ -10,6 +10,7 @@ import {
 import { useQueryClient } from '@tanstack/react-query';
 import {
   createSavedGenericDurablePhysicalHostV1,
+  SavedV7PlacementPersistenceErrorV1,
   type SavedGenericDurablePhysicalBindingV1,
   type SavedGenericDurablePhysicalHostSnapshotV1,
   type SavedV7PieceTranslationV1,
@@ -74,14 +75,30 @@ type Mounted = Readonly<{
 export type SavedV7PlacementEditorStateV1 =
   | Readonly<{ status: 'idle' | 'preparing'; draft: null; error: null }>
   | Readonly<{ status: 'editing' | 'saving'; draft: SavedV7PlacementEditV1; error: null }>
-  | Readonly<{ status: 'blocked'; draft: null; error: string }>;
+  | Readonly<{ status: 'save-retry'; draft: SavedV7PlacementEditV1; error: string }>
+  | Readonly<{ status: 'blocked'; draft: SavedV7PlacementEditV1 | null; error: string }>;
 type PlacementEditTurn = {
   controller: AbortController;
   actor: SavedClothDurableHostV1 | null;
   draft: SavedV7PlacementEditV1 | null;
+  pending: readonly SavedV7PieceTranslationV1[] | null;
   current: () => boolean;
+  restore: () => Promise<SavedClothDurableHostV1>;
   saving: boolean;
 };
+
+function sameSavedPlacement(
+  current: SavedGenericDurablePhysicalBindingV1,
+  prior: SavedGenericDurablePhysicalBindingV1,
+): boolean {
+  return (
+    current.outerSha256 === prior.outerSha256 &&
+    current.graphCanonicalSha256 === prior.graphCanonicalSha256 &&
+    current.compileInputSha256 === prior.compileInputSha256 &&
+    current.physicalInitializationCanonicalSha256 === prior.physicalInitializationCanonicalSha256 &&
+    current.freshSnapshotSha256 === prior.freshSnapshotSha256
+  );
+}
 
 export type SavedClothFirstAuthoringStateV1 =
   | Readonly<{ status: 'idle'; bootstrap: null; sourceGeometry: null; error: null }>
@@ -452,36 +469,26 @@ export function useSavedClothPhysicalHostV1({
       controller,
       actor: null,
       draft: null,
+      pending: null,
       current: live,
+      restore: () =>
+        restoreSavedClothPhysicalHostV1(
+          { row: savedRow, selectedOperationNumber, cardProjection, bodySession },
+          controller.signal,
+        ),
       saving: false,
     };
     placementTurn.current = turn;
     setPlacementEditor({ status: 'preparing', draft: null, error: null });
     try {
-      const actor = await restoreSavedClothPhysicalHostV1(
-        {
-          row: savedRow,
-          selectedOperationNumber,
-          cardProjection,
-          bodySession,
-        },
-        controller.signal,
-      );
+      const actor = await turn.restore();
       if (placementTurn.current !== turn || !live()) {
         await actor.dispose();
         throw new Error('The current saved placement or preview changed.');
       }
       turn.actor = actor;
       const draft = await actor.preparePlacementEdit(controller.signal);
-      if (
-        !live() ||
-        draft.binding.outerSha256 !== prior.outerSha256 ||
-        draft.binding.graphCanonicalSha256 !== prior.graphCanonicalSha256 ||
-        draft.binding.compileInputSha256 !== prior.compileInputSha256 ||
-        draft.binding.physicalInitializationCanonicalSha256 !==
-          prior.physicalInitializationCanonicalSha256 ||
-        draft.binding.freshSnapshotSha256 !== prior.freshSnapshotSha256
-      )
+      if (!live() || !sameSavedPlacement(draft.binding, prior))
         throw new Error('The saved V7 changed. Reload the cloth before editing placement.');
       turn.draft = draft;
       setPlacementEditor({ status: 'editing', draft, error: null });
@@ -498,9 +505,13 @@ export function useSavedClothPhysicalHostV1({
     const turn = placementTurn.current;
     if (!turn || !turn.actor || turn.draft !== draft || turn.saving || !turn.current()) return;
     turn.saving = true;
+    const pending = (turn.pending ??= pieces.map((piece) => ({
+      ...piece,
+      translationM: [...piece.translationM] as [number, number, number],
+    })));
     setPlacementEditor({ status: 'saving', draft, error: null });
     try {
-      await turn.actor.savePlacementEdit(draft, pieces, turn.controller.signal);
+      await turn.actor.savePlacementEdit(draft, pending, turn.controller.signal);
       if (placementTurn.current !== turn) return;
       if (turn.current()) retry();
       else {
@@ -509,8 +520,55 @@ export function useSavedClothPhysicalHostV1({
       }
     } catch (error) {
       if (placementTurn.current !== turn) return;
-      releasePlacementEdit();
-      setPlacementEditor({ status: 'blocked', draft: null, error: detail(error) });
+      // The one-shot actor may have already bound the requested initialization.
+      const spent = turn.actor;
+      turn.actor = null;
+      let restored: SavedClothDurableHostV1 | null = null;
+      let message = detail(error);
+      const confirmCurrent = () => {
+        if (placementTurn.current !== turn || !turn.current())
+          throw new Error('The current saved placement or preview changed.');
+      };
+      try {
+        await spent.dispose();
+        confirmCurrent();
+        const intended =
+          error instanceof SavedV7PlacementPersistenceErrorV1
+            ? error.result.intendedOuterSha256
+            : null;
+        if (intended) {
+          restored = await turn.restore();
+          confirmCurrent();
+          const confirmed = restored.getSnapshot().binding;
+          if (confirmed?.outerSha256 === intended) {
+            retry();
+            return;
+          }
+          if (!confirmed || !sameSavedPlacement(confirmed, draft.binding))
+            throw new Error('The saved placement has changed. Reload the current cloth.');
+          const edit = await restored.preparePlacementEdit(turn.controller.signal);
+          confirmCurrent();
+          if (!sameSavedPlacement(edit.binding, draft.binding))
+            throw new Error('The saved placement has changed. Reload the current cloth.');
+          turn.actor = restored;
+          restored = null;
+          turn.draft = edit;
+          turn.saving = false;
+          setPlacementEditor({
+            status: 'save-retry',
+            draft: edit,
+            error: 'The save failed. The previous saved placement is still current.',
+          });
+          return;
+        }
+      } catch (verificationError) {
+        message = detail(verificationError);
+      } finally {
+        if (restored) void restored.dispose();
+      }
+      if (placementTurn.current !== turn) return;
+      turn.saving = false;
+      setPlacementEditor({ status: 'blocked', draft, error: message });
     }
   };
   const cancelSavedPlacementEdit = () => {

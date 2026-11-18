@@ -63,7 +63,10 @@ import {
   createSavedGenericObservedPhysicalHostV1,
   projectSavedGenericObservedPhysicalHostPersistenceContextV1,
 } from './saved-generic-observed-physical-host-v1';
-import { createSavedGenericDurablePhysicalHostV1 } from './saved-generic-durable-physical-host-v1';
+import {
+  createSavedGenericDurablePhysicalHostV1,
+  SavedV7PlacementPersistenceErrorV1,
+} from './saved-generic-durable-physical-host-v1';
 import {
   buildDxfGarmentObservedUnsewnEdgesV1,
   type DxfGarmentObservedBoundaryEdgeV1,
@@ -1861,8 +1864,8 @@ describe('durable facade refusal before any stored V7 authority exists', () => {
 });
 
 describe('fixed durable generic host, real encoded V7 and genuine fresh receipts', () => {
-  it.each(['save', 'conflict'] as const)(
-    'edits a current V7 through mounted placement fields and preserves old placement on CAS %s',
+  it.each(['save', 'conflict', 'lost-after-write'] as const)(
+    'recovers exact mounted placement values and V7 bytes for %s',
     async (outcome) => {
       const f = await fixture();
       const prior = {
@@ -1871,11 +1874,15 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
       };
       outer = prior;
       const baseClient = vi.mocked(abortableAdminService).getMockImplementation()!;
+      let readbackAvailable = true;
+      let casAttempt = 0;
       const put = vi.fn(async (request: PutTechCardPatternSemanticSidecarRequest) => {
+        casAttempt += 1;
         expect(request.expectedPreviousSidecarSha256).toBe(prior.sidecarSha256);
         expect(request.expectedCardLockVersion).toBe(seed.row.cardLockVersion);
         expect(request.expectedSavedRowRevision).toBe(seed.row.revision);
-        if (outcome === 'conflict') throw new Error('Saved placement CAS conflict.');
+        if (outcome === 'conflict' && casAttempt === 1)
+          throw new Error('Saved placement CAS conflict.');
         outer = {
           ...prior,
           sidecarBytes: request.sidecarBytes,
@@ -1883,13 +1890,22 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
           mediaType: request.mediaType,
           byteLength: Buffer.from(request.sidecarBytes!, 'base64').length,
         };
+        if (outcome === 'lost-after-write') {
+          readbackAvailable = false;
+          throw new Error('The upload reply was lost.');
+        }
         return { semanticSidecar: structuredClone(outer) };
       });
       vi.mocked(abortableAdminService).mockImplementation((signal) => ({
         ...baseClient(signal),
-        GetTechCardPatternSemanticSidecar: async () => ({
-          semanticSidecar: structuredClone(outer),
-        }),
+        GetTechCardPatternSemanticSidecar: async () => {
+          if (!readbackAvailable) throw new Error('Readback unavailable.');
+          return { semanticSidecar: structuredClone(outer) };
+        },
+        GetTechCardSavedAssemblySnapshot: async (request) => {
+          if (!readbackAvailable) throw new Error('Assembly snapshot unavailable.');
+          return baseClient(signal).GetTechCardSavedAssemblySnapshot(request);
+        },
         PutTechCardPatternSemanticSidecar: put,
       }));
       // The displayed V7 stays independent from the edit actor and its one-shot bind.
@@ -1935,9 +1951,9 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
       await view.render(state);
       const find = (name: string) =>
         visitMountedTree(view.output(), (props) => props.name === name);
-      const submit = () =>
-        visitMountedTree(view.output(), (props) => props.children === 'Save placement')!;
-      expect(submit().disabled).toBe(true);
+      const submit = (label = 'Save placement') =>
+        visitMountedTree(view.output(), (props) => props.children === label);
+      expect(submit()?.disabled).toBe(true);
       const goal = edit.pieces.map(({ translationM, ...piece }) => ({
         ...piece,
         translationM: [translationM[0] + 0.125, translationM[1], translationM[2]] as const,
@@ -1949,10 +1965,10 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
           (find(name)?.onChange as (s: string) => void)(String(goal[index]!.translationM[0])),
         );
       }
-      expect(submit().disabled).toBe(false);
+      expect(submit()?.disabled).toBe(false);
       let apply: Promise<void> | undefined;
       await act(async () => {
-        (submit().onClick as () => void)();
+        (submit()?.onClick as () => void)();
         apply = save.mock.results[0]!.value;
         // The production hook catches persistence refusal and keeps the old displayed binding.
         await apply?.catch(() => {});
@@ -1975,28 +1991,79 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
           'composite-v6',
         ),
       );
-      if (outcome === 'conflict') {
-        await expect(apply).rejects.toThrow(/fresh saved Composite V7 differs/i);
-        expect(outer).toEqual(prior);
+      if (outcome !== 'save') {
+        await expect(apply).rejects.toBeInstanceOf(SavedV7PlacementPersistenceErrorV1);
+        await expect(apply).rejects.toMatchObject({
+          result: {
+            writeOutcome: 'unknown',
+            intendedOuterSha256: put.mock.calls[0]![0].sidecarSha256,
+          },
+        });
+        await view.render({
+          ...state,
+          placementEditor: { status: 'blocked', draft: edit, error: 'Readback unavailable.' },
+        });
+        expect(submit()).toBeNull();
+        for (const [index, piece] of edit.pieces.entries()) {
+          expect(find(`saved-placement-${piece.pieceId}-X`)).toMatchObject({
+            value: String(goal[index]!.translationM[0]),
+            readOnly: true,
+          });
+        }
+        if (outcome === 'conflict') {
+          await expect(apply).rejects.toThrow(/fresh saved Composite V7 differs/i);
+          expect(outer).toEqual(prior);
+          const previous = await freshPhysicalFixtureHost(f.body);
+          requireOk(await previous.host.restore(previous.request));
+          const retryDraft = await previous.host.preparePlacementEdit();
+          expect(retryDraft.binding.outerSha256).toBe(prior.sidecarSha256);
+          expect(
+            physicalReader.projectSavedFullAssemblyPhysicalSnapshotV1(previous.reader)!
+              .physicalInitialization,
+          ).toEqual(old);
+          const retrySave = vi.fn<State['saveSavedPlacementEdit']>(async (draft, pieces) => {
+            requireOk(await previous.host.savePlacementEdit(draft, pieces));
+          });
+          await view.render({
+            ...state,
+            saveSavedPlacementEdit: retrySave,
+            placementEditor: { status: 'save-retry', draft: retryDraft, error: 'Retry required.' },
+          });
+          expect(submit('Retry save placement')?.disabled).toBe(false);
+          for (const [index, piece] of edit.pieces.entries()) {
+            expect(find(`saved-placement-${piece.pieceId}-X`)).toMatchObject({
+              value: String(goal[index]!.translationM[0]),
+              readOnly: true,
+            });
+          }
+          expect(put).toHaveBeenCalledTimes(1);
+          await act(async () => {
+            (submit('Retry save placement')?.onClick as () => void)();
+            await retrySave.mock.results[0]!.value;
+          });
+          expect(retrySave).toHaveBeenCalledExactlyOnceWith(retryDraft, goal);
+          expect(put).toHaveBeenCalledTimes(2);
+          expect(put.mock.calls[1]![0].sidecarSha256).toBe(put.mock.calls[0]![0].sidecarSha256);
+        } else {
+          expect(outer!.sidecarSha256).toBe(put.mock.calls[0]![0].sidecarSha256);
+        }
       } else {
         await expect(apply).resolves.toBeUndefined();
         expect(outer!.sidecarSha256).not.toBe(prior.sidecarSha256);
       }
       expect(f.host.getSnapshot().binding?.outerSha256).toBe(prior.sidecarSha256);
+      readbackAvailable = true;
       const cold = await freshPhysicalFixtureHost(f.body);
       requireOk(await cold.host.restore(cold.request));
       const saved = physicalReader.projectSavedFullAssemblyPhysicalSnapshotV1(cold.reader)!;
-      expect(saved.physicalInitialization).toEqual(
-        outcome === 'conflict'
-          ? old
-          : {
-              ...old,
-              placements: old.placements.map((piece, index) => ({
-                ...piece,
-                translationM: goal[index]!.translationM,
-              })),
-            },
-      );
+      expect(saved.physicalInitialization).toEqual({
+        ...old,
+        placements: old.placements.map((piece, index) => ({
+          ...piece,
+          translationM: goal[index]!.translationM,
+        })),
+      });
+      expect(put).toHaveBeenCalledTimes(outcome === 'conflict' ? 2 : 1);
       expect(ports.calls).toEqual([]);
     },
     120000,
