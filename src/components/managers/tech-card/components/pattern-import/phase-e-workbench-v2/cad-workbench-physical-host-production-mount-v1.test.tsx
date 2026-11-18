@@ -28,13 +28,21 @@ function elements(tree: ts.SourceFile, name: string): ts.JsxOpeningLikeElement[]
   ).filter((node) => node.tagName.getText(tree) === name);
 }
 
-function attribute(tree: ts.SourceFile, node: ts.JsxOpeningLikeElement, name: string) {
-  const item = node.attributes.properties.find(
+function jsxAttribute(tree: ts.SourceFile, node: ts.JsxOpeningLikeElement, name: string) {
+  return node.attributes.properties.find(
     (candidate): candidate is ts.JsxAttribute =>
       ts.isJsxAttribute(candidate) && candidate.name.getText(tree) === name,
-  );
-  if (!item?.initializer || !ts.isJsxExpression(item.initializer)) return null;
-  return item.initializer.expression?.getText(tree) ?? null;
+  )?.initializer;
+}
+
+function attribute(tree: ts.SourceFile, node: ts.JsxOpeningLikeElement, name: string) {
+  const value = jsxAttribute(tree, node, name);
+  return value && ts.isJsxExpression(value) ? value.expression?.getText(tree) ?? null : null;
+}
+
+function classes(tree: ts.SourceFile, element: ts.JsxOpeningElement) {
+  const value = jsxAttribute(tree, element, 'className');
+  return value && ts.isStringLiteral(value) ? value.text.split(/\s+/) : [];
 }
 
 describe('physical host production receivers', () => {
@@ -99,18 +107,62 @@ describe('physical host production receivers', () => {
     expect(hook.text).not.toContain('createSavedObservedPhysicalHostV1');
   });
 
-  it('lets the zero-operation mount borrow a host without creating another owner', () => {
+  it('docks the borrowed controls above the zero-operation mannequin and forwards the accepted cloth', () => {
     const zero = source('./cad-table-zero-operation-production-mount-v1.tsx');
+    const hosts = elements(zero.tree, 'PatternImportDxfPhaseECadTableZeroOperationHostV1');
     const pickers = elements(zero.tree, 'PatternImportDxfPhaseECadMannequinModelPickerV1');
 
+    expect(hosts).toHaveLength(1);
     expect(pickers).toHaveLength(1);
     expect(attribute(zero.tree, pickers[0], 'onDisplayedBodyInputV1')).toBe(
       'physicalHost?.onDisplayedBodyInputV1',
     );
+    expect(attribute(zero.tree, pickers[0], 'acceptedCloth')).toBe('physicalHost?.acceptedCloth');
     expect(zero.text).toContain('physicalHost?: CadWorkbenchPhysicalHostV1');
-    expect(zero.text).toContain('{physicalHost.panel}');
-    expect(elements(zero.tree, 'CadWorkbenchPhysicalHostPanelV1')).toHaveLength(1);
     expect(zero.text).not.toContain('useSavedClothPhysicalHostV1(');
+    expect(zero.text).not.toMatch(/physicalHost(?:\?\.|\.)viewport\b/);
+    expect(elements(zero.tree, 'CadWorkbenchPhysicalHostPanelV1')).toHaveLength(0);
+    expect(elements(zero.tree, 'CadWorkbenchPhysicalHostControlsV1')).toHaveLength(0);
+
+    const slot = jsxAttribute(zero.tree, hosts[0], 'mannequin');
+    const render = slot && ts.isJsxExpression(slot) ? slot.expression : undefined;
+    expect(render && ts.isArrowFunction(render)).toBe(true);
+    const viewport = pickers[0].parent;
+    const column = viewport.parent;
+    if (!ts.isJsxElement(viewport) || !ts.isJsxElement(column)) {
+      throw new Error('Expected the picker inside its own mannequin viewport');
+    }
+    expect(column.parent.parent).toBe(render);
+    expect(classes(zero.tree, column.openingElement)).toEqual(
+      expect.arrayContaining(['flex', 'flex-col']),
+    );
+    expect(classes(zero.tree, viewport.openingElement)).toEqual(
+      expect.arrayContaining(['min-h-0', 'flex-1']),
+    );
+
+    const [dock, next] = column.children.filter((child) => !ts.isJsxText(child));
+    expect(next).toBe(viewport);
+    const branch = ts.isJsxExpression(dock) ? dock.expression : undefined;
+    if (!branch || !ts.isConditionalExpression(branch) || !ts.isJsxElement(branch.whenTrue)) {
+      throw new Error('Expected the borrowed controls in a dock before the mannequin viewport');
+    }
+    expect(branch.condition.getText(zero.tree)).toBe('physicalHost?.panel');
+    expect(branch.whenFalse.kind).toBe(ts.SyntaxKind.NullKeyword);
+    const dockClasses = classes(zero.tree, branch.whenTrue.openingElement);
+    expect(dockClasses).toContain('shrink-0');
+    expect(dockClasses.join(' ')).not.toMatch(
+      /(?:^|[\s:])(?:absolute|fixed|sticky|pointer-events-none)(?:$|\s)/,
+    );
+    expect(jsxAttribute(zero.tree, branch.whenTrue.openingElement, 'style')).toBeUndefined();
+    const panelChildren = nodes(zero.tree, ts.isJsxExpression).filter(
+      ({ expression }) =>
+        expression &&
+        ts.isPropertyAccessExpression(expression) &&
+        expression.expression.getText(zero.tree) === 'physicalHost' &&
+        expression.name.text === 'panel',
+    );
+    expect(panelChildren).toHaveLength(1);
+    expect(branch.whenTrue.children.filter((child) => !ts.isJsxText(child))).toEqual(panelChildren);
   });
 
   it('creates the body-only owner only inside the top-level no-operation branch wrapper', () => {
