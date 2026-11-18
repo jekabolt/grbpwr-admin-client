@@ -1812,6 +1812,10 @@ export type SemanticsInput = {
    * a..b in each size) as the mirror line.
    */
   operatorFold?: Partial<Record<SeedId, { a: PtMm; b: PtMm; half?: true }>>;
+  /** Current product saved read only. Each rank must match its own decoder-bound physical axis. */
+  savedNativeHalfFolds?: Partial<
+    Record<SeedId, readonly (ProductDxfFoldAxis & { sizeId: number; sourceSha256: string })[]>
+  >;
   /**
    * Seeds the AI, reading the drawing, says are cut on fold (F10 `suggestion.onFold`) — the sheet's
    * words may be curves. Asked, never unfolded on that alone (E1a, D3).

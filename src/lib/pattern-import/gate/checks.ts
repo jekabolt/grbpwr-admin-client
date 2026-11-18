@@ -35,6 +35,7 @@ import {
   reflection,
   sampleAlong,
 } from '../write/geom';
+import { num } from '../write/format';
 import { LAYERS, continuityOfBlock } from '../write/manifest-build';
 import {
   GRAIN_BARB_BACK_MM,
@@ -826,9 +827,33 @@ export function g5(ctx: GateCtx): GateCheck {
       const inner = l1.inner ?? [];
       const n4 = inner.filter((p) => p.layer === LAYERS.notch).length;
       const n8 = inner.filter((p) => p.layer === LAYERS.internal).length;
+
       if (n4 !== s.notches.length) bad(`card parser keeps ${n4} of ${s.notches.length} notches`);
-      if (!r12 && n8 !== s.drills.length + wantInternal)
-        bad(`card parser keeps ${n8} of ${s.drills.length + wantInternal} layer-8 paths`);
+      const confirmedMirror = !!(b.spec.halfFold && !b.spec.unfoldedFold && s.fold);
+      if (!r12 && confirmedMirror && s.fold) {
+        const kept = inner.filter((p) => p.layer === AAMA_MIRROR_LAYER);
+        const expected = [
+          s.fold.a,
+          { x: (s.fold.a.x + s.fold.b.x) / 2, y: (s.fold.a.y + s.fold.b.y) / 2 },
+          s.fold.b,
+        ];
+        const p = kept[0];
+        if (
+          mirror.length !== 1 ||
+          kept.length !== 1 ||
+          !p ||
+          p.closed ||
+          p.pts.length !== expected.length ||
+          !p.pts.every(
+            (v, i) =>
+              num((v.x + (l1.originX ?? 0)) * 10) === num(expected[i]!.x) &&
+              num((v.y + (l1.originY ?? 0)) * 10) === num(expected[i]!.y),
+          )
+        )
+          bad('card parser lost the directed confirmed half axis on layer 6');
+      }
+      const expected8 = s.drills.length + wantInternal - Number(confirmedMirror);
+      if (!r12 && n8 !== expected8) bad(`card parser keeps ${n8} of ${expected8} layer-8 paths`);
     }
   }
   // SHAPE (owner 16.10): one piece, one shape — the sizes of an identity carry the same features

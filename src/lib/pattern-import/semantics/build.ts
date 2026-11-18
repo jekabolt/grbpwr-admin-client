@@ -21,6 +21,7 @@ import {
   equalAxisPoint,
   hasSingleCutEdge,
   isReadProductFoldAxis,
+  matchesSavedFoldRank,
 } from '../adapters/dxf/product-fold-axis';
 import { resolveNativeCutLoops } from '../adapters/dxf/native-cut-holes';
 import { isMirrorSymmetric } from '../ai/geom';
@@ -1293,6 +1294,25 @@ export function buildPieceSpecsDetailed(
     // ── fold (E1a, D3): a fold word unfolds the piece only when it is bound to a straight edge of
     // THIS outline and the result is a believable whole; otherwise the operator is asked.
     const wantFold = ov.unfoldedFold ?? null;
+    const savedRanks = input.savedNativeHalfFolds?.[seed];
+    if (
+      savedRanks !== undefined &&
+      (!Array.isArray(savedRanks) ||
+        savedRanks.length < 1 ||
+        savedRanks.length > 2 ||
+        savedRanks.length !== p.cands.length ||
+        p.cands.length !== p.all.length ||
+        wantFold !== null ||
+        operatorFold[seed] ||
+        new Set(savedRanks.map((a) => a.rank)).size !== savedRanks.length)
+    ) {
+      block(
+        seed,
+        'fold-unresolved',
+        'Saved half requires one distinct native answer per current size.',
+      );
+      continue;
+    }
     const opFold = wantFold === false ? null : operatorFold[seed] ?? null;
     const foldWords = wantFold === false ? [] : foldWordsOf(p.fam, sheet);
     let refEdge: FoldLine | null = opFold;
@@ -1762,10 +1782,42 @@ export function buildPieceSpecsDetailed(
       let halfEdge: FoldEdge | null = null;
       if (wantFold !== false) {
         foldFeat = (feats.find((f) => f.kind === 'fold') as FoldFeature | undefined) ?? null;
-        if (foldFeat && halfPick && isReadProductFoldAxis(foldFeat)) {
+        const savedRank = savedRanks?.find((a) => a.rank === c.rank);
+        if (
+          savedRanks &&
+          (!savedRank ||
+            !foldFeat ||
+            savedRank.seed !== seed ||
+            savedRank.sizeId !== card.sizeId ||
+            savedRank.size !== card.token ||
+            savedRank.block !== c.dxf?.block ||
+            savedRank.identity !== c.dxf?.identity ||
+            !matchesSavedFoldRank(foldFeat, savedRank))
+        ) {
+          blockedHere = {
+            reason: 'fold-unresolved',
+            detail: `${card.token}: saved half axis does not match the native source rank`,
+          };
+          break;
+        }
+        if (
+          !savedRanks &&
+          halfPick &&
+          p.cands.length > 1 &&
+          foldFeat &&
+          isReadProductFoldAxis(foldFeat)
+        ) {
+          blockedHere = {
+            reason: 'fold-unresolved',
+            detail: `${card.token}: a saved graded half requires a directed answer for each rank`,
+          };
+          break;
+        }
+        const nativePick = savedRank ?? halfPick;
+        if (foldFeat && nativePick && isReadProductFoldAxis(foldFeat)) {
           if (
-            !equalAxisPoint(halfPick.a, foldFeat.a) ||
-            !equalAxisPoint(halfPick.b, foldFeat.b) ||
+            !equalAxisPoint(nativePick.a, foldFeat.a) ||
+            !equalAxisPoint(nativePick.b, foldFeat.b) ||
             feats.filter((f) => f.kind === 'fold').length !== 1 ||
             !hasSingleCutEdge(outer, foldFeat.a, foldFeat.b)
           ) {
