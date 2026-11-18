@@ -1304,3 +1304,162 @@ it.each(['internal-line', 'pattern-line', 'french-curve', 'guideline', 'cross'] 
     }
   },
 );
+
+it('reopens a native text mark without turning it into size, fold or quantity metadata', async () => {
+  const f = await fixture(true);
+  vi.stubGlobal('Worker', InProcessTransport);
+  try {
+    const { recordPatternImportDxfPhaseEDraftCadCanvasPointV1 } = await import(
+      './draft-cad-canvas-v1'
+    );
+    const { compilePatternImportDxfPhaseEDraftCadGeometryV1 } = await import(
+      './draft-cad-geometry-compile-v1'
+    );
+    const { AUTHORED_TEXT_LAYER } = await import('lib/pattern-import/manifest/authored-text');
+    const { parseDxf } = await import('lib/nesting/dxf/parse');
+    const { projection, selection } = f.compileInput;
+    const piece = projection.pieces[0]!;
+    const vertices = piece.contours[0]!.vertices;
+    const pointMm = {
+      x: vertices.reduce((sum, vertex) => sum + vertex.pointMm.x, 0) / vertices.length,
+      y: vertices.reduce((sum, vertex) => sum + vertex.pointMm.y, 0) / vertices.length,
+    };
+    const input = {
+      session: f.initial,
+      projection,
+      activeTool: 'mark',
+      activePieceIndex: 0,
+      sequence: 0,
+      pendingPoints: [],
+      pointMm,
+      markKind: 'text',
+    } as const;
+    expect(recordPatternImportDxfPhaseEDraftCadCanvasPointV1(input).recorded).toBe(false);
+    const markText = 'SIZE: XL · CUT 2 · СГИБ';
+    const edit = recordPatternImportDxfPhaseEDraftCadCanvasPointV1({ ...input, markText });
+    expect(edit.recorded).toBe(true);
+    const compileSource = createPatternImportDxfPhaseEDraftCadCompileSourceV1(
+      f.source.native.draft,
+    );
+    if (!compileSource) throw Error('Fixture lacks a current writer source.');
+    const compiled = compilePatternImportDxfPhaseEDraftCadGeometryV1({
+      session: edit.session,
+      projection,
+      selection,
+      compileSource,
+    });
+    if (!compiled.ok) throw Error(JSON.stringify(compiled.blockers));
+    const first = compiled.artifact.manifest.blocks.find(
+      ({ identity }) => identity === piece.pieceId,
+    )!;
+    expect(first.authoredText).toEqual([expect.objectContaining({ text: markText })]);
+    expect(compiled.artifact.compiledFeatures[0]).toMatchObject({
+      output: 'text-mark',
+      pieceId: piece.pieceId,
+      sizeToken: 'M',
+    });
+
+    for (const dialect of ['r12', 'r2000'] as const) {
+      const written = writeDxfDetailed(
+        { ...compiled.artifact.compiledJob, dialect },
+        { now: () => new Date('2026-11-17T00:00:00.000Z') },
+      );
+      const native = parseDxf(new TextEncoder().encode(written.dxfText).buffer, 'mm');
+      expect(
+        native.dxf.blocks[first.block]!.entities.filter(
+          ({ layer, type }) => layer === AUTHORED_TEXT_LAYER && type === 'TEXT',
+        ),
+      ).toHaveLength(1);
+      const file = new File([written.dxfText], 'main-cad-compiled.dxf', {
+        type: 'image/vnd.dxf',
+      });
+      const reviewed = await draftThroughWizardStages(
+        file,
+        f.current.card,
+        new ImportWorkerClient(),
+      );
+      const scope = reviewed.scopes[0]!;
+      expect(scope.manifest.gate?.passed).toBe(true);
+      const nativePiece = scope.writerReplay!.job.pieces.find(
+        ({ identity }) => identity === piece.pieceId,
+      )!;
+      expect(nativePiece.piecesPerGarment).toBe(1);
+      expect(nativePiece.unfoldedFold).toBe(false);
+      expect(nativePiece.sizes.map(({ sizeToken }) => sizeToken)).toEqual(['M']);
+      expect(nativePiece.sizes[0]!.textMarks).toEqual([
+        expect.objectContaining({ text: markText }),
+      ]);
+      expect(nativePiece.sizes[0]!.fold).toBeNull();
+      const latest = scope.manifest.blocks.find(({ identity }) => identity === piece.pieceId)!;
+      expect(latest.internal).toBe(first.internal);
+      expect(latest.drills).toBe(first.drills);
+      if (dialect === 'r12') {
+        const { nativePieceCopyVerifier } = await import(
+          'lib/pattern-import/fabrics/native-piece-copy-review'
+        );
+        const { asciiText } = await import('lib/pattern-import/write/format');
+        const copy = structuredClone(
+          compiled.artifact.compiledJob.pieces.find(({ identity }) => identity === piece.pieceId)!,
+        );
+        copy.identity = 'MARKCOPY';
+        copy.code = 'MARKCOPY';
+        copy.displayName = 'MARKCOPY';
+        copy.seed += 100;
+        const copied = writeDxfDetailed(
+          {
+            ...compiled.artifact.compiledJob,
+            dialect,
+            pieces: [...compiled.artifact.compiledJob.pieces, copy],
+          },
+          { now: () => new Date('2026-11-17T00:00:00.000Z') },
+        );
+        const verify = nativePieceCopyVerifier(written.dxfText, piece.pieceId, copy.identity);
+        expect(() => verify(copied.dxfText)).not.toThrow();
+        const replacedCaption = readManifest(copied.dxfText)!;
+        replacedCaption.blocks.find(
+          ({ identity }) => identity === copy.identity,
+        )!.authoredText![0]!.text = asciiText(markText);
+        expect(() => verify(embedManifest(copied.dxfText, replacedCaption))).toThrow(
+          'duplicate changed a native layer, mark, coordinate or rank',
+        );
+
+        const bytes = new TextEncoder().encode(scope.dxfText);
+        const row = {
+          ...f.current.row,
+          revision: f.current.row.revision + 1,
+          cardLockVersion: f.current.row.cardLockVersion + 1,
+          sizeBytes: bytes.length,
+          sha256: await digestFullAssemblyFixture(bytes),
+        };
+        const card = structuredClone(f.current.card);
+        card.existingPatterns![0]!.manifest = scope.manifest;
+        const restored = await createSavedThreePanelSourceV1(
+          { ...(await createSavedThreePanelFixtureV1(2)), bytes, row, card },
+          true,
+        );
+        try {
+          expect(restored.native.row).toEqual(row);
+          const pieces = restored.native.draft.scopes[0]!.writerReplay!.job.pieces;
+          const reread = pieces.find(({ identity }) => identity === piece.pieceId)?.sizes[0];
+          expect(reread?.textMarks).toEqual([expect.objectContaining({ text: markText })]);
+        } finally {
+          restored.dispose();
+        }
+
+        const altered = readManifest(written.dxfText)!;
+        altered.blocks.find(
+          ({ identity }) => identity === piece.pieceId,
+        )!.authoredText![0]!.anchor[0] += 100;
+        const moved = new File([embedManifest(written.dxfText, altered)], file.name, {
+          type: file.type,
+        });
+        await expect(
+          draftThroughWizardStages(moved, f.current.card, new ImportWorkerClient()),
+        ).rejects.toThrow('saved CAD text marks');
+      }
+    }
+  } finally {
+    vi.unstubAllGlobals();
+    f.source.dispose();
+  }
+});

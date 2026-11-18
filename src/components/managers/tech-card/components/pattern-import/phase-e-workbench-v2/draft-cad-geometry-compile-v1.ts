@@ -1,4 +1,5 @@
 import { closestOnPolyline, pointInPolygon } from 'lib/pattern-import/semantics/geom';
+import { normalizeAuthoredText } from 'lib/pattern-import/manifest/authored-text';
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 import type { DxfProductPhaseDSizeSelectionResultV1 } from 'lib/pattern-import/dxf-product-phase-d-size-selection-v1';
 import { readManifest } from 'lib/pattern-import/manifest';
@@ -77,6 +78,7 @@ export type PatternImportDxfPhaseEDraftCadCompiledFeatureV1 = Readonly<{
   sizeToken: string;
   output:
     | 'internal'
+    | 'text-mark'
     | 'drill'
     | 'notch'
     | 'boundary-point'
@@ -234,7 +236,11 @@ function supported(command: PatternImportDxfPhaseEDraftCadCommandV1): boolean {
   if (command.tool === 'cut') return command.payload.keepSide === 'both';
   if (command.tool === 'spread') return command.payload.amountMm > 0;
   if (command.tool === 'mark')
-    return command.payload.kind === 'drill' || command.payload.kind === 'cross';
+    return (
+      command.payload.kind === 'drill' ||
+      command.payload.kind === 'cross' ||
+      (command.payload.kind === 'text' && normalizeAuthoredText(command.payload.text) !== null)
+    );
   if (command.tool === 'notch') return command.payload.kind === 'single';
   return false;
 }
@@ -813,6 +819,25 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
     if (internal) {
       size.internal.push(internal);
       output = 'internal';
+    } else if (
+      command.tool === 'mark' &&
+      command.payload.kind === 'text' &&
+      primitive.kind === 'point' &&
+      primitive.indicator === 'text' &&
+      primitive.text
+    ) {
+      const at = primitive.pointMm;
+      if (
+        !pointInPolygon(at, size.cut) ||
+        (size.cutLoops ?? []).some((loop) => pointInPolygon(at, loop))
+      )
+        return blocked(
+          'preview-blocked',
+          'Place the text anchor inside the selected cut.',
+          command,
+        );
+      (size.textMarks ??= []).push({ at: { ...at }, text: primitive.text });
+      output = 'text-mark';
     } else if (
       command.tool === 'mark' &&
       command.payload.kind === 'cross' &&

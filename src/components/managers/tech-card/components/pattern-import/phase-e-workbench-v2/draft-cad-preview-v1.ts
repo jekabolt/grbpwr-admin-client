@@ -61,6 +61,7 @@ export type PatternImportDxfPhaseEDraftCadPreviewPrimitiveV1 =
       Readonly<{
         pointMm: PtMm;
         indicator: 'draft' | 'point-only' | 'drill' | 'cross' | 'text';
+        text?: string;
       }>)
   | (PrimitiveBase<'notch'> &
       Readonly<{
@@ -401,7 +402,17 @@ export function buildPatternImportDxfPhaseEDraftCadPreviewV1(
             : command.tool === 'point-only'
               ? ('point-only' as const)
               : command.payload.kind;
-        primitives.push(deepFreeze({ ...base, kind: 'point' as const, pointMm, indicator }));
+        primitives.push(
+          deepFreeze({
+            ...base,
+            kind: 'point' as const,
+            pointMm,
+            indicator,
+            ...(command.tool === 'mark' && command.payload.kind === 'text' && command.payload.text
+              ? { text: command.payload.text }
+              : {}),
+          }),
+        );
         bounds = extend(bounds, pointMm);
         break;
       }

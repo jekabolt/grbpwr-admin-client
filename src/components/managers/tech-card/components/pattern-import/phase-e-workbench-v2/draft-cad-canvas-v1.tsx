@@ -6,6 +6,10 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
+import {
+  AUTHORED_TEXT_HEIGHT_MM,
+  normalizeAuthoredText,
+} from 'lib/pattern-import/manifest/authored-text';
 import type { BoxMm, PtMm } from 'lib/pattern-import/types';
 
 import { SHEET_INK, SheetViewport, ptsAttr, vy } from '../sheet-viewport';
@@ -155,7 +159,8 @@ type PointInput = Readonly<{
   pendingDartBase?: PatternImportDxfPhaseEDraftCadCanvasDartBaseV1 | null;
   sequence: number;
   closePen?: boolean;
-  markKind?: 'drill' | 'cross';
+  markKind?: 'drill' | 'cross' | 'text';
+  markText?: string;
 }>;
 
 type ProjectedPiece = PatternImportDxfProductPhaseEAssemblyProjectionV1['pieces'][number];
@@ -525,19 +530,24 @@ function commandForPoint(
           payload: { entityId: ids.entityId, pointMm: input.pointMm },
         },
       };
-    case 'mark':
+    case 'mark': {
+      const kind = input.markKind ?? 'drill';
+      const label = { drill: 'Add drill mark', cross: 'Add cross mark', text: 'Add text mark' };
+      const text = kind === 'text' ? normalizeAuthoredText(input.markText) : null;
       return {
-        label: input.markKind === 'cross' ? 'Add cross mark' : 'Add drill mark',
+        label: label[kind],
         command: {
           ...common,
           tool: 'mark',
           payload: {
             entityId: ids.entityId,
             pointMm: input.pointMm,
-            kind: input.markKind ?? 'drill',
+            kind,
+            ...(text ? { text } : {}),
           },
         },
       };
+    }
     case 'rectangle': {
       const from = input.pendingPoints[0];
       if (!from) return null;
@@ -931,6 +941,12 @@ export function recordPatternImportDxfPhaseEDraftCadCanvasPointV1(
       blocker: null,
     };
 
+  if (
+    input.activeTool === 'mark' &&
+    input.markKind === 'text' &&
+    !normalizeAuthoredText(input.markText)
+  )
+    return failPointInput(input, 'Enter a single text line of up to 255 UTF-8 bytes.');
   const ids = nextIds(input.session, input.sequence);
   const nextCommand = commandForPoint(input, ids, {
     pieceId: target.pieceId,
@@ -1297,6 +1313,19 @@ function PreviewPrimitive({
         />
       );
     case 'point': {
+      if (primitive.indicator === 'text' && primitive.text)
+        return (
+          <text
+            {...common}
+            x={primitive.pointMm.x}
+            y={vy(primitive.pointMm.y)}
+            fontSize={AUTHORED_TEXT_HEIGHT_MM}
+            fill={SHEET_INK.blue}
+            stroke='none'
+          >
+            {primitive.text}
+          </text>
+        );
       const r = unit * 3.5;
       const cross = primitive.indicator === 'cross';
       const arm = cross ? DRAFT_CAD_CROSS_MARK_HALF_SPAN_MM : r * 1.6;
@@ -1405,7 +1434,8 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
   onTopologyAnchor,
   onCrossScopeEdge,
 }: PatternImportDxfPhaseEDraftCadCanvasPropsV1) {
-  const [markKind, setMarkKind] = useState<'drill' | 'cross'>('drill');
+  const [markKind, setMarkKind] = useState<'drill' | 'cross' | 'text'>('drill');
+  const [markText, setMarkText] = useState('');
   const [pendingPoints, setPendingPoints] = useState<readonly PtMm[]>([]);
   const [pendingDartBase, setPendingDartBase] =
     useState<PatternImportDxfPhaseEDraftCadCanvasDartBaseV1 | null>(null);
@@ -1496,6 +1526,7 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
       sequence: sequence.current,
       closePen,
       markKind,
+      markText,
     });
     setPendingPoints(result.pendingPoints);
     setPendingDartBase(result.pendingDartBase);
@@ -1945,22 +1976,44 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
               unavailable ??
               (activeTopologyTool
                 ? 'Choose an exact highlighted vertex from the sealed projection.'
-                : activeTool === 'mark' && markKind === 'cross'
-                  ? `Click inside the piece to place a cross in size ${projection.sizeToken}.`
+                : activeTool === 'mark' && markKind !== 'drill'
+                  ? `Click inside the piece to place the ${markKind} mark in size ${projection.sizeToken}.`
                   : toolInstruction(activeTool, projection.sizeToken))}
       </div>
       {activeTool === 'mark' && interactionEnabled ? (
-        <label className='flex items-center gap-2 text-small'>
-          Mark type
-          <select
-            value={markKind}
-            onChange={(event) => setMarkKind(event.target.value === 'cross' ? 'cross' : 'drill')}
-            className='border border-borderColor bg-bgColor p-1'
-          >
-            <option value='drill'>Drill</option>
-            <option value='cross'>Cross ({DRAFT_CAD_CROSS_MARK_HALF_SPAN_MM * 2} mm)</option>
-          </select>
-        </label>
+        <div className='flex flex-wrap items-center gap-2 text-small'>
+          <label className='flex items-center gap-2'>
+            Mark type
+            <select
+              value={markKind}
+              onChange={(event) => {
+                const value = event.target.value;
+                setMarkKind(value === 'cross' || value === 'text' ? value : 'drill');
+                setInputError(null);
+              }}
+              className='border border-borderColor bg-bgColor p-1'
+            >
+              <option value='drill'>Drill</option>
+              <option value='cross'>Cross ({DRAFT_CAD_CROSS_MARK_HALF_SPAN_MM * 2} mm)</option>
+              <option value='text'>Text</option>
+            </select>
+          </label>
+          {markKind === 'text' && (
+            <label className='flex items-center gap-2'>
+              Mark text
+              <input
+                type='text'
+                maxLength={255}
+                value={markText}
+                onChange={(event) => {
+                  setMarkText(event.target.value);
+                  setInputError(null);
+                }}
+                className='border border-borderColor bg-bgColor p-1'
+              />
+            </label>
+          )}
+        </div>
       ) : null}
       {activeTool === 'pen' && pendingPoints.length > 0 && interactionEnabled && (
         <div className='flex flex-wrap gap-2'>

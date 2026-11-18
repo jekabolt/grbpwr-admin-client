@@ -1,7 +1,7 @@
 import { buildAst, type RawBlock, type RawEntity } from '../adapters/dxf/ast';
 import { tokenize } from '../adapters/dxf/tags';
 import { readManifest } from '../manifest';
-import { PATIMPORT } from '../types';
+import { PATIMPORT, type ManifestBlock } from '../types';
 
 function requireMatch(ok: unknown, detail: string): asserts ok {
   if (!ok) throw new Error(`Unlinked copy review refused: ${detail}.`);
@@ -23,7 +23,8 @@ const allowed: Record<string, readonly number[]> = {
 };
 
 /** The only ignored displacement is the common translation of a whole block on the writer's sheet. */
-function nativeBlock(block: RawBlock, identity: string) {
+function nativeBlock(block: RawBlock, record: ManifestBlock) {
+  const { identity } = record;
   const outer = block.entities.find((e) => e.type === 'POLYLINE' && e.layer === '1');
   const first = outer?.children[0];
   requireMatch(
@@ -50,13 +51,25 @@ function nativeBlock(block: RawBlock, identity: string) {
       if (code === 20 || code === 21) return [code, (coordinate(value) - y).toString()];
       if (code === 30 || code === 31)
         requireMatch(coordinate(value) === 0n, 'non-planar coordinate');
-      if (e.type === 'TEXT' && code === 1 && value === `Piece Name: ${identity}`)
+      if (e.type === 'TEXT' && e.layer === '1' && code === 1 && value === `Piece Name: ${identity}`)
         return [code, { pieceName: true }];
       return [code, value];
     });
     return [e.type, e.layer, tags, e.children.map(entity)];
   }
-  return JSON.stringify(block.entities.map(entity));
+  const relative = (value: number, axis: 'x' | 'y') =>
+    (BigInt(value) - (axis === 'x' ? x : y)).toString();
+  return JSON.stringify({
+    entities: block.entities.map(entity),
+    authoredInternal: record.authoredInternal?.map((feature) => ({
+      ...feature,
+      vertices: feature.vertices.map((value, index) => relative(value, index % 2 ? 'y' : 'x')),
+    })),
+    authoredText: record.authoredText?.map(({ text, anchor }) => ({
+      text,
+      anchor: [relative(anchor[0], 'x'), relative(anchor[1], 'y')],
+    })),
+  });
 }
 
 function inventory(text: string) {
@@ -103,7 +116,7 @@ function inventory(text: string) {
     const key = JSON.stringify([rank[0]!.rank, b.sizeToken, b.sizeId]);
     const ranks = shapes.get(b.identity) ?? new Map<string, string>();
     requireMatch(!ranks.has(key), 'duplicate native size rank');
-    ranks.set(key, nativeBlock(native, b.identity));
+    ranks.set(key, nativeBlock(native, b));
     shapes.set(b.identity, ranks);
   }
   requireMatch(

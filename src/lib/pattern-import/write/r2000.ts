@@ -2,6 +2,7 @@
 // golden writer (tmp/plans/pdf-to-dxf/k2-work/write-golden.mjs). Every tag outside geometry is
 // deterministic; `golden-min.dxf` is the structural fixture (scripts/pattern-import/f6-entry.ts).
 
+import { AUTHORED_TEXT_HEIGHT_MM, AUTHORED_TEXT_LAYER } from '../manifest/authored-text';
 import type { PtMm } from '../types';
 import type { PlannedBlock, PlannedDrill } from './plan';
 import { DRILL_CIRCLE_SEGMENTS, DRILL_SQUARE_MM } from './plan';
@@ -202,8 +203,11 @@ export function writeR2000(blocks: readonly PlannedBlock[]): string {
     E(40, num(0));
   }
   E(0, 'ENDTAB');
-  tableHead('LAYER', 3, CLO_LAYERS.length);
-  for (const [n, c] of CLO_LAYERS) {
+  const layers: readonly [string, number][] = blocks.some((block) => block.size.textMarks?.length)
+    ? [...CLO_LAYERS, [AUTHORED_TEXT_LAYER, 8]]
+    : CLO_LAYERS;
+  tableHead('LAYER', 3, layers.length);
+  for (const [n, c] of layers) {
     E(0, 'LAYER');
     E(5, hex(h++));
     rec('AcDbLayerTableRecord', 3);
@@ -350,6 +354,8 @@ export function writeR2000(blocks: readonly PlannedBlock[]): string {
         s,
       ),
     );
+    for (const mark of b.size.textMarks ?? [])
+      text(o, AUTHORED_TEXT_LAYER, mark.at, AUTHORED_TEXT_HEIGHT_MM, mark.text);
     blockEnd(o, false);
   });
   E(0, 'ENDSEC');

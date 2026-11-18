@@ -1,3 +1,4 @@
+import { normalizeAuthoredText } from 'lib/pattern-import/manifest/authored-text';
 import type { PatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import type { DxfProductPhaseDReplayCarrierV1 } from 'lib/pattern-import/dxf-product-phase-d-replay-v1';
 import type { PtMm } from 'lib/pattern-import/types';
@@ -236,7 +237,10 @@ export type PatternImportDxfPhaseEDraftCadCommandV1 =
         depthMm: number;
       }
     >
-  | Command<'mark', { entityId: string; pointMm: PtMm; kind: 'drill' | 'cross' | 'text' }>;
+  | Command<
+      'mark',
+      { entityId: string; pointMm: PtMm; kind: 'drill' | 'cross' | 'text'; text?: string }
+    >;
 
 export type PatternImportDxfPhaseEDraftCadSourceV1 = Readonly<{
   phaseD: Readonly<
@@ -525,7 +529,11 @@ function validCommand(value: unknown): value is PatternImportDxfPhaseEDraftCadCo
     case 'mark':
       return (
         point(payload.pointMm) &&
-        (payload.kind === 'drill' || payload.kind === 'cross' || payload.kind === 'text')
+        (payload.kind === 'drill' || payload.kind === 'cross' || payload.kind === 'text') &&
+        (payload.text === undefined ||
+          (payload.kind === 'text' &&
+            typeof payload.text === 'string' &&
+            normalizeAuthoredText(payload.text) === payload.text))
       );
   }
 }

@@ -358,14 +358,16 @@ function splitSize(
   const split = splitPolygon(size.cut, from, to);
   if (!split.ok) return split;
   const [left, right] = split.polygons;
+  const { textMarks, ...base } = size;
   const output = [
     {
-      ...structuredClone(size),
+      ...structuredClone(base),
       cut: left.map((point) => ({ ...point })),
       seam: size.seam ? left.map((point) => ({ ...point })) : null,
       notches: [],
       drills: [],
       internal: [],
+      ...(textMarks?.length ? { textMarks: [] } : {}),
       grain: null,
       fold: null,
       offset: null,
@@ -374,12 +376,13 @@ function splitSize(
       areaMm2: Math.abs(areaSigned(left)),
     },
     {
-      ...structuredClone(size),
+      ...structuredClone(base),
       cut: right.map((point) => ({ ...point })),
       seam: size.seam ? right.map((point) => ({ ...point })) : null,
       notches: [],
       drills: [],
       internal: [],
+      ...(textMarks?.length ? { textMarks: [] } : {}),
       grain: null,
       fold: null,
       offset: null,
@@ -407,6 +410,16 @@ function splitSize(
         detail: `A drill in size ${size.sizeToken} lies on the cut chord.`,
       };
     output[side].drills.push(structuredClone(drill));
+  }
+  for (const mark of textMarks ?? []) {
+    const side = featureSide([mark.at], split.polygons);
+    if (side === null)
+      return {
+        ok: false,
+        code: 'feature-partition-ambiguous',
+        detail: `A text anchor in size ${size.sizeToken} lies on the cut chord.`,
+      };
+    output[side].textMarks!.push(structuredClone(mark));
   }
   for (const internal of size.internal) {
     const side = featureSide(internal.pts, split.polygons);

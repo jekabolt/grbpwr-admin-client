@@ -3,6 +3,7 @@ import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/patt
 import {
   bboxOf,
   footOnSegment,
+  pointInPolygon,
   selfIntersects,
   signedArea,
 } from 'lib/pattern-import/semantics/geom';
@@ -146,6 +147,9 @@ export function resizeDraftCadSelectedSizeEdgeV1(
     footOnSegment(movedPoint, before, after).d <= EPS
   )
     return { ok: false, detail: 'The new edge length would collapse or cross the outline.' };
+
+  if (source.textMarks?.some(({ at }) => !pointInPolygon(at, nextRing)))
+    return { ok: false, detail: 'Move the text anchor inside the resized outline.' };
 
   const size = structuredClone(source);
   const copyLoop = (previous: readonly PtMm[]) => {

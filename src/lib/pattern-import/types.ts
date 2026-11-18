@@ -1670,6 +1670,8 @@ export type ShapeIssue = {
   why: string;
 };
 
+export type AuthoredTextMark = { at: PtMm; text: string };
+
 export type PieceSizeSpec = {
   rank: number;
   sizeToken: string; // card token written into the block name
@@ -1686,6 +1688,7 @@ export type PieceSizeSpec = {
   notches: NotchFeature[];
   drills: DrillFeature[];
   internal: InternalFeature[];
+  textMarks?: AuthoredTextMark[];
   fold: FoldFeature | null;
   offset: OffsetReport | null;
   /** Wall chains the cut line came from — coverage/Hausdorff are computed against them. */
@@ -2672,9 +2675,16 @@ export type ManifestAuthoredInternalPath = {
   vertices: number[];
 };
 
+export type ManifestAuthoredTextMark = {
+  /** Anchor on the native writer grid, in block coordinates. */
+  anchor: [number, number];
+  text: string;
+};
+
 export type ManifestBlock = {
   protectedLineSplit?: ManifestProtectedLineSplit;
   authoredInternal?: ManifestAuthoredInternalPath[];
+  authoredText?: ManifestAuthoredTextMark[];
   block: string;
   identity: PieceKey;
   sizeToken: string;

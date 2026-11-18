@@ -4,9 +4,11 @@
 import type {
   Affine,
   AllowanceDecision,
+  AuthoredTextMark,
   BoxMm,
   Feature,
   ManifestAuthoredInternalPath,
+  ManifestAuthoredTextMark,
   ManifestBlock,
   PathId,
   PieceCandidate,
@@ -100,6 +102,7 @@ export type DxfMeta = {
   /** Manifest blocks explicitly emitted with a sewing boundary and zero allowance. */
   zeroAllowanceSeamBlocks?: ReadonlyMap<string, NonNullable<ManifestBlock['contour']>>;
   authoredInternalByBlock?: ReadonlyMap<string, readonly ManifestAuthoredInternalPath[]>;
+  authoredTextByBlock?: ReadonlyMap<string, readonly ManifestAuthoredTextMark[]>;
   /** Proven by the generator's DXF marker or the system-owned card-row flag. */
   generatedFusing: boolean;
   /** Model-space `KEY: value` texts (AAMA header: STYLE NAME, SAMPLE SIZE, UNITS, AUTHOR…). */
@@ -293,6 +296,7 @@ export type DxfBlockPiece = {
   drills: { at: PtMm; path: PathId; form: 'square' | 'circle' | 'point'; sizeMm: number }[];
   roles: Record<PathId, PathRole>;
   texts: TextId[];
+  textMarks?: AuthoredTextMark[];
   gradePoints: { turn: number; curve: number };
   pointNumbers: number;
   annotations: TextId[];
@@ -379,6 +383,7 @@ export type DxfPieceCandidate = PieceCandidate & {
     /** The outer contour is L14 (mode A: the true graded line) — cut = outward offset. */
     outerIsSeam: boolean;
     zeroAllowanceSeam?: true;
+    textMarks?: AuthoredTextMark[];
     /** The block's `seamPair` allowance, mm (the uniform same-look loop inside the outline). */
     seamPairMm?: number;
     /** F14 R5: the block is inserted this many times (identical copies) = its cut quantity. */

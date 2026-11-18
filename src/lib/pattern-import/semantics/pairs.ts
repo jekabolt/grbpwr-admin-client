@@ -65,6 +65,9 @@ export function transformSizeSpec(s: PieceSizeSpec, t: Affine): PieceSizeSpec {
     notches,
     drills,
     internal,
+    ...(s.textMarks?.length
+      ? { textMarks: s.textMarks.map((mark) => ({ ...mark, at: P(mark.at) })) }
+      : {}),
     fold,
     bbox: bboxOf(cutLoops?.length ? [...cut, ...cutLoops.flat()] : cut),
     areaMm2: areaOf(cut) + (cutLoops?.reduce((total, loop) => total + signedArea(loop), 0) ?? 0),

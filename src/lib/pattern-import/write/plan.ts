@@ -173,6 +173,11 @@ function transformSize(s: PieceSizeSpec, t: Affine): PieceSizeSpec {
     notches,
     drills,
     internal,
+    ...(s.textMarks?.length
+      ? {
+          textMarks: s.textMarks.map((mark) => ({ ...mark, at: P(mark.at) })),
+        }
+      : {}),
     fold,
     bbox: bboxOf(cut),
     areaMm2: areaOf(cut),

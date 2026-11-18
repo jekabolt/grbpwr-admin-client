@@ -180,6 +180,7 @@ type DxfExtra = {
     identity?: string;
     outerIsSeam?: boolean;
     zeroAllowanceSeam?: true;
+    textMarks?: PieceSizeSpec['textMarks'];
     sizeSource?: 'label' | 'block-name' | 'none';
     identitySource?: 'label' | 'block-name';
     generatedFusing?: boolean;
@@ -2112,6 +2113,7 @@ export function buildPieceSpecsDetailed(
         sizeId: card.sizeId,
         cut,
         ...(cutLoops ? { cutLoops } : {}),
+        ...(c.dxf?.textMarks?.length ? { textMarks: c.dxf.textMarks } : {}),
         seam,
         grain,
         notches: notchesOut,

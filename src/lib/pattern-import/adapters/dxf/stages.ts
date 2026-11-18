@@ -7,6 +7,7 @@
 // Contract gap this fills (proposed for 08-CONTRACT §4.1 in reports/F8.md): for kind 'dxf' with
 // `presegmented`, the worker runs `dxfFastPath` instead of assemble → chains → pieces.
 
+import { AUTHORED_TEXT_LAYER } from '../../manifest/authored-text';
 import { authoredInternalVertices } from '../../manifest/authored-internal';
 import { nativeCutHolesOf } from './native-cut-holes';
 import type {
@@ -342,7 +343,7 @@ export function dxfFastPath(read: DxfRead, seg: DxfSegmentation, rulGraded = fal
     bbox: read.meta.extents,
     missing: [],
     paths: page.paths,
-    texts: page.texts,
+    texts: page.texts.filter((text) => text.layer !== AUTHORED_TEXT_LAYER),
     rasters: page.rasters,
     styles: page.styles,
     warnings: [...read.doc.warnings, ...seg.warnings],
@@ -488,7 +489,7 @@ function candidateOf(
       .filter((id) => !wallIds.has(id))
       .map((id) => chainOf.get(id)!)
       .filter((x) => x != null),
-    textsInside: group.texts,
+    textsInside: p.texts,
     outcome: !outer ? 'leak' : area < PATIMPORT.minPieceAreaMm2 ? 'tiny' : 'closed',
     areaMm2: area,
     bbox:
@@ -507,6 +508,7 @@ function candidateOf(
       features,
       outerIsSeam: outerIsSeam && !!p.seam,
       ...(p.zeroAllowanceSeam ? { zeroAllowanceSeam: true as const } : {}),
+      ...(p.textMarks?.length ? { textMarks: p.textMarks } : {}),
       ...(p.seamPair ? { seamPairMm: p.seamPair.offsetMm } : {}),
       ...(p.instances ? { instances: p.instances } : {}),
       // D3: the block's QUANTITY label is the CAD's word on the count (semantics reads it)

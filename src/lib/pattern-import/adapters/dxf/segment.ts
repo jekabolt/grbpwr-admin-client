@@ -3,6 +3,8 @@
 // 10-CLO-DXF-FORMAT §2 (dialect, cut-line mode, grain arrow, POINT notches, notch twins, labels,
 // sizes, pairs, ungraded layer 1).
 
+import { AUTHORED_TEXT_LAYER } from '../../manifest/authored-text';
+import { readAuthoredTextMarks } from './authored-text';
 import { contourSigProblem } from '../../manifest/contour-sig';
 import type { AllowanceDecision, IRPath, IRText, PathId, PtMm, Style } from '../../types';
 import { PATIMPORT } from '../../types';
@@ -576,7 +578,9 @@ function blockPiece(
 ): BlockWork {
   const page = read.doc.pages[0];
   const paths = group.paths.map((id) => pathById.get(id)).filter((p): p is IRPath => !!p);
-  const texts = group.texts.map((id) => textById.get(id)).filter((t): t is IRText => !!t);
+  const groupTexts = group.texts.map((id) => textById.get(id)).filter((t): t is IRText => !!t);
+  const textMarks = readAuthoredTextMarks(read, group, groupTexts);
+  const texts = groupTexts.filter((text) => text.layer !== AUTHORED_TEXT_LAYER);
   const layerOfPath = (p: IRPath) => page.styles[p.style]?.layer ?? null;
   const kindOf = (p: IRPath) => layerKind(layerOfPath(p));
   const roles: Record<PathId, PathRole> = {};
@@ -891,7 +895,8 @@ function blockPiece(
     notchStats: { raw: raw.length, exactDuplicates: 0, twins: 0, derived: 0 },
     drills,
     roles,
-    texts: group.texts,
+    texts: texts.map(({ id }) => id),
+    ...(textMarks.length ? { textMarks } : {}),
     gradePoints: { turn, curve },
     pointNumbers,
     annotations,

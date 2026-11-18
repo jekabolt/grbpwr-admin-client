@@ -22,6 +22,7 @@
 // STANDARD); POLYLINEs carry no header point (as CLO-AAMA writes them, and our readers expect); text is
 // ASCII by transliteration (`asciiText`), never `\U+` escapes (R2000+ only).
 
+import { AUTHORED_TEXT_HEIGHT_MM, AUTHORED_TEXT_LAYER } from '../manifest/authored-text';
 import type { PtMm } from '../types';
 import type { PlannedBlock } from './plan';
 import { GRAIN_SHAFT_MM, halfOnFoldText } from './plan';
@@ -120,8 +121,11 @@ export function writeR12(
   E(0, 'ENDTAB');
   E(0, 'TABLE');
   E(2, 'LAYER');
-  E(70, String(AAMA_LAYERS.length));
-  for (const l of AAMA_LAYERS) {
+  const layers = blocks.some((block) => block.size.textMarks?.length)
+    ? [...AAMA_LAYERS, { name: AUTHORED_TEXT_LAYER, color: 8, ltype: 'CONTINUOUS' }]
+    : AAMA_LAYERS;
+  E(70, String(layers.length));
+  for (const l of layers) {
     E(0, 'LAYER');
     E(2, l.name);
     E(70, '0');
@@ -225,6 +229,8 @@ export function writeR12(
     lines.forEach(([layer, s], k) =>
       text(layer, { x: mid.x, y: mid.y - R12_TEXT_PITCH * k }, R12_TEXT_HEIGHT, s),
     );
+    for (const mark of b.size.textMarks ?? [])
+      text(AUTHORED_TEXT_LAYER, mark.at, AUTHORED_TEXT_HEIGHT_MM, mark.text);
     E(0, 'ENDBLK');
     E(8, '0');
   }
