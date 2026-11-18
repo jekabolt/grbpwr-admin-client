@@ -23,7 +23,7 @@ export const SAVED_COMPLETE_ASSEMBLY_DIRECTED_PLACEMENT_COMPONENT_V1 =
 const maximumCarrierBytes = 4 * 1024 * 1024;
 const maximumNestedV8Bytes = 3 * 1024 * 1024 - 8192;
 const encoder = new TextEncoder();
-const decoder = new TextDecoder('utf-8', { fatal: true });
+const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 const shaPattern = /^[a-f0-9]{64}$/;
 
 type Restored = Awaited<ReturnType<typeof restoreSavedCompleteAssemblyNativeStitchReviewV8>>;
@@ -31,7 +31,14 @@ type Body = Awaited<ReturnType<typeof readCurrentSavedNeutralPlacementModelV1>>;
 type Placement = Awaited<ReturnType<typeof prepareDirectedSourceCutPreviewV1>>['placement'];
 type CenterMm = readonly [number, number, number];
 
-function base64(bytes: Uint8Array) {
+export function hasExactSavedPlacementWireKeys(value: unknown, keys: readonly string[]): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  return (
+    Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key))
+  );
+}
+
+export function encodeSavedNativePlacementBase64(bytes: Uint8Array) {
   let binary = '';
   for (let offset = 0; offset < bytes.length; offset += 8_192)
     binary += String.fromCharCode(...bytes.subarray(offset, offset + 8_192));
@@ -42,7 +49,13 @@ async function component(kind: string, mediaType: string, bytes: Uint8Array, sig
   const sha256 = await sha256Hex(bytes);
   signal.throwIfAborted();
   if (!shaPattern.test(sha256)) throw new Error('SHA-256 is required for each saved component.');
-  return { kind, mediaType, sha256, byteLength: bytes.byteLength, base64: base64(bytes) };
+  return {
+    kind,
+    mediaType,
+    sha256,
+    byteLength: bytes.byteLength,
+    base64: encodeSavedNativePlacementBase64(bytes),
+  };
 }
 
 /** Packages the exact saved stitch and the existing compiler's initial world placement. */
@@ -179,63 +192,47 @@ export async function buildSavedCrossMaterialPlacementDocumentV9(
   };
 }
 
-/** Reads the existing carrier without applying world placement or starting a solver. */
-export async function readSavedCrossMaterialPlacementDocumentV9(
-  source: import('./saved-assembly-complete-source-rpc-v1').CompleteSavedAssemblySourceV1,
+/** Decodes an exact retained payload without treating it as the current source carrier. */
+export async function decodeSavedCrossMaterialPlacementDocumentV9(
+  carrier: Readonly<{
+    sidecarBytes: string;
+    sidecarSha256: string | undefined;
+    byteLength: number | undefined;
+    postSaveReceiptSha256?: string;
+  }>,
   signal: AbortSignal,
 ) {
-  const { isVerifiedCompleteSavedAssemblySourceV1, completeSavedAssemblyRowIdentityV1 } =
-    await import('./saved-assembly-complete-source-rpc-v1');
   signal.throwIfAborted();
-  const carrier = source.priorCarrier;
-  if (
-    !isVerifiedCompleteSavedAssemblySourceV1(source) ||
-    carrier?.mediaType !== SAVED_COMPLETE_ASSEMBLY_PLACEMENT_MEDIA_V9 ||
-    !carrier.sidecarBytes
-  )
-    throw new Error('A current saved cross-material placement is required.');
-
-  const decodeBase64 = (value: string, maximum: number) => {
-    if (typeof value !== 'string' || !value || value.length > Math.ceil(maximum / 3) * 4)
-      throw new Error('The saved placement component exceeds its byte limit.');
-    const bytes = Uint8Array.from(atob(value), (char) => char.charCodeAt(0));
-    if (bytes.byteLength > maximum || base64(bytes) !== value)
-      throw new Error('The saved placement component has noncanonical bytes.');
-    return bytes;
-  };
-  const bytes = decodeBase64(carrier.sidecarBytes, maximumCarrierBytes);
+  const bytes = decodeSavedNativePlacementBase64(carrier.sidecarBytes, maximumCarrierBytes);
   const text = decoder.decode(bytes);
   type Document = Awaited<
     ReturnType<typeof buildSavedCrossMaterialPlacementDocumentV9>
   >['document'];
   const document = JSON.parse(text) as Document;
-  const { anchorRow, serverAssemblyRevision, completeSourceSha256 } = document.bindings;
-  const selectedRow = source.rows.find(
-    ({ patternLineKey }) => patternLineKey === anchorRow.patternLineKey,
-  );
   if (
+    !hasExactSavedPlacementWireKeys(document, [
+      'schemaVersion',
+      'mediaType',
+      'profile',
+      'encoding',
+      'bindings',
+      'writeCas',
+      'components',
+    ]) ||
     canonical(document, maximumCarrierBytes) !== text ||
     document.schemaVersion !== SAVED_COMPLETE_ASSEMBLY_PLACEMENT_V9 ||
     document.mediaType !== SAVED_COMPLETE_ASSEMBLY_PLACEMENT_MEDIA_V9 ||
     document.profile !== SAVED_COMPLETE_ASSEMBLY_PLACEMENT_PROFILE_V1 ||
     document.encoding !== 'canonical-json-utf8' ||
-    document.components.length !== 2 ||
-    completeSourceSha256 !== source.sourceSha256 ||
-    serverAssemblyRevision !== source.serverAssemblyRevision ||
-    !selectedRow ||
-    selectedRow.scopeKey !== 'main' ||
-    canonical({
-      ...completeSavedAssemblyRowIdentityV1(selectedRow),
-      patternVersion: selectedRow.patternVersion,
-    }) !== canonical(anchorRow) ||
-    carrier.patternLineKey !== selectedRow.patternLineKey ||
-    carrier.cardLockVersion !== anchorRow.cardLockVersion
+    !hasExactSavedPlacementWireKeys(document.writeCas, ['expectedPreviousSidecarSha256']) ||
+    !Array.isArray(document.components) ||
+    document.components.length !== 2
   )
-    throw new Error('The saved placement belongs to different source rows or Assembly Order.');
+    throw new Error('The retained placement must be an exact V9 carrier.');
 
   const [review, physical] = document.components;
-  const reviewBytes = decodeBase64(review.base64, maximumNestedV8Bytes);
-  const physicalBytes = decodeBase64(physical.base64, 32_768);
+  const reviewBytes = decodeSavedNativePlacementBase64(review.base64, maximumNestedV8Bytes);
+  const physicalBytes = decodeSavedNativePlacementBase64(physical.base64, 32_768);
   const [expectedReview, expectedPhysical, sha256, receipt] = await Promise.all([
     component(
       'native-cross-row-review-v8',
@@ -261,7 +258,7 @@ export async function readSavedCrossMaterialPlacementDocumentV9(
   if (
     !shaPattern.test(sha256) ||
     sha256 !== carrier.sidecarSha256 ||
-    receipt !== carrier.postSaveReceiptSha256 ||
+    (carrier.postSaveReceiptSha256 !== undefined && receipt !== carrier.postSaveReceiptSha256) ||
     carrier.byteLength !== bytes.byteLength ||
     canonical(expectedReview) !== canonical(review) ||
     canonical(expectedPhysical) !== canonical(physical) ||
@@ -276,6 +273,24 @@ export async function readSavedCrossMaterialPlacementDocumentV9(
   const reviewText = decoder.decode(reviewBytes);
   const inner = JSON.parse(reviewText) as Restored['document'];
   if (
+    !hasExactSavedPlacementWireKeys(world, [
+      'schemaVersion',
+      'reviewSha256',
+      'body',
+      'placement',
+    ]) ||
+    !hasExactSavedPlacementWireKeys(world.placement, [
+      'centerMm',
+      'depthOffsetsMm',
+      'directedCut',
+    ]) ||
+    !hasExactSavedPlacementWireKeys(world.placement.directedCut, [
+      'gridSha256',
+      'carrierMaterialPositionsFloat64LeSha256',
+      'carrierTrianglesUint32LeSha256',
+      'positionsInvMassFloat32LeSha256',
+      'pieces',
+    ]) ||
     canonical(world) !== placementText ||
     canonical(inner, maximumNestedV8Bytes) !== reviewText ||
     inner.schemaVersion !== SAVED_COMPLETE_ASSEMBLY_NATIVE_REVIEW_V8 ||
@@ -292,6 +307,66 @@ export async function readSavedCrossMaterialPlacementDocumentV9(
     postSaveReceiptSha256: receipt,
     base64: carrier.sidecarBytes,
     world,
-    review: { text: reviewText, sha256: expectedReview.sha256 },
+    document,
+    review: { text: reviewText, sha256: expectedReview.sha256, document: inner },
+  };
+}
+
+export function decodeSavedNativePlacementBase64(value: string, maximum: number) {
+  if (typeof value !== 'string' || !value || value.length > Math.ceil(maximum / 3) * 4)
+    throw new Error('The saved placement component exceeds its byte limit.');
+  const bytes = Uint8Array.from(atob(value), (char) => char.charCodeAt(0));
+  if (bytes.byteLength > maximum || encodeSavedNativePlacementBase64(bytes) !== value)
+    throw new Error('The saved placement component has noncanonical bytes.');
+  return bytes;
+}
+
+/** Reads the existing carrier without applying world placement or starting a solver. */
+export async function readSavedCrossMaterialPlacementDocumentV9(
+  source: import('./saved-assembly-complete-source-rpc-v1').CompleteSavedAssemblySourceV1,
+  signal: AbortSignal,
+) {
+  const { isVerifiedCompleteSavedAssemblySourceV1, completeSavedAssemblyRowIdentityV1 } =
+    await import('./saved-assembly-complete-source-rpc-v1');
+  signal.throwIfAborted();
+  const carrier = source.priorCarrier;
+  if (
+    !isVerifiedCompleteSavedAssemblySourceV1(source) ||
+    carrier?.mediaType !== SAVED_COMPLETE_ASSEMBLY_PLACEMENT_MEDIA_V9 ||
+    !carrier.sidecarBytes ||
+    !carrier.postSaveReceiptSha256
+  )
+    throw new Error('A current saved cross-material placement is required.');
+
+  const { document, review, ...decoded } = await decodeSavedCrossMaterialPlacementDocumentV9(
+    {
+      sidecarBytes: carrier.sidecarBytes,
+      sidecarSha256: carrier.sidecarSha256,
+      byteLength: carrier.byteLength,
+      postSaveReceiptSha256: carrier.postSaveReceiptSha256,
+    },
+    signal,
+  );
+  const { anchorRow, serverAssemblyRevision, completeSourceSha256 } = document.bindings;
+  const selectedRow = source.rows.find(
+    ({ patternLineKey }) => patternLineKey === anchorRow.patternLineKey,
+  );
+  if (
+    completeSourceSha256 !== source.sourceSha256 ||
+    serverAssemblyRevision !== source.serverAssemblyRevision ||
+    !selectedRow ||
+    selectedRow.scopeKey !== 'main' ||
+    canonical({
+      ...completeSavedAssemblyRowIdentityV1(selectedRow),
+      patternVersion: selectedRow.patternVersion,
+    }) !== canonical(anchorRow) ||
+    carrier.patternLineKey !== selectedRow.patternLineKey ||
+    carrier.cardLockVersion !== anchorRow.cardLockVersion
+  )
+    throw new Error('The saved placement belongs to different source rows or Assembly Order.');
+
+  return {
+    ...decoded,
+    review: { text: review.text, sha256: review.sha256 },
   };
 }
