@@ -57,6 +57,7 @@ export type PatternImportDxfPhaseEZeroConnectExistingLinkedN1TargetV1 = Readonly
   orderedRowKeys: readonly string[];
   originalSeamFingerprint: string;
   originalSeamKind: StoredSeam['kind'];
+  originalAnchoredSize: string;
   originalSeamNote: string;
   originalAnchorMetadata: readonly [readonly AnchorMetadata[], readonly AnchorMetadata[]];
   operationsTopologyFingerprint: string;
@@ -396,6 +397,18 @@ export function resolvePatternImportDxfPhaseEZeroConnectExistingLinkedN1TargetV1
   const liveSeam = livePhysical[0]!;
   const savedSeam = savedPhysical[0]!;
   const seamKey = savedSeam.seamKey;
+  // The saved assembly normalizes keys when looking up every operation that owns the seam.
+  const normalizedKey = seamKey.toUpperCase();
+  const ownsSeam = (operation: OperationLike) =>
+    operation.seamKeys?.some((key) => key.trim().toUpperCase() === normalizedKey);
+  if (
+    input.liveOperations.some((operation) => operation !== selected && ownsSeam(operation)) ||
+    savedOperations.some((operation) => operation !== savedMatches[0] && ownsSeam(operation))
+  )
+    return blockedTarget(
+      'existing-linked-n1-seam-ambiguous',
+      'The same physical seam is linked to another Assembly Order operation.',
+    );
   if (liveSeam.seamKey !== seamKey)
     return blockedTarget(
       'existing-linked-n1-seam-row-mismatch',
@@ -439,6 +452,7 @@ export function resolvePatternImportDxfPhaseEZeroConnectExistingLinkedN1TargetV1
       orderedRowKeys: Object.freeze([...savedSeamKeys]),
       originalSeamFingerprint: seamFingerprint(savedSeam),
       originalSeamKind: savedSeam.kind,
+      originalAnchoredSize: savedSeam.anchoredSize,
       originalSeamNote: savedSeam.note,
       originalAnchorMetadata: Object.freeze([
         anchorMetadata(savedSeam.sideA),
@@ -478,6 +492,12 @@ export function capturePatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV
     return blockedCapture(
       'existing-linked-n1-source-size-invalid',
       'The selected exact edges must come from one current saved DXF size on this card.',
+    );
+  const { originalAnchoredSize } = target.target;
+  if (originalAnchoredSize && sourceSizeToken !== originalAnchoredSize)
+    return blockedCapture(
+      'existing-linked-n1-source-size-invalid',
+      `Select size ${originalAnchoredSize} and choose both edges for this saved seam.`,
     );
   const candidateInputs = input.request.candidate.connection.sides.map(({ pieceLineKey }) =>
     pieceLineKey.trim(),

@@ -33,6 +33,7 @@ import {
 import {
   canReleasePatternImportDxfPhaseEZeroConnectExistingLinkedN1V1,
   capturePatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1,
+  resolvePatternImportDxfPhaseELinkedN1MetadataResumeDirectionV1,
   executePatternImportDxfPhaseEZeroConnectExistingLinkedN1WriteOnceV1,
   preparePatternImportDxfPhaseEZeroConnectExistingLinkedN1RebindV1,
   readPatternImportDxfPhaseEZeroConnectExistingLinkedN1WriteOnceV1,
@@ -942,6 +943,67 @@ describe('existing saved one-physical-seam operation exact rebind', () => {
         },
       },
     });
+  });
+
+  it('rebinds a stale anchored seam only from its original rank and unique operation owner', async () => {
+    const fixture = await existingLinkedN1Fixture();
+    const rank = fixture.request.catalog.sizeToken;
+    const staleSeam = { ...fixture.seam, anchoredSize: rank, stale: true };
+    const card = structuredClone(fixture.savedCard);
+    card.seams = [{ ...toWire(staleSeam), stale: true }, toWire(fixture.pose)] as never;
+    const inputs = {
+      request: fixture.request,
+      techCardId: fixture.prepared.techCardId,
+      selectedIndex: fixture.selectedIndex,
+      liveOperations: fixture.liveOperations,
+      savedCard: card,
+      currentRows: [staleSeam, fixture.pose],
+      seamWriterCardId: fixture.prepared.techCardId,
+      seamWriterLockVersion: card.lockVersion,
+    };
+    const capture = capturePatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1;
+    const captured = capture(inputs);
+    if (!captured.ok) throw new Error(captured.blocker.detail);
+    const context = { nameOf: (key: string) => key, grainDeg: null };
+    expect(
+      resolvePatternImportDxfPhaseELinkedN1MetadataResumeDirectionV1(
+        captured.pending,
+        card,
+        context,
+      ),
+    ).toBeNull();
+    const rebind = preparePatternImportDxfPhaseEZeroConnectExistingLinkedN1RebindV1(
+      captured.pending,
+      'reversed',
+      context,
+    );
+    if (!rebind.ok) throw new Error(rebind.blocker.detail);
+    expect(rebind.receipt.storedSeam).toMatchObject({
+      seamKey: staleSeam.seamKey,
+      anchoredSize: rank,
+      direction: 'reversed',
+    });
+    expect(rebind.receipt.storedSeam.sideA[0]!.contourSig).not.toBe(staleSeam.sideA[0]!.contourSig);
+    expect(rebind.receipt.storedSeam.sideB[0]!.contourSig).not.toBe(staleSeam.sideB[0]!.contourSig);
+    const wrongRank = { ...staleSeam, anchoredSize: 'L' };
+    expect(rank).toBe('M');
+    const other = structuredClone(card);
+    other.seams![0]!.anchoredSize = wrongRank.anchoredSize;
+    expect(
+      capture({ ...inputs, currentRows: [wrongRank, fixture.pose], savedCard: other }),
+    ).toMatchObject({
+      ok: false,
+      blocker: { code: 'existing-linked-n1-source-size-invalid' },
+    });
+    const conflicting = structuredClone(card);
+    conflicting.techCard!.operations![0]!.seamKeys = [staleSeam.seamKey.toUpperCase()];
+    const localConflict = structuredClone(fixture.liveOperations);
+    localConflict[0]!.seamKeys = [staleSeam.seamKey];
+    for (const conflict of [{ savedCard: conflicting }, { liveOperations: localConflict }])
+      expect(capture({ ...inputs, ...conflict })).toMatchObject({
+        ok: false,
+        blocker: { code: 'existing-linked-n1-seam-ambiguous' },
+      });
   });
 
   it('fails closed on stale CAS, row-key drift, input reorder, or a second physical seam', async () => {
