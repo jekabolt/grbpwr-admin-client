@@ -23,7 +23,15 @@ import type {
 } from 'components/shared/measurement-watertight-surface-v1-stage';
 import { ROUTES } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Link } from 'react-router-dom';
 import { Button, CheckboxCommon, Pill, Text } from 'ui';
@@ -81,6 +89,7 @@ export function PatternImportDxfPhaseECadMannequinViewToolbarV1({
   onViewPreset,
   patternTool,
   onPatternTool,
+  patternTransformDisabled = false,
   poseEditing,
   poseEditingDisabled = false,
   onPoseEditingChange,
@@ -89,6 +98,7 @@ export function PatternImportDxfPhaseECadMannequinViewToolbarV1({
   onViewPreset: (preset: MeasurementSurfaceViewPreset) => void;
   patternTool?: PatternImportDxfPhaseECadMannequinPatternOverlayToolV1;
   onPatternTool?: (tool: PatternImportDxfPhaseECadMannequinPatternOverlayToolV1) => void;
+  patternTransformDisabled?: boolean;
   poseEditing: boolean;
   poseEditingDisabled?: boolean;
   onPoseEditingChange: (enabled: boolean) => void;
@@ -123,6 +133,7 @@ export function PatternImportDxfPhaseECadMannequinViewToolbarV1({
               size='xs'
               variant={patternTool === tool ? 'simpleReverseWithBorder' : 'underline'}
               aria-pressed={patternTool === tool}
+              disabled={patternTransformDisabled && tool !== 'select'}
               data-cad-mannequin-pattern-tool={tool}
               onClick={() => onPatternTool(tool)}
             >
@@ -545,6 +556,26 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
         arrangementExpected.mannequin,
       ])
     : null;
+  const placementTurn = useMemo(
+    () =>
+      arrangementKey &&
+      !disabled &&
+      !loading &&
+      !error &&
+      !poseLoading &&
+      !poseError &&
+      !poseEditing
+        ? Symbol()
+        : null,
+    [arrangementKey, disabled, loading, error, poseLoading, poseError, poseEditing],
+  );
+  const currentPlacementTurn = useRef<typeof placementTurn>(null);
+  useLayoutEffect(() => {
+    currentPlacementTurn.current = placementTurn;
+    return () => {
+      currentPlacementTurn.current = null;
+    };
+  }, [placementTurn]);
   const arrangementCurrent = useRef({
     key: arrangementKey,
     expected: arrangementExpected,
@@ -655,10 +686,11 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
   };
   const handlePatternTransform = useCallback(
     (pieceKey: string, transform: MeasurementSurfacePatternPieceTransformV1) => {
+      if (!placementTurn || currentPlacementTurn.current !== placementTurn) return;
       arrangementEdits.current += 1;
       setPatternTransforms((current) => Object.freeze({ ...current, [pieceKey]: transform }));
     },
-    [],
+    [placementTurn],
   );
   const patternOverlayResult = useMemo(
     () =>
@@ -673,24 +705,18 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
               patternPieceScene.sceneOverlay?.status === 'available'
                 ? patternPieceScene.sceneOverlay.bridge.guides
                 : patternPieceScene.guides,
-            tool: patternTool,
+            tool: placementTurn ? patternTool : 'select',
             transformsByPieceKey: patternTransforms,
-            onTransform: handlePatternTransform,
+            onTransform: placementTurn ? handlePatternTransform : undefined,
           })
         : null,
-    [handlePatternTransform, patternPieceScene, patternTool, patternTransforms],
+    [handlePatternTransform, patternPieceScene, patternTool, patternTransforms, placementTurn],
   );
   const offsetPiece =
     patternTool === 'translate' &&
     patternOverlayResult?.ok &&
-    arrangementKey &&
-    onSaveMannequinArrangement &&
-    !loading &&
-    !error &&
-    !poseLoading &&
-    !poseError &&
-    !poseEditing &&
-    !disabled
+    placementTurn &&
+    onSaveMannequinArrangement
       ? patternOverlayResult.overlay.pieces.find(
           ({ selected, scopeKey }) => selected && scopeKey === arrangementSource?.scopeKey,
         )
@@ -807,8 +833,9 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
         <PatternImportDxfPhaseECadMannequinViewToolbarV1
           viewPreset={viewPreset}
           onViewPreset={setViewPreset}
-          patternTool={patternOverlayResult?.ok ? patternTool : undefined}
+          patternTool={patternOverlayResult?.ok ? patternOverlayResult.overlay.tool : undefined}
           onPatternTool={patternOverlayResult?.ok ? setPatternTool : undefined}
+          patternTransformDisabled={!placementTurn}
           poseEditing={poseEditing}
           poseEditingDisabled={!poseBinding || Boolean(poseError)}
           onPoseEditingChange={setPoseEditing}

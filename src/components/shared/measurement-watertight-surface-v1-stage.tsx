@@ -1676,6 +1676,8 @@ export function MeasurementWatertightSurfaceV1Stage({
     let cancelledPatternPointer: AbortController | null = null;
     let patternPieceGesture: Readonly<{
       pointerId: number;
+      overlayKey: string;
+      onTransform: NonNullable<MeasurementSurfacePatternPieceOverlayV1['onTransformPiece']>;
       binding: MeasurementSurfacePatternPieceSceneBindingV1;
       tool: 'translate' | 'rotate';
       plane: THREE.Plane;
@@ -1879,11 +1881,19 @@ export function MeasurementWatertightSurfaceV1Stage({
       window.addEventListener('click', swallow, options);
     }
 
+    function isPatternPieceGestureCurrent(gesture: NonNullable<typeof patternPieceGesture>) {
+      return (
+        gesture.overlayKey === patternPieceOverlayRenderKeyRef.current &&
+        gesture.onTransform === patternPieceOverlayRef.current?.onTransformPiece
+      );
+    }
+
     function finishPatternPieceGesture(outcome: 'commit' | 'cancel') {
       const gesture = patternPieceGesture;
       if (!gesture) return;
       patternPieceGesture = null;
-      if (outcome === 'cancel') {
+      const commit = outcome === 'commit' && isPatternPieceGestureCurrent(gesture);
+      if (!commit) {
         gesture.binding.anchor.position.copy(gesture.startPosition);
         gesture.binding.content.rotation.z = gesture.startRotation;
         suppressCancelledPatternPointer(gesture.pointerId);
@@ -1892,9 +1902,9 @@ export function MeasurementWatertightSurfaceV1Stage({
         contextCanvas.releasePointerCapture(gesture.pointerId);
       }
       if (controls) controls.enabled = interactive;
-      if (outcome === 'commit') {
+      if (commit) {
         const offset = gesture.binding.anchor.position.clone().sub(gesture.binding.basePosition);
-        patternPieceOverlayRef.current?.onTransformPiece?.(
+        gesture.onTransform(
           gesture.binding.piece.pieceKey,
           Object.freeze({
             offsetM: Object.freeze(offset.toArray() as [number, number, number]),
@@ -2830,13 +2840,20 @@ export function MeasurementWatertightSurfaceV1Stage({
       document.addEventListener('visibilitychange', rotationVisibilityHandler);
 
       patternPiecePointerDownHandler = (event) => {
-        if (event.button !== 0 || !camera || patternPieceGesture) return;
+        if (
+          event.button !== 0 ||
+          !camera ||
+          patternPieceGesture ||
+          mountedPatternPieceKey !== patternPieceOverlayRenderKeyRef.current
+        )
+          return;
         const binding = patternPieceHit(event);
         if (!binding) return;
         const overlay = patternPieceOverlayRef.current;
         overlay?.onSelectPiece?.(binding.piece);
         const tool = overlay?.tool ?? 'select';
-        if (!binding.piece.selected || tool === 'select') {
+        const onTransform = overlay?.onTransformPiece;
+        if (!binding.piece.selected || tool === 'select' || !onTransform) {
           event.preventDefault();
           event.stopImmediatePropagation();
           scheduleRender();
@@ -2855,6 +2872,8 @@ export function MeasurementWatertightSurfaceV1Stage({
         if (!raycaster.ray.intersectPlane(plane, startPoint)) return;
         patternPieceGesture = Object.freeze({
           pointerId: event.pointerId,
+          overlayKey: mountedPatternPieceKey,
+          onTransform,
           binding,
           tool,
           plane,
@@ -2875,6 +2894,10 @@ export function MeasurementWatertightSurfaceV1Stage({
       patternPiecePointerMoveHandler = (event) => {
         const gesture = patternPieceGesture;
         if (!gesture || gesture.pointerId !== event.pointerId || !camera) return;
+        if (!isPatternPieceGestureCurrent(gesture)) {
+          finishPatternPieceGesture('cancel');
+          return;
+        }
         if (gesture.tool === 'translate') {
           const pointer = normalizedTransformPointer(event, -1);
           if (!pointer) return;
@@ -3014,7 +3037,10 @@ export function MeasurementWatertightSurfaceV1Stage({
 
       const syncPatternPieceOverlay = (key: string) => {
         const runtime = runtimeRef.current;
-        if (disposed || key === mountedPatternPieceKey || !runtime || !controls || !scene) return;
+        if (disposed || !runtime || !controls || !scene) return;
+        if (patternPieceGesture && !isPatternPieceGestureCurrent(patternPieceGesture))
+          finishPatternPieceGesture('cancel');
+        if (key === mountedPatternPieceKey) return;
         try {
           const replacement = createPatternPieceLayerV1(
             patternPieceOverlayRef.current,
@@ -3263,7 +3289,7 @@ export function MeasurementWatertightSurfaceV1Stage({
 
   useEffect(() => {
     runtimeRef.current?.syncPatternPieceOverlay(patternPieceOverlayRenderKey);
-  }, [patternPieceOverlayRenderKey]);
+  }, [patternPieceOverlayRenderKey, patternPieceOverlay?.onTransformPiece]);
 
   useEffect(() => {
     contextReleaseGenerationRef.current += 1;
