@@ -5,6 +5,7 @@ const LABELS = new Set<string>([
   'draft-cad:pattern-line',
   'draft-cad:french-curve',
   'draft-cad:guideline',
+  'draft-cad:cross',
 ]);
 
 export function isAuthoredInternalLabel(value: unknown): value is AuthoredInternalLabel {

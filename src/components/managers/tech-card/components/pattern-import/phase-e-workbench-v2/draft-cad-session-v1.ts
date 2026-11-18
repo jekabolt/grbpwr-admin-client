@@ -36,6 +36,8 @@ export type PatternImportDxfPhaseEDraftCadToolV1 =
  * The larger command union remains readable for old/session evidence, but unsupported intents are
  * not advertised as working CAD actions in the production rail.
  */
+export const DRAFT_CAD_CROSS_MARK_HALF_SPAN_MM = 3;
+
 export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_PRODUCTIVE_TOOLS_V1 = Object.freeze([
   'pen',
   'rectangle',

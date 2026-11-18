@@ -69,7 +69,7 @@ const TOOL_LABELS = Object.freeze({
   pleat: 'Pleat',
   cut: 'Cut',
   notch: 'Notch',
-  mark: 'Drill mark',
+  mark: 'Mark',
 } as const satisfies Readonly<Record<PatternImportDxfPhaseEDraftCadToolV1, string>>);
 
 const TOPOLOGY_TOOL_LABELS = Object.freeze({

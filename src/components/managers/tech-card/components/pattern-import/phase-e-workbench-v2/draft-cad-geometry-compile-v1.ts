@@ -31,6 +31,7 @@ import type {
   PatternImportDxfPhaseEDraftCadToolV1,
 } from './draft-cad-session-v1';
 import {
+  DRAFT_CAD_CROSS_MARK_HALF_SPAN_MM,
   PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_PRODUCTIVE_TOOLS_V1,
   permitsDraftCadLocalPieceEditV1,
 } from './draft-cad-session-v1';
@@ -232,7 +233,8 @@ function supported(command: PatternImportDxfPhaseEDraftCadCommandV1): boolean {
   if (command.tool === 'edge-length') return true;
   if (command.tool === 'cut') return command.payload.keepSide === 'both';
   if (command.tool === 'spread') return command.payload.amountMm > 0;
-  if (command.tool === 'mark') return command.payload.kind === 'drill';
+  if (command.tool === 'mark')
+    return command.payload.kind === 'drill' || command.payload.kind === 'cross';
   if (command.tool === 'notch') return command.payload.kind === 'single';
   return false;
 }
@@ -245,7 +247,7 @@ function unsupportedDetail(command: PatternImportDxfPhaseEDraftCadCommandV1): st
   if (command.tool === 'notch')
     return `Notch kind ${command.payload.kind} has no lossless PieceSpec encoding; only a single anchored notch is compiled.`;
   if (command.tool === 'mark')
-    return `Mark kind ${command.payload.kind} has no lossless PieceSpec encoding; only drill marks are compiled.`;
+    return `Mark kind ${command.payload.kind} has no typed DXF encoding.`;
   return `Tool ${command.tool} changes topology or carries semantics the retained PieceSpec writer cannot encode losslessly.`;
 }
 
@@ -810,6 +812,39 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
     let output: PatternImportDxfPhaseEDraftCadCompiledFeatureV1['output'];
     if (internal) {
       size.internal.push(internal);
+      output = 'internal';
+    } else if (
+      command.tool === 'mark' &&
+      command.payload.kind === 'cross' &&
+      primitive.kind === 'point' &&
+      primitive.indicator === 'cross'
+    ) {
+      const center = primitive.pointMm;
+      const { x, y } = center;
+      const halfSpanMm = DRAFT_CAD_CROSS_MARK_HALF_SPAN_MM;
+      if (
+        !pointInPolygon(center, size.cut) ||
+        closestOnPolyline(center, size.cut, true).d <= halfSpanMm ||
+        (size.cutLoops ?? []).some(
+          (loop) =>
+            pointInPolygon(center, loop) || closestOnPolyline(center, loop, true).d <= halfSpanMm,
+        )
+      )
+        return blocked('preview-blocked', 'Place the full cross inside the selected cut.', command);
+      size.internal.push({
+        kind: 'internal',
+        label: 'draft-cad:cross',
+        closed: false,
+        // The middle return follows the horizontal arm already drawn, with no extra diagonal.
+        pts: [
+          { x: x - halfSpanMm, y },
+          { x: x + halfSpanMm, y },
+          { x, y },
+          { x, y: y - halfSpanMm },
+          { x, y: y + halfSpanMm },
+        ],
+        ...featureBase(),
+      });
       output = 'internal';
     } else if (
       command.tool === 'mark' &&

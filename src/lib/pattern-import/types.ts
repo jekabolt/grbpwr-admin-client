@@ -2660,7 +2660,8 @@ export type AuthoredInternalLabel =
   | 'draft-cad:internal-line'
   | 'draft-cad:pattern-line'
   | 'draft-cad:french-curve'
-  | 'draft-cad:guideline';
+  | 'draft-cad:guideline'
+  | 'draft-cad:cross';
 
 export type ManifestAuthoredInternalPath = {
   /** Zero-based order among the block's native layer-8 paths. */

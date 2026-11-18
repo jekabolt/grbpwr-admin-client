@@ -1166,7 +1166,7 @@ it('retains one authored single notch on its exact saved-size piece through the 
   }
 });
 
-it.each(['internal-line', 'pattern-line', 'french-curve', 'guideline'] as const)(
+it.each(['internal-line', 'pattern-line', 'french-curve', 'guideline', 'cross'] as const)(
   'reopens the authored %s as the same typed native layer-8 path after ordinary review',
   async (tool) => {
     const f = await fixture(true);
@@ -1193,11 +1193,12 @@ it.each(['internal-line', 'pattern-line', 'french-curve', 'guideline'] as const)
       const edit = recordPatternImportDxfPhaseEDraftCadCanvasPointV1({
         session: f.initial,
         projection,
-        activeTool: tool,
+        activeTool: tool === 'cross' ? 'mark' : tool,
+        ...(tool === 'cross' ? { markKind: 'cross' as const } : {}),
         activePieceIndex: 0,
         sequence: 0,
         pendingPoints: tool === 'french-curve' ? [start, control] : [start],
-        pointMm: end,
+        pointMm: tool === 'cross' ? control : end,
       });
       expect(edit.recorded).toBe(true);
       const compileSource = createPatternImportDxfPhaseEDraftCadCompileSourceV1(
@@ -1229,6 +1230,35 @@ it.each(['internal-line', 'pattern-line', 'french-curve', 'guideline'] as const)
       expect(second.authoredInternal).toHaveLength(1);
       expect(second.authoredInternal?.[0]?.label).toBe(label);
       expect(scope.manifest.gate?.passed).toBe(true);
+      if (tool === 'cross') {
+        expect(second.drills).toBe(first.drills);
+        const points = feature!.pts;
+        for (const coordinate of ['x', 'y'] as const) {
+          const axis = points.map((point) => point[coordinate]);
+          expect(Math.max(...axis) - Math.min(...axis)).toBeCloseTo(6);
+        }
+        const outside = recordPatternImportDxfPhaseEDraftCadCanvasPointV1({
+          session: f.initial,
+          projection,
+          activeTool: 'mark',
+          activePieceIndex: 0,
+          sequence: 0,
+          pendingPoints: [],
+          pointMm: { x: minX - 2, y: minY - 2 },
+          markKind: 'cross',
+        });
+        expect(
+          compilePatternImportDxfPhaseEDraftCadGeometryV1({
+            session: outside.session,
+            projection,
+            selection,
+            compileSource,
+          }),
+        ).toMatchObject({
+          ok: false,
+          blockers: [{ detail: 'Place the full cross inside the selected cut.' }],
+        });
+      }
       if (tool === 'french-curve') {
         const bytes = new TextEncoder().encode(scope.dxfText);
         const row = {

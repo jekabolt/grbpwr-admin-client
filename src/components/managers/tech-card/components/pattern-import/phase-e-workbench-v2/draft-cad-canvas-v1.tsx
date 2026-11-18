@@ -15,6 +15,7 @@ import {
 } from './draft-cad-preview-v1';
 import { PatternImportDxfPhaseEDraftCadGridRulersV1 } from './draft-cad-grid-rulers-v1';
 import {
+  DRAFT_CAD_CROSS_MARK_HALF_SPAN_MM,
   listActiveDraftCadNewPiecesV1,
   permitsDraftCadLocalPieceEditV1,
   recordPatternImportDxfPhaseEDraftCadTransactionV1,
@@ -154,6 +155,7 @@ type PointInput = Readonly<{
   pendingDartBase?: PatternImportDxfPhaseEDraftCadCanvasDartBaseV1 | null;
   sequence: number;
   closePen?: boolean;
+  markKind?: 'drill' | 'cross';
 }>;
 
 type ProjectedPiece = PatternImportDxfProductPhaseEAssemblyProjectionV1['pieces'][number];
@@ -525,11 +527,15 @@ function commandForPoint(
       };
     case 'mark':
       return {
-        label: 'Add drill mark',
+        label: input.markKind === 'cross' ? 'Add cross mark' : 'Add drill mark',
         command: {
           ...common,
           tool: 'mark',
-          payload: { entityId: ids.entityId, pointMm: input.pointMm, kind: 'drill' },
+          payload: {
+            entityId: ids.entityId,
+            pointMm: input.pointMm,
+            kind: input.markKind ?? 'drill',
+          },
         },
       };
     case 'rectangle': {
@@ -1292,14 +1298,16 @@ function PreviewPrimitive({
       );
     case 'point': {
       const r = unit * 3.5;
+      const cross = primitive.indicator === 'cross';
+      const arm = cross ? DRAFT_CAD_CROSS_MARK_HALF_SPAN_MM : r * 1.6;
       return (
         <g {...common} data-point-indicator={primitive.indicator}>
-          <circle cx={primitive.pointMm.x} cy={vy(primitive.pointMm.y)} r={r} />
+          {!cross && <circle cx={primitive.pointMm.x} cy={vy(primitive.pointMm.y)} r={r} />}
           <path
-            d={`M ${primitive.pointMm.x - r * 1.6} ${vy(primitive.pointMm.y)} H ${
-              primitive.pointMm.x + r * 1.6
-            } M ${primitive.pointMm.x} ${vy(primitive.pointMm.y) - r * 1.6} V ${
-              vy(primitive.pointMm.y) + r * 1.6
+            d={`M ${primitive.pointMm.x - arm} ${vy(primitive.pointMm.y)} H ${
+              primitive.pointMm.x + arm
+            } M ${primitive.pointMm.x} ${vy(primitive.pointMm.y) - arm} V ${
+              vy(primitive.pointMm.y) + arm
             }`}
           />
         </g>
@@ -1397,6 +1405,7 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
   onTopologyAnchor,
   onCrossScopeEdge,
 }: PatternImportDxfPhaseEDraftCadCanvasPropsV1) {
+  const [markKind, setMarkKind] = useState<'drill' | 'cross'>('drill');
   const [pendingPoints, setPendingPoints] = useState<readonly PtMm[]>([]);
   const [pendingDartBase, setPendingDartBase] =
     useState<PatternImportDxfPhaseEDraftCadCanvasDartBaseV1 | null>(null);
@@ -1486,6 +1495,7 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
       pendingDartBase,
       sequence: sequence.current,
       closePen,
+      markKind,
     });
     setPendingPoints(result.pendingPoints);
     setPendingDartBase(result.pendingDartBase);
@@ -1935,8 +1945,23 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
               unavailable ??
               (activeTopologyTool
                 ? 'Choose an exact highlighted vertex from the sealed projection.'
-                : toolInstruction(activeTool, projection.sizeToken))}
+                : activeTool === 'mark' && markKind === 'cross'
+                  ? `Click inside the piece to place a cross in size ${projection.sizeToken}.`
+                  : toolInstruction(activeTool, projection.sizeToken))}
       </div>
+      {activeTool === 'mark' && interactionEnabled ? (
+        <label className='flex items-center gap-2 text-small'>
+          Mark type
+          <select
+            value={markKind}
+            onChange={(event) => setMarkKind(event.target.value === 'cross' ? 'cross' : 'drill')}
+            className='border border-borderColor bg-bgColor p-1'
+          >
+            <option value='drill'>Drill</option>
+            <option value='cross'>Cross ({DRAFT_CAD_CROSS_MARK_HALF_SPAN_MM * 2} mm)</option>
+          </select>
+        </label>
+      ) : null}
       {activeTool === 'pen' && pendingPoints.length > 0 && interactionEnabled && (
         <div className='flex flex-wrap gap-2'>
           <button
