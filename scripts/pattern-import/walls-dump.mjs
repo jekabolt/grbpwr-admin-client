@@ -193,8 +193,12 @@ process.on('exit', () => {
     // WD_ALL=1: every chain of the set, also the ones no rank or common took (unranked lines)
     if (process.env.WD_ALL) c.set.chains.forEach((ch, id) => ch && used.add(id));
     const { set, rerank, ...rest } = c;
+    // WD_CHAINS=id,id,…: also dump these chains (e.g. unranked lines no wall uses)
+    for (const id of (process.env.WD_CHAINS ?? '').split(',').filter(Boolean)) used.add(+id);
+    const classOf = new Map();
+    for (const cl of set.classes ?? []) for (const id of cl.chains) classOf.set(id, { role: cl.role, cls: cl.id });
     const chains = {};
-    for (const id of used) if (set.chains[id]) chains[id] = { role: set.chains[id].role, closed: !!set.chains[id].closed, pts: set.chains[id].pts.map((q) => [+q.x.toFixed(2), +q.y.toFixed(2)]) };
+    for (const id of used) if (set.chains[id]) chains[id] = { role: set.chains[id].role, ...classOf.get(id), style: set.chains[id].style, motif: set.chains[id].motif, len: +set.chains[id].lengthMm.toFixed(1), closed: !!set.chains[id].closed, pts: set.chains[id].pts.map((q) => [+q.x.toFixed(2), +q.y.toFixed(2)]) };
     return { ...rest, rerank: rr, chains, orphans: set.orphans };
   });
   __wfs(process.env.WD_FILE, JSON.stringify(out));
@@ -207,12 +211,20 @@ process.on('exit', () => {
       setup(b) {
         b.onLoad({ filter: /pieces[\\/]walls\.ts$/ }, (a) => {
           let src = readFileSync(a.path, 'utf8');
-          const SIG = 'export function lonePortions(set: ChainSet, m: WallModel, sideMm = 20): WallItem[] {';
+          const SIG =
+            'export function lonePortions(set: ChainSet, m: WallModel, sideMm = 20): WallItem[] {';
           const PUSH = '      lone.push(!beside);';
-          if (!src.includes(SIG) || !src.includes(PUSH)) throw new Error('walls-dump: lone anchors not found');
+          if (!src.includes(SIG) || !src.includes(PUSH))
+            throw new Error('walls-dump: lone anchors not found');
           src = src
-            .replace(SIG, 'export function lonePortions(set: ChainSet, m: WallModel, sideMm0 = 20): WallItem[] {\n  const sideMm: number = (globalThis as any).__WDSIDE ? (globalThis as any).__WDSIDE(set, m, sideMm0) : sideMm0;')
-            .replace(PUSH, '      lone.push(!beside && !((globalThis as any).__WDNEST ? (globalThis as any).__WDNEST(set, m, rank, id, rc, p, tx, ty) : false));');
+            .replace(
+              SIG,
+              'export function lonePortions(set: ChainSet, m: WallModel, sideMm0 = 20): WallItem[] {\n  const sideMm: number = (globalThis as any).__WDSIDE ? (globalThis as any).__WDSIDE(set, m, sideMm0) : sideMm0;',
+            )
+            .replace(
+              PUSH,
+              '      lone.push(!beside && !((globalThis as any).__WDNEST ? (globalThis as any).__WDNEST(set, m, rank, id, rc, p, tx, ty) : false));',
+            );
           return { contents: src, loader: 'ts' };
         });
         b.onLoad({ filter: /pieces[\\/]fill\.ts$/ }, (a) => {
@@ -222,7 +234,12 @@ process.on('exit', () => {
           if (!src.includes(LONE)) throw new Error('walls-dump: fill lone anchor not found');
           return {
             contents: src
-              .replace(LONE, '  (globalThis as any).__WDSCOPE = 1;\n' + LONE + '\n  (globalThis as any).__WDSCOPE = 0;')
+              .replace(
+                LONE,
+                '  (globalThis as any).__WDSCOPE = 1;\n' +
+                  LONE +
+                  '\n  (globalThis as any).__WDSCOPE = 0;',
+              )
               .replace(ANCHOR, HOOK + ANCHOR),
             loader: 'ts',
           };
@@ -235,7 +252,12 @@ const r = spawnSync(
   process.execPath,
   ['--expose-gc', '--max-old-space-size=8192', fileURLToPath(import.meta.url), pdf, dir],
   {
-    env: { ...process.env, WD_CHILD: bundle, PATIMPORT_REPO: REPO, WD_FILE: resolve(dir, 'walls-dump.json') },
+    env: {
+      ...process.env,
+      WD_CHILD: bundle,
+      PATIMPORT_REPO: REPO,
+      WD_FILE: resolve(dir, 'walls-dump.json'),
+    },
     stdio: ['ignore', 'ignore', 'inherit'],
   },
 );

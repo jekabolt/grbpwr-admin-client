@@ -876,6 +876,263 @@ centre) − len/2`) and the gap _after_ it from its centre. Walked one way the d
   `sig.rev`, seen by legend-id only) and score each key sample as max over walks, uniformly for all
   keys.
 
+## 16 Nov 2026 — Triage of the 1086 open cells of `baseline-set40` — DIAGNOSIS (branch `open-lines-global`)
+
+Run: `/private/tmp/patimport-runs/baseline-set40/` (dxf-check 3666 / 4752 closed, 1086 open; Glinda
+stops on the sheet — no families, not in the 4752). Read-only on `run.json` / `cells.json`. Scripts
+(scratch, to be moved with the tools in task 3): `triage.py` (buckets by outcome, first reason,
+draw refusal, the size's place among the closed sizes), `fit-triage.ts` (re-runs `fitFamily` with
+`GFIT_TOL_PDF` offline on the closed `class` outlines of every family with an open cell),
+`fitprof.py` (profile of those fits). The offline fit reproduces the run: 93 of the 97 families the
+run calls `no-model:inconsistent` are `inconsistent` offline too (4 get a model).
+
+| group | bucket (first reason) | cells | files | where |
+| --- | --- | --- | --- | --- |
+| G | `no-model:inconsistent` | 307 | 33 | Emma 25, Dyanna 22, Madison 22, Memoir A 19 |
+| G | `not-bracketed`, closed sizes on BOTH sides (neighbours not trusted by the fit) | 129 | 27 | Verona 13, Memoir A 11, Kalla 12, Ophelia 12 |
+| D | `E1-cover`, draw refused `D-share` | 109 | 22 | Paris 13, Reims 11, Dyanna 9, Memoir C 9 |
+| D | `E1-cover`, other draw refusal | 36 | 15 | Cassandra 6, Memoir A 6 |
+| D | `E2-hole*`, draw refused `D-cross` | 61 | 19 | Opal 6, Paris 6, Kalla 5, Memoir 5 |
+| D | `E2-hole*`, other (`E4` 17, end-offset 7, `D-cross-nest` 6, `E3-*` 7, `D-cross-wall` 1) | 38 | — | |
+| D | `E4-off-corridor` / `E3-*` first | 37 | 10 | Opal 8, Kalla 9 |
+| X | `not-bracketed`, edge size, 1 step past the last closed | 38 | 24 | spread |
+| X | `not-bracketed`, edge, 2 steps | 24 | 15 | |
+| X | `not-bracketed`, edge, ≥ 3 steps | 66 | 10 | Kalla 16, Verona 9, Reims 8, Fawn 7 |
+| P | piece open in EVERY size (leak `not-bracketed`) | 88 | 5 | Selenite J/K/L/M 36, Venice J POCKETS 18, Opal 14, Madison 12, Fawn 8 |
+| P | `merged` in a piece open in every size | 56 | 3 | Madison H/I 24, Opal B/IC 22, Fawn "L - 2XL" 10 |
+| R | `refused: sizes-not-distinguished` (whole pieces) | 54 | 2 | Memoir B I/K 36, Kalla A BACK YOKE 18 |
+| M | `merged` (piece closes elsewhere) / `tiny` | 37 | 19 | Fawn 10, Kitchen 4 |
+| — | `no-model:grade-points<2` / `no-match` | 6 | 2 | Ambrosia C CUPS 4, Soho 2 |
+
+Totals: G 436, D 281, P 144, X 128, R 54, M 37, other 6 = 1086. Concentration: 642 open cells sit
+in families with ≥ 5 open sizes; 49 are the only open size of their piece.
+
+Group G in detail (offline fit, families with an open G cell):
+- `fitFamily` has a model in 173 families, none in 13 (anchors < 2: 92 cells; grade-points < 2: 7).
+- Disagreeing anchors per family: ≥ 4 in 67 families (215 cells), 3 in 31 (122), 2 in 43 (106),
+  1 in 18 (61), 0 in 14 (49). It is not "one bad anchor": in 88 cells EVERY anchor disagrees with
+  the others.
+- No disagreement is `how: 'break'` (no grade break detected) and none has `cause: 'neighbour'`.
+- Scores of the 568 disagreeing anchors (residual / tolerance): ≤ 1.25: 94, ≤ 1.5: 81, ≤ 2: 79,
+  ≤ 3: 103, ≤ 5: 78, ≤ 10: 75, > 10: 58. A third is marginal (≤ 2 × the PDF tolerance), a quarter
+  is gross (> 5 ×: a wrong outline, not reader noise).
+- Families at the top are small pieces with few anchors: Verona G BOW (3 anchors of 18, all at
+  1.07–1.33), Verona F SASH, Axel G POCKETS (6 anchors, 3 at 1.2–1.3), Kalla G ARMHOLE OUTER
+  FACING (one at 49.8), Emma I SKIRT TIER 2 (4 of 4, 3–12), Jolie C RUFFLE (6 of 6, up to 15.7).
+
+Which buckets touch legend-id (first chat's zone): R (sizes not told apart is a size-identity
+question), part of P (Fawn's piece labelled "L - 2XL" is a size label read as a piece; Opal "IC :
+CUT 2" is text) and any G anchor closed on another size's line (its rank is the reader's). The
+geometry-side part of G (marginal scores, few anchors, small pieces) and all of D and X are in
+`pieces/gfit` / `pieces/fill`, outside legend-id.
+
+Verdict (first draft, REVISED below): G was named the first target, with a "tolerance relative to
+piece size" for the marginal half. The critic (f3) refuted that idea before any code was written:
+small pieces grade 1–2 mm per size, so a residual over half a step there looks exactly like an
+anchor closed on a neighbour's line; a size-relative tolerance is the parked `GFIT_TOL_PDF` raise in
+disguise, aimed where it is least safe. Correction to the line above: `GFIT_TOL_PDF` itself is live
+(via `repairTol()`); what is parked is a *raise* of it. f3's order: residuals in grade-step units and
+a rank-shift test first, then area order, pictures only of what stays unexplained, then decide.
+
+### 16 Nov, later — G in grade-step units: the rank-shift test
+
+Script (scratch): `shift-test.ts`. For every family with an open G cell (652 cells: the 436 of G plus
+the `not-bracketed` edge/P cells of the same families), and for each anchor the fit marks as
+disagreeing: refit without it, then measure the p95 distance from its outline to the prediction at
+its own rank and at ranks ±1, in units of the family's median grade step. "Shift" = a neighbour rank
+fits within 0.5 step while its own rank does not (an anchor closed on another size's line). Only
+`interp` predictions are compared — a first pass that also compared `extrap` rings reported 268
+"shift" cells; with extrapolations excluded that number is 20. The lesson stands for later tests:
+an extrapolated ring is not evidence about the anchor.
+
+| family category (first match wins) | G-family cells | families | top |
+| --- | --- | --- | --- |
+| disagreeing anchor's own rank is extrapolated — untestable | 167 | 64 | Reims 20, Memoir A 13, Ophelia 13, Axel 11 |
+| starved: no model, anchors < 2 | 92 | 12 | Selenite 36, Venice 18, Opal 14, Madison 12 |
+| model miss: own interp ≥ 1 step, no neighbour within 0.5 | 91 | 20 | Verona 24, Emma 21, Reims 8, Madison 7 |
+| closed-size area order inverted (drop > 0.5 %) | 88 | 20 | Kalla 26, D 11, Madison 8, Memoir A 7 |
+| noise: disagreeing anchor within 0.5 step of its interp | 71 | 29 | Kitchen 11, Memoir 9, Lynx 8, Paris 7 |
+| between 0.5 and 1 step | 65 | 22 | Olympia 9, Ophelia 8, D 7, Verona 6 |
+| model, no disagreeing anchor (open for another reason) | 47 | 13 | Memoir A 8, Venice 8, Nob Hill 7 |
+| shift: a neighbour rank fits, own rank does not | 20 | 4 | Jolie 12, Kitchen 6 |
+| starved: grade-points < 2 / ungraded step < 0.3 mm | 11 | 2 | Fawn 7, Nob Hill 4 |
+
+Pictures (two of the model-miss class): Emma I SKIRT TIER 2 is a set of long rectangles sharing one
+end, graded only at the far end — two grade points, the interpolation draws a step where the
+outlines slide; the matcher, not a line, misses. Verona G BOW rank 9 lies outside BOTH rank 7 and 11
+— not between its neighbours, the shape of an anchor that closed on a foreign line (or a bow whose
+sizes are not drawn nested). Memoir A D SIDE FRONT UPPER rank 14 sits outside the extrapolated ring.
+
+Conclusions:
+- "G is mostly a wrong-line problem" is NOT supported: a clean neighbour-rank match is 20 cells.
+- The largest testable lever is the noise + between class (136 cells, 51 families): anchors within
+  one grade step of where the rest of the family puts them, rejected because the absolute 2.4 mm
+  tolerance is below half a step on large pieces. This is the opposite end from the refuted idea
+  (large steps, not small pieces), but it is still a tolerance change and needs the critic first.
+- 167 cells cannot be judged with this test (extrapolated own rank); 92 + 11 are starvation.
+- Area inversion (88) and the model-miss class (91) need pictures, family by family, before any code.
+
+### 16 Nov, later — GFIT_STEP_TOL (grade tolerance tied to the point's own step) — DROPPED before a run
+
+Idea: the 136 "noise / between" cells are anchors within one grade step of their interpolated
+prediction, rejected by the absolute 2.4 mm on pieces whose step is ~8 mm. Proposed: `ptStep` /
+`edgeStep` = 0.3 on top of `GFIT_TOL_PDF` (per point, so non-grading points stay strict), interior
+only. Scripts (scratch): `cond2.ts`, `local.ts`. Agreed bar before measuring: ≥ 30 newly closed cells
+with 0 wrong, else no run.
+
+Offline, 129 disagreeing anchors within one step:
+- What fires: edge 79, point 50. Of these, 23 are ONE strong grade point off while every edge fits:
+  the matcher put a grade point on the wrong corner, and no tolerance should absorb it. These are
+  the matcher's to-do list.
+- At 0.3, 88 more anchors are admitted. The whole-outline discrimination guard (own interp p95 <
+  0.5 × the nearest interp neighbour's) keeps 46.
+- Median worst-point residual vs that point's own |δ| is 0.9: locally, the typical admitted anchor is
+  almost a full step off, where a neighbour size's line runs. The critic's local guard catches this.
+  Every outline stretch over the base tolerance must be < 0.5 × as far from its own ring as from
+  the r±1 ring. With it, 11–15 anchors survive (longest violating run 0–3 mm), and the
+  violating runs of the rest reach 100–800 mm.
+- Families that become consistent with every admission surviving both guards: 6, holding 15 open
+  cells — before the D guards.
+
+Verdict: DROPPED, 15 cells is half the agreed floor and an upper bound. The lesson: on this corpus,
+an anchor that is "close to its own prediction overall" is usually far from it over a long stretch
+that follows a neighbour's line. The absolute tolerance was rejecting real segment-scale wrong
+lines, not reader noise. Do not reopen as a step-relative or size-relative tolerance.
+
+### 16 Nov, later — closed-but-wrong: a second number next to "open"
+
+The critic's point: the 3666 "closed" include wrong closes, and nothing counts them (notClosed sees
+only open cells). Two probes, read-only on `baseline-set40/cells.json`:
+
+1. Long off-model stretches (the 58 anchors with ≥ 50 mm closer to a neighbour's PREDICTED ring than
+   to their own) re-checked against the neighbours' ACTUAL closed outlines (share of the stretch within
+   0.3 mm of r±1 / r±2). Most coincide with nothing — the inconsistent model's ring is wrong, not the
+   close. The 10 with ≥ 0.57 coincidence (Riverside C r2, Corella B r3/r4, Soho C r6, Madison F/G)
+   were drawn: the red outline runs on its own graded line between its neighbours; the coincidence
+   is a line every size shares (centre front, top edge). Legitimate common lines, no borrowed line.
+2. Area outliers: interior closed cells whose area is > 25 % off the linear interpolation of the
+   closed neighbours on either side (neighbours within 40 % of each other). 23 cells (list below).
+   Drawn: Verona D SKIRT BACK 24 is closed on the upper part only — cut by an internal horizontal line
+   while 22 and 28 close full length; Venice E TOP FRONT MIDDLE 2 and 6 are cut the same way while 4
+   is whole (the outlier score flags 4 as well, because its neighbours are the truncated ones). Kalla
+   E 0 / G 8 / G 18 are the half-area cells reported to the first chat. So the probe finds real wrong
+   closes; it is a lower bound (edge sizes, and wrong closes of near-normal area, are invisible to it).
+
+Closed cells with area off their neighbours' interpolation by > 25 % (ratio, file, piece, size, from):
+
+```
+0.27	MDF346-Kalla-Ensemble-	L - SKIRT FRONT SIDE	30	innerPlug
+0.41	MDF481-Verona-Sheath-G	D - SKIRT BACK	24	class
+0.43	MDF477-Venice-V-Waist-	E - TOP FRONT MIDDLE	2	class
+0.44	MDF477-Venice-V-Waist-	E - TOP FRONT MIDDLE	6	class
+0.49	MDF346-Kalla-Ensemble-	G - ARMHOLE OUTER FACING	8	class
+0.5	MDF404-The-Harper-Plis	D - CUFFS	24	class
+0.51	MDF346-Kalla-Ensemble-	G - ARMHOLE OUTER FACING	18	class
+0.52	MDF363-The-Memoir-Dres	H - CENTER FRONT LOWER	30	class
+0.53	MDF363-The-Memoir-Dres	H - CENTER FRONT LOWER	26	class
+0.54	MDF346-Kalla-Ensemble-	E - TOP FRONT	0	class
+0.57	MDF346-Kalla-Ensemble-	O - SKIRT FRONT POCKET	0	class
+0.59	MDF411-The-Ambrosia-Co	B - FRONT TOP	10	class
+0.66	MDF477-Venice-V-Waist-	B - TOP BACK MIDDLE	0	class
+0.67	MDF439-Mendocino-A-Lin	E - SLEEVES	S	class
+0.68	MDF477-Venice-V-Waist-	B - TOP BACK MIDDLE	6	class
+0.7	MDF515-Selenite-V-Wais	I - SKIRT	14-16	innerPlug
+1.25	MDF411-The-Ambrosia-Co	B - FRONT TOP	2	innerPlug
+1.25	MDF411-The-Ambrosia-Co	B - FRONT TOP	8	class
+1.27	MDF439-Mendocino-A-Lin	E - SLEEVES	4XL	class
+1.45	MDF515-Selenite-V-Wais	I - SKIRT	18-20	class
+1.48	MDF477-Venice-V-Waist-	B - TOP BACK MIDDLE	4	class
+1.9	MDF363-The-Memoir-Dres	H - CENTER FRONT LOWER	28	class
+2.31	MDF477-Venice-V-Waist-	E - TOP FRONT MIDDLE	4	class
+```
+
+Two numbers from now on: open (1086) and closed-but-wrong (≥ 6 confirmed by picture; 23 candidates).
+The mechanism seen so far is truncation at an internal cross line taken as a wall.
+
+### 16 Nov, later — closed-but-wrong: the nesting probe and whose lane each cut is
+
+**Question.** The area outlier list sees only cells whose area jumps. Does a geometric test (a
+smaller size must lie inside the next larger one) find more wrong closes, and which part of the
+code takes the cutting line as a wall?
+
+**Probe** (scratchpad `nest3.mjs`, baseline `baseline-set40`, no code change). For each family with
+≥ 3 closed cells: `v(a, b)` = mm of `a`'s outline (2 mm samples) outside polygon `b` by > TOL.
+`trunc(c)` = min over the two nearest smaller closed sizes of `v(smaller, c)`; two passes, the
+second without cells flagged in the first as references. A family whose median adjacent `v` is
+≥ 5 mm is skipped as not nested.
+
+| TOL | families skipped | trunc ≥ 20 | ≥ 50 | ≥ 100 |
+| --- | --- | --- | --- | --- |
+| 0.3 mm | 199 / 312 | 101 | 76 | 43 |
+| 3 mm | 120 / 312 | 130 | 107 | 87 |
+
+0.3 mm is too tight: on 4 random flags of 20–94 mm, all 4 were shared edges with sub-mm grade
+jitter (pictures). 3 mm covers more families but brings in families that are not nested along
+one edge (Jolie B BACK: sizes cross at the waist; Ambrosia C CUPS cross at the apex).
+Split at TOL 3, trunc ≥ 50: 31 families with 1–3 flags (56 cells) and 8 families with ≥ 4 flags
+(51 cells). ~~The ≥ 4 group is mostly the probe's artefact~~ — WITHDRAWN (critic): a run of
+truncated sizes is exactly the systematic case (Memoir A H CENTER FRONT LOWER 00–16, cut at the
+waist-mark ladder, fa) and the split would discard it. Superseded by nest9 below.
+
+Pictures of isolated flags (12 looked at): real — Verona D 24, Venice E 2 / 6, Reims M 24, Harper
+D CUFFS 24 (half the cuff: closed on the fold line), Mendocino E SLEEVES S (an arc ~60 % of XS),
+Riverside C M (180 mm of the side runs 10 mm inside), Taos D PLACKET 18 (shorter than 16);
+not real — Ambrosia C 22, Axel B YOKE 28, Valentina A 4XL, Estoril J BELT 5XL (outlines
+coincide). nest3 precision about half — superseded by nest9 below.
+List: `/private/tmp/patimport-runs/global-closed-wrong-candidates.json` (107 cells; isolated
+first; confirmed ones carry the lane).
+
+**Lane of the cutting chain** (`walls-dump.mjs`, PIECES_OPEN_PASS=1 AUTOPILOT_OUTLINES=1, runs
+`/private/tmp/patimport-runs/global-wd-*`; script `lane.py`: chains within 1 mm of the part of
+the cell outline that lies > 3 mm inside the smaller size):
+
+| cell | cutting chain | tagged | lane |
+| --- | --- | --- | --- |
+| Verona D SKIRT BACK 24 | 2708, 438 mm horizontal | `common` | rank / common (fa) |
+| Venice E TOP FRONT MIDDLE 2 | 2986, 81 mm | own rank 2, `lone` | rank (fa) |
+| Venice E TOP FRONT MIDDLE 6 | 2848, 84 mm | own rank 4, `lone` | rank (fa) |
+| Mendocino E SLEEVES S | 1428, 1054 mm arc | own rank 1 | rank (fa) |
+| Reims M LOWER SKIRT 24 | 5922, 177 mm | unranked, enters rank 13 via `rescued` | fill (this lane) |
+| Harper D CUFFS 24 | 505 … 700, the fold line of ranks 0,3,5,7,9,11,12,15,17 | none in rank 13's walls | unexplained |
+
+**Conclusions.**
+- 4 of 6 confirmed wrong closes are a line given to the size (common or its own rank) that is
+  an interior line: the rank side, not the fill. One (Reims) is the fill's `rescued` source
+  taking an unranked line. Harper needs a trace of the close itself (the dump does not show the
+  cut line among rank 13's walls).
+- Next on this lane: `rescued` on Reims M 24 — what rescue admits a 177 mm unranked line inside a
+  closed size bundle. No change before fa has the list.
+
+**Probe v2 → nest9** (scratchpad `nest6.mjs` … `nest9.mjs`, same baseline, no code change).
+- nest6 (stretch distance in grade steps + interior chord; or a deep run of c inside the larger
+  size): 98 flags, 0 real in 10 random unlabelled pictures. Lower-side fakes have the missing end
+  only 3–7 steps out (rectangle strips with offset sizes, honest crossings). The upper-side test
+  blames the wrong cell: c sits deep inside its larger neighbour when that NEIGHBOUR is overgrown
+  (Memoir C I SLEEVES 2 took a bigger size's lower arc; Dyanna E SLEEVES 24, fuller cap).
+- A one-sided pair test cannot say which of two cells is wrong (Ambrosia B 8 > 10 because 10 is
+  cut; Reims M 22 > 24 because 24 is cut). nest9 judges by a bracket: c is judged only when its
+  neighbours agree (lo inside hi: no ≥ 20 mm run of lo outside hi deeper than lim). TRUNC = lo has
+  such a run outside c; OVER = c has one outside hi. lim = max(10 mm, 3 · step · index gap), step =
+  median over adjacent pairs of the pair's p95 distance. Pass 2 skips neighbours flagged in pass 1
+  (kills the OVER(j) / TRUNC(j+1) twin a single cut cell produces: 39 → 19 flags).
+- set40 baseline: 312 families, 3033 cells judged, 4 unjudged, **19 flagged**. Pictured: 11 / 11
+  real (Verona D 24, Venice E 2 / 6, Venice B 0, Harper D 24, Mendocino E S, Taos D 18, Kalla G 18,
+  Ambrosia B 10 cut, Ambrosia B 2 garbage outline, Kalla I 24 closed on a smaller size's line) +
+  Memoir L SHOULDER 20 undecided. The 9 earlier fake pictures: 0 flagged.
+- Recall holes, by construction: a run cut alike (Memoir A H — neighbours agree with each other;
+  fa's TICK_THROUGH covers it), edge sizes (no bracket), strip ladders (Reims M 24, Riverside C M,
+  Memoir C I 2, Dyanna E 24 missed). nest9 is a precision-first queue, not a recall claim.
+- The candidates file now has the `nest9` field and Memoir A H 00/0/8/12/16 (confirmed,
+  `cutAtTicks`, fa); 118 cells. Proposed to the critic as the acceptance's second number; the owner
+  has not decided the metric.
+
+
+**Decision (owner, 16 Nov).** Acceptance gets a second number next to `notClosed`:
+`scripts/pattern-import/nest-check.mjs <after> --before <before>` — read per cell (new / cleared /
+cleared-by-unjudged = not a fix), with flags / judged / unjudged stated, the blind spots stated
+(runs cut alike, edge sizes, strip ladders) and media-diff `moved` alongside. Fixture:
+`nest-check.mjs --fixture` (27 labelled cells, exact verdicts; a RUN 20 → 1000 mutation fails 10).
+
 ## 16 Nov 2026 — TICK_THROUGH / TICK_ORDER (end ticks that are not ends) — ACCEPTED (default on)
 
 - **Trigger:** Memoir A H CENTER FRONT LOWER and BACK CENTER: per-size waist marks are short lines
@@ -1243,3 +1500,126 @@ Verdict: PARKED at the stop after point 4. Anchors fix E 4/16; E 14/20 and self-
     blind, self-crossing, crosses-own-line) refuse every Leah open cell the walk builds. Raising
     those thresholds is outside the allowed set.
   - Missing etalon corner (not hidden): B, ~(740, 1298), sizes 26/30/32.
+
+## 16 Nov 2026 — LADDER_RESCUE (a rescued line that is a rung of a ranked ladder) — IN CODE, measuring (probe flag `LADDER_RESCUE=1`)
+
+- **Trigger:** a rescued 'ignore' line (`walls.ts` `rescuedIgnored`) walls every rank it touches.
+  When it runs parallel to ranked lines of ≥ 2 ranks it is itself some size's line in the wrong pen,
+  and a size that closed on it often closed on ANOTHER size's line (Reims M LOWER SKIRT: five sizes
+  at exactly 993 cm²; Venice E TOP FRONT MIDDLE 2/6 at 84/89 vs ~200).
+- **Rule (`pieces/ladder.ts`, pass in `fill.ts` after `repairPass`, graded sheets only):** rung =
+  rescued, unranked, open, ≥ 15 mm, ranked parallels (mean 2–60 mm, sd < 1 mm, length ±25 %) of ≥ 2
+  ranks. A closed cell "uses" it when ≥ 15 of its 1 mm samples lie within 1 mm of the outline. One
+  local trend per cell from the family's clean closed cells (iterative leave-one-out, floored at
+  max(3, ½ closed); an outlier at the floor = collapsed, no fire). Off trend → withdraw and refill
+  without the rung (no derived bridges, no cascade: all verdicts from the pre-pass state).
+- **Dry run (scripts `fires4.py`, set40 `m-group`):** 16 withdraws, all pictured wrong
+  (`/private/tmp/patimport-runs/media/global-ladder-rescue-dryrun-2026-11-16/set40-v3`).
+- **Neighbour guard (f3):** a fire whose trend neighbour sits in an inversion pair (> 3 % against the
+  grade) with its adjacent clean neighbours is `suppressed:neighbour`. Moves 1 of 16: Memoir A H 26,
+  whose trend ran through 16 and 30 — both truncated, both in the clean set. 26 IS wrong; the fire
+  was right by luck, and that is not evidence. Repaired (`from == 'repair'`) trend neighbours: 0/16.
+- **Dropped before code:** a family inversion guard as a verdict (≥ 2 inversions or step ratio > 3
+  on ≥ 3 pairs → collapse) would have killed 9 of the 16 pictured fires: inversions count wrong
+  cells, they do not tell one bad line from two ladders. Kept as diag flags only (17 families, picture
+  leads). The longest smooth increasing ladder (fa) picks the WRONG ladder in Kalla E TOP FRONT
+  (low 0/2/6/10/14 + a jump, 11 vs 11): area cannot choose between two ladders — nesting against the
+  drawn lines must.
+- **Triage of the 67 cells the clean set rejected:** sorted by dev/tol, top 14 pictured. 15 wrong
+  added to the inventory (lane `LADDER_RESCUE-triage`). Three families are two interleaved ladders
+  (Kalla E TOP FRONT: 00/4/8/12/16/20… on the outer edge, 0/2/6/10/14/30 on the inner CF line;
+  Selenite I SKIRT: a flat ~15000 cluster; Silverstone G/E 4XL on 5XL's line, 5XL on 3XL's). There
+  the rejected list names the HONEST cells: a rejected list is not a wrong list.
+- **Scope (for the owner):** area cannot see truncations that stay on trend (Leah A/B, MDF438 B:
+  104 inventory cells sit on a smooth ladder) and iterative rejection lets same-direction
+  truncations into the clean set (Memoir A H 16/30); the guard catches them only when they invert
+  against each other. This pass does not reach those cells.
+- **7-file run (`global-lr7-base` vs `global-lr7-on`):** closed 1109 → 1101, 8 lost, 0 gained, 0
+  moved. The 8 are exactly the mayOpen withdraws (Kalla O 0, Venice E 2/6, Reims M 12/18/24/26/32),
+  all in the wrong-closes inventory; `refilled` = 0. With `LADDER_DEBUG=1` (`global-lr7-dbg`) EVERY
+  refill without the rung gave the SAME area (Memoir B L 22/24/26 174→174, Ambrosia F 16 1515→1515,
+  Kalla O 0 308→308 …): the rung is not the wall — a chain coincident with it is. The 8 openings
+  rested on area alone.
+- **LADDER_JUDGE (flag, default off, no run yet):** a mayOpen cell opens only when the refill differs
+  (`reason: refill-differs`) or the nest judge calls the old outline trunc / over / both
+  (`reason: judge`); an identical refill with the judge `ok` or `unjudged` keeps
+  (`reason: refill-identical`). The judge reads the pre-pass closed outlines (no cascade).
+- **Nest judge (`pieces/nest-judge.ts`):** nest-check's bracket rule ported one to one (two passes,
+  robust step by default); `nest-judge.test.ts` = parity on the 27 labelled cells, plain and robust
+  (54/54). `onNeighbour` (closed on the neighbour's drawn line) is DIAG ONLY: on existing set40
+  walls-dump it catches 2 of 9 expected cells (Memoir B L SHOULDER 24/26; misses L SHOULDER 22,
+  Kitchen F 3XL, Reims M ×5), and the plain rule flooded Memoir B (stepped grading: one line ranked to
+  one size of a pair). Coverage 2/9 — not a witness. Next rule (f3): a pile-up (≥ 3 ranks close on
+  one line, or the family is not paired elsewhere), not own-line absence; probe needs the owner's OK.
+  New leads, not inventory: Memoir B L SHOULDER 0/2, Reims C 24, Reims D 20.
+- **Prediction for the LADDER_JUDGE run (f3, written before it):** Reims M 12/18/24/26/32 sit on one
+  line and are each other's trend neighbours, so with an identical refill the bracket sees lo / hi on
+  that same line: M 18 `trunc` (opens), the rest `ok` or `unjudged`. Without a fallback up to 4 of
+  v3's correct openings go back to wrong closes (status quo, but a loss against v3 — the pile-up
+  blind spot). Fallback in code: `unjudged` + dev ≥ 3·tol → open (`reason: area-unjudged`). Still
+  exposed: Reims M cells the judge calls `ok`. A read-only dry run of the judge on the 8 pre-pass
+  outlines (existing lr7 cells) answers it before the run — needs the owner's OK.
+- **Bracket of suspects (f3):** a judge `ok` whose lo or hi is itself withdrawn in this pass is read
+  as `unjudged` (`bracketSuspect`); with dev ≥ 3·tol it then opens with `reason:
+  judge-bracket-suspect`. Covers the Reims M `ok` gap above; the run shows how often it fires.
+
+### 16 Nov, later — pile-up rule for on-neighbour — DROPPED on saved cells (no runs)
+
+Probe `scratchpad/pileup/pile.py` over `m-glocal` / `h-glocal` cells.json + `wdall-{m,h}` walls-dump:
+a closed outline "runs on" a chain where ≥ 20 mm of its 3 mm samples lie within 0.6 mm of it.
+Measured against the 41 confirmed wrong closes of `global-closed-wrong-candidates.json` (all set40;
+holdout has no labels, so only flag counts there):
+
+| rule | set40 flagged (of 3684 closed) | confirmed caught | holdout flagged |
+|---|---|---|---|
+| B: ≥ 3 ranks on one ranked chain, owner excluded | 3447 | 40 / 41 | 2331 |
+| A: B + a closed rank between them not on that chain | 1033 | 14 / 41 | 290 |
+| C: ≥ 3 ranks on the SAME stretch (≥ 20 mm) + a closed rank between them off it | 366 | 3 / 41 | 118 |
+
+A shared edge drawn once and ranked to one size (Leah's mechanism) is a pile-up by this definition,
+and it is everywhere: B flags 94 % of closed cells. Each narrowing loses the wrong closes faster than
+the honest ones. Chain sharing does not separate wrong from honest; on-neighbour stays diag only.
+
+### LADDER_JUDGE — ACCEPTED (18 Nov 2026)
+
+Hypothesis: a withdrawn rung cell opens only when the refill differs or the nest judge says trunc / over / both; an identical refill that the judge calls ok or unjudged stays closed, except the two fallbacks (`area-unjudged`, `judge-bracket-suspect`). The 16 Nov prediction: Reims M 18 is `trunc`, the other four are `ok` or `unjudged`, and the fallbacks put those four back to open.
+Change: none. Flags only, on the uncommitted `pieces/fill.ts`, `pieces/ladder.ts`, `pieces/nest-judge.ts` in this worktree. `src/lib/pattern-import/CLAUDE.md` not touched.
+Run: three shots, `--par 2`, list `global-ladder7-list.txt`, out `global-lj7-{base,rescue,judge}`. Then `dxf-check.mjs` on each (no DXF: the shot still stops at the resolver, `wrote 0`, `bad 0`). `cells.json` does not store `reason` / `judge`; those lines are a log-only repeat of the three files that moved (`LADDER_DEBUG=1 SHOT_STDOUT=1`, out `global-lj7-judge-dbg`). That repeat matches the official judge cell for cell (0 diffs).
+Numbers: closed 1109 → 1101 → 1101 (dxf-check, of 1422). Rescue lost 8, gained 0. Judge lost the same 8, gained 0. Nothing else moved. Per file the loss is Kalla 262→261, Venice 113→111, Reims 186→181; Memoir A/B, Ambrosia, Reef unchanged.
+
+The 8 are the 16 Nov eight, all in `global-closed-wrong-candidates.json`. Judge left all 8 open. Two pieces are both labelled `M - LOWER SKIRT`; the one that moved is seed 0 (the rescued-rung pile-up, 993 cm²). Seed 1's 12 and 32 stayed closed.
+
+| cell | reason | nest | in the wrong-closed list | picture of the base closure |
+|---|---|---|---|---|
+| Kalla O SKIRT FRONT POCKET 0 (seed 15) | judge | trunc | yes | неверно — half the pocket, a seam down the middle, 308 cm² against 527 / 545 |
+| Venice E TOP FRONT MIDDLE 2 (seed 6) | judge | trunc | yes | неверно — stops on a horizontal, the flare below is missing, 84 cm² against ~200 |
+| Venice E TOP FRONT MIDDLE 6 (seed 6) | judge | trunc | yes | неверно — same cut, 89 cm² against ~200 |
+| Reims M LOWER SKIRT 12 (seed 0) | refill-differs | ok | yes | неверно — hem of the small sizes; 10 and 14 run longer |
+| Reims M LOWER SKIRT 18 (seed 0) | refill-differs | trunc | yes | неверно — same hem; 16 and 20 run longer |
+| Reims M LOWER SKIRT 24 (seed 0) | refill-differs | unjudged | yes | неверно — same hem as 26; 22 runs longer |
+| Reims M LOWER SKIRT 26 (seed 0) | refill-differs | ok | yes | неверно — same hem as 24; 28 runs longer |
+| Reims M LOWER SKIRT 32 (seed 0) | refill-differs | unjudged | yes | неверно — hem short of 30 |
+
+No cell is closed in judge and open in base, so there is no reverse picture. Rescue (judge off) has no `reason` string; it opened these 8 on the area withdraw. Refill areas: Kalla 308=308, Venice 84=84 and 89=89, Reims all five 993→971 cm² (2.2 %, outside the 0.1 % identical band). The 971 outline was still off the trend, so the pass dropped it and left a leak. No cell took `area-unjudged` or `judge-bracket-suspect`.
+
+Prediction against fact, Reims M seed 0:
+
+| cell | predicted | fact |
+|---|---|---|
+| 12 | ok or unjudged; a fallback reopens it | judge `ok`. Opened, but by `refill-differs`, not a fallback |
+| 18 | trunc, opens | judge `trunc`. Opened by `refill-differs` (trunc would also have opened it) |
+| 24 | ok or unjudged; a fallback reopens it | judge `unjudged`. Opened by `refill-differs`, not a fallback |
+| 26 | ok or unjudged; `judge-bracket-suspect` covers an `ok` | judge `ok`. Opened by `refill-differs`. The ok-gap fallback did not fire |
+| 32 | ok or unjudged; a fallback reopens it | judge `unjudged`. Opened by `refill-differs`, not a fallback |
+
+The nest kinds match the prediction. The premise does not: the refill is not identical, so the fallbacks were not what returned the four, and this run does not show that they work.
+
+Verdict: accepted on the stated gate. Judge opened no cell whose base closure is right, opened the same 8 wrong closures as rescue, and every one of them is in the wrong-closed list. Lesson: do not treat the 16 Nov "identical refill" note as still true — on this code the five Reims cells move because the refill changes, and the ok-gap fallback is still untested.
+
+### LADDER_JUDGE default on — ACCEPTED (18 Nov 2026)
+
+Hypothesis: the judge can ship on, because the two area fallbacks (`area-unjudged`, `judge-bracket-suspect`) never opened a cell and the 7-file open set is the eight wrong closures.
+Change: `ladderOn` / `ladderJudgeOn` are on unless `LADDER_RESCUE_OFF=1` / `LADDER_JUDGE_OFF=1` (no `process` — the browser — stays on). The fallback branch and the bracket-of-suspects rewrite are deleted: an identical refill with nest `ok` or `unjudged` keeps. A judged cell carries `ladderReason` / `ladderNest`, written to cells.json as `reason` / `nest`.
+Run: `global-ladder7-list.txt`, no flags, out `global-lj7-default`; then `LADDER_JUDGE_OFF=1 LADDER_RESCUE_OFF=1`, out `global-lj7-off`. `nest-judge.test.ts` 60/60, `pieces/` 92/92.
+Numbers: default vs `global-lj7-judge` — closed 1101 = 1101, 0 outcome diffs. Off vs `global-lj7-base` — closed 1109 = 1109, 0 diffs. The eight opened cells now carry reason and nest in cells.json: Kalla O 0 `judge/trunc`; Venice E 2 and 6 `judge/trunc`; Reims M seed 0 sizes 12 `refill-differs/ok`, 18 `refill-differs/trunc`, 24 `refill-differs/unjudged`, 26 `refill-differs/ok`, 32 `refill-differs/unjudged`.
+Verdict: the fallbacks are out because they closed no hole. The pass stays on. Leah check is after the merge into `fix-pattern-pdf-open-lines`.
