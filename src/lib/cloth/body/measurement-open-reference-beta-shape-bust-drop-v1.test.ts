@@ -74,20 +74,23 @@ const APEX_TOLERANCE_MM = 1;
 
 type Vec3 = readonly [number, number, number];
 
-async function fixture(kind: MakeHumanOpenReferenceBasisKindV1) {
+async function fixture(
+  kind: MakeHumanOpenReferenceBasisKindV1,
+  measurements: CanonicalBodyMeasurementsMm = MEASUREMENTS,
+) {
   const basis = parseMakeHumanOpenReferenceBasisV1(
     readFileSync(resolve(cwd, MAKEHUMAN_OPEN_REFERENCE_BASIS_METADATA_V1[kind].assetPath)),
     kind,
   );
   const frame = createMeasurementBodyFrameV2({
-    measurements: MEASUREMENTS,
+    measurements,
     sourceRevision: `beta-shape-bust-drop-test:${kind}`,
     pose: 'A',
   });
   const openReference = createMeasurementOpenReferenceUniformHeightDisplayV1({ basis, frame });
   const waistHipRuntime = await createMeasurementOpenReferenceUniformWaistHipRuntimeV1({
     basis,
-    measurements: MEASUREMENTS,
+    measurements,
     openReference,
     loadBundle: async () => torsoBundle,
   });
@@ -197,9 +200,16 @@ describe('measurement open-reference beta shape runtime v1 bust-drop L0 step', (
 
     const requested = realOutputs[0];
     const droppedTorso = realOutputs[3];
-    const underBustStation = droppedTorso.underBustStationOriginM!;
+    // Re-baselined on purpose (female under-bust fold station): the dropped solve carries no
+    // under-bust target, so like any female bust-path body without one it puts its under-bust
+    // plane on the base's fold, below the bounded plane the 760 target was solved on. Every check
+    // below still reads that bounded plane; the dropped band is also checked on its own fold plane.
+    const underBustStation = requested.underBustStationOriginM!;
+    const droppedUnderBustStation = droppedTorso.underBustStationOriginM!;
     const chestStation = droppedTorso.chestStationOriginM!;
-    expect(underBustStation).toEqual(requested.underBustStationOriginM);
+    expect(requested.ribcageDiagnostics).not.toContain('underbust-station:female-fold-template');
+    expect(droppedTorso.ribcageDiagnostics).toContain('underbust-station:female-fold-template');
+    expect(droppedUnderBustStation[1]).toBeLessThan(underBustStation[1]);
     expect(chestStation[1]).toBeGreaterThan(underBustStation[1]);
 
     // Apex: the requested bust pushes it forward; the drop brings it back to the base apex.
@@ -219,6 +229,12 @@ describe('measurement open-reference beta shape runtime v1 bust-drop L0 step', (
     const baseUnderBustMm = girthMm(sourcePositionsM, indices, underBustStation);
     const requestedUnderBustMm = girthMm(requested.positionsM, indices, underBustStation);
     const droppedUnderBustMm = girthMm(droppedTorso.positionsM, indices, underBustStation);
+    const baseFoldUnderBustMm = girthMm(sourcePositionsM, indices, droppedUnderBustStation);
+    const droppedFoldUnderBustMm = girthMm(
+      droppedTorso.positionsM,
+      indices,
+      droppedUnderBustStation,
+    );
 
     const waistStation = stationOf(waistHipRuntime, 'waistCircumferenceMm');
     const hipStation = stationOf(waistHipRuntime, 'hipCircumferenceMm');
@@ -245,6 +261,9 @@ describe('measurement open-reference beta shape runtime v1 bust-drop L0 step', (
     expect(Math.abs(droppedApexMm - baseApexMm)).toBeLessThanOrEqual(APEX_TOLERANCE_MM);
     expect(Math.abs(requestedUnderBustMm - 760)).toBeLessThanOrEqual(GIRTH_TOLERANCE_MM);
     expect(Math.abs(droppedUnderBustMm - baseUnderBustMm)).toBeLessThanOrEqual(GIRTH_TOLERANCE_MM);
+    expect(Math.abs(droppedFoldUnderBustMm - baseFoldUnderBustMm)).toBeLessThanOrEqual(
+      GIRTH_TOLERANCE_MM,
+    );
     expect(Math.abs(droppedWaistMm - baseWaistMm)).toBeLessThanOrEqual(GIRTH_TOLERANCE_MM);
     expect(Math.abs(droppedHipMm - baseHipMm)).toBeLessThanOrEqual(GIRTH_TOLERANCE_MM);
   }, 240_000);
@@ -292,4 +311,139 @@ describe('measurement open-reference beta shape runtime v1 bust-drop L0 step', (
     },
     240_000,
   );
+});
+
+/**
+ * The female under-bust fold plane is only a default for an untyped under bust: when the fold
+ * result leaves a typed field unapplied, the runtime solves the typed-only chain once more on the
+ * bounded plane and keeps the fold only if it applies every typed field at least as well.
+ */
+describe('measurement open-reference beta shape runtime v1 fold yields to a typed field', () => {
+  const { underBustCircumferenceMm: _underBust, ...untypedUnderBust } =
+    CANONICAL_MEASUREMENT_SIZE_RECORDS[1].measurements;
+  // Re-baselined on purpose after #453 (tape girths): with 205/195/225 the bounded plane itself
+  // already drops depth on beta bb599aa3e (final global gate -> depth-subset rollback, measured
+  // with the fold off), so that body no longer exercised the yield. 215/205/235 is kept whole by
+  // the bounded plane on beta and by the fold plane unperturbed; the assertions are unchanged.
+  const CHEST_DEPTH_MM = 215;
+  const DEPTH_TYPED: CanonicalBodyMeasurementsMm = Object.freeze({
+    ...untypedUnderBust,
+    chestDepthMm: CHEST_DEPTH_MM,
+    waistDepthMm: 205,
+    hipDepthMm: 235,
+  });
+  const YIELD = 'underbust-station:fold-yielded-to-typed-field';
+  const FOLD = 'underbust-station:female-fold-template';
+  type TorsoOptions = Parameters<typeof createMeasurementOpenReferenceBetaTorsoInWorkerV1>[0];
+
+  function torsoFailingWhen(fails: (options: TorsoOptions) => boolean) {
+    const realOutputs: Awaited<
+      ReturnType<typeof createMeasurementOpenReferenceBetaTorsoInWorkerV1>
+    >[] = [];
+    const createTorsoShape = vi.fn(async (options: TorsoOptions) => {
+      const torso = await createMeasurementOpenReferenceBetaTorsoInWorkerV1(options);
+      realOutputs.push(torso);
+      if (!fails(options)) return torso;
+      const positionsM = torso.positionsM.slice();
+      positionsM[0] += 10;
+      return Object.freeze({ ...torso, positionsM });
+    });
+    return { createTorsoShape, realOutputs };
+  }
+
+  async function run(
+    measurements: CanonicalBodyMeasurementsMm,
+    createTorsoShape: ReturnType<typeof torsoFailingWhen>['createTorsoShape'],
+  ) {
+    const { basis, waistHipRuntime } = await fixture('female', measurements);
+    return createMeasurementOpenReferenceBetaShapeRuntimeV1({
+      basis,
+      measurements,
+      waistHipRuntime,
+      loadTorsoBundle: async () => torsoBundle,
+      loadFemaleBustBundle: async () => bustBundle,
+      loadLengthPack: async () => lengthPack,
+      loadPoseResources: async () => poseResources,
+      createTorsoShape,
+    });
+  }
+
+  function applied(result: Awaited<ReturnType<typeof run>>) {
+    return new Set([...result.representedVisualControls, ...(result.limitedVisualControls ?? [])]);
+  }
+
+  it('takes the bounded plane when only it keeps the typed depth', async () => {
+    const { createTorsoShape, realOutputs } = torsoFailingWhen(
+      (options) =>
+        options.underBustBoundedPlane !== true && options.measurements.chestDepthMm != null,
+    );
+    const result = await run(DEPTH_TYPED, createTorsoShape);
+
+    // fold with depth (fails) -> fold without depth -> bounded with depth.
+    expect(createTorsoShape).toHaveBeenCalledTimes(3);
+    const calls = createTorsoShape.mock.calls.map(([options]) => options);
+    expect(calls.map(({ underBustBoundedPlane }) => underBustBoundedPlane)).toEqual([
+      undefined,
+      undefined,
+      true,
+    ]);
+    expect(calls.map(({ measurements }) => measurements.chestDepthMm)).toEqual([
+      CHEST_DEPTH_MM,
+      undefined,
+      CHEST_DEPTH_MM,
+    ]);
+    expect(realOutputs[0].ribcageDiagnostics).toContain(FOLD);
+    expect(realOutputs[2].ribcageDiagnostics).not.toContain(FOLD);
+    expect(realOutputs[2].underBustStationOriginM![1]).toBeGreaterThan(
+      realOutputs[0].underBustStationOriginM![1],
+    );
+
+    expect(result.chestShoulderDiagnostics[0]).toBe(YIELD);
+    expect(result.chestShoulderDiagnostics).not.toContain('beta-final-depth-subset-rollback');
+    expect(result.chestShoulderDiagnostics).not.toContain('beta-final-global-quality-rollback');
+    for (const key of ['chestDepthMm', 'waistDepthMm', 'hipDepthMm'] as const) {
+      expect(applied(result).has(key)).toBe(true);
+    }
+    expect(result.fkProxyRuntime.qualityGate?.safe).toBe(true);
+    expect(result.claims.torsoDepthFrontBackDistributionCalibrated).toBe(false);
+  }, 240_000);
+
+  it('keeps the fold when the bounded plane applies no typed field better', async () => {
+    const { createTorsoShape } = torsoFailingWhen(
+      (options) => options.measurements.chestDepthMm != null,
+    );
+    const result = await run(DEPTH_TYPED, createTorsoShape);
+
+    // fold: depth (fails) -> no depth; bounded: depth (fails) -> no depth.
+    expect(createTorsoShape).toHaveBeenCalledTimes(4);
+    const calls = createTorsoShape.mock.calls.map(([options]) => options);
+    expect(calls.map(({ underBustBoundedPlane }) => underBustBoundedPlane)).toEqual([
+      undefined,
+      undefined,
+      true,
+      true,
+    ]);
+    expect(result.chestShoulderDiagnostics).toContain('beta-final-depth-subset-rollback');
+    expect(result.chestShoulderDiagnostics).toContain(FOLD);
+    expect(result.chestShoulderDiagnostics).not.toContain(YIELD);
+    expect(applied(result).has('chestDepthMm')).toBe(false);
+  }, 240_000);
+
+  it('never runs while every typed field is applied', async () => {
+    const { chestDepthMm: _c, waistDepthMm: _w, hipDepthMm: _h, ...depthUntyped } = DEPTH_TYPED;
+    let solves = 0;
+    const { createTorsoShape } = torsoFailingWhen(() => solves++ === 0);
+    const result = await run(Object.freeze(depthUntyped), createTorsoShape);
+
+    // fold (fails) -> chest halfway on the fold plane, chest still applied (limited).
+    expect(createTorsoShape).toHaveBeenCalledTimes(2);
+    const calls = createTorsoShape.mock.calls.map(([options]) => options);
+    expect(calls.every(({ underBustBoundedPlane }) => underBustBoundedPlane == null)).toBe(true);
+    expect(calls[1].measurements.chestCircumferenceMm).not.toBe(
+      calls[0].measurements.chestCircumferenceMm,
+    );
+    expect(applied(result).has('chestCircumferenceMm')).toBe(true);
+    expect(result.chestShoulderDiagnostics).not.toContain(YIELD);
+    expect(result.chestShoulderDiagnostics).toContain(FOLD);
+  }, 240_000);
 });

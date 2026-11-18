@@ -37,6 +37,11 @@ export interface MeasurementOpenReferenceBetaTorsoWorkerOptionsV1 {
   readonly neckRigHeads?: MeasurementOpenReferenceNeckRigHeadsV1;
   /** Display pose of the source mesh; the neck proxy is A-pose only (defaults to 'A'). */
   readonly neckPose?: BodyPoseKind;
+  /**
+   * Female bust path: keep the bounded under-bust plane even with no under-bust typed. The beta
+   * runtime sets it when the fold plane left a typed field unapplied.
+   */
+  readonly underBustBoundedPlane?: true;
 }
 
 export interface MeasurementOpenReferenceBetaTorsoWorkerResultV1 {
