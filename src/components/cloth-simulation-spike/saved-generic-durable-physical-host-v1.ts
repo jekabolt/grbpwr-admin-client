@@ -30,6 +30,8 @@ import type {
   DxfGarmentObservedPreviewSeamSideV1,
 } from './dxf-garment-observed-strain-heatmap-preview-v1';
 
+import type { DxfGarmentObservedBoundaryEdgeV1 } from './dxf-garment-observed-unsewn-edges-v1';
+
 export type SavedGenericDurablePhysicalPreviewScopeV1 = Readonly<{
   row: DxfProductSavedRowIdentityV1;
   sourceFileId: string;
@@ -881,12 +883,14 @@ export function createSavedGenericDurablePhysicalHostV1(
       scope: SavedGenericDurablePhysicalPreviewScopeV1 | null,
       selection: SavedGenericDurablePhysicalPreviewPieceV1 | null,
       selectedSide?: SavedGenericDurablePhysicalPreviewSelectedSideV1,
+      selectedEdge?: DxfGarmentObservedBoundaryEdgeV1,
     ): boolean {
       const preview = previewAdmission();
       if (!preview) return false;
       const { durable } = preview;
       let selectedPieceId: string | null = null;
       let runtimeSide: DxfGarmentObservedPreviewSeamSideV1 | undefined;
+      let runtimeEdge: DxfGarmentObservedBoundaryEdgeV1 | undefined;
       try {
         if (selection && matchesPreviewScope(scope, durable)) {
           const requested = capture(record(selection, ['scopeKey', 'pieceId', 'pieceLineKey']));
@@ -896,7 +900,7 @@ export function createSavedGenericDurablePhysicalHostV1(
                 pieceId === requested.pieceId && pieceLineKey === requested.pieceLineKey,
             );
             selectedPieceId = piece?.pieceId ?? null;
-            if (piece && selectedSide) {
+            if (piece && selectedSide && !selectedEdge) {
               const candidate = record(selectedSide, ['seam', 'sideIndex']);
               const { sideIndex } = candidate;
               const seam = currentN1Seam(
@@ -911,18 +915,41 @@ export function createSavedGenericDurablePhysicalHostV1(
               )
                 runtimeSide = Object.freeze({ runtimeSeamId: seam.id, sideIndex });
             }
+            if (piece && selectedEdge && !selectedSide) {
+              const edge = capture(record(selectedEdge, ['contourId', 'boundaryVertexIds']));
+              if (
+                typeof edge.contourId === 'string' &&
+                Array.isArray(edge.boundaryVertexIds) &&
+                edge.boundaryVertexIds.length === 2 &&
+                edge.boundaryVertexIds.every((id) => typeof id === 'string' && id.length > 0) &&
+                edge.boundaryVertexIds[0] !== edge.boundaryVertexIds[1]
+              )
+                runtimeEdge = Object.freeze({
+                  contourId: edge.contourId,
+                  boundaryVertexIds: Object.freeze([
+                    edge.boundaryVertexIds[0],
+                    edge.boundaryVertexIds[1],
+                  ] as const),
+                });
+            }
           }
         }
       } catch {
         // A stale or malformed selection also clears a previously visible outline.
       }
       if (!preview.current()) return false;
-      const rendered = host.setPreviewSelectedPiece(canvas, selectedPieceId, runtimeSide);
+      const rendered = host.setPreviewSelectedPiece(
+        canvas,
+        selectedPieceId,
+        runtimeSide,
+        runtimeEdge,
+      );
       return (
         rendered &&
         preview.current() &&
         (selection === null || selectedPieceId !== null) &&
-        (!selectedSide || !!runtimeSide)
+        (!selectedSide || !!runtimeSide) &&
+        (!selectedEdge || !!runtimeEdge)
       );
     },
     async stopPreview() {

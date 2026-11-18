@@ -1,3 +1,4 @@
+import type { DxfGarmentObservedBoundaryEdgeV1 } from './dxf-garment-observed-unsewn-edges-v1';
 import type { DxfGarmentObservedPreviewSeamSideV1 } from './dxf-garment-observed-strain-heatmap-preview-v1';
 import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 import type {
@@ -1367,9 +1368,11 @@ export function createSavedGenericObservedPhysicalHostV1(
       canvas: HTMLCanvasElement,
       pieceId: string | null,
       seamSide?: DxfGarmentObservedPreviewSeamSideV1,
+      edge?: DxfGarmentObservedBoundaryEdgeV1,
     ): boolean {
       return (
-        withMountedPreview(canvas, (view) => view.setSelectedPiece(pieceId, seamSide)) ?? false
+        withMountedPreview(canvas, (view) => view.setSelectedPiece(pieceId, seamSide, edge)) ??
+        false
       );
     },
     async stopPreview() {

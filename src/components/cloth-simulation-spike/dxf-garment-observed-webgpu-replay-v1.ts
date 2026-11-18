@@ -70,6 +70,10 @@ import {
   TRIANGLE_STRAIN_UTILIZATION_DIAGNOSTIC_WGSL_V1,
 } from './beta-skirt-canonical-medium-strain-utilization-diagnostic-v1';
 import {
+  buildDxfGarmentObservedUnsewnEdgesV1,
+  type DxfGarmentObservedUnsewnEdgeV1,
+} from './dxf-garment-observed-unsewn-edges-v1';
+import {
   buildDxfGarmentObservedSeamEdgesV1,
   type DxfGarmentObservedSeamEdgeV1,
 } from './dxf-garment-observed-seam-edges-v1';
@@ -436,6 +440,7 @@ type Receipt = {
   renderTriangles: Uint32Array;
   pieceRanges: CorePlan['report']['pieceRanges'];
   seamEdges: readonly DxfGarmentObservedSeamEdgeV1[];
+  unsewnEdges: readonly DxfGarmentObservedUnsewnEdgeV1[];
   strain: Strain;
   sourceBindingSha256: string;
   report: DxfGarmentObservedWebgpuReplayReportV1;
@@ -1363,6 +1368,10 @@ async function run(
         placement.artifact.localSourceArtifact.refinement.mesh,
         placement.artifact.localSourceArtifact.sourceEvidence.handoff.seams,
       ),
+      unsewnEdges: buildDxfGarmentObservedUnsewnEdgesV1(
+        placement.artifact.localSourceArtifact.refinement,
+        placement.artifact.localSourceArtifact.sourceEvidence.samplingRequest,
+      ),
       strain,
       sourceBindingSha256,
       report: terminal,
@@ -1499,6 +1508,7 @@ export async function projectDxfGarmentObservedWebgpuRenderV1(
       garmentTriangles: r.renderTriangles.slice(),
       pieceRanges: r.pieceRanges.map((range) => ({ ...range })),
       seamEdges: r.seamEdges,
+      unsewnEdges: r.unsewnEdges,
       bodyPositionsM: body.snapshot.bodyPositionsM.slice(),
       bodyTriangles: body.snapshot.bodyTriangles.slice(),
       strain: capture(r.strain) as Strain,

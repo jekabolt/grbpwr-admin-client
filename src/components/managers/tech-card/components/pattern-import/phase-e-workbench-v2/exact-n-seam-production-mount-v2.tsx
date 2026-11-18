@@ -31,6 +31,7 @@ import { bridgePatternImportDxfPhaseECadMannequinSceneOverlayToRendererV1 } from
 import type { PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1 } from './cad-table-zero-connect-phase-e-authority-v1';
 import type { PatternImportDxfPhaseECadMannequinSceneOverlayCapabilityV1 } from './cad-workbench-mannequin-model-picker-v1';
 import { findCadWorkbenchScopedPieceIndexV1 } from './cad-workbench-piece-selection-v1';
+import { derivePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1 } from './cad-table-connect-edge-segments-v1';
 import { cadWorkbenchOperationSeamOrdinal } from './cad-workbench-seam-ordinal-v1';
 import { matchesPatternImportDxfProductExactNDesktopGeometryV2 } from './durable-exact-session-current-v1';
 import {
@@ -249,6 +250,11 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
         )
       : null;
   const savedSideFocus = tableSessionOwner?.session.savedSeamSide;
+  const savedBoundary = tableSessionOwner?.session.savedBoundary;
+  const focusedBoundary =
+    savedBoundary && activePiece?.identity.key === savedBoundary.pieceKey
+      ? savedBoundary
+      : undefined;
   const focusedSeamSide =
     savedSideFocus?.seamId === activeSeam.seamId &&
     activePiece?.identity.key === savedSideFocus.pieceKey
@@ -265,6 +271,12 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
       : activeSeam.sides[0]?.pieceLineKey ?? null,
     seamId: activeSeam.seamId,
     seamSideIndex: focusedSeamSide,
+    ...(focusedBoundary && {
+      boundaryEdge: {
+        contourId: focusedBoundary.contourId,
+        boundaryVertexIds: focusedBoundary.boundaryVertexIds,
+      },
+    }),
   });
   const sceneOverlay =
     !session.productionFeed && exactDesktop?.savedSceneAuthority
@@ -313,6 +325,29 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
       if (index < 0) return;
       const pieceKey = pieces[index]!.identity.key;
       const sideIndex = nextSelection.seamSideIndex;
+      const edge = nextSelection.boundaryEdge;
+      if (edge) {
+        if (
+          !exactDesktop ||
+          edge.boundaryVertexIds.length !== 2 ||
+          sideIndex != null ||
+          nextSelection.operationNumber !== operation.sourceOperationNumber
+        )
+          return;
+        const matches = derivePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1(
+          exactDesktop.projection,
+        ).filter(
+          (segment) =>
+            segment.contourRole === 'sewing-boundary' &&
+            segment.pieceId === nextSelection.pieceId &&
+            segment.pieceLineKey === nextSelection.pieceLineKey &&
+            segment.contourId === edge.contourId &&
+            segment.boundaryVertexIds.every(
+              (id, ordinal) => id === edge.boundaryVertexIds[ordinal],
+            ),
+        );
+        if (matches.length !== 1) return;
+      }
       if (sideIndex != null) {
         const side = activeSeam.sides[sideIndex];
         if (
@@ -330,6 +365,11 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
           pieceKey,
           false,
         );
+        if (edge)
+          return Object.freeze({
+            ...activated,
+            savedBoundary: { ...edge, pieceKey },
+          });
         return sideIndex == null
           ? activated
           : Object.freeze({
@@ -394,6 +434,18 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
               operationNumber: operation.sourceOperationNumber,
               ordinal: seamOrdinal,
               focusedSideIndex: focusedSeamSide,
+              focusedBoundary,
+              onFocusBoundary: (segment) =>
+                focusSelection({
+                  operationNumber: operation.sourceOperationNumber,
+                  scopeKey: session.current.row.scopeKey,
+                  pieceId: segment.pieceId,
+                  pieceLineKey: segment.pieceLineKey,
+                  boundaryEdge: {
+                    contourId: segment.contourId,
+                    boundaryVertexIds: segment.boundaryVertexIds,
+                  },
+                }),
               sides: activeSeamChoice.sides,
               onFocusSide: (sideIndex) => {
                 const { pieceId, pieceLineKey } = activeSeamChoice.sides[sideIndex];

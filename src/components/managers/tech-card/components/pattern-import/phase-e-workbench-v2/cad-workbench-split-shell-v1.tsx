@@ -1,3 +1,4 @@
+import type { DxfGarmentObservedBoundaryEdgeV1 } from 'components/cloth-simulation-spike/dxf-garment-observed-unsewn-edges-v1';
 import {
   createContext,
   useContext,
@@ -183,6 +184,7 @@ export type PatternImportDxfPhaseECadWorkbenchSelectionV1 = Readonly<{
   pieceLineKey?: string | null;
   seamId?: string | null;
   seamSideIndex?: 0 | 1 | null;
+  boundaryEdge?: DxfGarmentObservedBoundaryEdgeV1;
 }>;
 
 export type PatternImportDxfPhaseECadWorkbenchSelectionSourceV1 =

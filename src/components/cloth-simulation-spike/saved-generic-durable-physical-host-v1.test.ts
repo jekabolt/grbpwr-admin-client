@@ -58,6 +58,11 @@ import {
   projectSavedGenericObservedPhysicalHostPersistenceContextV1,
 } from './saved-generic-observed-physical-host-v1';
 import { createSavedGenericDurablePhysicalHostV1 } from './saved-generic-durable-physical-host-v1';
+import {
+  buildDxfGarmentObservedUnsewnEdgesV1,
+  type DxfGarmentObservedBoundaryEdgeV1,
+} from './dxf-garment-observed-unsewn-edges-v1';
+import type { DxfGarmentObservedWebgpuReplayRequestV1 } from './dxf-garment-observed-webgpu-replay-v1';
 import type {
   DxfGarmentObservedPreviewHitV1,
   DxfGarmentObservedPreviewSeamSideV1,
@@ -120,7 +125,11 @@ const ports = vi.hoisted(() => ({
     | ((x: number, y: number, runtimeSeamId?: string) => DxfGarmentObservedPreviewHitV1 | null)
     | null,
   previewSelect: null as
-    | ((pieceId: string | null, side?: DxfGarmentObservedPreviewSeamSideV1) => boolean)
+    | ((
+        pieceId: string | null,
+        side?: DxfGarmentObservedPreviewSeamSideV1,
+        edge?: DxfGarmentObservedBoundaryEdgeV1,
+      ) => boolean)
     | null,
 }));
 vi.mock('./dxf-garment-observed-webgpu-replay-v1', () => {
@@ -204,8 +213,11 @@ vi.mock('./dxf-garment-observed-strain-heatmap-preview-v1', () => ({
       lifetime: controller.signal,
       pick: (x: number, y: number, runtimeSeamId?: string) =>
         ports.previewPick?.(x, y, runtimeSeamId) ?? null,
-      setSelectedPiece: (pieceId: string | null, side?: DxfGarmentObservedPreviewSeamSideV1) =>
-        ports.previewSelect?.(pieceId, side) ?? true,
+      setSelectedPiece: (
+        pieceId: string | null,
+        side?: DxfGarmentObservedPreviewSeamSideV1,
+        edge?: DxfGarmentObservedBoundaryEdgeV1,
+      ) => ports.previewSelect?.(pieceId, side, edge) ?? true,
       dispose,
     };
   },
@@ -2014,7 +2026,11 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
 
     const focusSelection = vi.fn();
     const selectOutline = vi.fn<
-      (pieceId: string | null, side?: DxfGarmentObservedPreviewSeamSideV1) => boolean
+      (
+        pieceId: string | null,
+        side?: DxfGarmentObservedPreviewSeamSideV1,
+        edge?: DxfGarmentObservedBoundaryEdgeV1,
+      ) => boolean
     >(() => true);
     ports.previewSelect = selectOutline;
     let interaction = bindCadWorkbenchPhysicalPreviewSelectionV1(
@@ -2119,7 +2135,7 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
     );
     await act(async () => route.render(createElement(Controls)));
     const selectedRuntimeSide = { runtimeSeamId: runtimeSeam.id, sideIndex: 0 };
-    expect(selectOutline).toHaveBeenLastCalledWith(piece.pieceId, selectedRuntimeSide);
+    expect(selectOutline).toHaveBeenLastCalledWith(piece.pieceId, selectedRuntimeSide, undefined);
     expect(readCount).toBe(readCountBeforeClick);
     expect(
       f.host.setPreviewSelectedPiece({} as HTMLCanvasElement, scope, selected, {
@@ -2127,35 +2143,82 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
         sideIndex: 0,
       }),
     ).toBe(false);
-    expect(selectOutline).toHaveBeenLastCalledWith(piece.pieceId, selectedRuntimeSide);
+    expect(selectOutline).toHaveBeenLastCalledWith(piece.pieceId, selectedRuntimeSide, undefined);
     expect(
       f.host.setPreviewSelectedPiece(canvas, scope, selected, {
         seam: savedSeam,
         sideIndex: 1,
       }),
     ).toBe(false);
-    expect(selectOutline).toHaveBeenLastCalledWith(piece.pieceId, undefined);
+    expect(selectOutline).toHaveBeenLastCalledWith(piece.pieceId, undefined, undefined);
     expect(
       f.host.setPreviewSelectedPiece(canvas, scope, selected, {
         seam: { ...savedSeam, sides: [...savedSeam.sides].reverse() },
         sideIndex: 0,
       }),
     ).toBe(false);
-    expect(selectOutline).toHaveBeenLastCalledWith(piece.pieceId, undefined);
+    expect(selectOutline).toHaveBeenLastCalledWith(piece.pieceId, undefined, undefined);
 
     expect(
       f.host.setPreviewSelectedPiece(canvas, scope, { ...selected, pieceLineKey: 'wrong-line' }),
     ).toBe(false);
-    expect(selectOutline).toHaveBeenLastCalledWith(null, undefined);
+    expect(selectOutline).toHaveBeenLastCalledWith(null, undefined, undefined);
     expect(f.host.setPreviewSelectedPiece(canvas, scope, selected)).toBe(true);
     expect(
       f.host.setPreviewSelectedPiece(canvas, { ...scope, sizeToken: 'wrong-size' }, selected),
     ).toBe(false);
-    expect(selectOutline).toHaveBeenLastCalledWith(null, undefined);
+    expect(selectOutline).toHaveBeenLastCalledWith(null, undefined, undefined);
     expect(f.host.setPreviewSelectedPiece(canvas, scope, selected)).toBe(true);
+    const currentFrame = ports.calls.find(({ frame }) => frame === 32)
+      ?.request as unknown as DxfGarmentObservedWebgpuReplayRequestV1;
+    const { refinement, sourceEvidence } = currentFrame.placementRequest.sourceArtifact;
+    const nativeEdges = buildDxfGarmentObservedUnsewnEdgesV1(
+      refinement,
+      sourceEvidence.samplingRequest,
+    );
+    const ownedEdge = nativeEdges.find(({ pieceId }) => pieceId === piece.pieceId);
+    if (!ownedEdge) throw new Error('The genuine saved frame lost its unsewn native edge.');
+    const { contourId, boundaryVertexIds } = ownedEdge;
+    const boundaryEdge = { contourId, boundaryVertexIds };
+    selectOutline.mockImplementation(
+      (pieceId, _side, edge) =>
+        !edge ||
+        nativeEdges.some(
+          (native) =>
+            native.pieceId === pieceId &&
+            native.contourId === edge.contourId &&
+            native.boundaryVertexIds.every((id, ordinal) => id === edge.boundaryVertexIds[ordinal]),
+        ),
+    );
+    interaction = bindCadWorkbenchPhysicalPreviewSelectionV1(
+      scope,
+      savedSeam.operationNumber,
+      focusSelection,
+      { ...selected, operationNumber: savedSeam.operationNumber, boundaryEdge },
+      savedSeam,
+    );
+    await act(async () => route.render(createElement(Controls)));
+    expect(selectOutline).toHaveBeenLastCalledWith(piece.pieceId, undefined, boundaryEdge);
+    expect(
+      f.host.setPreviewSelectedPiece(canvas, scope, selected, undefined, {
+        contourId,
+        boundaryVertexIds: ['forged-1', 'forged-2'],
+      }),
+    ).toBe(false);
+    expect(
+      f.host.setPreviewSelectedPiece(
+        canvas,
+        scope,
+        { ...selected, scopeKey: 'another' },
+        undefined,
+        boundaryEdge,
+      ),
+    ).toBe(false);
+    expect(selectOutline).toHaveBeenLastCalledWith(null, undefined, undefined);
+
     interaction = null;
     await act(async () => route.render(createElement(Controls)));
-    expect(selectOutline).toHaveBeenLastCalledWith(null, undefined);
+    expect(selectOutline).toHaveBeenLastCalledWith(null, undefined, undefined);
 
     pick.mockImplementationOnce(() => {
       caller.abort();

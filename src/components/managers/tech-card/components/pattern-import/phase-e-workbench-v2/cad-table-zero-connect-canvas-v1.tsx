@@ -1,3 +1,4 @@
+import type { DxfGarmentObservedBoundaryEdgeV1 } from 'components/cloth-simulation-spike/dxf-garment-observed-unsewn-edges-v1';
 import type { PatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 import type { BoxMm, PtMm } from 'lib/pattern-import/types';
@@ -99,6 +100,8 @@ export type PatternImportDxfPhaseECadTableZeroConnectCanvasPropsV1 = Readonly<{
     ordinal: number;
     focusedSideIndex?: 0 | 1 | null;
     onFocusSide?: (sideIndex: 0 | 1) => void;
+    onFocusBoundary?: (segment: PatternImportDxfPhaseECadTableConnectEdgeSegmentV1) => void;
+    focusedBoundary?: DxfGarmentObservedBoundaryEdgeV1 & Readonly<{ pieceKey: string }>;
     sides: readonly Readonly<{
       pieceId: string;
       pieceLineKey: string;
@@ -190,6 +193,7 @@ function boundsFor(layout: PatternImportDxfPhaseECadTablePieceLayoutSessionV1): 
 export type PatternImportDxfPhaseECadTableZeroCanvasSessionV1 = Readonly<{
   layout: PatternImportDxfPhaseECadTablePieceLayoutSessionV1;
   savedSeamSide?: Readonly<{ seamId: string; sideIndex: 0 | 1; pieceKey: string }> | null;
+  savedBoundary?: (DxfGarmentObservedBoundaryEdgeV1 & Readonly<{ pieceKey: string }>) | null;
   /**
    * Caller-owned fitted view. It intentionally does not follow session-only piece offsets until
    * the operator explicitly asks to fit the table again.
@@ -252,6 +256,7 @@ export function movePatternImportDxfPhaseECadTableZeroCanvasSessionV1(
   return Object.freeze({
     ...session,
     savedSeamSide: selected === session.layout ? session.savedSeamSide : null,
+    savedBoundary: selected === session.layout ? session.savedBoundary : null,
     layout: translateSelectedPatternImportDxfPhaseECadTablePiecesV1(selected, deltaMm),
   });
 }
@@ -275,6 +280,7 @@ export function activatePatternImportDxfPhaseECadTableZeroCanvasPieceV1(
   return Object.freeze({
     ...session,
     savedSeamSide: null,
+    savedBoundary: null,
     layout: selectPatternImportDxfPhaseECadTablePiecesV1(
       session.layout,
       resolvedKey ? [resolvedKey] : [],
@@ -623,13 +629,21 @@ function CadTableZeroCanvas({
           fitRequest={fitRequest}
           className='min-h-0'
           onPick={(viewKey, modifiers) => {
-            if (activeTool === 'select' && savedSeam?.onFocusSide) {
+            if (activeTool === 'select' && savedSeam) {
               const segment = segments.find((candidate) => candidate.viewKey === viewKey);
               const sideIndex = segment
                 ? savedSeam.sides.findIndex((side) => sameSavedSeamEdge(side, segment))
                 : -1;
-              if (sideIndex === 0 || sideIndex === 1) {
+              if ((sideIndex === 0 || sideIndex === 1) && savedSeam.onFocusSide) {
                 savedSeam.onFocusSide(sideIndex);
+                return;
+              }
+              if (
+                sideIndex < 0 &&
+                segment?.contourRole === 'sewing-boundary' &&
+                savedSeam.onFocusBoundary
+              ) {
+                savedSeam.onFocusBoundary(segment);
                 return;
               }
             }
@@ -652,6 +666,7 @@ function CadTableZeroCanvas({
             setTableSession((current) => ({
               ...current,
               savedSeamSide: null,
+              savedBoundary: null,
               layout: selectPatternImportDxfPhaseECadTablePiecesInLassoV1(
                 current.layout,
                 points,
@@ -816,7 +831,13 @@ function CadTableZeroCanvas({
                             controller,
                             segment,
                           );
-                    if (!controller.session && selectedSide === null) return null;
+                    const canFocusBoundary =
+                      activeTool === 'select' &&
+                      !savedSide &&
+                      segment.contourRole === 'sewing-boundary' &&
+                      !!savedSeam?.onFocusBoundary;
+                    if (!controller.session && selectedSide === null && !canFocusBoundary)
+                      return null;
                     const [from, to] = segment.pointsMm;
                     const canSelect =
                       !!controller.session &&
@@ -828,7 +849,13 @@ function CadTableZeroCanvas({
                       (savedSideIndex === 0 || savedSideIndex === 1);
                     const savedSideFocused =
                       !!savedSide && savedSideIndex === savedSeam?.focusedSideIndex;
-                    const canActivateEdge = canSelect || canFocusSavedSide;
+                    const savedBoundaryFocused =
+                      savedSeam?.focusedBoundary?.pieceKey === placed.identity.key &&
+                      savedSeam.focusedBoundary.contourId === segment.contourId &&
+                      savedSeam.focusedBoundary.boundaryVertexIds.every(
+                        (id, index) => id === segment.boundaryVertexIds[index],
+                      );
+                    const canActivateEdge = canSelect || canFocusSavedSide || canFocusBoundary;
                     const savedSideColor = savedSide
                       ? CAD_WORKBENCH_SEAM_SIDE_COLORS[savedSide]
                       : 'currentColor';
@@ -839,6 +866,7 @@ function CadTableZeroCanvas({
                         key={segment.viewKey}
                         transform={cadTablePieceSvgTransformV1(placed, 'inverted')}
                         data-cad-zero-connect-edge={segment.viewKey}
+                        data-cad-zero-connect-boundary-focused={savedBoundaryFocused || undefined}
                         data-cad-zero-connect-seam-id={savedSide ? savedSeam?.seamId : undefined}
                         data-cad-zero-connect-saved-side-focused={
                           savedSideFocused ? savedSide : undefined
@@ -858,10 +886,18 @@ function CadTableZeroCanvas({
                           y1={vy(from.y)}
                           x2={to.x}
                           y2={vy(to.y)}
-                          stroke={savedSideColor}
-                          strokeWidth={savedSideFocused ? 5 : selectedSide === null ? 1 : 3}
+                          stroke={
+                            savedBoundaryFocused ? 'var(--color-highlightColor)' : savedSideColor
+                          }
+                          strokeWidth={
+                            savedSideFocused || savedBoundaryFocused
+                              ? 5
+                              : selectedSide === null
+                                ? 1
+                                : 3
+                          }
                           strokeDasharray={selectedSide === 1 ? '6 3' : undefined}
-                          opacity={selectedSide === null ? 0.18 : 1}
+                          opacity={selectedSide === null && !savedBoundaryFocused ? 0.18 : 1}
                           vectorEffect='non-scaling-stroke'
                           pointerEvents='none'
                         />
@@ -878,11 +914,19 @@ function CadTableZeroCanvas({
                           role='button'
                           tabIndex={canActivateEdge ? 0 : -1}
                           aria-disabled={!canActivateEdge}
-                          aria-pressed={canFocusSavedSide ? savedSideFocused : undefined}
+                          aria-pressed={
+                            canFocusSavedSide
+                              ? savedSideFocused
+                              : canFocusBoundary
+                                ? savedBoundaryFocused
+                                : undefined
+                          }
                           aria-label={
                             canFocusSavedSide
                               ? `Select seam ${savedSeam.ordinal} side ${savedSide}`
-                              : `Choose ${segment.pieceLineKey} edge ${segment.boundaryVertexIds.join(' → ')}; hold Shift for reverse`
+                              : canFocusBoundary
+                                ? `Select ${segment.pieceLineKey} edge ${segment.boundaryVertexIds.join(' → ')}`
+                                : `Choose ${segment.pieceLineKey} edge ${segment.boundaryVertexIds.join(' → ')}; hold Shift for reverse`
                           }
                           onKeyDown={(event) => {
                             if (!canActivateEdge || (event.key !== 'Enter' && event.key !== ' '))
@@ -890,6 +934,7 @@ function CadTableZeroCanvas({
                             event.preventDefault();
                             event.stopPropagation();
                             if (canFocusSavedSide) savedSeam.onFocusSide?.(savedSideIndex);
+                            else if (canFocusBoundary) savedSeam.onFocusBoundary?.(segment);
                             else selectEdge(segment, event.shiftKey ? 'reverse' : 'forward');
                           }}
                         />

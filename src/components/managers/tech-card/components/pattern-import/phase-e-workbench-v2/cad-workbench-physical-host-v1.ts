@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import type { DxfGarmentObservedBoundaryEdgeV1 } from 'components/cloth-simulation-spike/dxf-garment-observed-unsewn-edges-v1';
 import type {
   SavedGenericDurablePhysicalPreviewHitV1,
   SavedGenericDurablePhysicalPreviewPieceV1,
@@ -27,6 +28,7 @@ export type CadWorkbenchPhysicalPreviewInteractionV1 = Readonly<{
   selectedPiece: SavedGenericDurablePhysicalPreviewPieceV1 | null;
   savedSeam?: SavedGenericDurablePhysicalPreviewSeamV1;
   selectedSide?: SavedGenericDurablePhysicalPreviewSelectedSideV1;
+  selectedEdge?: DxfGarmentObservedBoundaryEdgeV1;
   onPick: (hit: SavedGenericDurablePhysicalPreviewHitV1) => void;
 }>;
 
@@ -48,6 +50,8 @@ export function bindCadWorkbenchPhysicalPreviewSelectionV1(
       selection.seamSideIndex != null
         ? { seam: savedSeam, sideIndex: selection.seamSideIndex }
         : undefined,
+    selectedEdge:
+      selection?.operationNumber === operationNumber ? selection.boundaryEdge : undefined,
     selectedPiece:
       selection?.scopeKey && selection.pieceId && selection.pieceLineKey
         ? {

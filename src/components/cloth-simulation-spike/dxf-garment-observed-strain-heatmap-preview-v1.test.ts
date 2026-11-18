@@ -97,6 +97,14 @@ vi.mock('./dxf-garment-observed-webgpu-replay-v1', () => ({
           vertexIndices: [4, 5],
         },
       ],
+      unsewnEdges: [
+        {
+          pieceId: 'first-panel',
+          contourId: 'front-sewing',
+          boundaryVertexIds: ['native-a', 'native-d'],
+          vertexIndices: [0, 2],
+        },
+      ],
       frameCount: 32,
       report: {
         status: 'diagnostic-completed',
@@ -300,6 +308,34 @@ describe('synthetic renderer lifecycle (not visual or physical acceptance)', () 
     expect(material).toHaveBeenCalledTimes(1);
     expect(geometry).toHaveBeenCalledTimes(1);
     expect(ports.projectionReads).toBe(1);
+  });
+
+  it('outlines only the indexed unsewn edge of the current deformed piece', async () => {
+    ports.clothZ = 0.25;
+    const { view } = await open();
+    const color = ports.garmentColors;
+    const camera = ports.currentCamera;
+    const edge = {
+      contourId: 'front-sewing',
+      boundaryVertexIds: ['native-a', 'native-d'],
+    } as const;
+    expect(view.setSelectedPiece('first-panel', undefined, edge)).toBe(true);
+    expect(ports.outline).toEqual([0, 0, 0.25, 0, 1, 0.25]);
+    expect(
+      view.setSelectedPiece('first-panel', undefined, {
+        ...edge,
+        boundaryVertexIds: ['native-d', 'native-a'],
+      }),
+    ).toBe(false);
+    expect(ports.outline).toHaveLength(18);
+    expect(view.setSelectedPiece('second-panel', undefined, edge)).toBe(false);
+    expect(view.setSelectedPiece(null)).toBe(true);
+    expect(ports.outline).toBeNull();
+    expect(ports.currentCamera).toBe(camera);
+    expect(ports.garmentColors).toEqual(color);
+    expect(ports.projectionReads).toBe(1);
+    ports.controller.abort();
+    expect(view.setSelectedPiece('first-panel', undefined, edge)).toBe(false);
   });
 
   it('draws only the selected exact side and keeps the heatmap and camera unchanged', async () => {

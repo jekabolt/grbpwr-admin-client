@@ -38,6 +38,7 @@ export function handleCadTablePieceSelectionKey(
   owner.update((current) => ({
     ...current,
     savedSeamSide: null,
+    savedBoundary: null,
     layout: selectPatternImportDxfPhaseECadTablePiecesV1(
       current.layout,
       selectAll ? current.layout.pieces.map(({ identity }) => identity.key) : [],

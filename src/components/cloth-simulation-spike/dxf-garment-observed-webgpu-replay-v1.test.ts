@@ -1,4 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { buildDxfGarmentObservedUnsewnEdgesV1 } from './dxf-garment-observed-unsewn-edges-v1';
 import { createThreePanelDxfMaterialCompileFixtureV1 } from 'lib/cloth/domain/dxf-garment-assembly-material-compile-stage-v1.test-fixture';
 import { compileDxfGarmentAssemblyMaterialStageV1 } from 'lib/cloth/domain/dxf-garment-assembly-material-compile-stage-v1';
 import { buildDxfAssemblyHandoffV1 } from 'lib/cloth/domain/dxf-assembly-handoff-v1';
@@ -479,6 +480,41 @@ describe('actual encoder with explicitly scripted GPU transport (not physics evi
       }
     }
     expect(Object.isFrozen(render.seamEdges[0]?.vertexIndices)).toBe(true);
+    const { samplingRequest } = placementRequest.sourceArtifact.sourceEvidence;
+    const sewnEdges = new Set(
+      samplingRequest.equalSeams.flatMap(({ sides }) => sides.map(({ edgeId }) => edgeId)),
+    );
+    const nativeUnsewn = samplingRequest.pieces.flatMap(({ edges }) =>
+      edges.filter(({ edgeId }) => !sewnEdges.has(edgeId)),
+    );
+    expect(render.unsewnEdges).toHaveLength(nativeUnsewn.length);
+    const provenance = placementRequest.sourceArtifact.refinement.vertexProvenance;
+    for (const edge of render.unsewnEdges) {
+      const matches = nativeUnsewn.filter(
+        (native) =>
+          native.pieceId === edge.pieceId &&
+          native.ringId === edge.contourId &&
+          native.startBoundaryVertexId === edge.boundaryVertexIds[0] &&
+          native.endBoundaryVertexId === edge.boundaryVertexIds[1],
+      );
+      expect(matches).toHaveLength(1);
+      expect(provenance[edge.vertexIndices[0]!]!.source).toMatchObject({
+        boundaryVertexId: edge.boundaryVertexIds[0],
+      });
+      expect(provenance[edge.vertexIndices.at(-1)!]!.source).toMatchObject({
+        boundaryVertexId: edge.boundaryVertexIds[1],
+      });
+      expect(Object.isFrozen(edge.vertexIndices)).toBe(true);
+    }
+    expect(render.unsewnEdges.some(({ vertexIndices }) => vertexIndices.length > 2)).toBe(true);
+    const duplicate = samplingRequest.pieces[0]!;
+    const ambiguous = buildDxfGarmentObservedUnsewnEdgesV1(
+      placementRequest.sourceArtifact.refinement,
+      { ...samplingRequest, pieces: [...samplingRequest.pieces, duplicate] },
+    );
+    expect(ambiguous).toEqual(
+      render.unsewnEdges.filter(({ pieceId }) => pieceId !== duplicate.input.pieceId),
+    );
     const expectedTopology = render.garmentTriangles.slice();
     render.finalPositions3M.fill(77);
     render.garmentTriangles.fill(77);

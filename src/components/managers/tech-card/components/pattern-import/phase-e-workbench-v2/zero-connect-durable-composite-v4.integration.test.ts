@@ -338,12 +338,16 @@ describe('zero-connect durable N=1 genuine production chain', () => {
     }>;
     let pickEdge: ComponentProps<typeof sheet.SheetViewport>['onPick'];
     const sideActions = new Map<string, SideAction>();
+    const boundaryActions = new Map<string, SideAction>();
     const visitSideActions = (node: ReactNode): void => {
       if (Array.isArray(node)) node.forEach(visitSideActions);
       if (!isValidElement<Record<string, unknown>>(node)) return;
-      if (node.type === 'line' && String(node.props['aria-label']).startsWith('Select seam ')) {
+      if (node.type === 'line') {
+        const label = String(node.props['aria-label']);
         const action = node.props as SideAction;
-        sideActions.set(action['aria-label'], action);
+        if (label.startsWith('Select seam ')) sideActions.set(label, action);
+        else if (label.startsWith('Select ') && label.includes(' edge '))
+          boundaryActions.set(label, action);
       }
       visitSideActions(node.props.children as ReactNode);
     };
@@ -352,6 +356,7 @@ describe('zero-connect durable N=1 genuine production chain', () => {
       pickEdge = props.onPick;
       const viewport = Viewport(props);
       sideActions.clear();
+      boundaryActions.clear();
       visitSideActions(viewport);
       return viewport;
     });
@@ -470,8 +475,15 @@ describe('zero-connect durable N=1 genuine production chain', () => {
       expect(stopPropagation).toHaveBeenCalledOnce();
       expect(preventDefault).toHaveBeenCalledOnce();
       expect(renderWorkbench().markup).toContain('data-cad-zero-connect-saved-side-focused="B"');
+      expect(boundaryActions.size).toBeGreaterThan(0);
+      const boundary = [...boundaryActions.values()][0]!;
+      pickEdge?.(boundary['data-key'], { shiftKey: false });
+      const selectedBoundaryMarkup = renderWorkbench().markup;
+      expect(selectedBoundaryMarkup).toContain('data-cad-zero-connect-boundary-focused="true"');
+      expect(selectedBoundaryMarkup).not.toContain('data-cad-zero-connect-saved-side-focused');
+      expect(table.savedBoundary?.boundaryVertexIds).toHaveLength(2);
       pickEdge?.('outside-exact-side-bounds', { shiftKey: false });
-      expect(renderWorkbench().markup).not.toContain('data-cad-zero-connect-saved-side-focused');
+      expect(renderWorkbench().markup).not.toContain('data-cad-zero-connect-boundary-focused');
     } finally {
       sheetHook.mockRestore();
       tableHook.mockRestore();

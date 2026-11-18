@@ -9,15 +9,12 @@ export type DxfGarmentObservedSeamEdgeV1 = Readonly<{
   vertexIndices: readonly [number, number];
 }>;
 
-/** Read-only inspection of the compiler's exact recovered A/B order. The placement owner preserves
- * triangle and vertex ordinals. Unsupported or ambiguous paths produce no inspection edges. */
-export function buildDxfGarmentObservedSeamEdgesV1(
-  mesh: Pick<ClothMeshIR, 'boundarySamples' | 'seams' | 'triangles' | 'restPositions2Mm'>,
-  handoffSeams: readonly DxfSeamV1[],
-): readonly DxfGarmentObservedSeamEdgeV1[] {
+export function indexDxfGarmentObservedBoundaryFacesV1(
+  mesh: Pick<ClothMeshIR, 'boundarySamples' | 'triangles' | 'restPositions2Mm'>,
+) {
   const vertexCount = mesh.restPositions2Mm.length / 2;
   const samples = new Map(mesh.boundarySamples.map((sample) => [sample.vertexIndex, sample]));
-  if (samples.size !== mesh.boundarySamples.length) return [];
+  if (samples.size !== mesh.boundarySamples.length) return null;
   const key = (a: number, b: number) => Math.min(a, b) * vertexCount + Math.max(a, b);
   const edgeFaces = new Map<number, number | null>();
   for (let index = 0; index < mesh.triangles.length; index += 3) {
@@ -29,6 +26,18 @@ export function buildDxfGarmentObservedSeamEdgesV1(
       edgeFaces.set(edge, edgeFaces.has(edge) ? null : index / 3);
     }
   }
+  return { samples, faceOf: (a: number, b: number) => edgeFaces.get(key(a, b)) };
+}
+
+/** Read-only inspection of the compiler's exact recovered A/B order. The placement owner preserves
+ * triangle and vertex ordinals. Unsupported or ambiguous paths produce no inspection edges. */
+export function buildDxfGarmentObservedSeamEdgesV1(
+  mesh: Pick<ClothMeshIR, 'boundarySamples' | 'seams' | 'triangles' | 'restPositions2Mm'>,
+  handoffSeams: readonly DxfSeamV1[],
+): readonly DxfGarmentObservedSeamEdgeV1[] {
+  const boundary = indexDxfGarmentObservedBoundaryFacesV1(mesh);
+  if (!boundary) return [];
+  const { samples, faceOf } = boundary;
   return Object.freeze(
     handoffSeams.flatMap((seam) => {
       const compiled = mesh.seams.filter(({ seamId }) => seamId === seam.id);
@@ -56,7 +65,7 @@ export function buildDxfGarmentObservedSeamEdgesV1(
             return [];
           seen.add(vertex);
           if (last !== null) {
-            const triangleIndex = edgeFaces.get(key(last, vertex));
+            const triangleIndex = faceOf(last, vertex);
             if (triangleIndex == null) return [];
             edges.push(
               Object.freeze({

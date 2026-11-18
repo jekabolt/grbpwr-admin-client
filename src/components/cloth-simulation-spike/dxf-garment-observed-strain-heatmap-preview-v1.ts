@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { DxfGarmentObservedBoundaryEdgeV1 } from './dxf-garment-observed-unsewn-edges-v1';
 import { CAD_WORKBENCH_SEAM_SIDE_COLORS } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/cad-workbench-seam-colors-v1';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
@@ -169,11 +170,13 @@ export async function createDxfGarmentObservedStrainHeatmapPreviewV1(
   let outline: LineSegments2 | null = null;
   let outlinedPieceId: string | null = null;
   let outlinedSeamSide: DxfGarmentObservedPreviewSeamSideV1 | undefined;
+  let outlinedEdge: DxfGarmentObservedBoundaryEdgeV1 | undefined;
   const clearOutline = () => {
     const old = outline;
     outline = null;
     outlinedPieceId = null;
     outlinedSeamSide = undefined;
+    outlinedEdge = undefined;
     if (!old) return;
     old.removeFromParent();
     try {
@@ -319,13 +322,14 @@ export async function createDxfGarmentObservedStrainHeatmapPreviewV1(
     const setSelectedPiece = (
       pieceId: string | null,
       seamSide?: DxfGarmentObservedPreviewSeamSideV1,
+      edge?: DxfGarmentObservedBoundaryEdgeV1,
     ): boolean => {
       try {
         current();
         const range = input.pieceRanges.find((piece) => piece.pieceId === pieceId);
         const nextPieceId = range?.pieceId ?? null;
         const seamEdges =
-          range && seamSide
+          range && seamSide && !edge
             ? input.seamEdges.filter(
                 (edge) =>
                   edge.pieceId === range.pieceId &&
@@ -334,19 +338,38 @@ export async function createDxfGarmentObservedStrainHeatmapPreviewV1(
               )
             : [];
         const nextSeamSide = seamEdges.length ? seamSide : undefined;
-        const exactSelection = nextPieceId === pieceId && (!seamSide || !!nextSeamSide);
+        const matchingEdges =
+          range && edge && !seamSide
+            ? input.unsewnEdges.filter(
+                (entry) =>
+                  entry.pieceId === range.pieceId &&
+                  entry.contourId === edge.contourId &&
+                  entry.boundaryVertexIds.every(
+                    (id, index) => id === edge.boundaryVertexIds[index],
+                  ),
+              )
+            : [];
+        const nextEdge = matchingEdges.length === 1 ? matchingEdges[0] : undefined;
+        const exactSelection =
+          nextPieceId === pieceId && (!seamSide || !!nextSeamSide) && (!edge || !!nextEdge);
         if (
           nextPieceId === outlinedPieceId &&
           nextSeamSide?.runtimeSeamId === outlinedSeamSide?.runtimeSeamId &&
-          nextSeamSide?.sideIndex === outlinedSeamSide?.sideIndex
+          nextSeamSide?.sideIndex === outlinedSeamSide?.sideIndex &&
+          nextEdge === outlinedEdge
         )
           return exactSelection;
         clearOutline();
         if (range) {
-          const segments = seamEdges.length
+          const edgePairs = nextEdge
+            ? nextEdge.vertexIndices
+                .slice(1)
+                .map((to, index) => [nextEdge.vertexIndices[index]!, to])
+            : seamEdges.map(({ vertexIndices }) => vertexIndices);
+          const segments = edgePairs.length
             ? Float32Array.from(
-                seamEdges.flatMap(({ vertexIndices }) =>
-                  vertexIndices.flatMap((vertex) =>
+                edgePairs.flatMap((pair) =>
+                  pair.flatMap((vertex) =>
                     Array.from(input.finalPositions3M.subarray(vertex * 3, vertex * 3 + 3)),
                   ),
                 ),
@@ -358,7 +381,7 @@ export async function createDxfGarmentObservedStrainHeatmapPreviewV1(
               color: nextSeamSide
                 ? CAD_WORKBENCH_SEAM_SIDE_COLORS[nextSeamSide.sideIndex === 0 ? 'A' : 'B']
                 : 0x311eee,
-              linewidth: nextSeamSide ? 4 : 3,
+              linewidth: nextSeamSide || nextEdge ? 4 : 3,
               depthWrite: false,
               polygonOffset: true,
               polygonOffsetFactor: -1,
@@ -375,6 +398,7 @@ export async function createDxfGarmentObservedStrainHeatmapPreviewV1(
               scene.add(outline);
               outlinedPieceId = nextPieceId;
               outlinedSeamSide = nextSeamSide && { ...nextSeamSide };
+              outlinedEdge = nextEdge;
             } catch (error) {
               if (outline) clearOutline();
               else {
