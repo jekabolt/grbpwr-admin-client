@@ -317,5 +317,5 @@ export async function resolveSavedAssemblyNativeDirectedIntervalsV1(
   ).join('');
   const receipt = Object.freeze({ ...payload, canonicalSha256 });
   verifiedReceipts.set(receipt, signal);
-  return { ok: true as const, receipt };
+  return { ok: true as const, receipt, catalog };
 }

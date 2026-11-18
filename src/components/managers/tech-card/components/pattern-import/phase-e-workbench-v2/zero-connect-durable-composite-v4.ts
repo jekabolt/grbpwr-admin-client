@@ -12,7 +12,10 @@ import {
 import type { PatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import { decodePatternImportDxfProductMultiseamPlacementSidecarV2 } from 'lib/cloth/domain/pattern-import-dxf-product-multiseam-placement-sidecar-v2';
 import { PATTERN_IMPORT_DXF_PRODUCT_SEMANTIC_SIDECAR_MEDIA_TYPE_V1 } from 'lib/cloth/domain/pattern-import-dxf-product-semantic-sidecar-v1';
-import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
+import type {
+  DxfProductSavedReprocessResultV1,
+  DxfProductSavedRowIdentityV1,
+} from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 
 import type { PatternImportDxfPhaseEZeroConnectPendingHandoffV1 } from './cad-table-zero-connect-post-save-owner-v1';
 import {
@@ -58,7 +61,18 @@ import {
   PATTERN_IMPORT_DXF_PRODUCT_EXACT_N_SEAM_SAVED_CARD_PROJECTION_REQUEST_V2,
   projectPatternImportDxfProductExactNSeamSavedCardV2,
 } from './exact-n-seam-saved-card-projection-v2';
-import type { PatternImportDxfPhaseESavedAssemblyAuthorityTransportAdapterV1 } from './saved-assembly-authority-transport-v1';
+import type {
+  PatternImportDxfPhaseESavedAssemblyAuthorityTransportAdapterV1,
+  PatternImportDxfPhaseESavedAssemblyCurrentTopologyV1,
+} from './saved-assembly-authority-transport-v1';
+import {
+  readCompleteSavedAssemblySourceV1,
+  type CompleteSavedAssemblySourceV1,
+} from './saved-assembly-complete-source-rpc-v1';
+import {
+  isVerifiedSavedAssemblyNativeDirectedIntervalReceiptV1,
+  resolveSavedAssemblyNativeDirectedIntervalsV1,
+} from './saved-assembly-native-directed-intervals-v1';
 import { computePatternImportDxfPhaseEDomainSeparatedCanonicalSha256V1 } from './saved-assembly-topology-hash-v1';
 
 export const PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_DURABLE_COMPOSITE_V4 =
@@ -101,6 +115,11 @@ export type PatternImportDxfPhaseEZeroConnectDurableBridgeDepsV1 = Readonly<{
   >;
   application: Pick<PatternImportDxfProductCompositeSidecarApplicationTransactionV4, 'transaction'>;
   createClient: (signal: AbortSignal) => SidecarService;
+  readCompleteSource?: (
+    row: DxfProductSavedRowIdentityV1,
+    expectedServerAssemblyRevision: string,
+    signal: AbortSignal,
+  ) => Promise<CompleteSavedAssemblySourceV1>;
   crypto?: Pick<Crypto, 'subtle'>;
 }>;
 
@@ -133,6 +152,27 @@ export type PatternImportDxfPhaseEZeroConnectDurableRestoreRequestV1 = Readonly<
   selectedOperationNumber: number;
   catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1;
 }>;
+
+export type PatternImportDxfPhaseESavedNativeExactNReadV1 = Readonly<{
+  row: DxfProductSavedRowIdentityV1;
+  selectedOperationNumber: number;
+  sizeToken: string;
+  replay: DxfProductSavedReprocessResultV1;
+}>;
+
+export const PATTERN_IMPORT_DXF_PHASE_E_SAVED_NATIVE_EXACT_N_CONFIRM_V1 =
+  'pattern-import-dxf-phase-e-saved-native-exact-n-confirm/1' as const;
+
+export type PatternImportDxfPhaseESavedNativeExactNConfirmV1 =
+  PatternImportDxfPhaseESavedNativeExactNReadV1 &
+    Readonly<{
+      schemaVersion: typeof PATTERN_IMPORT_DXF_PHASE_E_SAVED_NATIVE_EXACT_N_CONFIRM_V1;
+      mapping: 'equal';
+      lengthRatio: 1;
+      expectedCatalogCanonicalSha256: string;
+      expectedIntervalReceiptSha256: string;
+      verifiedSemanticSha256: string;
+    }>;
 
 export type PatternImportDxfPhaseEZeroConnectDurableResultV1 =
   | Readonly<{
@@ -306,6 +346,157 @@ async function durableBindings(
   });
 }
 
+type ExactCurrent = Parameters<
+  typeof restorePatternImportDxfProductCompositeSidecarDurableV4
+>[0]['current'];
+
+async function readCurrentSavedNativeExactN(
+  deps: PatternImportDxfPhaseEZeroConnectDurableBridgeDepsV1,
+  request: PatternImportDxfPhaseESavedNativeExactNReadV1,
+  signal: AbortSignal,
+  crypto: Pick<Crypto, 'subtle'> | undefined,
+  expectedCatalogCanonicalSha256?: string,
+) {
+  const { selectedOperationNumber, replay, sizeToken } = request;
+  const row = Object.freeze({ ...request.row });
+  if (!deps.readCompleteSource)
+    throw new DurableBridgeFailure(
+      'durable-native-complete-source-unavailable',
+      'Saved native exact N requires the verified complete Assembly source.',
+    );
+  const topology: PatternImportDxfPhaseESavedAssemblyCurrentTopologyV1 =
+    await deps.authorityAdapter.readCurrentAssemblyTopology(
+      { row, selectedOperationNumber },
+      signal,
+    );
+  const operation = topology.topology.operations.find(
+    ({ number }) => number === selectedOperationNumber,
+  );
+  if (
+    !sameSourceRow(topology.row, row) ||
+    topology.row.cardLockVersion !== row.cardLockVersion ||
+    topology.selectedOperationNumber !== selectedOperationNumber ||
+    !operation ||
+    operation.seamKeys.length <= 2 ||
+    operation.inputKeys.length !== 2
+  )
+    throw new DurableBridgeFailure(
+      'durable-native-operation-binding-mismatch',
+      'Select a saved two-piece Assembly operation with more than two exact seams.',
+    );
+  const source = await deps.readCompleteSource(row, topology.serverAssemblyRevision, signal);
+  const fullOperation = source.operations.find(
+    ({ operationNumber }) => operationNumber === selectedOperationNumber,
+  );
+  if (
+    source.serverAssemblyRevision !== topology.serverAssemblyRevision ||
+    !fullOperation ||
+    !sameOrdered(fullOperation.seamKeys ?? [], operation.seamKeys) ||
+    !sameOrdered(fullOperation.inputKeys ?? [], operation.inputKeys)
+  )
+    throw new DurableBridgeFailure(
+      'durable-native-operation-binding-mismatch',
+      'The complete saved source and selected Assembly topology have changed.',
+    );
+  const ratio = fullOperation.stitching?.fullnessRatio?.value;
+  if (typeof ratio !== 'string' || !/^1(?:\.0+)?$/.test(ratio))
+    throw new DurableBridgeFailure(
+      'durable-native-equal-ratio-unavailable',
+      'The current saved Assembly operation must explicitly record a fullness ratio of 1.',
+    );
+
+  const interpreted = await resolveSavedAssemblyNativeDirectedIntervalsV1(
+    {
+      source,
+      expectedRow: row,
+      replay,
+      operationNumber: selectedOperationNumber,
+      sizeToken,
+      expectedCatalogCanonicalSha256,
+    },
+    signal,
+  );
+  if (!interpreted.ok)
+    throw new DurableBridgeFailure(
+      interpreted.blocker.code,
+      'The saved native interval could not be uniquely verified.',
+    );
+  if (!isVerifiedSavedAssemblyNativeDirectedIntervalReceiptV1(interpreted.receipt))
+    throw new DurableBridgeFailure(
+      'durable-native-interval-proof-stale',
+      'The current saved native interval read generation has ended.',
+    );
+  const { catalog, receipt } = interpreted;
+  if (
+    receipt.orderedSeams.some(
+      ({ sides }) =>
+        !sameOrdered(
+          sides.map(({ pieceLineKey }) => pieceLineKey),
+          operation.inputKeys,
+        ),
+    )
+  )
+    throw new DurableBridgeFailure(
+      'durable-native-operation-binding-mismatch',
+      'Every saved native interval pair must follow the operation’s ordered piece inputs.',
+    );
+  const sides: readonly ExactSide[] = Object.freeze(
+    receipt.orderedSeams.flatMap(({ seamKey, seamDirection, sides }) =>
+      sides.map(
+        (side, index): ExactSide =>
+          Object.freeze({
+            seamId: seamKey,
+            sideIndex: index === 0 ? 0 : 1,
+            pieceId: side.pieceId,
+            pieceLineKey: side.pieceLineKey,
+            contourId: side.contourId,
+            boundaryVertexIds: side.boundaryVertexIds,
+            direction:
+              index === 1 && seamDirection === 'reversed'
+                ? side.direction === 'forward'
+                  ? 'reverse'
+                  : 'forward'
+                : side.direction,
+          }),
+      ),
+    ),
+  );
+  const derived = await durableBindings(
+    {
+      row,
+      operationNumber: selectedOperationNumber,
+      inputKeys: operation.inputKeys,
+      seamIds: operation.seamKeys,
+      catalogCanonicalSha256: catalog.canonicalSha256,
+      mapping: 'equal',
+      lengthRatio: 1,
+      sides,
+    },
+    crypto,
+  );
+  signal.throwIfAborted();
+  const current: ExactCurrent = Object.freeze({
+    row,
+    serverAssemblyRevision: topology.serverAssemblyRevision,
+    assemblyTopologySha256: topology.assemblyTopologySha256,
+    selectedOperation: Object.freeze({
+      sourceOperationNumber: selectedOperationNumber,
+      authoringOperationId: derived.compositeOperationBindingId,
+      localOperationOrder: 0,
+      seamIds: Object.freeze([...operation.seamKeys]),
+    }),
+    catalogCanonicalSha256: catalog.canonicalSha256,
+    phaseEAggregatePlanSha256: derived.phaseEAggregatePlanSha256,
+  });
+  return {
+    current,
+    catalog,
+    receipt,
+    sides,
+    priorCarrierSha256: source.priorCarrier?.sidecarSha256,
+  };
+}
+
 async function preserveComponents(
   current: CurrentSidecar,
   currentAuthority: PatternImportDxfProductCompositeSidecarBindingsV3,
@@ -350,6 +541,65 @@ async function preserveComponents(
       'multiseam-placement-v3',
     ),
   });
+}
+
+async function writeDurableExactPlan(
+  deps: PatternImportDxfPhaseEZeroConnectDurableBridgeDepsV1,
+  current: ExactCurrent,
+  previousSidecarSha256: string,
+  preserved: Awaited<ReturnType<typeof preserveComponents>>,
+  exactBytes: Uint8Array<ArrayBuffer>,
+  catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1,
+  crypto: Pick<Crypto, 'subtle'> | undefined,
+  signal: AbortSignal,
+) {
+  const currentAuthority = Object.freeze({
+    row: current.row,
+    serverAssemblyRevision: current.serverAssemblyRevision,
+    assemblyTopologySha256: current.assemblyTopologySha256,
+  });
+  const nested = await buildPatternImportDxfProductCompositeSidecarV3(
+    {
+      schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V3,
+      bindings: currentAuthority,
+      expectedPreviousSidecarSha256: previousSidecarSha256,
+      semanticProductV1Bytes: preserved.semanticV1,
+      placementV2Bytes: preserved.placementV2,
+      placementV3Bytes: preserved.placementV3,
+      exactTopologyBytes: null,
+    },
+    crypto,
+  );
+  if (!nested.ok) return blocked('durable-nested-v3-blocked', nested.blockers[0].detail);
+  const nestedBytes = encodePatternImportDxfProductCompositeSidecarV3(nested.owner);
+  if (!nestedBytes.ok || !nestedBytes.bytes)
+    return blocked('durable-nested-v3-blocked', 'Nested Composite V3 encoding failed.');
+  const next = await buildPatternImportDxfProductCompositeSidecarV4(
+    {
+      schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V4,
+      bindings: currentAuthority,
+      expectedPreviousSidecarSha256: previousSidecarSha256,
+      compositeV3Bytes: nestedBytes.bytes,
+      exactNSeamConsistencyBytes: exactBytes,
+    },
+    crypto,
+  );
+  if (!next.ok) return blocked('durable-composite-v4-blocked', next.blockers[0].detail);
+  const transaction = await deps.application.transaction.execute(
+    {
+      schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_TRANSACTION_REQUEST_V4,
+      current,
+      storage: {
+        schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_REQUEST_V4,
+        currentAuthority,
+        nextOwner: next.owner,
+      },
+    },
+    signal,
+  );
+  if (!transaction.ok)
+    return blocked('durable-transaction-blocked', transaction.blockers[0].detail);
+  return createSession(transaction.owner, catalog, true, signal);
 }
 
 async function createSession(
@@ -442,6 +692,179 @@ export function createPatternImportDxfPhaseEZeroConnectDurableBridgeV1(
   const crypto = deps.crypto ?? globalThis.crypto;
   return Object.freeze({
     schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_DURABLE_COMPOSITE_V4,
+    async persistSavedNativeExactN(
+      request: PatternImportDxfPhaseESavedNativeExactNConfirmV1,
+      signal: AbortSignal,
+    ): Promise<PatternImportDxfPhaseEZeroConnectDurableResultV1> {
+      try {
+        signal.throwIfAborted();
+        const {
+          expectedCatalogCanonicalSha256,
+          expectedIntervalReceiptSha256,
+          verifiedSemanticSha256,
+        } = request;
+        if (
+          request.schemaVersion !== PATTERN_IMPORT_DXF_PHASE_E_SAVED_NATIVE_EXACT_N_CONFIRM_V1 ||
+          request.mapping !== 'equal' ||
+          request.lengthRatio !== 1 ||
+          !SHA256.test(expectedCatalogCanonicalSha256) ||
+          !SHA256.test(expectedIntervalReceiptSha256) ||
+          !SHA256.test(verifiedSemanticSha256)
+        )
+          return blocked(
+            'durable-native-confirm-invalid',
+            'Confirm explicit Equal mapping, ratio 1 and the current semantic attachment.',
+          );
+        const { current, catalog, receipt, sides, priorCarrierSha256 } =
+          await readCurrentSavedNativeExactN(
+            deps,
+            request,
+            signal,
+            crypto,
+            expectedCatalogCanonicalSha256,
+          );
+        if (receipt.canonicalSha256 !== expectedIntervalReceiptSha256)
+          return blocked(
+            'durable-native-confirm-source-moved',
+            'The saved Assembly source or exact spans changed since the confirmation was prepared.',
+          );
+        if (!priorCarrierSha256)
+          return blocked(
+            'durable-native-semantic-missing',
+            'Attach verified semantic V1 to this current row before saving the exact connection.',
+          );
+        const previous = await readCurrentSidecar(deps, current.row, signal);
+        if (previous.sha256 !== priorCarrierSha256)
+          return blocked(
+            'durable-native-carrier-moved',
+            'The semantic attachment changed after the fresh Assembly read.',
+          );
+        if (
+          previous.mediaType !== PATTERN_IMPORT_DXF_PRODUCT_SEMANTIC_SIDECAR_MEDIA_TYPE_V1 &&
+          previous.mediaType !== PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V3
+        )
+          return blocked(
+            'durable-native-carrier-conflict',
+            'The existing exact or unsupported attachment cannot be replaced. Restore any saved exact connection.',
+          );
+        const preserved = await preserveComponents(previous, current, crypto);
+        const digest = await crypto?.subtle.digest('SHA-256', preserved.semanticV1);
+        const observed =
+          digest &&
+          Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+        if (observed !== verifiedSemanticSha256)
+          return blocked(
+            'durable-verified-semantic-mismatch',
+            'The exact saved row no longer has the confirmed semantic V1 attachment.',
+          );
+
+        const exact = await buildPatternImportDxfPhaseEExactNSeamConsistencyCarrierV2(
+          {
+            schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_EXACT_N_SEAM_AUTHORITY_CANDIDATE_V2,
+            status: 'untrusted-authority-candidate',
+            ...current,
+            sides,
+          },
+          { crypto },
+        );
+        if (!exact.ok) return blocked('durable-exact-carrier-blocked', exact.blockers[0].detail);
+        const encoded = await encodePatternImportDxfProductExactNSeamComponentV4(
+          { carrier: exact.carrier, seal: exact.seal },
+          crypto,
+        );
+        if (!encoded.ok) return blocked('durable-exact-component-blocked', encoded.blocker.detail);
+        return await writeDurableExactPlan(
+          deps,
+          current,
+          previous.sha256,
+          preserved,
+          encoded.bytes,
+          catalog,
+          crypto,
+          signal,
+        );
+      } catch (error) {
+        if (signal.aborted)
+          return blocked('durable-persist-cancelled', 'Exact native persistence was cancelled.');
+        if (error instanceof DurableBridgeFailure) return blocked(error.code, error.message);
+        return blocked(
+          'durable-persist-failed',
+          error instanceof Error ? error.message : 'Exact native persistence failed.',
+        );
+      }
+    },
+    async restoreSavedNativeExactN(
+      request: PatternImportDxfPhaseESavedNativeExactNReadV1,
+      signal: AbortSignal,
+    ): Promise<PatternImportDxfPhaseEZeroConnectDurableResultV1> {
+      try {
+        signal.throwIfAborted();
+        const { current, catalog, sides, priorCarrierSha256 } = await readCurrentSavedNativeExactN(
+          deps,
+          request,
+          signal,
+          crypto,
+        );
+        if (!priorCarrierSha256)
+          return blocked(
+            'durable-restore-sidecar-missing',
+            'The current row has no exact composite attachment.',
+          );
+        const readback = await readCurrentSidecar(deps, current.row, signal);
+        if (priorCarrierSha256 !== readback.sha256)
+          return blocked(
+            'durable-native-carrier-moved',
+            'The exact attachment changed after the fresh Assembly read.',
+          );
+        const { mediaType } = readback;
+        if (
+          mediaType !== PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V4 &&
+          mediaType !== PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V5 &&
+          mediaType !== PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6 &&
+          mediaType !== PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7
+        )
+          return blocked(
+            'durable-restore-sidecar-missing',
+            'The current row has no durable Composite V4–V7 exact operation.',
+          );
+        const restored = await restorePatternImportDxfProductCompositeSidecarDurableV4(
+          {
+            schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_DURABLE_RESTORE_REQUEST_V4,
+            current,
+            readback: {
+              ...readback,
+              mediaType,
+              status: 'present',
+              source: 'fresh-current-sidecar-get',
+            },
+          },
+          crypto,
+        );
+        if (!restored.ok)
+          return blocked('durable-restore-authority-blocked', restored.blockers[0].detail);
+        const patch = readPatternImportDxfProductExactNSeamRestorePatchV2(restored.owner);
+        if (
+          !patch ||
+          !sameExactSides(
+            sides,
+            patch.seams.flatMap((seam) => seam.sides),
+          )
+        )
+          return blocked(
+            'durable-native-restore-span-mismatch',
+            'The stored carrier spans differ from the current exact Assembly anchors.',
+          );
+        return createSession(restored.owner, catalog, true, signal);
+      } catch (error) {
+        if (signal.aborted)
+          return blocked('durable-restore-cancelled', 'Exact native restore was cancelled.');
+        if (error instanceof DurableBridgeFailure) return blocked(error.code, error.message);
+        return blocked(
+          'durable-restore-failed',
+          error instanceof Error ? error.message : 'Exact native restore failed.',
+        );
+      }
+    },
     async persist(
       request:
         | PatternImportDxfPhaseEZeroConnectDurablePersistRequestV1
@@ -667,54 +1090,17 @@ export function createPatternImportDxfPhaseEZeroConnectDurableBridgeV1(
             'durable-existing-carrier-unsupported',
             'This saved DXF row already carries an unsupported semantic container. It is never overwritten while preserving a new exact operation; a coordinated lossless container migration is required.',
           );
-        const currentAuthority = Object.freeze({
-          row: request.row,
-          serverAssemblyRevision: currentTopology.serverAssemblyRevision,
-          assemblyTopologySha256: currentTopology.assemblyTopologySha256,
-        });
-        const preserved = await preserveComponents(currentSidecar, currentAuthority, crypto);
-        const nested = await buildPatternImportDxfProductCompositeSidecarV3(
-          {
-            schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V3,
-            bindings: currentAuthority,
-            expectedPreviousSidecarSha256: currentSidecar.sha256,
-            semanticProductV1Bytes: preserved.semanticV1,
-            placementV2Bytes: preserved.placementV2,
-            placementV3Bytes: preserved.placementV3,
-            exactTopologyBytes: null,
-          },
+        const preserved = await preserveComponents(currentSidecar, current, crypto);
+        return await writeDurableExactPlan(
+          deps,
+          current,
+          currentSidecar.sha256,
+          preserved,
+          exactBytes.bytes,
+          catalog,
           crypto,
-        );
-        if (!nested.ok) return blocked('durable-nested-v3-blocked', nested.blockers[0].detail);
-        const nestedBytes = encodePatternImportDxfProductCompositeSidecarV3(nested.owner);
-        if (!nestedBytes.ok || !nestedBytes.bytes)
-          return blocked('durable-nested-v3-blocked', 'Nested Composite V3 encoding failed.');
-        const next = await buildPatternImportDxfProductCompositeSidecarV4(
-          {
-            schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V4,
-            bindings: currentAuthority,
-            expectedPreviousSidecarSha256: currentSidecar.sha256,
-            compositeV3Bytes: nestedBytes.bytes,
-            exactNSeamConsistencyBytes: exactBytes.bytes,
-          },
-          crypto,
-        );
-        if (!next.ok) return blocked('durable-composite-v4-blocked', next.blockers[0].detail);
-        const transaction = await deps.application.transaction.execute(
-          {
-            schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_TRANSACTION_REQUEST_V4,
-            current,
-            storage: {
-              schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_REQUEST_V4,
-              currentAuthority,
-              nextOwner: next.owner,
-            },
-          },
           signal,
         );
-        if (!transaction.ok)
-          return blocked('durable-transaction-blocked', transaction.blockers[0].detail);
-        return createSession(transaction.owner, catalog, true, signal);
       } catch (error) {
         if (error instanceof DurableBridgeFailure) return blocked(error.code, error.message);
         return blocked(
@@ -880,6 +1266,13 @@ export function createPatternImportDxfPhaseEZeroConnectProductionDurableBridgeV1
     authorityAdapter,
     application,
     createClient: (signal) => abortableAdminService(signal),
+    readCompleteSource: (row, expectedServerAssemblyRevision, signal) =>
+      readCompleteSavedAssemblySourceV1(
+        abortableAdminService(signal),
+        row,
+        { expectedServerAssemblyRevision },
+        signal,
+      ),
     crypto,
   });
 }
