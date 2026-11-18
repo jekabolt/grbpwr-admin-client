@@ -135,9 +135,9 @@ export function PatternImportDxfPhaseESavedTopologyAnnotationEditControlV1({
       </Dialog.Trigger>
       {edit ? (
         <Dialog.Portal>
-          <Dialog.Overlay className='fixed inset-0 z-[210] bg-black/50' />
+          <Dialog.Overlay className='fixed inset-0 z-[210] bg-textColor/50' />
           <Dialog.Content
-            className='fixed left-1/2 top-1/2 z-[211] max-h-[90vh] w-[min(46rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-auto border border-borderColor bg-bgColor shadow-xl'
+            className='fixed left-1/2 top-1/2 z-[211] max-h-[90vh] w-[min(46rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-auto border border-borderColor bg-bgColor'
             aria-describedby={undefined}
             onKeyDown={(event) => event.stopPropagation()}
             onEscapeKeyDown={(event) => {
@@ -145,7 +145,7 @@ export function PatternImportDxfPhaseESavedTopologyAnnotationEditControlV1({
             }}
             onInteractOutside={(event) => event.preventDefault()}
           >
-            <Dialog.Title className='px-3 py-2 text-sm font-bold'>
+            <Dialog.Title className='px-3 py-2 text-small font-bold'>
               Edit saved annotations
             </Dialog.Title>
             <PatternImportDxfPhaseEExactNTopologyAnnotationEditorV1

@@ -2790,11 +2790,11 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
         durableSnapshot: retainedSnapshot ?? f.host.getSnapshot(),
       } as ComponentProps<typeof CadWorkbenchPhysicalHostControlsV1>['state'];
       controls = CadWorkbenchPhysicalHostControlsV1({ state, interaction });
-      const props = visitMountedTree(
+      const canvasNode = visitMountedTree(
         controls,
         (item) => item['aria-label'] === 'Cloth simulation on the selected mannequin',
       );
-      const ref = props?.ref as RefObject<HTMLCanvasElement | null> | undefined;
+      const ref = canvasNode?.ref as RefObject<HTMLCanvasElement | null> | undefined;
       if (ref) ref.current = canvas;
       return null;
     }

@@ -14,7 +14,7 @@ import {
   useCadTableZeroCanvasOwner,
 } from './cad-table-zero-connect-canvas-v1';
 import {
-  CadTablePieceSelectionPanel,
+  CadTablePieceSelection,
   handleCadTablePieceSelectionKey,
 } from './cad-table-piece-selection-panel-v1';
 
@@ -226,15 +226,15 @@ function DeferredTopologyAnnotationAuthoring({
         </Button>
       </Dialog.Trigger>
       <Dialog.Portal>
-        <Dialog.Overlay className='fixed inset-0 z-[210] bg-black/50' />
+        <Dialog.Overlay className='fixed inset-0 z-[210] bg-textColor/50' />
         <Dialog.Content
-          className='fixed left-1/2 top-1/2 z-[211] max-h-[90vh] w-[min(46rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-auto border border-borderColor bg-bgColor shadow-xl'
+          className='fixed left-1/2 top-1/2 z-[211] max-h-[90vh] w-[min(46rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-auto border border-borderColor bg-bgColor'
           aria-describedby={undefined}
           onKeyDown={(event) => event.stopPropagation()}
           onInteractOutside={(event) => event.preventDefault()}
         >
           <header className='flex items-center justify-between px-3 py-2'>
-            <Dialog.Title className='text-sm font-bold'>Edit annotations</Dialog.Title>
+            <Dialog.Title className='text-small font-bold'>Edit annotations</Dialog.Title>
             <Dialog.Close asChild>
               <Close />
             </Dialog.Close>
@@ -434,7 +434,7 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
       objectSidebar={
         objectSidebar ??
         (exactDesktop && tableSessionOwner ? (
-          <CadTablePieceSelectionPanel
+          <CadTablePieceSelection
             owner={tableSessionOwner}
             projection={exactDesktop.projection}
             features={exactDesktop.pieceFeatures}

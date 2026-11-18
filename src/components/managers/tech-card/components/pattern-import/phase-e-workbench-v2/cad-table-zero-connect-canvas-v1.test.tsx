@@ -25,6 +25,7 @@ import { buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1 } from './
 import { buildPatternImportDxfPhaseECadMannequinSceneOverlayFromExactAuthorityV2 } from './cad-mannequin-scene-overlay-adapter-v1';
 import { bridgePatternImportDxfPhaseECadMannequinSceneOverlayToRendererV1 } from './cad-mannequin-scene-overlay-renderer-bridge-v1';
 import { cadWorkbenchOperationSeamOrdinal } from './cad-workbench-seam-ordinal-v1';
+import { CAD_WORKBENCH_SEAM_SIDE_COLORS } from './cad-workbench-seam-colors-v1';
 import { projectCadTablePieceFeatures } from './cad-table-piece-features-v1';
 import {
   createPatternImportDxfPhaseECadTablePieceLayoutSessionV1,
@@ -293,7 +294,7 @@ describe('V2 assembly fallback material selection', () => {
           physicalSurface: { mode: 'cut-surface', seamAllowancePhysical: true },
         }}
         materialOptions={[]}
-        colorwayOptions={[{ id: 1, label: 'Blue', swatchHex: '#334499' }]}
+        colorwayOptions={[{ id: 1, label: 'Blue', swatchHex: SHEET_INK.blue }]}
         activeSeamIndex={0}
         activePieceIndex={0}
         onActiveSeamIndexChange={() => {}}
@@ -306,7 +307,7 @@ describe('V2 assembly fallback material selection', () => {
     expect(material).toHaveLength(2);
     expect(material?.[0]).toContain('d="M 0,0 40,0 40,12 12,12 12,40 0,40 Z M 2,2 6,2 6,6 2,6 Z"');
     expect(material?.[0]).toContain('fill-rule="evenodd"');
-    expect(material?.[0]).toContain('fill="#334499"');
+    expect(material?.[0]).toContain(`fill="${SHEET_INK.blue}"`);
     expect(material?.[0]).toContain('pointer-events="fill"');
     expect(html).not.toMatch(/<rect[^>]*data-v2-piece-hit-area=/);
     const contour = (id: string) =>
@@ -640,9 +641,10 @@ describe('zero-operation CAD table rendering', () => {
     if (!rendererInput.ok) throw new Error(rendererInput.blocker.detail);
     const rendererSeams = rendererInput.overlay.pieces.flatMap(({ seams }) => seams);
     expect(rendererSeams.map(({ side, colorCss }) => [side, colorCss])).toEqual([
-      ['A', '#2563EB'],
-      ['B', '#F97316'],
+      ['A', CAD_WORKBENCH_SEAM_SIDE_COLORS.A],
+      ['B', CAD_WORKBENCH_SEAM_SIDE_COLORS.B],
     ]);
+    expect(rendererSeams[0]?.colorCss).not.toBe(rendererSeams[1]?.colorCss);
     for (const { side, colorCss, operationSeam } of rendererSeams) {
       expect(operationSeam).toEqual({ operationNumber, ordinal: 1 });
       const line = html.match(
@@ -791,7 +793,7 @@ describe('zero-operation CAD table rendering', () => {
             useCadTableZeroCanvasOwner,
           } from '${directory}/cad-table-zero-connect-canvas-v1.tsx';
           import {
-            CadTablePieceSelectionPanel,
+            CadTablePieceSelection,
             handleCadTablePieceSelectionKey,
           } from '${directory}/cad-table-piece-selection-panel-v1.tsx';
           function SharedHarness({ fixture }) {
@@ -800,7 +802,7 @@ describe('zero-operation CAD table rendering', () => {
             return React.createElement(
               'main',
               { className: 'flex', onKeyDown: (event) => handleCadTablePieceSelectionKey(event, owner) },
-              React.createElement(CadTablePieceSelectionPanel, { owner, projection: fixture.projection }),
+              React.createElement(CadTablePieceSelection, { owner, projection: fixture.projection }),
               React.createElement(PatternImportDxfPhaseECadTableZeroConnectCanvasV1, {
                 ...fixture, tableSessionOwner: owner,
               }),

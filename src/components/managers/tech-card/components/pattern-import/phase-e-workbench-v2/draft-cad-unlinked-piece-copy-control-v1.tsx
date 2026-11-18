@@ -1,6 +1,6 @@
 import type { NativePieceCopyMode } from 'lib/pattern-import/fabrics/native-piece-copy-review';
 import { useEffect, useRef, useState } from 'react';
-import { Button } from 'ui/components/button';
+import { Button } from 'ui';
 import { openSavedCopyInPatternsReviewV1 } from './cad-command-compiled-reimport-handoff-v1';
 import type { PatternImportDxfPhaseEDraftCadSessionV1 } from './draft-cad-session-v1';
 import type {
@@ -74,13 +74,13 @@ export function SavedDraftPieceCopyControlV1({
     <details
       ref={details}
       onToggle={(e) => setExpanded(e.currentTarget.open)}
-      className='relative text-xs'
+      className='relative text-small'
     >
       <summary className='cursor-pointer'>
         {mode === 'mirror-across-grain' ? 'Mirror piece' : 'Duplicate piece'}
       </summary>
       {expanded && (
-        <div className='absolute left-0 top-full z-20 grid min-w-52 gap-2 border border-hairline bg-bgColor p-2 shadow'>
+        <div className='absolute left-0 top-full z-20 grid min-w-52 gap-2 border border-hairline bg-bgColor p-2'>
           <span role='status'>
             {!prepare
               ? 'Select one piece in an unmodified saved Draft with Patterns available.'

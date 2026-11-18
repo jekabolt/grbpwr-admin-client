@@ -3,6 +3,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ChangeEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
@@ -11,6 +12,7 @@ import {
   normalizeAuthoredText,
 } from 'lib/pattern-import/manifest/authored-text';
 import type { AuthoredNotchShape, BoxMm, PtMm } from 'lib/pattern-import/types';
+import { Button, Input, Selector } from 'ui';
 
 import { SHEET_INK, SheetViewport, ptsAttr, vy } from '../sheet-viewport';
 import {
@@ -2220,56 +2222,57 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
                     : toolInstruction(activeTool, projection.sizeToken))}
       </div>
       {activeTool === 'notch' && interactionEnabled ? (
-        <label className='flex items-center gap-2 text-small'>
+        <div className='flex items-center gap-2 text-small' role='group' aria-label='Notch type'>
           Notch type
-          <select
+          <Selector
+            label='Notch type'
+            compact
             value={notchKind}
-            onChange={(event) => {
-              const value = event.target.value;
+            onChange={(value: string) => {
               setNotchKind(
                 value === 'double' || value === 'triple' || value === 'v' ? value : 'single',
               );
               setInputError(null);
             }}
-            className='border border-borderColor bg-bgColor p-1'
-          >
-            <option value='single'>Single</option>
-            <option value='double'>Double</option>
-            <option value='triple'>Triple</option>
-            <option value='v'>V notch</option>
-          </select>
-        </label>
+            options={[
+              { value: 'single', label: 'Single' },
+              { value: 'double', label: 'Double' },
+              { value: 'triple', label: 'Triple' },
+              { value: 'v', label: 'V notch' },
+            ]}
+          />
+        </div>
       ) : null}
       {activeTool === 'mark' && interactionEnabled ? (
         <div className='flex flex-wrap items-center gap-2 text-small'>
-          <label className='flex items-center gap-2'>
+          <div className='flex items-center gap-2' role='group' aria-label='Mark type'>
             Mark type
-            <select
+            <Selector
+              label='Mark type'
+              compact
               value={markKind}
-              onChange={(event) => {
-                const value = event.target.value;
+              onChange={(value: string) => {
                 setMarkKind(value === 'cross' || value === 'text' ? value : 'drill');
                 setInputError(null);
               }}
-              className='border border-borderColor bg-bgColor p-1'
-            >
-              <option value='drill'>Drill</option>
-              <option value='cross'>Cross ({DRAFT_CAD_CROSS_MARK_HALF_SPAN_MM * 2} mm)</option>
-              <option value='text'>Text</option>
-            </select>
-          </label>
+              options={[
+                { value: 'drill', label: 'Drill' },
+                { value: 'cross', label: `Cross (${DRAFT_CAD_CROSS_MARK_HALF_SPAN_MM * 2} mm)` },
+                { value: 'text', label: 'Text' },
+              ]}
+            />
+          </div>
           {markKind === 'text' && (
             <label className='flex items-center gap-2'>
               Mark text
-              <input
+              <Input
                 type='text'
                 maxLength={255}
                 value={markText}
-                onChange={(event) => {
+                onChange={(event: ChangeEvent<HTMLInputElement>) => {
                   setMarkText(event.target.value);
                   setInputError(null);
                 }}
-                className='border border-borderColor bg-bgColor p-1'
               />
             </label>
           )}
@@ -2277,21 +2280,18 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
       ) : null}
       {activeTool === 'pen' && pendingPoints.length > 0 && interactionEnabled && (
         <div className='flex flex-wrap gap-2'>
-          <button
+          <Button
             type='button'
-            className='border border-borderColor px-2 py-1 text-small disabled:opacity-50'
+            size='xs'
+            variant='secondary'
             disabled={pendingPoints.length < 3}
             onClick={() => drawPoint(pendingPoints[pendingPoints.length - 1]!, true)}
           >
             Close Pen outline
-          </button>
-          <button
-            type='button'
-            className='border border-borderColor px-2 py-1 text-small'
-            onClick={clearPen}
-          >
+          </Button>
+          <Button type='button' size='xs' variant='secondary' onClick={clearPen}>
             Cancel outline
-          </button>
+          </Button>
         </div>
       )}
       {movePointActive && outlinePointInput && interactionEnabled && (
@@ -2299,21 +2299,22 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
           {(['x', 'y'] as const).map((axis) => (
             <label key={axis} className='grid gap-1 text-small'>
               {axis.toUpperCase()} (mm)
-              <input
-                className='w-28 border border-borderColor bg-bgColor p-1'
+              <Input
+                className='w-28'
                 type='number'
                 step='any'
                 value={outlinePointInput[axis]}
-                onChange={(event) => {
+                onChange={(event: ChangeEvent<HTMLInputElement>) => {
                   setOutlinePointInput({ ...outlinePointInput, [axis]: event.target.value });
                   setInputError(null);
                 }}
               />
             </label>
           ))}
-          <button
+          <Button
             type='button'
-            className='border border-borderColor px-2 py-1 text-small disabled:opacity-50'
+            size='xs'
+            variant='secondary'
             disabled={!outlinePointInput.x.trim() || !outlinePointInput.y.trim()}
             onClick={() =>
               commitOutlinePointEdit(outlinePointInput.key, {
@@ -2323,18 +2324,19 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
             }
           >
             Move point
-          </button>
+          </Button>
         </div>
       )}
       {activeTool === 'delete-point' && outlinePointInput && interactionEnabled && (
         <div className='flex gap-2'>
-          <button
+          <Button
             type='button'
-            className='border border-borderColor px-2 py-1 text-small'
+            size='xs'
+            variant='secondary'
             onClick={() => commitOutlinePointEdit(outlinePointInput.key)}
           >
             Delete point
-          </button>
+          </Button>
         </div>
       )}
       {activeTool === 'edge-length' && pendingDartBase && interactionEnabled && (
@@ -2349,29 +2351,34 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
         >
           <label className='grid gap-1 text-small'>
             Edge length (mm)
-            <input
-              className='w-28 border border-borderColor bg-bgColor p-1'
+            <Input
+              className='w-28'
               type='number'
               min='0'
               step='any'
               value={resizeLength}
-              onChange={(event) => setResizeLength(event.target.value)}
+              onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                setResizeLength(event.target.value)
+              }
             />
           </label>
-          <label className='grid gap-1 text-small'>
+          <div className='grid gap-1 text-small' role='group' aria-label='Fixed endpoint'>
             Fixed endpoint
-            <select
-              className='border border-borderColor bg-bgColor p-1'
+            <Selector
+              label='Fixed endpoint'
+              compact
               value={resizeFixed}
-              onChange={(event) => setResizeFixed(event.target.value === 'end' ? 'end' : 'start')}
-            >
-              <option value='start'>Start</option>
-              <option value='end'>End</option>
-            </select>
-          </label>
-          <button
+              onChange={(value: string) => setResizeFixed(value === 'end' ? 'end' : 'start')}
+              options={[
+                { value: 'start', label: 'Start' },
+                { value: 'end', label: 'End' },
+              ]}
+            />
+          </div>
+          <Button
             type='button'
-            className='border border-borderColor px-2 py-1 text-small'
+            size='xs'
+            variant='secondary'
             onClick={() => {
               const result = recordPatternImportDxfPhaseEDraftCadCanvasBoundaryPickV1({
                 session,
@@ -2391,7 +2398,7 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
             }}
           >
             Set edge length
-          </button>
+          </Button>
         </div>
       )}
       {preview.blockers.length > 0 && (

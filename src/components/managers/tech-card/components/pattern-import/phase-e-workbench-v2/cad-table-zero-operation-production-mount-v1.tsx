@@ -29,7 +29,7 @@ import {
   useCadTableZeroCanvasOwner,
 } from './cad-table-zero-connect-canvas-v1';
 import {
-  CadTablePieceSelectionPanel,
+  CadTablePieceSelection,
   handleCadTablePieceSelectionKey,
 } from './cad-table-piece-selection-panel-v1';
 import { projectCadTablePieceFeatures } from './cad-table-piece-features-v1';
@@ -1104,7 +1104,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
       selection={selection}
       objectSidebar={
         prepared && tableSessionOwner ? (
-          <CadTablePieceSelectionPanel
+          <CadTablePieceSelection
             owner={tableSessionOwner}
             projection={prepared.projection}
             features={pieceFeatures}

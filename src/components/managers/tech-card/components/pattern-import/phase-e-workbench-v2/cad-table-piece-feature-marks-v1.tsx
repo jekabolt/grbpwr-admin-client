@@ -130,7 +130,7 @@ export function CadTablePieceFeatureMarks({
           textAnchor='middle'
           fontSize={12 * unit}
           fill={SHEET_INK.ink}
-          stroke='#fff'
+          stroke='var(--color-bgColor)'
           strokeWidth={3 * unit}
           strokeLinejoin='round'
           paintOrder='stroke'

@@ -1,4 +1,5 @@
-import { useState, type KeyboardEvent } from 'react';
+import { useState, type ChangeEvent, type KeyboardEvent } from 'react';
+import { Button, Input } from 'ui';
 import type { GuardedSavedPieceRename } from '../../guarded-piece-rename';
 import { normalizeTechCardPieceRename } from 'utils/pattern';
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
@@ -66,9 +67,14 @@ function SavedPieceNameEditor({
   const [error, setError] = useState<string | null>(null);
   if (name === null) {
     return (
-      <button className='underline' type='button' onClick={() => setName(intent.expectedName)}>
+      <Button
+        variant='underline'
+        size='xs'
+        type='button'
+        onClick={() => setName(intent.expectedName)}
+      >
         Rename piece
-      </button>
+      </Button>
     );
   }
   const nextName = normalizeTechCardPieceRename(name);
@@ -76,19 +82,19 @@ function SavedPieceNameEditor({
     <div className='space-y-1'>
       <label className='block'>
         Piece name
-        <input
-          className='block w-full rounded border border-borderColor bg-bgColor p-1'
+        <Input
           disabled={busy}
           value={name}
-          onChange={(event) => {
+          onChange={(event: ChangeEvent<HTMLInputElement>) => {
             setName(event.target.value);
             setError(null);
           }}
         />
       </label>
       <div className='flex flex-wrap gap-2'>
-        <button
-          className='underline disabled:opacity-50'
+        <Button
+          variant='underline'
+          size='xs'
           type='button'
           disabled={busy || !nextName || nextName === intent.expectedName}
           onClick={async () => {
@@ -105,9 +111,10 @@ function SavedPieceNameEditor({
           }}
         >
           {busy ? 'Saving…' : 'Save name'}
-        </button>
-        <button
-          className='underline'
+        </Button>
+        <Button
+          variant='underline'
+          size='xs'
           type='button'
           disabled={busy}
           onClick={() => {
@@ -116,14 +123,14 @@ function SavedPieceNameEditor({
           }}
         >
           Cancel
-        </button>
+        </Button>
       </div>
       {error ? <p role='alert'>{error}</p> : null}
     </div>
   );
 }
 
-export function CadTablePieceSelectionPanel({
+export function CadTablePieceSelection({
   owner,
   projection,
   features,

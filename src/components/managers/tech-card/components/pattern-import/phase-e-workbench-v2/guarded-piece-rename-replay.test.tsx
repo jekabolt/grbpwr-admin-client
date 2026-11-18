@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { buildPatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import { selectPatternImportDxfProductDraftPhaseDSizeV1 } from 'lib/cloth/domain/pattern-import-dxf-product-draft-phase-d-selection-v1';
 import { projectPatternImportDxfProductPhaseEAssemblyV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
-import { CadTablePieceSelectionPanel } from './cad-table-piece-selection-panel-v1';
+import { CadTablePieceSelection } from './cad-table-piece-selection-panel-v1';
 import { createPatternImportDxfPhaseECadTableZeroCanvasSessionV1 } from './cad-table-zero-connect-canvas-v1';
 import { projectCadTablePieceFeatures } from './cad-table-piece-features-v1';
 import type { common_TechCard, GuardedZeroOperationPieceRename } from 'api/proto-http/admin';
@@ -212,12 +212,12 @@ it('verifies the sparse rename and freshly opens identical exact pattern bytes w
       };
       const save = vi.fn();
       const zeroMarkup = renderToStaticMarkup(
-        <CadTablePieceSelectionPanel {...props} renamePiece={{ row: after.native.row, save }} />,
+        <CadTablePieceSelection {...props} renamePiece={{ row: after.native.row, save }} />,
       );
       expect(zeroMarkup).toContain(NAME);
       expect(zeroMarkup).toContain('Rename piece');
       expect(save).not.toHaveBeenCalled();
-      const linkedMarkup = renderToStaticMarkup(<CadTablePieceSelectionPanel {...props} />);
+      const linkedMarkup = renderToStaticMarkup(<CadTablePieceSelection {...props} />);
       expect(linkedMarkup).toContain(NAME);
       expect(linkedMarkup).not.toContain('Rename piece');
     } finally {
