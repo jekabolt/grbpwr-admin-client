@@ -56,8 +56,8 @@ export function Join() {
     setBusy(true);
     setNote('');
     try {
-      // the name row is the mockup's; AcceptInvite carries no name yet (backend decides it)
-      const r = await authService.AcceptInvite({ token, password });
+      const handle = invite?.accountExists ? undefined : name.trim() || undefined;
+      const r = await authService.AcceptInvite({ token, password, handle });
       goToUrl(teamUrl(r.teamSlug ?? '', `/auth#code=${encodeURIComponent(r.handoffCode ?? '')}`));
     } catch (e) {
       setNote(
