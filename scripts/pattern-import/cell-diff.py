@@ -13,7 +13,7 @@ def load(d):
     r=json.load(open(p))
     for fam in r.get('families') or []:
       for c in fam['cells']:
-        out[(f,fam['label'],c['size'])]=c
+        out[(f,fam['label'],fam.get('seed'),c['size'])]=c
   return out
 a,b=load(A),load(B)
 fa={k[0] for k in a}; fb={k[0] for k in b}

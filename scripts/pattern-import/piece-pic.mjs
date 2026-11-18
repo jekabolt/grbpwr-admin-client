@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // One piece of a dxf-shot run, all sizes overlaid (grey), the suspect size red and alone with its
 // neighbours. Reads <shot-file-dir>/cells.json.
-//   node scripts/pattern-import/piece-pic.mjs <shot-file-dir> <piece label substring> <size> <out.png>
+//   node scripts/pattern-import/piece-pic.mjs <shot-file-dir> <piece label substring> <size> <out.png> [seed]
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,9 +9,13 @@ const { createCanvas } = await import(
   resolve(dirname(fileURLToPath(import.meta.url)), '../../node_modules/@napi-rs/canvas/index.js'),
 );
 
-const [dir, pieceQ, size, out] = process.argv.slice(2);
+const [dir, pieceQ, size, out, seed] = process.argv.slice(2);
 const fams = JSON.parse(readFileSync(resolve(dir, 'cells.json'), 'utf8'));
-const fam = fams.find((f) => f.label.includes(pieceQ));
+const matches = fams.filter(
+  (f) => f.label.includes(pieceQ) && (seed === undefined || String(f.seed) === seed),
+);
+if (matches.length > 1) throw new Error(`Specify a seed: ${matches.map((f) => f.seed).join(', ')}`);
+const [fam] = matches;
 if (!fam) throw new Error(`no piece ${pieceQ}: ${fams.map((f) => f.label).join(' | ')}`);
 const cells = fam.cells.filter((c) => c.outer?.length);
 const iBad = cells.findIndex((c) => c.size === size);

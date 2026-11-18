@@ -172,10 +172,13 @@ function judgeRun(dir) {
   for (const f of readdirSync(dir).sort()) {
     const p = join(dir, f, 'cells.json');
     if (!existsSync(p)) continue;
-    for (const fam of JSON.parse(readFileSync(p, 'utf8'))) {
+    const families = JSON.parse(readFileSync(p, 'utf8'));
+    for (const fam of families) {
       const j = judgeFamily(fam);
-      if (j.step) famSteps.push({ key: `${f}|${fam.label}`, step: j.step, oldStep: j.oldStep });
-      for (const [size, v] of j.verdicts) cells.set(`${f}|${fam.label}|${size}`, v);
+      const repeated = families.some((other) => other !== fam && other.label === fam.label);
+      const key = repeated ? `${f}|${fam.label} [seed ${fam.seed}]` : `${f}|${fam.label}`;
+      if (j.step) famSteps.push({ key, step: j.step, oldStep: j.oldStep });
+      for (const [size, v] of j.verdicts) cells.set(`${key}|${size}`, v);
     }
   }
   return cells;
