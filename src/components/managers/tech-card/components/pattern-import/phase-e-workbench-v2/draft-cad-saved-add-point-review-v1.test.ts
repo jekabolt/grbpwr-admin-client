@@ -1103,3 +1103,65 @@ it.each([
     }
   },
 );
+
+it('retains one authored single notch on its exact saved-size piece through the ordinary Wizard', async () => {
+  const f = await fixture(true);
+  vi.stubGlobal('Worker', InProcessTransport);
+  const worker = new ImportWorkerClient();
+  try {
+    const {
+      buildPatternImportDxfPhaseEDraftCadCanvasDartBasesV1,
+      recordPatternImportDxfPhaseEDraftCadCanvasBoundaryPickV1,
+    } = await import('./draft-cad-canvas-v1');
+    const { compilePatternImportDxfPhaseEDraftCadGeometryV1 } = await import(
+      './draft-cad-geometry-compile-v1'
+    );
+    const { projection, selection } = f.compileInput;
+    const [base] = buildPatternImportDxfPhaseEDraftCadCanvasDartBasesV1(f.initial, projection, 0);
+    if (!base) throw Error('Fixture lacks a current anchored boundary.');
+    const edit = recordPatternImportDxfPhaseEDraftCadCanvasBoundaryPickV1({
+      session: f.initial,
+      projection,
+      activeTool: 'notch',
+      activePieceIndex: 0,
+      sequence: 0,
+      baseKey: base.key,
+    });
+    expect(edit.recorded).toBe(true);
+    const compileSource = createPatternImportDxfPhaseEDraftCadCompileSourceV1(
+      f.source.native.draft,
+    );
+    if (!compileSource) throw Error('Fixture lacks a current writer source.');
+    const compiled = compilePatternImportDxfPhaseEDraftCadGeometryV1({
+      session: edit.session,
+      projection,
+      selection,
+      compileSource,
+    });
+    if (!compiled.ok) throw Error(JSON.stringify(compiled.blockers));
+    const target = compiled.artifact.compiledFeatures[0]!;
+    expect(target).toMatchObject({ output: 'notch', sizeToken: 'M' });
+    const before = f.source.native.draft.scopes[0]!.manifest.blocks;
+    const file = new File([compiled.artifact.dxfText], 'main-cad-compiled.dxf', {
+      type: 'image/vnd.dxf',
+    });
+    const reviewed = await draftThroughWizardStages(file, f.current.card, worker);
+    expect(reviewed.scopes[0]!.manifest.gate?.passed).toBe(true);
+    const expected = before.map(({ identity, sizeToken, notches }) => ({
+      identity,
+      sizeToken,
+      notches: notches + Number(identity === target.pieceId && sizeToken === target.sizeToken),
+    }));
+    expect(
+      reviewed.scopes[0]!.manifest.blocks.map(({ identity, sizeToken, notches }) => ({
+        identity,
+        sizeToken,
+        notches,
+      })),
+    ).toEqual(expected);
+  } finally {
+    worker.dispose();
+    vi.unstubAllGlobals();
+    f.source.dispose();
+  }
+});
