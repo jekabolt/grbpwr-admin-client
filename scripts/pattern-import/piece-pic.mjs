@@ -12,7 +12,7 @@ const { createCanvas } = await import(
 const [dir, pieceQ, size, out, seed] = process.argv.slice(2);
 const fams = JSON.parse(readFileSync(resolve(dir, 'cells.json'), 'utf8'));
 const matches = fams.filter(
-  (f) => f.label.includes(pieceQ) && (seed === undefined || String(f.seed) === seed),
+  (f) => (f.label ?? '').includes(pieceQ) && (seed === undefined || String(f.seed) === seed),
 );
 if (matches.length > 1) throw new Error(`Specify a seed: ${matches.map((f) => f.seed).join(', ')}`);
 const [fam] = matches;
@@ -50,7 +50,7 @@ const cv = createCanvas(W * 2, H);
 const g = cv.getContext('2d');
 g.fillStyle = '#fff';
 g.fillRect(0, 0, cv.width, cv.height);
-panel(g, 0, W, H, cells, `${fam.label} — all sizes, red ${size} (${bad.outcome})`);
+panel(g, 0, W, H, cells, `${fam.label ?? `seed ${fam.seed}`} — all sizes, red ${size} (${bad.outcome})`);
 panel(g, W, W, H, [...near, bad], `${size} red vs neighbours blue: ${near.map((c) => c.size).join(', ')}`);
 writeFileSync(out, cv.toBuffer('image/png'));
 console.log('wrote', out, 'sizes', cells.map((c) => c.size).join(' '));
