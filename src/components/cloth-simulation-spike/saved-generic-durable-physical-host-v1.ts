@@ -1,3 +1,4 @@
+import type { DxfGarmentExplicitPiecePlacementV1 } from 'lib/cloth/domain/dxf-garment-assembly-explicit-placement-stage-v1';
 import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 import type {
   DxfProductSavedNativeCompilerSourceOwnerV1,
@@ -116,6 +117,9 @@ export type SavedV7PieceTranslationV1 = Readonly<{
   pieceLineKey: string;
   translationM: readonly [number, number, number];
 }>;
+export type SavedV7PlacementChangeV1 =
+  | Readonly<{ kind: 'translate'; pieces: readonly SavedV7PieceTranslationV1[] }>
+  | Readonly<{ kind: 'quarter-turn-world-y' }>;
 export type SavedV7PlacementEditV1 = Readonly<{
   binding: SavedGenericDurablePhysicalBindingV1;
   pieces: readonly SavedV7PieceTranslationV1[];
@@ -126,6 +130,55 @@ export class SavedV7PlacementPersistenceErrorV1 extends Error {
   ) {
     super(result.blockers[0].detail);
   }
+}
+
+type PlacementRotation = DxfGarmentExplicitPiecePlacementV1['rotationRowMajor'];
+
+/** Pre-multiply by the right-handed +90° world Y rotation. This permutes existing rows exactly. */
+function quarterTurnWorldY(r: PlacementRotation): PlacementRotation {
+  const negate = (value: number) => (value === 0 ? 0 : -value);
+  return [r[6], r[7], r[8], r[3], r[4], r[5], negate(r[0]), negate(r[1]), negate(r[2])];
+}
+
+function placementAfterEdit(
+  placements: readonly DxfGarmentExplicitPiecePlacementV1[],
+  edit: SavedV7PlacementEditV1,
+  change: SavedV7PlacementChangeV1,
+): readonly DxfGarmentExplicitPiecePlacementV1[] {
+  if (change.kind === 'quarter-turn-world-y') {
+    const pivot = placements[0]?.translationM;
+    if (!pivot) throw new Error('The saved assembly has no placement pivot.');
+    return placements.map((piece) => {
+      const [x, y, z] = piece.translationM;
+      return {
+        ...piece,
+        rotationRowMajor: quarterTurnWorldY(piece.rotationRowMajor),
+        translationM: [pivot[0] + (z - pivot[2]), y, pivot[2] - (x - pivot[0])],
+      };
+    });
+  }
+  if (
+    change.kind !== 'translate' ||
+    change.pieces.length !== edit.pieces.length ||
+    !change.pieces.every((entry, i) => {
+      const prior = edit.pieces[i];
+      return (
+        entry.pieceId === prior?.pieceId &&
+        entry.pieceLineKey === prior.pieceLineKey &&
+        Array.isArray(entry.translationM) &&
+        entry.translationM.length === 3 &&
+        entry.translationM.every(Number.isFinite)
+      );
+    }) ||
+    change.pieces.every(
+      (entry, i) => canonical(entry.translationM) === canonical(edit.pieces[i]!.translationM),
+    )
+  )
+    throw new Error('Change the translation of a current saved piece.');
+  return placements.map((piece, i) => ({
+    ...piece,
+    translationM: change.pieces[i]!.translationM,
+  }));
 }
 
 export type SavedGenericDurablePhysicalHostSnapshotV1 = Readonly<{
@@ -843,11 +896,11 @@ export function createSavedGenericDurablePhysicalHostV1(
     },
     async savePlacementEdit(
       edit: SavedV7PlacementEditV1,
-      requested: readonly SavedV7PieceTranslationV1[],
+      requested: SavedV7PlacementChangeV1,
       signal?: AbortSignal,
     ) {
       let ticket: Operation | null = null;
-      const translated = capture(requested);
+      const change = capture(requested);
       try {
         const done = await work(signal, async (op) => {
           ticket = op;
@@ -855,38 +908,15 @@ export function createSavedGenericDurablePhysicalHostV1(
           if (placementEdit !== edit || edit.binding !== a.publicBinding)
             throw new Error('The saved placement edit expired.');
           placementEdit = null;
-          if (
-            translated.length !== edit.pieces.length ||
-            !translated.every((entry, i) => {
-              const prior = edit.pieces[i];
-              return (
-                entry.pieceId === prior?.pieceId &&
-                entry.pieceLineKey === prior.pieceLineKey &&
-                Array.isArray(entry.translationM) &&
-                entry.translationM.length === 3 &&
-                entry.translationM.every(Number.isFinite)
-              );
-            }) ||
-            translated.every(
-              (entry, i) =>
-                canonical(entry.translationM) === canonical(edit.pieces[i]!.translationM),
-            )
-          )
-            throw new Error('Change the translation of a current saved piece.');
+          const original = a.durable.physicalInitialization;
+          const placements = placementAfterEdit(original.placements, edit, change);
           const { persistCurrentSavedGenericObservedPhysicalHostV1 } = await import(
             'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-full-assembly-physical-document-production-v1'
           );
           const t = await verify(a, op);
           terminal(a, op, t);
-          const original = a.durable.physicalInitialization;
           const initial = await host.bindInitialization(
-            {
-              ...original,
-              placements: original.placements.map((piece, i) => ({
-                ...piece,
-                translationM: translated[i]!.translationM,
-              })),
-            },
+            { ...original, placements },
             a.generation,
             op.controller.signal,
           );

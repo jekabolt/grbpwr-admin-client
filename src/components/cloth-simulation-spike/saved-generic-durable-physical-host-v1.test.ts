@@ -704,7 +704,13 @@ async function compiledObservedFixture(
   const author = requireOk(await pre.projectAuthoringContext(1));
   return { pre, author, native };
 }
-async function fixture(withAnnotations = false, options?: { nativeExactDesktop: boolean }) {
+async function fixture(
+  withAnnotations = false,
+  options?: {
+    nativeExactDesktop?: boolean;
+    initialRotation?: DxfGarmentPhysicalInitializationV1['placements'][number]['rotationRowMajor'];
+  },
+) {
   const observed = await sessionFixture();
   cleanup.push(() => observed.input.dispose());
   const body = createSavedModelDisplayedTriangleBodySessionV2(async () =>
@@ -721,7 +727,7 @@ async function fixture(withAnnotations = false, options?: { nativeExactDesktop: 
     placements: ['FRONT', 'BACK', 'SIDE'].map((pieceId, i) => ({
       pieceId,
       sourceOriginM: [i * 0.15, 0, 0],
-      rotationRowMajor: [1, 0, 0, 0, 1, 0, 0, 0, 1],
+      rotationRowMajor: options?.initialRotation ?? [1, 0, 0, 0, 1, 0, 0, 0, 1],
       translationM: [1 + i * 0.1, 0.5, 0],
     })),
     observedTarget: author.observedTarget,
@@ -1864,10 +1870,17 @@ describe('durable facade refusal before any stored V7 authority exists', () => {
 });
 
 describe('fixed durable generic host, real encoded V7 and genuine fresh receipts', () => {
-  it.each(['save', 'conflict', 'lost-after-write'] as const)(
+  it.each(['save', 'conflict', 'lost-after-write', 'rotate', 'rotate-conflict'] as const)(
     'recovers exact mounted placement values and V7 bytes for %s',
     async (outcome) => {
-      const f = await fixture();
+      const rotates = outcome === 'rotate' || outcome === 'rotate-conflict';
+      const conflicts = outcome === 'conflict' || outcome === 'rotate-conflict';
+      const losesReply = outcome === 'lost-after-write';
+      // A common +90° X frame preserves seam positions and does not commute with +90° Y.
+      const priorRotation = [1, 0, 0, 0, 0, -1, 0, 1, 0] as const;
+      const f = await fixture(false, { initialRotation: rotates ? priorRotation : undefined });
+      const beforeDxf = seed.bytes.slice();
+      const beforePhysical = physicalReader.projectSavedFullAssemblyPhysicalSnapshotV1(f.reader)!;
       const prior = {
         ...f.storage.v7,
         postSaveReceiptSha256: semanticDocument(seed.row).persistence.receiptSealSha256,
@@ -1881,8 +1894,7 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
         expect(request.expectedPreviousSidecarSha256).toBe(prior.sidecarSha256);
         expect(request.expectedCardLockVersion).toBe(seed.row.cardLockVersion);
         expect(request.expectedSavedRowRevision).toBe(seed.row.revision);
-        if (outcome === 'conflict' && casAttempt === 1)
-          throw new Error('Saved placement CAS conflict.');
+        if (conflicts && casAttempt === 1) throw new Error('Saved placement CAS conflict.');
         outer = {
           ...prior,
           sidecarBytes: request.sidecarBytes,
@@ -1890,7 +1902,7 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
           mediaType: request.mediaType,
           byteLength: Buffer.from(request.sidecarBytes!, 'base64').length,
         };
-        if (outcome === 'lost-after-write') {
+        if (losesReply) {
           readbackAvailable = false;
           throw new Error('The upload reply was lost.');
         }
@@ -1917,9 +1929,9 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
       expect(edit.pieces.map(({ translationM }) => translationM)).toEqual(
         old.placements.map(({ translationM }) => translationM),
       );
-      await expect(actor.host.savePlacementEdit({ ...edit }, edit.pieces)).rejects.toThrow(
-        'The saved placement edit expired.',
-      );
+      await expect(
+        actor.host.savePlacementEdit({ ...edit }, { kind: 'translate', pieces: edit.pieces }),
+      ).rejects.toThrow('The saved placement edit expired.');
       expect(put).not.toHaveBeenCalled();
       type State = ComponentProps<typeof CadWorkbenchSavedPlacementEditorV1>['state'];
       const save = vi.fn(
@@ -1936,34 +1948,64 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
       vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
       vi.stubGlobal('window', { event: undefined, location: { origin: 'http://fixture.local' } });
       cleanup.push(() => vi.unstubAllGlobals());
-      const view = mountAnnotationFixtureView((current: State) => {
-        const root = CadWorkbenchSavedPlacementEditorV1({ state: current, disabled: false });
-        const fields = Children.toArray(root?.props.children).find(
-          (item) =>
-            isValidElement(item) &&
-            typeof item.type === 'function' &&
-            item.type.name === 'SavedPlacementTranslations',
-        ) as ReactElement | undefined;
-        if (!fields || typeof fields.type !== 'function')
-          throw new Error('Saved placement fields are absent.');
-        return (fields.type as (props: unknown) => ReactNode)(fields.props);
-      });
-      await view.render(state);
+      const view = mountAnnotationFixtureView(
+        ({ current, disabled }: { current: State; disabled: boolean }) => {
+          const root = CadWorkbenchSavedPlacementEditorV1({ state: current, disabled });
+          const fields = Children.toArray(root?.props.children).find(
+            (item) =>
+              isValidElement(item) &&
+              typeof item.type === 'function' &&
+              item.type.name === 'SavedPlacementFields',
+          ) as ReactElement | undefined;
+          if (!fields || typeof fields.type !== 'function')
+            throw new Error('Saved placement fields are absent.');
+          return (fields.type as (props: unknown) => ReactNode)(fields.props);
+        },
+      );
+      const render = (current = state, disabled = false) => view.render({ current, disabled });
+      await render();
       const find = (name: string) =>
         visitMountedTree(view.output(), (props) => props.name === name);
       const submit = (label = 'Save placement') =>
         visitMountedTree(view.output(), (props) => props.children === label);
       expect(submit()?.disabled).toBe(true);
-      const goal = edit.pieces.map(({ translationM, ...piece }) => ({
+      const requestedTranslations = edit.pieces.map(({ translationM, ...piece }) => ({
         ...piece,
         translationM: [translationM[0] + 0.125, translationM[1], translationM[2]] as const,
       }));
-      for (const [index, piece] of edit.pieces.entries()) {
-        const name = `saved-placement-${piece.pieceId}-X`;
-        expect(find(name)?.value).toBe(String(piece.translationM[0]));
-        await act(async () =>
-          (find(name)?.onChange as (s: string) => void)(String(goal[index]!.translationM[0])),
+      const goal: Parameters<State['saveSavedPlacementEdit']>[1] = rotates
+        ? { kind: 'quarter-turn-world-y' }
+        : { kind: 'translate', pieces: requestedTranslations };
+      const displayedTranslations = rotates ? edit.pieces : requestedTranslations;
+      const rotateAssembly = () =>
+        visitMountedTree(
+          view.output(),
+          (props) => props.children === 'Rotate assembly +90° about world Y',
         );
+      if (rotates) {
+        await render(state, true);
+        expect(rotateAssembly()).toMatchObject({ disabled: true, 'aria-pressed': false });
+        await act(async () => (rotateAssembly()?.onClick as () => void)());
+        await render();
+        expect(rotateAssembly()).toMatchObject({ disabled: false, 'aria-pressed': false });
+        await act(async () => (rotateAssembly()?.onClick as () => void)());
+        expect(rotateAssembly()?.['aria-pressed']).toBe(true);
+        expect(submit()?.disabled).toBe(false);
+        await act(async () => (rotateAssembly()?.onClick as () => void)());
+        expect(rotateAssembly()?.['aria-pressed']).toBe(false);
+        expect(submit()?.disabled).toBe(true);
+        expect(put).not.toHaveBeenCalled();
+        await act(async () => (rotateAssembly()?.onClick as () => void)());
+      } else {
+        for (const [index, piece] of edit.pieces.entries()) {
+          const name = `saved-placement-${piece.pieceId}-X`;
+          expect(find(name)?.value).toBe(String(piece.translationM[0]));
+          await act(async () =>
+            (find(name)?.onChange as (s: string) => void)(
+              String(displayedTranslations[index]!.translationM[0]),
+            ),
+          );
+        }
       }
       expect(submit()?.disabled).toBe(false);
       let apply: Promise<void> | undefined;
@@ -1991,7 +2033,7 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
           'composite-v6',
         ),
       );
-      if (outcome !== 'save') {
+      if (conflicts || losesReply) {
         await expect(apply).rejects.toBeInstanceOf(SavedV7PlacementPersistenceErrorV1);
         await expect(apply).rejects.toMatchObject({
           result: {
@@ -1999,18 +2041,19 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
             intendedOuterSha256: put.mock.calls[0]![0].sidecarSha256,
           },
         });
-        await view.render({
+        await render({
           ...state,
           placementEditor: { status: 'blocked', draft: edit, error: 'Readback unavailable.' },
         });
         expect(submit()).toBeNull();
+        expect(rotateAssembly()).toMatchObject({ disabled: true, 'aria-pressed': rotates });
         for (const [index, piece] of edit.pieces.entries()) {
           expect(find(`saved-placement-${piece.pieceId}-X`)).toMatchObject({
-            value: String(goal[index]!.translationM[0]),
+            value: String(displayedTranslations[index]!.translationM[0]),
             readOnly: true,
           });
         }
-        if (outcome === 'conflict') {
+        if (conflicts) {
           await expect(apply).rejects.toThrow(/fresh saved Composite V7 differs/i);
           expect(outer).toEqual(prior);
           const previous = await freshPhysicalFixtureHost(f.body);
@@ -2024,15 +2067,16 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
           const retrySave = vi.fn<State['saveSavedPlacementEdit']>(async (draft, pieces) => {
             requireOk(await previous.host.savePlacementEdit(draft, pieces));
           });
-          await view.render({
+          await render({
             ...state,
             saveSavedPlacementEdit: retrySave,
             placementEditor: { status: 'save-retry', draft: retryDraft, error: 'Retry required.' },
           });
           expect(submit('Retry save placement')?.disabled).toBe(false);
+          expect(rotateAssembly()).toMatchObject({ disabled: true, 'aria-pressed': rotates });
           for (const [index, piece] of edit.pieces.entries()) {
             expect(find(`saved-placement-${piece.pieceId}-X`)).toMatchObject({
-              value: String(goal[index]!.translationM[0]),
+              value: String(displayedTranslations[index]!.translationM[0]),
               readOnly: true,
             });
           }
@@ -2060,10 +2104,40 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
         ...old,
         placements: old.placements.map((piece, index) => ({
           ...piece,
-          translationM: goal[index]!.translationM,
+          rotationRowMajor: rotates ? [0, 1, 0, 0, 0, -1, -1, 0, 0] : piece.rotationRowMajor,
+          translationM: rotates
+            ? [1, 0.5, 0 - (piece.translationM[0] - 1)]
+            : requestedTranslations[index]!.translationM,
         })),
       });
-      expect(put).toHaveBeenCalledTimes(outcome === 'conflict' ? 2 : 1);
+      expect(put).toHaveBeenCalledTimes(conflicts ? 2 : 1);
+      if (rotates) {
+        expect(old.placements.find((piece) => piece.pieceId === 'BACK')).toMatchObject({
+          rotationRowMajor: priorRotation,
+          sourceOriginM: [0.15, 0, 0],
+          translationM: [1.1, 0.5, 0],
+        });
+        expect(saved.physicalInitialization.placements[0]!.translationM).toEqual(
+          old.placements[0]!.translationM,
+        );
+        expect(saved.graphCanonicalSha256).toBe(beforePhysical.graphCanonicalSha256);
+        expect(saved.compileInputSha256).toBe(beforePhysical.compileInputSha256);
+        const [originalNative, reloadedNative] = await Promise.all(
+          [f, cold].map(({ native }) =>
+            selectPatternImportDxfProductDraftPhaseDSizeV1(
+              native.native.draft,
+              seed.row.scopeKey,
+              saved.graph.source.sizeToken,
+            ),
+          ),
+        );
+        expect(
+          Buffer.from(JSON.stringify(requireOk(reloadedNative!).selection.phaseD.contours)),
+        ).toEqual(
+          Buffer.from(JSON.stringify(requireOk(originalNative!).selection.phaseD.contours)),
+        );
+        expect(seed.bytes).toEqual(beforeDxf);
+      }
       expect(ports.calls).toEqual([]);
     },
     120000,

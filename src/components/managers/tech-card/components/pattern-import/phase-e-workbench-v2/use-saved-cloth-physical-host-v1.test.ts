@@ -332,7 +332,19 @@ it('edits only a current idle or failed V7 and reloads after one explicit save',
     await act(async () => latest!.startSavedPlacementEdit(() => true));
     expect(mocks.createHost).toHaveBeenCalledTimes(1);
     await act(async () => {
-      snapshot = { ...snapshot, status: 'blocked', binding: null };
+      snapshot = {
+        ...snapshot,
+        status: 'blocked',
+        binding: null,
+        numeric: { cleanupPending: true },
+      };
+      notify();
+    });
+    expect(latest!.canEditSavedPlacement).toBe(false);
+    await act(async () => latest!.startSavedPlacementEdit(() => true));
+    expect(mocks.createHost).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      snapshot = { ...snapshot, numeric: { cleanupPending: false } };
       notify();
     });
     expect(latest!.canEditSavedPlacement).toBe(true);
@@ -344,15 +356,15 @@ it('edits only a current idle or failed V7 and reloads after one explicit save',
     expect(editActor.savePlacementEdit).not.toHaveBeenCalled();
     expect(latest!.placementEditor.status).toBe('idle');
     await act(async () => latest!.startSavedPlacementEdit(() => idle));
-    const pieces = [{ ...draft.pieces[0]!, translationM: [2, 2, 3] as const }];
+    const change = { kind: 'quarter-turn-world-y' } as const;
     idle = false;
-    await act(async () => latest!.saveSavedPlacementEdit(draft, pieces));
+    await act(async () => latest!.saveSavedPlacementEdit(draft, change));
     expect(editActor.savePlacementEdit).not.toHaveBeenCalled();
     idle = true;
-    await act(async () => latest!.saveSavedPlacementEdit(draft, pieces));
+    await act(async () => latest!.saveSavedPlacementEdit(draft, change));
     expect(editActor.savePlacementEdit).toHaveBeenCalledExactlyOnceWith(
       draft,
-      pieces,
+      change,
       expect.any(AbortSignal),
     );
     expect(editActor.dispose).toHaveBeenCalledOnce();
@@ -364,7 +376,7 @@ it('edits only a current idle or failed V7 and reloads after one explicit save',
   }
 });
 
-it.each(['prior', 'intended', 'different', 'body', 'operation'] as const)(
+it.each(['prior', 'prior-rotation', 'intended', 'different', 'body', 'operation'] as const)(
   'retains the uncertain placement save and reconciles current %s authority',
   async (outcome) => {
     const root = createRoot(reactContainer() as never);
@@ -383,7 +395,14 @@ it.each(['prior', 'intended', 'different', 'body', 'operation'] as const)(
       pieces: [{ pieceId: 'FRONT', pieceLineKey: 'front', translationM: [1, 2, 3] as const }],
     };
     const renewed = { ...draft };
-    const retained = [{ ...draft.pieces[0]!, translationM: [1.25, 2, 3] as const }];
+    const priorCurrent = outcome === 'prior' || outcome === 'prior-rotation';
+    const retained =
+      outcome === 'prior-rotation'
+        ? ({ kind: 'quarter-turn-world-y' } as const)
+        : ({
+            kind: 'translate',
+            pieces: [{ ...draft.pieces[0]!, translationM: [1.25, 2, 3] as const }],
+          } as const);
     const actor = (outerSha256 = binding.outerSha256) => {
       const snapshot = {
         status: 'ready',
@@ -425,11 +444,7 @@ it.each(['prior', 'intended', 'different', 'body', 'operation'] as const)(
       }),
     );
     const confirmed = actor(
-      outcome === 'prior'
-        ? binding.outerSha256
-        : outcome === 'intended'
-          ? intendedSha
-          : '9'.repeat(64),
+      priorCurrent ? binding.outerSha256 : outcome === 'intended' ? intendedSha : '9'.repeat(64),
     );
     confirmed.restore = vi.fn().mockImplementation(
       () =>
@@ -480,11 +495,17 @@ it.each(['prior', 'intended', 'different', 'body', 'operation'] as const)(
         await first!;
       });
       expect(confirmed.savePlacementEdit).not.toHaveBeenCalled();
-      if (outcome === 'prior') {
+      if (priorCurrent) {
         expect(latest!.placementEditor).toMatchObject({ status: 'save-retry', draft: renewed });
         await act(async () => {
-          const retry = latest!.saveSavedPlacementEdit(renewed, draft.pieces);
-          await latest!.saveSavedPlacementEdit(renewed, draft.pieces);
+          const retry = latest!.saveSavedPlacementEdit(renewed, {
+            kind: 'translate',
+            pieces: draft.pieces,
+          });
+          await latest!.saveSavedPlacementEdit(renewed, {
+            kind: 'translate',
+            pieces: draft.pieces,
+          });
           await retry;
         });
         expect(confirmed.savePlacementEdit).toHaveBeenCalledExactlyOnceWith(

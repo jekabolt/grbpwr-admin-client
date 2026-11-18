@@ -571,7 +571,7 @@ export function CadWorkbenchFirstPhysicalAuthoringV1({
   );
 }
 
-function SavedPlacementTranslations({
+function SavedPlacementFields({
   draft,
   state,
   disabled,
@@ -585,19 +585,39 @@ function SavedPlacementTranslations({
   const [values, setValues] = useState(() =>
     draft.pieces.map(({ translationM }) => translationM.map(String)),
   );
+  const [rotate, setRotate] = useState(false);
   const parsed = values.map((entry) => entry.map((value) => finite(value)));
   const complete = parsed.every((entry) => entry.every((value) => value !== null));
-  const changed = parsed.some((entry, index) =>
+  const translationChanged = parsed.some((entry, index) =>
     entry.some((value, axis) => value !== draft.pieces[index]!.translationM[axis]),
   );
+  const changed = rotate || translationChanged;
   const saving = status === 'saving';
   const busy = disabled || saving;
   const readOnly = status !== 'editing';
   return (
     <div className='space-y-stack'>
       <Text component='p' size='micro' variant='label'>
-        World translation in metres. Saved pivots and rotations are retained.
+        World translation in metres.
       </Text>
+      <div className='space-y-2'>
+        <Button
+          type='button'
+          size='xs'
+          variant={rotate ? 'main' : 'secondary'}
+          aria-pressed={rotate}
+          disabled={busy || readOnly || translationChanged}
+          onClick={() => {
+            if (busy || readOnly || translationChanged) return;
+            setRotate((selected) => !selected);
+          }}
+        >
+          Rotate assembly +90° about world Y
+        </Button>
+        <Text component='p' size='micro' variant='label'>
+          Rotation pivot: {draft.pieces[0]?.pieceId}
+        </Text>
+      </div>
       {draft.pieces.map(({ pieceId, pieceLineKey }, index) => (
         <div key={pieceId} className='space-y-2 border-t border-hairline pt-2'>
           <Text component='p' size='micro'>
@@ -611,9 +631,9 @@ function SavedPlacementTranslations({
                 label={`${pieceId} ${axis} (m)`}
                 value={values[index]![component]!}
                 disabled={busy}
-                readOnly={readOnly}
+                readOnly={readOnly || rotate}
                 onChange={(value) => {
-                  if (readOnly) return;
+                  if (readOnly || rotate) return;
                   setValues((current) =>
                     current.map((entry, i) =>
                       i === index
@@ -637,10 +657,15 @@ function SavedPlacementTranslations({
             if (busy || !complete || !changed) return;
             void state.saveSavedPlacementEdit(
               draft,
-              draft.pieces.map((piece, index) => ({
-                ...piece,
-                translationM: [parsed[index]![0]!, parsed[index]![1]!, parsed[index]![2]!],
-              })),
+              rotate
+                ? { kind: 'quarter-turn-world-y' }
+                : {
+                    kind: 'translate',
+                    pieces: draft.pieces.map((piece, index) => ({
+                      ...piece,
+                      translationM: [parsed[index]![0]!, parsed[index]![1]!, parsed[index]![2]!],
+                    })),
+                  },
             );
           }}
         >
@@ -691,7 +716,7 @@ export function CadWorkbenchSavedPlacementEditorV1({
         </Text>
       ) : null}
       {editor.draft ? (
-        <SavedPlacementTranslations
+        <SavedPlacementFields
           key={editor.draft.binding.outerSha256}
           state={state}
           draft={editor.draft}

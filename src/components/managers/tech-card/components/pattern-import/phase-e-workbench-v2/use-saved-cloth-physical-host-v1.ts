@@ -13,7 +13,7 @@ import {
   SavedV7PlacementPersistenceErrorV1,
   type SavedGenericDurablePhysicalBindingV1,
   type SavedGenericDurablePhysicalHostSnapshotV1,
-  type SavedV7PieceTranslationV1,
+  type SavedV7PlacementChangeV1,
   type SavedV7PlacementEditV1,
 } from 'components/cloth-simulation-spike/saved-generic-durable-physical-host-v1';
 import {
@@ -81,7 +81,7 @@ type PlacementEditTurn = {
   controller: AbortController;
   actor: SavedClothDurableHostV1 | null;
   draft: SavedV7PlacementEditV1 | null;
-  pending: readonly SavedV7PieceTranslationV1[] | null;
+  pending: SavedV7PlacementChangeV1 | null;
   current: () => boolean;
   restore: () => Promise<SavedClothDurableHostV1>;
   saving: boolean;
@@ -500,15 +500,21 @@ export function useSavedClothPhysicalHostV1({
   };
   const saveSavedPlacementEdit = async (
     draft: SavedV7PlacementEditV1,
-    pieces: readonly SavedV7PieceTranslationV1[],
+    change: SavedV7PlacementChangeV1,
   ) => {
     const turn = placementTurn.current;
     if (!turn || !turn.actor || turn.draft !== draft || turn.saving || !turn.current()) return;
     turn.saving = true;
-    const pending = (turn.pending ??= pieces.map((piece) => ({
-      ...piece,
-      translationM: [...piece.translationM] as [number, number, number],
-    })));
+    const pending = (turn.pending ??=
+      change.kind === 'translate'
+        ? {
+            kind: 'translate',
+            pieces: change.pieces.map((piece) => ({
+              ...piece,
+              translationM: [...piece.translationM] as [number, number, number],
+            })),
+          }
+        : { ...change });
     setPlacementEditor({ status: 'saving', draft, error: null });
     try {
       await turn.actor.savePlacementEdit(draft, pending, turn.controller.signal);
