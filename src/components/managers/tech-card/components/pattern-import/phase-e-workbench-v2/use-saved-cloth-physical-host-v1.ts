@@ -10,7 +10,10 @@ import {
 import { useQueryClient } from '@tanstack/react-query';
 import {
   createSavedGenericDurablePhysicalHostV1,
+  type SavedGenericDurablePhysicalBindingV1,
   type SavedGenericDurablePhysicalHostSnapshotV1,
+  type SavedV7PieceTranslationV1,
+  type SavedV7PlacementEditV1,
 } from 'components/cloth-simulation-spike/saved-generic-durable-physical-host-v1';
 import {
   createSavedGenericObservedPhysicalHostV1,
@@ -64,9 +67,21 @@ type Mounted = Readonly<{
   bodySession: BodySession;
   cardProjection: PatternImportDxfPhaseESavedRowCardProjectionV1;
   host: SavedClothDurableHostV1 | null;
+  initialBinding?: SavedGenericDurablePhysicalBindingV1;
   status: Exclude<SavedClothPhysicalSourceStatusV1, 'idle' | 'awaiting-mannequin'>;
   error: string | null;
 }>;
+export type SavedV7PlacementEditorStateV1 =
+  | Readonly<{ status: 'idle' | 'preparing'; draft: null; error: null }>
+  | Readonly<{ status: 'editing' | 'saving'; draft: SavedV7PlacementEditV1; error: null }>
+  | Readonly<{ status: 'blocked'; draft: null; error: string }>;
+type PlacementEditTurn = {
+  controller: AbortController;
+  actor: SavedClothDurableHostV1 | null;
+  draft: SavedV7PlacementEditV1 | null;
+  current: () => boolean;
+  saving: boolean;
+};
 
 export type SavedClothFirstAuthoringStateV1 =
   | Readonly<{ status: 'idle'; bootstrap: null; sourceGeometry: null; error: null }>
@@ -327,7 +342,11 @@ export function useSavedClothPhysicalHostV1({
           controller.signal,
         );
         if (controller.signal.aborted) void durable.dispose();
-        else setMounted({ ...base, host: durable, status: 'ready', error: null });
+        else {
+          const initialBinding = durable.getSnapshot().binding;
+          if (!initialBinding) throw new Error('The restored V7 is no longer current.');
+          setMounted({ ...base, host: durable, initialBinding, status: 'ready', error: null });
+        }
       } catch (error) {
         if (!controller.signal.aborted) {
           const status = classifySavedClothPhysicalRestoreErrorV1(error);
@@ -368,6 +387,137 @@ export function useSavedClothPhysicalHostV1({
       : !bodySession || bodySnapshot.status !== 'observed-body-bound'
         ? 'awaiting-mannequin'
         : current?.status ?? 'loading';
+
+  const [placementEditor, setPlacementEditor] = useState<SavedV7PlacementEditorStateV1>({
+    status: 'idle',
+    draft: null,
+    error: null,
+  });
+  const placementTurn = useRef<PlacementEditTurn | null>(null);
+  const placementContext = useRef({ sourceKey, cardProjection, bodySession, host });
+  placementContext.current = { sourceKey, cardProjection, bodySession, host };
+  const releasePlacementEdit = useCallback(() => {
+    const turn = placementTurn.current;
+    placementTurn.current = null;
+    turn?.controller.abort();
+    void turn?.actor?.dispose();
+  }, []);
+  useLayoutEffect(() => {
+    setPlacementEditor({ status: 'idle', draft: null, error: null });
+    return releasePlacementEdit;
+  }, [sourceKey, cardProjection, bodySession, host, releasePlacementEdit]);
+
+  const canEditSavedPlacement = Boolean(
+    sourceStatus === 'ready' &&
+      host &&
+      current?.initialBinding &&
+      durableSnapshot &&
+      (durableSnapshot.status === 'ready' || durableSnapshot.status === 'blocked') &&
+      !durableSnapshot.numeric.cleanupPending,
+  );
+  const startSavedPlacementEdit = async (previewIdle: () => boolean) => {
+    if (
+      !canEditSavedPlacement ||
+      !previewIdle() ||
+      placementTurn.current ||
+      !savedRow ||
+      !cardProjection ||
+      !bodySession ||
+      !sourceKey ||
+      !host ||
+      !current?.initialBinding
+    )
+      return;
+    const prior = current.initialBinding;
+    const controller = new AbortController();
+    const live = () => {
+      const context = placementContext.current;
+      const body = bodySession.getSnapshot();
+      const numeric = host.getSnapshot();
+      return (
+        !controller.signal.aborted &&
+        context.sourceKey === sourceKey &&
+        context.cardProjection === cardProjection &&
+        context.bodySession === bodySession &&
+        context.host === host &&
+        body.status === 'observed-body-bound' &&
+        body.generation === bodySnapshot.generation &&
+        (numeric.status === 'ready' || numeric.status === 'blocked') &&
+        !numeric.numeric.cleanupPending &&
+        previewIdle()
+      );
+    };
+    if (!live()) return;
+    const turn: PlacementEditTurn = {
+      controller,
+      actor: null,
+      draft: null,
+      current: live,
+      saving: false,
+    };
+    placementTurn.current = turn;
+    setPlacementEditor({ status: 'preparing', draft: null, error: null });
+    try {
+      const actor = await restoreSavedClothPhysicalHostV1(
+        {
+          row: savedRow,
+          selectedOperationNumber,
+          cardProjection,
+          bodySession,
+        },
+        controller.signal,
+      );
+      if (placementTurn.current !== turn || !live()) {
+        await actor.dispose();
+        throw new Error('The current saved placement or preview changed.');
+      }
+      turn.actor = actor;
+      const draft = await actor.preparePlacementEdit(controller.signal);
+      if (
+        !live() ||
+        draft.binding.outerSha256 !== prior.outerSha256 ||
+        draft.binding.graphCanonicalSha256 !== prior.graphCanonicalSha256 ||
+        draft.binding.compileInputSha256 !== prior.compileInputSha256 ||
+        draft.binding.physicalInitializationCanonicalSha256 !==
+          prior.physicalInitializationCanonicalSha256 ||
+        draft.binding.freshSnapshotSha256 !== prior.freshSnapshotSha256
+      )
+        throw new Error('The saved V7 changed. Reload the cloth before editing placement.');
+      turn.draft = draft;
+      setPlacementEditor({ status: 'editing', draft, error: null });
+    } catch (error) {
+      if (placementTurn.current !== turn) return;
+      releasePlacementEdit();
+      setPlacementEditor({ status: 'blocked', draft: null, error: detail(error) });
+    }
+  };
+  const saveSavedPlacementEdit = async (
+    draft: SavedV7PlacementEditV1,
+    pieces: readonly SavedV7PieceTranslationV1[],
+  ) => {
+    const turn = placementTurn.current;
+    if (!turn || !turn.actor || turn.draft !== draft || turn.saving || !turn.current()) return;
+    turn.saving = true;
+    setPlacementEditor({ status: 'saving', draft, error: null });
+    try {
+      await turn.actor.savePlacementEdit(draft, pieces, turn.controller.signal);
+      if (placementTurn.current !== turn) return;
+      if (turn.current()) retry();
+      else {
+        releasePlacementEdit();
+        setPlacementEditor({ status: 'idle', draft: null, error: null });
+      }
+    } catch (error) {
+      if (placementTurn.current !== turn) return;
+      releasePlacementEdit();
+      setPlacementEditor({ status: 'blocked', draft: null, error: detail(error) });
+    }
+  };
+  const cancelSavedPlacementEdit = () => {
+    if (placementTurn.current?.saving) return;
+    releasePlacementEdit();
+    setPlacementEditor({ status: 'idle', draft: null, error: null });
+  };
 
   const startFirstAuthoring = useCallback(async () => {
     if (
@@ -650,5 +800,11 @@ export function useSavedClothPhysicalHostV1({
     compileFirstAuthoring,
     saveFirstAuthoring,
     retryFirstPlacementSave,
+    placementEditor,
+    canEditSavedPlacement,
+    isEditingSavedPlacement: () => placementTurn.current !== null,
+    startSavedPlacementEdit,
+    saveSavedPlacementEdit,
+    cancelSavedPlacementEdit,
   } as const;
 }

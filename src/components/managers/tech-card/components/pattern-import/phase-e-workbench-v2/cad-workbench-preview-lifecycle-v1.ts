@@ -40,12 +40,14 @@ export function createCadWorkbenchPreviewLifecycleV1(
 ) {
   let current: PreviewTurn | null = null;
   let closing = Promise.resolve();
+  let cleanupCount = 0;
 
   const isCurrent = (turn: PreviewTurn) =>
     current === turn && !turn.cleanup && !turn.controller.signal.aborted;
 
   function close(turn: PreviewTurn) {
     if (turn.cleanup) return turn.cleanup;
+    cleanupCount += 1;
     const cleanup = Promise.resolve().then(async () => {
       if (!turn.device) {
         await turn.initialStop;
@@ -66,6 +68,10 @@ export function createCadWorkbenchPreviewLifecycleV1(
       }
     });
     turn.cleanup = cleanup;
+    const settled = () => {
+      cleanupCount -= 1;
+    };
+    void cleanup.then(settled, settled);
     // A late create can configure the shared canvas before resolving. Wait for its disposal
     // before a subsequent turn attempts to configure that canvas.
     closing = Promise.allSettled([closing, cleanup]).then(() => undefined);
@@ -87,6 +93,7 @@ export function createCadWorkbenchPreviewLifecycleV1(
   }
 
   return {
+    isIdle: () => current === null && cleanupCount === 0,
     async start(
       host: PreviewHost,
       computeCanvas: HTMLCanvasElement,

@@ -5,7 +5,10 @@ import { Button, Text } from 'ui';
 
 import type { CadWorkbenchPhysicalPreviewInteractionV1 } from './cad-workbench-physical-host-v1';
 import type { useSavedClothPhysicalHostV1 } from './use-saved-cloth-physical-host-v1';
-import { CadWorkbenchFirstPhysicalAuthoringV1 } from './cad-workbench-first-physical-authoring-v1';
+import {
+  CadWorkbenchFirstPhysicalAuthoringV1,
+  CadWorkbenchSavedPlacementEditorV1,
+} from './cad-workbench-first-physical-authoring-v1';
 import {
   createCadWorkbenchPreviewLifecycleV1,
   type CadWorkbenchPreviewStatusV1,
@@ -117,6 +120,7 @@ export function CadWorkbenchPhysicalHostControlsV1({
   const localStatus = previewStatus?.host === host ? previewStatus : null;
   const pending = localStatus?.pending ?? false;
   const localError = localStatus?.error;
+  const editingPlacement = state.isEditingSavedPlacement?.() ?? false;
 
   useLayoutEffect(
     () => () => {
@@ -126,7 +130,14 @@ export function CadWorkbenchPhysicalHostControlsV1({
   );
 
   const preview = () => {
-    if (disabled || !host || !computeCanvas.current || !previewCanvas.current) return;
+    if (
+      disabled ||
+      state.isEditingSavedPlacement?.() ||
+      !host ||
+      !computeCanvas.current ||
+      !previewCanvas.current
+    )
+      return;
     void lifecycle.start(host, computeCanvas.current, previewCanvas.current, (status) =>
       setPreviewStatus({ ...status, host }),
     );
@@ -242,7 +253,7 @@ export function CadWorkbenchPhysicalHostControlsV1({
             type='button'
             size='xs'
             variant='main'
-            disabled={disabled || pending}
+            disabled={disabled || pending || editingPlacement}
             onClick={preview}
           >
             {pending ? 'Preparing…' : previewReady ? 'Refresh preview' : 'Preview'}
@@ -262,10 +273,29 @@ export function CadWorkbenchPhysicalHostControlsV1({
             type='button'
             size='xs'
             variant='secondary'
-            disabled={disabled || pending}
-            onClick={state.retry}
+            disabled={disabled || pending || editingPlacement}
+            onClick={() => {
+              if (!state.isEditingSavedPlacement?.()) state.retry();
+            }}
           >
             Retry
+          </Button>
+        ) : null}
+        {state.canEditSavedPlacement &&
+        !pending &&
+        !previewReady &&
+        lifecycle.isIdle() &&
+        !editingPlacement ? (
+          <Button
+            type='button'
+            size='xs'
+            variant='secondary'
+            disabled={disabled}
+            onClick={() => {
+              if (!disabled) void state.startSavedPlacementEdit(lifecycle.isIdle);
+            }}
+          >
+            Edit placement
           </Button>
         ) : null}
         <Text
@@ -338,6 +368,10 @@ export function CadWorkbenchPhysicalHostControlsV1({
         </aside>
       ) : null}
       <CadWorkbenchFirstPhysicalAuthoringV1 state={state} disabled={disabled} />
+      <CadWorkbenchSavedPlacementEditorV1
+        state={state}
+        disabled={disabled || !state.canEditSavedPlacement || !lifecycle.isIdle()}
+      />
     </div>
   );
 }

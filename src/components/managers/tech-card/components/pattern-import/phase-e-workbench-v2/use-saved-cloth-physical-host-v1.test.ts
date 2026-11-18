@@ -249,6 +249,111 @@ function reactContainer() {
   };
 }
 
+it('edits only a current idle or failed V7 and reloads after one explicit save', async () => {
+  const root = createRoot(reactContainer() as never);
+  let latest: ReturnType<typeof useSavedClothPhysicalHostV1>;
+  const binding = Object.freeze({
+    sourceGeneration: 1,
+    graphCanonicalSha256: 'a'.repeat(64),
+    compileInputSha256: 'b'.repeat(64),
+    physicalInitializationCanonicalSha256: 'c'.repeat(64),
+    outerSha256: 'd'.repeat(64),
+    freshSnapshotSha256: 'e'.repeat(64),
+  });
+  const draft = {
+    binding,
+    pieces: [{ pieceId: 'FRONT', pieceLineKey: 'front', translationM: [1, 2, 3] as const }],
+  };
+  let snapshot = {
+    status: 'ready',
+    binding: binding as typeof binding | null,
+    numeric: { cleanupPending: false },
+  };
+  let notify = () => {};
+  const displayed = {
+    restore: mocks.restore,
+    dispose: vi.fn().mockResolvedValue(true),
+    getSnapshot: () => snapshot,
+    subscribe: (listener: () => void) => {
+      notify = listener;
+      return () => {};
+    },
+  };
+  const editActor = {
+    ...displayed,
+    dispose: vi.fn().mockResolvedValue(true),
+    getSnapshot: () => ({ status: 'ready', binding, numeric: { cleanupPending: false } }),
+    preparePlacementEdit: vi.fn().mockResolvedValue(draft),
+    savePlacementEdit: vi.fn().mockResolvedValue({ ok: true }),
+  };
+  const cold = {
+    ...displayed,
+    getSnapshot: () => coldSnapshot,
+  };
+  const cancelledActor = { ...editActor, dispose: vi.fn().mockResolvedValue(true) };
+  const coldSnapshot = {
+    status: 'ready',
+    binding: { ...binding, outerSha256: 'f'.repeat(64) },
+    numeric: { cleanupPending: false },
+  };
+  mocks.createHost
+    .mockReturnValueOnce(displayed)
+    .mockReturnValueOnce(cancelledActor)
+    .mockReturnValueOnce(editActor)
+    .mockReturnValueOnce(cold);
+  function Harness() {
+    latest = useSavedClothPhysicalHostV1({
+      row,
+      selectedOperationNumber: 10,
+      cardProjection: cardProjection as never,
+    });
+    return null;
+  }
+  try {
+    await act(async () => root.render(createElement(Harness)));
+    expect(latest!.canEditSavedPlacement).toBe(true);
+    await act(async () => latest!.startSavedPlacementEdit(() => false));
+    expect(mocks.createHost).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      snapshot = { ...snapshot, status: 'running16' };
+      notify();
+    });
+    expect(latest!.canEditSavedPlacement).toBe(false);
+    await act(async () => latest!.startSavedPlacementEdit(() => true));
+    expect(mocks.createHost).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      snapshot = { ...snapshot, status: 'blocked', binding: null };
+      notify();
+    });
+    expect(latest!.canEditSavedPlacement).toBe(true);
+    let idle = true;
+    await act(async () => latest!.startSavedPlacementEdit(() => idle));
+    expect(latest!.placementEditor).toMatchObject({ status: 'editing', draft });
+    await act(async () => latest!.cancelSavedPlacementEdit());
+    expect(cancelledActor.dispose).toHaveBeenCalledOnce();
+    expect(editActor.savePlacementEdit).not.toHaveBeenCalled();
+    expect(latest!.placementEditor.status).toBe('idle');
+    await act(async () => latest!.startSavedPlacementEdit(() => idle));
+    const pieces = [{ ...draft.pieces[0]!, translationM: [2, 2, 3] as const }];
+    idle = false;
+    await act(async () => latest!.saveSavedPlacementEdit(draft, pieces));
+    expect(editActor.savePlacementEdit).not.toHaveBeenCalled();
+    idle = true;
+    await act(async () => latest!.saveSavedPlacementEdit(draft, pieces));
+    expect(editActor.savePlacementEdit).toHaveBeenCalledExactlyOnceWith(
+      draft,
+      pieces,
+      expect.any(AbortSignal),
+    );
+    expect(editActor.dispose).toHaveBeenCalledOnce();
+    expect(mocks.createHost).toHaveBeenCalledTimes(4);
+    expect(latest!.host).toBe(cold);
+    expect(latest!.placementEditor.status).toBe('idle');
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
+
 describe('first physical authoring source lifetime', () => {
   let root: ReturnType<typeof createRoot>;
   let latest: ReturnType<typeof useSavedClothPhysicalHostV1>;

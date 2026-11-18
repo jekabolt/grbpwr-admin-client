@@ -1,5 +1,6 @@
 import { useEffect, useState, type ChangeEvent, type ReactNode } from 'react';
 import { Button, Input, Select, Text } from 'ui';
+import type { SavedV7PlacementEditV1 } from 'components/cloth-simulation-spike/saved-generic-durable-physical-host-v1';
 
 import {
   savedFullAssemblyFirstContourRoleV1,
@@ -564,5 +565,140 @@ export function CadWorkbenchFirstPhysicalAuthoringV1({
         </div>
       ) : null}
     </div>
+  );
+}
+
+function SavedPlacementTranslations({
+  draft,
+  state,
+  disabled,
+  saving,
+}: {
+  draft: SavedV7PlacementEditV1;
+  state: HostState;
+  disabled: boolean;
+  saving: boolean;
+}) {
+  const [values, setValues] = useState(() =>
+    draft.pieces.map(({ translationM }) => translationM.map(String)),
+  );
+  const parsed = values.map((entry) => entry.map((value) => finite(value)));
+  const complete = parsed.every((entry) => entry.every((value) => value !== null));
+  const changed = parsed.some((entry, index) =>
+    entry.some((value, axis) => value !== draft.pieces[index]!.translationM[axis]),
+  );
+  const busy = disabled || saving;
+  return (
+    <div className='space-y-stack'>
+      <Text component='p' size='micro' variant='label'>
+        World translation in metres. Saved pivots and rotations are retained.
+      </Text>
+      {draft.pieces.map(({ pieceId, pieceLineKey }, index) => (
+        <div key={pieceId} className='space-y-2 border-t border-hairline pt-2'>
+          <Text component='p' size='micro'>
+            {pieceId} · {pieceLineKey}
+          </Text>
+          <div className='grid grid-cols-3 gap-2'>
+            {(['X', 'Y', 'Z'] as const).map((axis, component) => (
+              <NumberField
+                key={axis}
+                name={`saved-placement-${pieceId}-${axis}`}
+                label={`${pieceId} ${axis} (m)`}
+                value={values[index]![component]!}
+                disabled={busy}
+                onChange={(value) =>
+                  setValues((current) =>
+                    current.map((entry, i) =>
+                      i === index
+                        ? entry.map((previous, j) => (j === component ? value : previous))
+                        : entry,
+                    ),
+                  )
+                }
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+      <Button
+        type='button'
+        size='xs'
+        variant='main'
+        disabled={busy || !complete || !changed}
+        onClick={() => {
+          if (busy || !complete || !changed) return;
+          void state.saveSavedPlacementEdit(
+            draft,
+            draft.pieces.map((piece, index) => ({
+              ...piece,
+              translationM: [parsed[index]![0]!, parsed[index]![1]!, parsed[index]![2]!],
+            })),
+          );
+        }}
+      >
+        {saving ? 'Saving…' : 'Save placement'}
+      </Button>
+    </div>
+  );
+}
+
+export function CadWorkbenchSavedPlacementEditorV1({
+  state,
+  disabled,
+}: {
+  state: HostState;
+  disabled: boolean;
+}) {
+  const editor = state.placementEditor;
+  if (!editor || editor.status === 'idle') return null;
+  return (
+    <section
+      aria-label='Saved physical placement'
+      className='pointer-events-auto absolute top-10 right-2 bottom-2 w-[min(28rem,calc(100%-1rem))] overflow-y-auto border border-borderColor bg-bgColor p-3'
+      data-cad-saved-placement-editor={editor.status}
+    >
+      <div className='mb-2 flex items-center justify-between gap-2'>
+        <Text component='p' size='small'>
+          Saved placement
+        </Text>
+        <Button
+          type='button'
+          size='xs'
+          variant='secondary'
+          disabled={editor.status === 'saving'}
+          onClick={state.cancelSavedPlacementEdit}
+        >
+          Close
+        </Button>
+      </div>
+      {editor.status === 'preparing' ? (
+        <Text component='p' size='micro' role='status'>
+          Verifying saved placement…
+        </Text>
+      ) : editor.status === 'blocked' ? (
+        <div className='space-y-2'>
+          <Text component='p' size='micro' role='alert' variant='errorLabel'>
+            {editor.error}
+          </Text>
+          <Button
+            type='button'
+            size='xs'
+            variant='secondary'
+            disabled={disabled}
+            onClick={state.retry}
+          >
+            Reload saved cloth
+          </Button>
+        </div>
+      ) : editor.draft ? (
+        <SavedPlacementTranslations
+          key={editor.draft.binding.outerSha256}
+          state={state}
+          draft={editor.draft}
+          disabled={disabled}
+          saving={editor.status === 'saving'}
+        />
+      ) : null}
+    </section>
   );
 }

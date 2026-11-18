@@ -69,7 +69,9 @@ describe('workbench preview lifecycle', () => {
     const publish = vi.fn();
     const duplicate = vi.fn();
 
+    expect(lifecycle.isIdle()).toBe(true);
     const started = lifecycle.start(physicalHost, computeCanvas, previewCanvas, publish);
+    expect(lifecycle.isIdle()).toBe(false);
     expect(publish).toHaveBeenCalledExactlyOnceWith({ pending: true, error: null });
     await lifecycle.start(physicalHost, computeCanvas, previewCanvas, duplicate);
     expect(duplicate).not.toHaveBeenCalled();
@@ -92,6 +94,7 @@ describe('workbench preview lifecycle', () => {
     expect(publish).toHaveBeenCalledTimes(1);
     mount.resolve(ok);
     await started;
+    expect(lifecycle.isIdle()).toBe(false);
     expect(publish).toHaveBeenLastCalledWith({ pending: false, error: null });
     expect(create).toHaveBeenCalledTimes(1);
     expect(session.dispose).not.toHaveBeenCalled();
@@ -108,6 +111,7 @@ describe('workbench preview lifecycle', () => {
     expect(session.dispose).toHaveBeenCalledTimes(1);
     expect(physicalHost.run16.mock.lastCall?.[0]).toBe(replacement.lease);
     await lifecycle.cancel(physicalHost);
+    expect(lifecycle.isIdle()).toBe(true);
   });
 
   it('disposes a device returned after a host change before reusing its compute canvas', async () => {
@@ -129,6 +133,7 @@ describe('workbench preview lifecycle', () => {
     const previous = lifecycle.start(previousHost, computeCanvas, previewCanvas, stale);
     await vi.waitFor(() => expect(create).toHaveBeenCalledTimes(1));
     const cancelled = lifecycle.cancel(previousHost);
+    expect(lifecycle.isIdle()).toBe(false);
     const next = lifecycle.start(nextHost, computeCanvas, previewCanvas, current);
     expect(nextHost.stopPreview).not.toHaveBeenCalled();
     expect(create).toHaveBeenCalledTimes(1);

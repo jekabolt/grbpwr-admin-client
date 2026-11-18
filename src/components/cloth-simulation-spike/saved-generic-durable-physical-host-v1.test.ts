@@ -75,7 +75,10 @@ import type {
 } from './dxf-garment-observed-strain-heatmap-preview-v1';
 import { bindCadWorkbenchPhysicalPreviewSelectionV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/cad-workbench-physical-host-v1';
 import { CadWorkbenchPhysicalHostControlsV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/cad-workbench-physical-host-controls-v1';
-import { CadWorkbenchFirstPhysicalAuthoringV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/cad-workbench-first-physical-authoring-v1';
+import {
+  CadWorkbenchFirstPhysicalAuthoringV1,
+  CadWorkbenchSavedPlacementEditorV1,
+} from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/cad-workbench-first-physical-authoring-v1';
 import {
   bindSavedFullAssemblyGenericFirstAuthoringV1,
   type SavedFullAssemblyTablePiecePlacementV1,
@@ -1858,6 +1861,146 @@ describe('durable facade refusal before any stored V7 authority exists', () => {
 });
 
 describe('fixed durable generic host, real encoded V7 and genuine fresh receipts', () => {
+  it.each(['save', 'conflict'] as const)(
+    'edits a current V7 through mounted placement fields and preserves old placement on CAS %s',
+    async (outcome) => {
+      const f = await fixture();
+      const prior = {
+        ...f.storage.v7,
+        postSaveReceiptSha256: semanticDocument(seed.row).persistence.receiptSealSha256,
+      };
+      outer = prior;
+      const baseClient = vi.mocked(abortableAdminService).getMockImplementation()!;
+      const put = vi.fn(async (request: PutTechCardPatternSemanticSidecarRequest) => {
+        expect(request.expectedPreviousSidecarSha256).toBe(prior.sidecarSha256);
+        expect(request.expectedCardLockVersion).toBe(seed.row.cardLockVersion);
+        expect(request.expectedSavedRowRevision).toBe(seed.row.revision);
+        if (outcome === 'conflict') throw new Error('Saved placement CAS conflict.');
+        outer = {
+          ...prior,
+          sidecarBytes: request.sidecarBytes,
+          sidecarSha256: request.sidecarSha256,
+          mediaType: request.mediaType,
+          byteLength: Buffer.from(request.sidecarBytes!, 'base64').length,
+        };
+        return { semanticSidecar: structuredClone(outer) };
+      });
+      vi.mocked(abortableAdminService).mockImplementation((signal) => ({
+        ...baseClient(signal),
+        GetTechCardPatternSemanticSidecar: async () => ({
+          semanticSidecar: structuredClone(outer),
+        }),
+        PutTechCardPatternSemanticSidecar: put,
+      }));
+      // The displayed V7 stays independent from the edit actor and its one-shot bind.
+      requireOk(await f.host.restore(f.request));
+      const actor = await freshPhysicalFixtureHost(f.body);
+      requireOk(await actor.host.restore(actor.request));
+      const edit = await actor.host.preparePlacementEdit();
+      const old = f.context.physicalInitialization.document;
+      expect(edit.pieces.map(({ translationM }) => translationM)).toEqual(
+        old.placements.map(({ translationM }) => translationM),
+      );
+      await expect(actor.host.savePlacementEdit({ ...edit }, edit.pieces)).rejects.toThrow(
+        'The saved placement edit expired.',
+      );
+      expect(put).not.toHaveBeenCalled();
+      type State = ComponentProps<typeof CadWorkbenchSavedPlacementEditorV1>['state'];
+      const save = vi.fn(
+        (
+          draft: Parameters<State['saveSavedPlacementEdit']>[0],
+          pieces: Parameters<State['saveSavedPlacementEdit']>[1],
+        ) => actor.host.savePlacementEdit(draft, pieces).then(() => undefined),
+      );
+      const state = {
+        placementEditor: { status: 'editing', draft: edit, error: null },
+        saveSavedPlacementEdit: save,
+        cancelSavedPlacementEdit: vi.fn(),
+      } as unknown as State;
+      vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+      vi.stubGlobal('window', { event: undefined, location: { origin: 'http://fixture.local' } });
+      cleanup.push(() => vi.unstubAllGlobals());
+      const view = mountAnnotationFixtureView((current: State) => {
+        const root = CadWorkbenchSavedPlacementEditorV1({ state: current, disabled: false });
+        const fields = Children.toArray(root?.props.children).find(
+          (item) =>
+            isValidElement(item) &&
+            typeof item.type === 'function' &&
+            item.type.name === 'SavedPlacementTranslations',
+        ) as ReactElement | undefined;
+        if (!fields || typeof fields.type !== 'function')
+          throw new Error('Saved placement fields are absent.');
+        return (fields.type as (props: unknown) => ReactNode)(fields.props);
+      });
+      await view.render(state);
+      const find = (name: string) =>
+        visitMountedTree(view.output(), (props) => props.name === name);
+      const submit = () =>
+        visitMountedTree(view.output(), (props) => props.children === 'Save placement')!;
+      expect(submit().disabled).toBe(true);
+      const goal = edit.pieces.map(({ translationM, ...piece }) => ({
+        ...piece,
+        translationM: [translationM[0] + 0.125, translationM[1], translationM[2]] as const,
+      }));
+      for (const [index, piece] of edit.pieces.entries()) {
+        const name = `saved-placement-${piece.pieceId}-X`;
+        expect(find(name)?.value).toBe(String(piece.translationM[0]));
+        await act(async () =>
+          (find(name)?.onChange as (s: string) => void)(String(goal[index]!.translationM[0])),
+        );
+      }
+      expect(submit().disabled).toBe(false);
+      let apply: Promise<void> | undefined;
+      await act(async () => {
+        (submit().onClick as () => void)();
+        apply = save.mock.results[0]!.value;
+        // The production hook catches persistence refusal and keeps the old displayed binding.
+        await apply?.catch(() => {});
+      });
+      expect(save).toHaveBeenCalledExactlyOnceWith(edit, goal);
+      expect(put).toHaveBeenCalledTimes(1);
+      const decodeOuter = (value: TechCardPatternSemanticSidecar) =>
+        V7.decodePatternImportDxfProductCompositeSidecarV7(
+          new Uint8Array(Buffer.from(value.sidecarBytes!, 'base64')),
+        );
+      const [before, after] = await Promise.all([decodeOuter(prior), decodeOuter(outer!)]);
+      expect(
+        V7.readPatternImportDxfProductCompositeComponentBytesV7(
+          requireOk(after).owner,
+          'composite-v6',
+        ),
+      ).toEqual(
+        V7.readPatternImportDxfProductCompositeComponentBytesV7(
+          requireOk(before).owner,
+          'composite-v6',
+        ),
+      );
+      if (outcome === 'conflict') {
+        await expect(apply).rejects.toThrow(/fresh saved Composite V7 differs/i);
+        expect(outer).toEqual(prior);
+      } else {
+        await expect(apply).resolves.toBeUndefined();
+        expect(outer!.sidecarSha256).not.toBe(prior.sidecarSha256);
+      }
+      expect(f.host.getSnapshot().binding?.outerSha256).toBe(prior.sidecarSha256);
+      const cold = await freshPhysicalFixtureHost(f.body);
+      requireOk(await cold.host.restore(cold.request));
+      const saved = physicalReader.projectSavedFullAssemblyPhysicalSnapshotV1(cold.reader)!;
+      expect(saved.physicalInitialization).toEqual(
+        outcome === 'conflict'
+          ? old
+          : {
+              ...old,
+              placements: old.placements.map((piece, index) => ({
+                ...piece,
+                translationM: goal[index]!.translationM,
+              })),
+            },
+      );
+      expect(ports.calls).toEqual([]);
+    },
+    120000,
+  );
   it('restores exact complete intent through a fresh one-shot native owner and genuine reader', async () => {
     const f = await fixture();
     const result = await f.host.restore(f.request);
@@ -1977,6 +2120,12 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
       compileFirstAuthoring: async () => {},
       saveFirstAuthoring: save,
       retryFirstPlacementSave: async () => {},
+      placementEditor: { status: 'idle', draft: null, error: null },
+      canEditSavedPlacement: false,
+      isEditingSavedPlacement: () => false,
+      startSavedPlacementEdit: async () => {},
+      saveSavedPlacementEdit: async () => {},
+      cancelSavedPlacementEdit: () => {},
     };
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     vi.stubGlobal('window', { event: undefined, location: { origin: 'http://fixture.local' } });
@@ -2167,6 +2316,12 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
         compileFirstAuthoring: async () => {},
         saveFirstAuthoring: async () => {},
         retryFirstPlacementSave: async () => {},
+        placementEditor: { status: 'idle', draft: null, error: null },
+        canEditSavedPlacement: false,
+        isEditingSavedPlacement: () => false,
+        startSavedPlacementEdit: async () => {},
+        saveSavedPlacementEdit: async () => {},
+        cancelSavedPlacementEdit: () => {},
       };
       const controls = CadWorkbenchPhysicalHostControlsV1({ state });
       for (const [canvas, identify] of [

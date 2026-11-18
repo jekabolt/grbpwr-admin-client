@@ -110,6 +110,15 @@ export type SavedGenericDurablePhysicalBindingV1 = Readonly<{
   /** Ephemeral same-read join; never persist this digest inside its own outer component. */
   freshSnapshotSha256: string;
 }>;
+export type SavedV7PieceTranslationV1 = Readonly<{
+  pieceId: string;
+  pieceLineKey: string;
+  translationM: readonly [number, number, number];
+}>;
+export type SavedV7PlacementEditV1 = Readonly<{
+  binding: SavedGenericDurablePhysicalBindingV1;
+  pieces: readonly SavedV7PieceTranslationV1[];
+}>;
 export type SavedGenericDurablePhysicalHostSnapshotV1 = Readonly<{
   version: typeof SAVED_GENERIC_DURABLE_PHYSICAL_HOST_V1;
   status:
@@ -662,6 +671,18 @@ export function createSavedGenericDurablePhysicalHostV1(
       releaseReads(ticket);
     }
   }
+  let placementEdit: SavedV7PlacementEditV1 | null = null;
+  const editableAdmission = () => {
+    if (
+      !admission ||
+      snapshot.status !== 'ready' ||
+      bridges.size ||
+      lease16 ||
+      host.getSnapshot().cleanupPending
+    )
+      throw new Error('A freshly restored saved V7 with no active preview is required.');
+    return admission;
+  };
   return Object.freeze({
     getSnapshot: () => snapshot,
     subscribe(listener: () => void) {
@@ -776,6 +797,102 @@ export function createSavedGenericDurablePhysicalHostV1(
           publish({ status: 'blocked', binding: null, detail: reason(error) });
         }
         return failAccepted(a, ticket, error, signal);
+      } finally {
+        releaseReads(ticket);
+      }
+    },
+    async preparePlacementEdit(signal?: AbortSignal): Promise<SavedV7PlacementEditV1> {
+      let ticket: Operation | null = null;
+      try {
+        const done = await work(signal, async (op) => {
+          ticket = op;
+          const a = editableAdmission();
+          const t = await verify(a, op);
+          terminal(a, op, t);
+          const pieces = a.durable.physicalInitialization.placements.map(
+            ({ pieceId, translationM }) => {
+              const piece = a.durable.graph.pieces.find((p) => p.pieceId === pieceId);
+              if (!piece) throw new Error('A saved placement has no exact source piece.');
+              return Object.freeze({
+                pieceId,
+                pieceLineKey: piece.pieceLineKey,
+                translationM: Object.freeze([...translationM] as [number, number, number]),
+              });
+            },
+          );
+          return { a, t, pieces };
+        });
+        terminal(done.value.a, done.op, done.value.t, true);
+        placementEdit = Object.freeze({
+          binding: done.value.a.publicBinding,
+          pieces: Object.freeze(done.value.pieces),
+        });
+        return placementEdit;
+      } finally {
+        releaseReads(ticket);
+      }
+    },
+    async savePlacementEdit(
+      edit: SavedV7PlacementEditV1,
+      requested: readonly SavedV7PieceTranslationV1[],
+      signal?: AbortSignal,
+    ) {
+      let ticket: Operation | null = null;
+      const translated = capture(requested);
+      try {
+        const done = await work(signal, async (op) => {
+          ticket = op;
+          const a = editableAdmission();
+          if (placementEdit !== edit || edit.binding !== a.publicBinding)
+            throw new Error('The saved placement edit expired.');
+          placementEdit = null;
+          if (
+            translated.length !== edit.pieces.length ||
+            !translated.every((entry, i) => {
+              const prior = edit.pieces[i];
+              return (
+                entry.pieceId === prior?.pieceId &&
+                entry.pieceLineKey === prior.pieceLineKey &&
+                Array.isArray(entry.translationM) &&
+                entry.translationM.length === 3 &&
+                entry.translationM.every(Number.isFinite)
+              );
+            }) ||
+            translated.every(
+              (entry, i) =>
+                canonical(entry.translationM) === canonical(edit.pieces[i]!.translationM),
+            )
+          )
+            throw new Error('Change the translation of a current saved piece.');
+          const { persistCurrentSavedGenericObservedPhysicalHostV1 } = await import(
+            'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-full-assembly-physical-document-production-v1'
+          );
+          const t = await verify(a, op);
+          terminal(a, op, t);
+          const original = a.durable.physicalInitialization;
+          const initial = await host.bindInitialization(
+            {
+              ...original,
+              placements: original.placements.map((piece, i) => ({
+                ...piece,
+                translationM: translated[i]!.translationM,
+              })),
+            },
+            a.generation,
+            op.controller.signal,
+          );
+          check(op, a.epoch);
+          if (!initial.ok) throw new Error(initial.detail);
+          const result = await persistCurrentSavedGenericObservedPhysicalHostV1(
+            host,
+            a.generation,
+            op.controller.signal,
+          );
+          check(op, a.epoch);
+          if (!result.ok) throw new Error(result.blockers[0].detail);
+          return result;
+        });
+        return done.value;
       } finally {
         releaseReads(ticket);
       }
