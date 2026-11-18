@@ -7,6 +7,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { MODEL_OPEN_REFERENCE_DIRECT_NEUTRAL_POSE_V9 } from 'components/managers/model/components/model-open-reference-direct-pose-v9';
 import {
   createModelMannequinPoseDocumentV2,
+  encodeModelMannequinPoseDocumentV2,
   fingerprintModelMannequinPoseDocumentV2,
 } from 'lib/cloth/body/model-mannequin-pose-document-v2';
 import { readCompleteSavedAssemblySourceV1 } from './saved-assembly-complete-source-rpc-v1';
@@ -23,6 +24,7 @@ import {
   SAVED_COMPLETE_ASSEMBLY_PLACEMENT_PROFILE_V1,
   SAVED_COMPLETE_ASSEMBLY_PLACEMENT_V9,
 } from './saved-cross-material-placement-document-v9';
+import { matchesSavedNeutralPlacementBodyV1 } from './saved-cross-material-placement-model-binding-v1';
 import {
   buildSavedWholeAssemblyPlacementDocumentV10,
   readSavedWholeAssemblyPlacementDocumentV10,
@@ -222,6 +224,25 @@ let reviewText: string;
 let v8: TechCardPatternSemanticSidecar;
 let v9: TechCardPatternSemanticSidecar;
 let placed: SavedWholeAssemblyPlacementResultV10;
+
+it('requires the exact saved neutral pose even when the displayed geometry hashes agree', () => {
+  const neutral = createModelMannequinPoseDocumentV2(MODEL_OPEN_REFERENCE_DIRECT_NEUTRAL_POSE_V9);
+  const changed = createModelMannequinPoseDocumentV2({
+    ...MODEL_OPEN_REFERENCE_DIRECT_NEUTRAL_POSE_V9,
+    legMode: 'independent',
+  });
+  const displayed = (poseDocument: typeof neutral) => ({
+    identity: {
+      modelId: `tech-card-base-model:${body.modelId}`,
+      poseDocumentCanonicalKey: encodeModelMannequinPoseDocumentV2(poseDocument),
+    },
+    poseDocument,
+    displayedPose: poseDocument.pose,
+    hashes: body.observed,
+  });
+  expect(matchesSavedNeutralPlacementBodyV1(displayed(neutral), body)).toBe(true);
+  expect(matchesSavedNeutralPlacementBodyV1(displayed(changed), body)).toBe(false);
+});
 
 function layout(): SavedWholeAssemblyPlacementLayoutV10 {
   return {

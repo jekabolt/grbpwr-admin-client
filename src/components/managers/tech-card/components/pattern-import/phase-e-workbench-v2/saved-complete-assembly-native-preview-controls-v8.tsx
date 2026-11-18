@@ -3,7 +3,6 @@ import {
   projectCurrentModelDisplayedTriangleBodyInputV1,
   subscribeModelDisplayedTriangleBodyInputInvalidationV1,
   type ModelDisplayedTriangleBodyOwnedInputV1,
-  type ModelDisplayedTriangleBodyInputProjectionV1,
 } from 'components/cloth-simulation-spike/model-displayed-triangle-body-input-v1';
 import type { MeasurementSurfaceAcceptedClothV1 } from 'components/shared/measurement-watertight-surface-v1-stage';
 import { Button, Input, Text } from 'ui';
@@ -16,23 +15,13 @@ import {
 } from './cad-workbench-preview-lifecycle-v1';
 import { canonicalizePatternImportDxfPhaseESavedAssemblyValueV1 as canonical } from './saved-assembly-topology-hash-v1';
 import type { SavedCrossMaterialReviewForPreviewV8 } from './saved-complete-assembly-native-review-action-v8';
+import { matchesSavedNeutralPlacementBodyV1 as matchesSavedBody } from './saved-cross-material-placement-model-binding-v1';
 import type {
   SavedWholeAssemblyPreviewProgressV1,
   SavedWholeAssemblyResumeV1,
 } from './saved-whole-assembly-staged-preview-v1';
 
 type PreviewKind = 'seam' | 'whole';
-
-function matchesSavedBody(
-  displayed: ModelDisplayedTriangleBodyInputProjectionV1 | null,
-  saved: NonNullable<SavedCrossMaterialReviewForPreviewV8['placement']>['body'],
-) {
-  return (
-    displayed?.identity.modelId === `tech-card-base-model:${saved.modelId}` &&
-    displayed.hashes.bodyPositionsFloat32LeSha256 === saved.observed.bodyPositionsFloat32LeSha256 &&
-    displayed.hashes.bodyTrianglesUint32LeSha256 === saved.observed.bodyTrianglesUint32LeSha256
-  );
-}
 
 export default function SavedCompleteAssemblyNativePreviewControlsV8({
   review,

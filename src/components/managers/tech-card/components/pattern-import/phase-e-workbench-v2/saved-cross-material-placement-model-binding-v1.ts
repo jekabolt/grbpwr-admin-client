@@ -3,6 +3,7 @@ import type { common_Model } from 'api/proto-http/admin';
 import {
   projectCurrentModelDisplayedTriangleBodyInputV1,
   type ModelDisplayedTriangleBodyOwnedInputV1,
+  type ModelDisplayedTriangleBodyInputProjectionV1,
 } from 'components/cloth-simulation-spike/model-displayed-triangle-body-input-v1';
 import { getModelMannequinPoseV1 } from 'components/managers/model/components/model-mannequin-pose-transport-v1';
 import { MODEL_OPEN_REFERENCE_DIRECT_NEUTRAL_POSE_V9 } from 'components/managers/model/components/model-open-reference-direct-pose-v9';
@@ -15,6 +16,8 @@ import {
 import { computePatternImportDxfPhaseEDomainSeparatedCanonicalSha256V1 } from './saved-assembly-topology-hash-v1';
 
 const bodyInputDomain = 'tech-card-physical-model-inputs/1';
+const neutralPose = createModelMannequinPoseDocumentV2(MODEL_OPEN_REFERENCE_DIRECT_NEUTRAL_POSE_V9);
+const neutralPoseKey = encodeModelMannequinPoseDocumentV2(neutralPose);
 const genderValues = new Set(['GENDER_ENUM_UNISEX', 'GENDER_ENUM_MALE', 'GENDER_ENUM_FEMALE']);
 const measuredSources = new Set([
   'BODY_MEASUREMENT_SOURCE_MANUAL_TAPE',
@@ -75,20 +78,10 @@ export async function readCurrentSavedNeutralPlacementModelV1(
 ) {
   signal.throwIfAborted();
   const displayed = projectCurrentModelDisplayedTriangleBodyInputV1(body);
-  const neutral = createModelMannequinPoseDocumentV2(MODEL_OPEN_REFERENCE_DIRECT_NEUTRAL_POSE_V9);
-  const neutralKey = encodeModelMannequinPoseDocumentV2(neutral);
   const modelId = Number(
     displayed?.identity.modelId.match(/^tech-card-base-model:([1-9][0-9]*)$/)?.[1],
   );
-  if (
-    !displayed ||
-    !Number.isSafeInteger(modelId) ||
-    displayed.identity.poseDocumentCanonicalKey !== neutralKey ||
-    encodeModelMannequinPoseDocumentV2(displayed.poseDocument) !== neutralKey ||
-    encodeModelMannequinPoseDocumentV2(
-      createModelMannequinPoseDocumentV2(displayed.displayedPose),
-    ) !== neutralKey
-  )
+  if (!displayed || !Number.isSafeInteger(modelId) || !hasExactNeutralPose(displayed))
     throw new Error('A currently displayed, exact neutral saved mannequin is required.');
 
   const client = abortableAdminService(signal);
@@ -111,7 +104,7 @@ export async function readCurrentSavedNeutralPlacementModelV1(
 
   const [modelPhysicalInputsSha256, poseFingerprint] = await Promise.all([
     fingerprintSavedPlacementModelInputsV1(model, signal),
-    fingerprintModelMannequinPoseDocumentV2(neutral),
+    fingerprintModelMannequinPoseDocumentV2(neutralPose),
   ]);
   signal.throwIfAborted();
   if (!body.isCurrent())
@@ -129,4 +122,38 @@ export async function readCurrentSavedNeutralPlacementModelV1(
       bodyTrianglesUint32LeSha256: displayed.hashes.bodyTrianglesUint32LeSha256,
     }),
   });
+}
+
+type DisplayedPlacementBody = Pick<
+  ModelDisplayedTriangleBodyInputProjectionV1,
+  'poseDocument' | 'displayedPose' | 'hashes'
+> &
+  Readonly<{
+    identity: Pick<
+      ModelDisplayedTriangleBodyInputProjectionV1['identity'],
+      'modelId' | 'poseDocumentCanonicalKey'
+    >;
+  }>;
+
+function hasExactNeutralPose(displayed: Omit<DisplayedPlacementBody, 'hashes'>) {
+  return (
+    displayed.identity.poseDocumentCanonicalKey === neutralPoseKey &&
+    encodeModelMannequinPoseDocumentV2(displayed.poseDocument) === neutralPoseKey &&
+    encodeModelMannequinPoseDocumentV2(
+      createModelMannequinPoseDocumentV2(displayed.displayedPose),
+    ) === neutralPoseKey
+  );
+}
+
+/** A previously saved neutral placement is valid only for its exact observed body and pose. */
+export function matchesSavedNeutralPlacementBodyV1(
+  displayed: DisplayedPlacementBody | null,
+  saved: Awaited<ReturnType<typeof readCurrentSavedNeutralPlacementModelV1>>,
+) {
+  return (
+    displayed?.identity.modelId === `tech-card-base-model:${saved.modelId}` &&
+    displayed.hashes.bodyPositionsFloat32LeSha256 === saved.observed.bodyPositionsFloat32LeSha256 &&
+    displayed.hashes.bodyTrianglesUint32LeSha256 === saved.observed.bodyTrianglesUint32LeSha256 &&
+    hasExactNeutralPose(displayed)
+  );
 }
