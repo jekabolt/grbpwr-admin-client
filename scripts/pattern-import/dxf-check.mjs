@@ -24,8 +24,10 @@ function readBlocks(text) {
   const blocks = [];
   let blk = null;
   let ent = null;
+  let polyline = null;
   const flush = () => {
     if (ent && blk && ent.type === 'LWPOLYLINE') blk.polys.push(ent);
+    if (ent?.type === 'VERTEX' && polyline) polyline.pts.push(...ent.pts);
     ent = null;
   };
   for (let i = 0; i + 1 < l.length; i += 2) {
@@ -33,18 +35,25 @@ function readBlocks(text) {
     const v = l[i + 1].trim();
     if (code === 0) {
       flush();
+      if (v !== 'VERTEX' && polyline) {
+        if (v === 'SEQEND') blk.polys.push(polyline);
+        polyline = null;
+      }
       if (v === 'BLOCK') blk = { name: null, polys: [] };
       else if (v === 'ENDBLK') {
         if (blk?.name && !blk.name.startsWith('*')) blocks.push(blk);
         blk = null;
-      } else if (blk) ent = { type: v, layer: null, closed: false, pts: [] };
+      } else if (blk) {
+        ent = { type: v, layer: null, closed: false, pts: [] };
+        if (v === 'POLYLINE') polyline = ent;
+      }
       continue;
     }
     if (blk && !ent && code === 2) blk.name = v;
     if (!ent) continue;
     if (code === 8) ent.layer = v;
     else if (code === 70) ent.closed = (+v & 1) === 1;
-    else if (code === 10) ent.pts.push({ x: +v, y: 0 });
+    else if (code === 10 && ent.type !== 'POLYLINE') ent.pts.push({ x: +v, y: 0 });
     else if (code === 20 && ent.pts.length) ent.pts[ent.pts.length - 1].y = +v;
   }
   return blocks;
