@@ -136,6 +136,7 @@ it('reopens a genuine manifest-bearing writer revision with native sewing IDs bo
     expect(result.evidence?.writerSha256).toBe(seed.row.sha256);
     expect(result.graph?.source.handoffSource.exportSha256).toBe(seed.row.sha256);
     expect(result.graph?.source.handoffSource.exporterId).toBe('grbpwr.saved-native-drawn-sewing');
+    expect(result.graph?.source.handoffSource.provenanceKind).toBe('untrusted-product');
   } finally {
     compiler.dispose();
     owner.dispose();

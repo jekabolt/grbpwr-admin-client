@@ -852,7 +852,10 @@ export function createSavedFullAssemblyCompileSessionV1(): SavedFullAssemblyComp
           ? await stage(() =>
               buildDxfAssemblyHandoffV1({
                 schemaVersion: surface.handoff.schemaVersion,
-                source: surface.handoff.source,
+                source: {
+                  ...surface.handoff.source,
+                  provenanceKind: unsigned.provenanceKind,
+                },
                 physicalSurface: surface.handoff.physicalSurface,
                 pieces: surface.handoff.pieces.map((p) => ({
                   ...p,
