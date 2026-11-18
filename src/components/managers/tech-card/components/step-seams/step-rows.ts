@@ -8,21 +8,27 @@ import { orderSideAlongOutline } from 'lib/assembly-skeleton/union';
 import { apply } from 'lib/assembly-skeleton/union/affine';
 import { resolveEdge } from 'lib/assembly-skeleton/union';
 import {
+  anchorOfRunId,
   expandSidePart,
+  SEAMS,
   resolveSeamDecisions,
   type EdgeAnchor,
   type SeamPlacement,
   type SidePart,
   type StoredSeam,
+  type StoredSeamDirection,
 } from 'lib/seams';
 
 import { handRow, type AnchorCtx, type HandRowRefusal } from '../assembly-seams/seam-actions';
 import { laysRow } from './live-row';
+import { innerRangesAreContiguous, sideParts, surfacePartSide, type SidePick } from './span-pick';
 import {
   innerId,
+  isClosedInner,
   parseInner,
   pieceOfTarget,
   polylineLenMm,
+  surfaceRow,
   type FormOpLike,
   type TargetId,
 } from './step-seams-model';
@@ -87,6 +93,62 @@ const edgeByEdge = (parts: readonly SidePart[], geoms: ReadonlyMap<string, Piece
     part.range ? expandSidePart(part, geoms) : edgeIdsOf(part.target).map((target) => ({ target })),
   );
 
+/** The ordinary surface pick as it was confirmed: the inner host and every chosen part span. */
+export function surfaceRowFromPick(
+  pick: SidePick,
+  geoms: ReadonlyMap<string, PieceGeom>,
+  innerLines: ReadonlyMap<string, readonly (readonly Pt2[])[]>,
+  anchorCtx: AnchorCtx,
+  direction: StoredSeamDirection = 'unknown',
+): StoredSeam | null {
+  const partSide = surfacePartSide(pick, (id) => !!parseInner(id));
+  if (!partSide) return null;
+  const hostSide = partSide === 'a' ? 'b' : 'a';
+  const [hostTarget] = pick[hostSide];
+  const host = hostTarget && parseInner(hostTarget);
+  const geom = host && geoms.get(host.piece);
+  const line = host && innerLines.get(host.piece)?.[host.k];
+  if (pick[hostSide].length !== 1 || !host || !geom || !line) return null;
+  const ranges = pick.spans[hostSide][hostTarget];
+  if (ranges && !innerRangesAreContiguous(ranges, polylineLenMm(line), isClosedInner(line)))
+    return null;
+
+  const selected = sideParts(pick[partSide], pick.spans[partSide]);
+  if (!selected.length || selected.length > SEAMS.maxAnchorsPerSide) return null;
+  const partPiece = pieceOfTarget(selected[0].target);
+  if (partPiece === host.piece) return null;
+  const partAnchors: EdgeAnchor[] = [];
+  for (const { target, range } of selected) {
+    if (parseInner(target) || pieceOfTarget(target) !== partPiece) return null;
+    const len = resolveEdge(target, geoms)?.len ?? 0;
+    if (!(len > 0) || !Number.isFinite(len)) return null;
+    let shares: [number, number] | undefined;
+    if (range) {
+      const [from, to] = range;
+      if (!Number.isFinite(from) || !Number.isFinite(to) || from < 0 || to <= from || to > len)
+        return null;
+      shares = [from / len, to / len];
+    }
+    const anchor = anchorOfRunId(anchorCtx.pieces, target, anchorCtx.grainDeg ?? undefined, shares);
+    if (!anchor || anchor.range[0] >= anchor.range[1]) return null;
+    if (
+      shares &&
+      (shares[0] > 0 || shares[1] < 1) &&
+      anchor.range[0] === 0 &&
+      anchor.range[1] === 1
+    )
+      return null;
+    partAnchors.push(anchor);
+  }
+
+  const row = surfaceRow(
+    { geom, k: host.k, line, grainDeg: anchorCtx.grainDeg?.get(host.piece) ?? 0, ranges },
+    partAnchors,
+    undefined,
+  );
+  return row ? { ...row, direction } : null;
+}
+
 /** The edge ids and inner targets an anchor names on today's drawing (by its persisted hint). */
 export function rowTargetsOfAnchor(anchor: EdgeAnchor): TargetId[] {
   const inner = /^i(\d+)$/.exec(anchor.edgeHint);
@@ -112,12 +174,7 @@ export function storedSeamSides(
     anchors.flatMap((anchor) => {
       const targets = rowTargetsOfAnchor(anchor);
       const inner = targets.length === 1 && !!parseInner(targets[0]);
-      if (
-        row.kind === 'edge' ||
-        (row.kind === 'surface' && !inner) ||
-        row.kind === 'closure' ||
-        targets.length === 0
-      )
+      if (row.kind === 'edge' || row.kind === 'closure' || targets.length === 0)
         return targets.map((target) => ({ target }));
       const mark = inner ? parseInner(targets[0]) : null;
       const currentLine = mark ? innerLines?.get(mark.piece)?.[mark.k] : undefined;
@@ -166,7 +223,12 @@ export function candidateOfStoredSeam(
     const mark = a.map(parseInner).find((target) => target?.piece === host);
     const edge = b.find((target) => !parseInner(target));
     return mark
-      ? seamOfSides(parts, geoms, innerLines, placement)
+      ? seamOfSides(
+          { a: parts.a, b: b.map((target) => ({ target })) },
+          geoms,
+          innerLines,
+          placement,
+        )
       : surfaceSeam(host, part, [], geoms, placement, edge);
   }
   const hasRealRange =

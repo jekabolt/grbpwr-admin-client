@@ -23,6 +23,7 @@ import {
   card6InnerLines,
   card6Step,
 } from './card6.fixture';
+import { surfaceRowFromPick } from './step-rows';
 import {
   deltaMm,
   closedInner,
@@ -1464,6 +1465,39 @@ describe('surface seam rows', () => {
       ),
     ).toBeNull();
   });
+  it('refuses the entire surface pick when its second outline range cannot be stored', () => {
+    const part = rect('FLP', 120, 60);
+    const geoms = new Map([
+      [host.pieceKey, host],
+      [part.pieceKey, part],
+    ]);
+    const inner = new Map<string, Pt2[][]>([
+      [
+        host.pieceKey,
+        [
+          [
+            [20, -50],
+            [180, -50],
+          ],
+        ],
+      ],
+    ]);
+    const pick = {
+      a: [`${host.pieceKey}:i0`],
+      b: ['FLP#0', 'FLP#1'],
+      spans: { a: {}, b: { 'FLP#1': [[20, 20.0000001]] as const } },
+    };
+    const context = { pieces: [...geoms.values()], grainDeg: null, nameOf: (id: string) => id };
+    expect(surfaceRowFromPick(pick, geoms, inner, context)).toBeNull();
+    expect(
+      surfaceRowFromPick({ ...pick, b: ['FLP#0', 'FLP#99'] }, geoms, inner, context),
+    ).toBeNull();
+    expect(surfaceRowFromPick({ ...pick, b: ['FLP#0'] }, geoms, inner, context)).toMatchObject({
+      direction: 'unknown',
+      sideB: [{ edgeHint: 'FLP#0', range: [0, 1] }],
+    });
+  });
+
   it('a part with no picked edge anchors on its longest edge', () => {
     expect(longestEdge(rect('FLP', 120, 60))).toBe('FLP#0');
     expect(longestEdge(undefined)).toBeNull();

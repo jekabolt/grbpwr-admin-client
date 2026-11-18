@@ -9,7 +9,10 @@ import type {
 } from 'api/proto-http/admin';
 import { toWire, type StoredPose, type StoredRow } from 'lib/seams';
 
-import { CARD6_SEAMS } from '../step-seams/card6.fixture';
+import { CARD6_SEAMS, card6Geoms, card6InnerLines } from '../step-seams/card6.fixture';
+import { innerId, parseInner, pieceOfTarget } from '../step-seams/step-seams-model';
+import { NO_SPANS, pickFreeSpan, surfacePick, type SidePick } from '../step-seams/span-pick';
+import { storedSeamSides, surfaceRowFromPick } from '../step-seams/step-rows';
 import type { TechCardFormData } from '../schema';
 import { createAutosaveMachine, type SaveResult } from '../useTechCardAutosave';
 import { linksByOperation, type SeamChange } from './seam-change-plan';
@@ -143,6 +146,88 @@ describe('one gesture, one ChangeTechCardSeams', () => {
     expect(useSeamsStore.getState().serverVersion).toBe(8);
     expect(useSeamsStore.getState().pending).toEqual({});
   });
+
+  it.each([
+    [undefined, 'TECH_CARD_SEAM_DIRECTION_UNKNOWN'],
+    ['same', 'TECH_CARD_SEAM_DIRECTION_SAME'],
+    ['reversed', 'TECH_CARD_SEAM_DIRECTION_REVERSED'],
+  ] as const)(
+    'ACCEPT stores the selected 1×2 surface parts at one CAS with direction %s',
+    async (direction, wireDirection) => {
+      const geoms = card6Geoms();
+      const innerLines = card6InnerLines();
+      const hostTarget = innerId('SLV_R', 0);
+      const part = geoms.get('FLP_R_MAIN')!;
+      const pickedEdges = [part.edges[1], part.edges[0]];
+      const ranges = [
+        [0.25, 0.625],
+        [0.2, 0.8],
+      ] as const;
+      const f = fakeBridge({ operationNumber: () => 250 });
+      const pickRules = { isInner: (id: string) => !!parseInner(id), pieceOf: pieceOfTarget };
+      const hostSide = direction === 'same' ? 'b' : 'a';
+      const partSide = hostSide === 'a' ? 'b' : 'a';
+      let pick: SidePick = { a: [], b: [], spans: NO_SPANS, [hostSide]: [hostTarget] };
+      pickedEdges.forEach(({ id, lenMm }, i) => {
+        const [from, to] = ranges[i];
+        pick = surfacePick(
+          pickFreeSpan(pick, partSide, id, [from * lenMm, to * lenMm], lenMm, pickRules),
+          pickRules.isInner,
+          pickRules.pieceOf,
+          id,
+        );
+      });
+      const row = surfaceRowFromPick(
+        pick,
+        geoms,
+        innerLines,
+        { pieces: [...geoms.values()], grainDeg: new Map(), nameOf: (id) => id },
+        direction,
+      )!;
+      expect(row).not.toBeNull();
+      const request = vi.fn(async (req: ChangeTechCardSeamsRequest) => {
+        expect(req.expectedLockVersion).toBe(7);
+        expect(req.upsert?.[0]).toMatchObject({
+          kind: 'TECH_CARD_SEAM_KIND_SURFACE',
+          direction: wireDirection,
+          sideA: { parts: [{ pieceLineKey: 'SLV_R', edgeHint: 'i0', rangeFrom: 0, rangeTo: 0 }] },
+          sideB: {
+            parts: pickedEdges.map(({ id }, i) => ({
+              pieceLineKey: part.pieceKey,
+              edgeHint: id,
+              rangeFrom: ranges[i][0],
+              rangeTo: ranges[i][1],
+            })),
+          },
+        });
+        expect(req.upsert?.[0]?.sideA?.parts).toHaveLength(1);
+        expect(req.upsert?.[0]?.sideB?.parts).toHaveLength(2);
+        expect(req.link).toEqual([{ operationNumber: 250, seamKey: row.seamKey }]);
+        return reply(8, [a, row], [{ operationNumber: 250, seamKeys: [row.seamKey] }]);
+      });
+      const result = await runSeamChange(
+        CARD,
+        { upsert: [row], link: [{ step, seamKey: row.seamKey }] },
+        { verb: 'decision', pastInvalidForm: true },
+        depsOf(f.bridge, request),
+      );
+      expect(result.ok).toBe(true);
+      expect(request).toHaveBeenCalledOnce();
+      const stored = rowsOf(useSeamsStore.getState()).find(
+        ({ seamKey }) => seamKey === row.seamKey,
+      )!;
+      expect(stored.direction).toBe(direction ?? 'unknown');
+      expect(stored.sideB.map(({ edgeHint, range }) => [edgeHint, range])).toEqual(
+        pickedEdges.map(({ id }, i) => [id, ranges[i]]),
+      );
+      const displayed = storedSeamSides(stored, geoms, innerLines).parts.b;
+      displayed.forEach(({ target, range }, i) => {
+        expect(target).toBe(pickedEdges[i].id);
+        expect(range?.[0]).toBeCloseTo(ranges[i][0] * pickedEdges[i].lenMm);
+        expect(range?.[1]).toBeCloseTo(ranges[i][1] * pickedEdges[i].lenMm);
+      });
+    },
+  );
 
   it('the key the row was stored under comes back in keyMap', async () => {
     const f = fakeBridge();

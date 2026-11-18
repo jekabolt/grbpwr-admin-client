@@ -2851,8 +2851,8 @@ export function innerAnchor(
 }
 
 /**
- * A surface seam: the host's inner line on side A, the part on side B (its picked edges, or its
- * longest edge — the drawing places the part itself). A hand placement rides on both anchors.
+ * A surface seam stores the host's inner line on side A and the chosen part anchors on side B.
+ * An explicit hand placement rides on both sides.
  */
 export function surfaceRow(
   host: {
@@ -2866,11 +2866,12 @@ export function surfaceRow(
   placement: SeamPlacement | undefined,
   seamKey = newSeamKey(),
 ): StoredSeam | null {
-  const sideA = (host.ranges?.length ? host.ranges : [undefined]).flatMap((range) => {
+  const ranges = host.ranges?.length ? host.ranges : [undefined];
+  const sideA = ranges.flatMap((range) => {
     const anchor = innerAnchor(host.geom, host.k, host.line, host.grainDeg, placement, range);
     return anchor ? [anchor] : [];
   });
-  if (sideA.length === 0 || partAnchors.length === 0) return null;
+  if (sideA.length !== ranges.length || partAnchors.length === 0) return null;
   return {
     seamKey,
     status: 'confirmed',

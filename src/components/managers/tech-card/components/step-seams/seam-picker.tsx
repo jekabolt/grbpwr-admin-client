@@ -16,7 +16,7 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import { activeFoldRows } from 'lib/folds';
 import { resolveEdge } from 'lib/assembly-skeleton/union';
-import { anchorOfRunId, type EdgeAnchor, type SidePart, type StoredSeam } from 'lib/seams';
+import type { SidePart, StoredSeam, StoredSeamDirection } from 'lib/seams';
 import { cn } from 'lib/utility';
 import {
   useCallback,
@@ -29,7 +29,6 @@ import {
 } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Button, Chip, ChipRow, Close, ConfirmationModal, Placeholder, Text } from 'ui';
-import { runsOfSide } from '../assembly-seams/seam-actions';
 import { useSeamsStore } from '../assembly-seams/seams-store';
 import { useFoldRows } from '../assembly-folds/folds-store';
 import { useTechCardAutosave } from '../design/autosave-contract';
@@ -70,7 +69,6 @@ import { usePictureZoom } from './picture-zoom';
 import {
   edgeBreaks,
   innerBreaks,
-  innerRangesAreContiguous,
   NO_SPANS,
   pickFreeSpan,
   pickSegments,
@@ -80,7 +78,6 @@ import {
   sidePartsShareEdge,
   segmentAt,
   segmentsAt,
-  surfacePartSide,
   surfacePick,
   spanOfLength,
   sideParts,
@@ -113,7 +110,6 @@ import {
   longestEdge,
   parseInner,
   pieceOfTarget,
-  surfaceRow,
   type Pt,
   type TargetId,
   targetsLen,
@@ -137,7 +133,13 @@ import {
   foldedFitSides,
   withFoldPartners,
 } from './step-folds';
-import { edgeRowOfPick, initialPickerPick, orderedPickSides, storedSeamSides } from './step-rows';
+import {
+  edgeRowOfPick,
+  initialPickerPick,
+  orderedPickSides,
+  storedSeamSides,
+  surfaceRowFromPick,
+} from './step-rows';
 import { fitSourceOf } from './step-pose';
 import { stepPictureOf } from './surface-picture';
 import { mirrorClickDialog, mirrorConfirmTitle } from './mirror-step';
@@ -160,6 +162,11 @@ const mmText = (v: number) => `${fmtMm(v)} mm`;
 /** The LAYERS window stays as the owner left it from step to step while the tab lives. */
 let layersShown = true;
 const NO_PAINT: readonly string[] = [];
+const SURFACE_DIRECTIONS = [
+  { value: 'unknown', label: 'Unspecified' },
+  { value: 'same', label: 'Same' },
+  { value: 'reversed', label: 'Reversed' },
+] as const;
 
 export default function SeamPicker({
   index,
@@ -333,6 +340,10 @@ export function SeamPickerBody({
       ? null
       : initialPickerPick(suggestion, preselectProposal, unitStep);
   const [sel, setSel] = useState<Sel>(() => (initialPick ? wholeSel(initialPick) : EMPTY));
+  const [surfaceDirectionChoice, setSurfaceDirectionChoice] = useState<{
+    pick: Sel;
+    direction: StoredSeamDirection;
+  } | null>(null);
   const [hover, setHover] = useState<SpanHover | null>(null);
   const [spanDrag, setSpanDrag] = useState<SpanHover | null>(null);
   // The selected stored seam's key; in topstitch mode, the selected line's `lineKey`.
@@ -437,6 +448,8 @@ export function SeamPickerBody({
 
   // ── what «accept» would write: only what the owner picked ──
   const pick: Sel = sel;
+  const surfaceDirection =
+    surfaceDirectionChoice?.pick === pick ? surfaceDirectionChoice.direction : 'unknown';
   const inners = [...pick.a, ...pick.b].filter((t) => parseInner(t));
   const surface = inners.length === 1;
   const hostSide: Side | null = surface ? (pick.a.includes(inners[0]) ? 'a' : 'b') : null;
@@ -512,43 +525,11 @@ export function SeamPickerBody({
   );
 
   const buildRow = useCallback(
-    (clicked: Sel): StoredSeam | null => {
-      const s = orderedPickSides(clicked, geoms);
-      const ins = [...s.a, ...s.b].filter((t) => parseInner(t));
-      if (ins.length === 0) return edgePick(clicked).row;
-      const h = parseInner(ins[0]);
-      const g = h ? geoms.get(h.piece) : undefined;
-      const line = h ? pieces?.get(h.piece)?.inner[h.k] : undefined;
-      if (!h || !g || !line || !partKey || !geo) return null;
-      const hs: Side = s.a.includes(ins[0]) ? 'a' : 'b';
-      const hostRanges = clicked.spans[hs][ins[0]];
-      if (
-        hostRanges &&
-        !innerRangesAreContiguous(
-          hostRanges,
-          targetLenMm(ins[0], geoms, innerLines),
-          isClosedInner(line),
-        )
-      )
-        return null;
-      const picked = s[hs === 'a' ? 'b' : 'a'];
-      if (!picked.length) return null;
-      const parts = runsOfSide(picked, geoms)
-        .map((id) => (id ? anchorOfRunId(anchorCtx.pieces, id, geo.grainDeg) : null))
-        .filter((a): a is EdgeAnchor => !!a);
-      return surfaceRow(
-        {
-          geom: g,
-          k: h.k,
-          line,
-          grainDeg: geo.grainDeg.get(h.piece) ?? 0,
-          ranges: clicked.spans[hs][ins[0]],
-        },
-        parts,
-        undefined,
-      );
-    },
-    [geoms, anchorCtx, pieces, geo, partKey, edgePick, innerLines],
+    (clicked: Sel): StoredSeam | null =>
+      [...clicked.a, ...clicked.b].some((target) => parseInner(target))
+        ? surfaceRowFromPick(clicked, geoms, innerLines, anchorCtx, surfaceDirection)
+        : edgePick(clicked).row,
+    [geoms, anchorCtx, edgePick, innerLines, surfaceDirection],
   );
 
   const reset = () => {
@@ -666,7 +647,7 @@ export function SeamPickerBody({
       return;
     }
     // Accepted as «guess» filled it: the proposal's acceptance; any change made it the owner's own.
-    const guessed = !!filled && samePick(filled, pick);
+    const guessed = surfaceDirection === 'unknown' && !!filled && samePick(filled, pick);
     recordSeamDecision({
       cardId: cardId ?? 0,
       operationNumber: op?.operationNumber ?? 0,
@@ -752,14 +733,12 @@ export function SeamPickerBody({
       }
       setActiveSeam(null);
       const base = (bindingMode || topstitchMode) && !sel.a.includes(id) ? EMPTY : sel;
-      // A surface's part is taken by whole edges of one piece (Р5).
+      // A surface's part can use one piece with its chosen runs and stretches.
       const surfaced = (next: Sel) =>
         bindingMode || topstitchMode
           ? next
           : surfacePick(next, pickRules.isInner, pickRules.pieceOf, id);
-      const wholeOnly =
-        !bindingMode && !topstitchMode && surfacePartSide(base, pickRules.isInner) === side;
-      if (atMm == null || (inner && !stretches) || !(length > 0) || wholeOnly) {
+      if (atMm == null || (inner && !stretches) || !(length > 0)) {
         if (topstitchMode && topstitchPickOverlaps(topstitchLines, id, undefined, geoms)) {
           setRefused('already picked');
           return;
@@ -820,17 +799,11 @@ export function SeamPickerBody({
       const length = id ? targetLenMm(id, geoms, innerLines) : 0;
       const inner = id ? parseInner(id) : null;
       const stretches = inner ? innerStretches(innerLines.get(inner.piece)?.[inner.k] ?? []) : null;
-      const wholeOnly =
-        !!id &&
-        !bindingMode &&
-        !topstitchMode &&
-        surfacePartSide(sel, pickRules.isInner) === clickSide(id);
       const free =
         id &&
         atMm != null &&
         length > 0 &&
         (!inner || !!stretches) &&
-        !wholeOnly &&
         (topstitchMode || storedSeamAt(stored, id, atMm, geoms) < 0)
           ? labelSpanAt(id, bindingMode || topstitchMode ? 'a' : clickSide(id), length, atMm) ??
             segmentAt(breaksOf(id), length, atMm)
@@ -843,18 +816,7 @@ export function SeamPickerBody({
             : null,
       );
     },
-    [
-      geoms,
-      innerLines,
-      stored,
-      labelSpanAt,
-      bindingMode,
-      topstitchMode,
-      breaksOf,
-      clickSide,
-      sel,
-      pickRules,
-    ],
+    [geoms, innerLines, stored, labelSpanAt, bindingMode, topstitchMode, breaksOf, clickSide],
   );
   const onSpanDrag = useCallback(
     (id: TargetId, fromMm: number, toMm: number, done: boolean) => {
@@ -884,19 +846,6 @@ export function SeamPickerBody({
       }
       const side = bindingMode || topstitchMode ? 'a' : clickSide(id);
       const base = (bindingMode || topstitchMode) && !sel.a.includes(id) ? EMPTY : sel;
-      // A surface's part has no stretches (Р5): a drag on it takes the whole edge.
-      if (!bindingMode && !topstitchMode && surfacePartSide(base, pickRules.isInner) === side) {
-        if (base[side].includes(id)) return;
-        setSel(
-          surfacePick(
-            onFolded(pickTarget(base, side, id, pickRules.isInner, pickRules.pieceOf), side, id),
-            pickRules.isInner,
-            pickRules.pieceOf,
-            id,
-          ),
-        );
-        return;
-      }
       setSel(
         surfacePick(
           onFolded(
@@ -1049,7 +998,11 @@ export function SeamPickerBody({
 
   const onKeyDown = (e: KeyboardEvent) => {
     const t = e.target as HTMLElement;
-    if (t.closest('input, textarea')) return;
+    if (
+      t.closest('input, textarea') ||
+      (e.key === 'Enter' && t.closest('[data-seam-surface-direction]'))
+    )
+      return;
     if (!e.metaKey && !e.ctrlKey && !e.altKey && zoom.onKey(e.key)) {
       e.preventDefault();
     } else if (e.key === 'Enter' && canAccept) {
@@ -1483,6 +1436,32 @@ export function SeamPickerBody({
           </div>
         </div>
         {phone && layersWindow}
+
+        {surface && pickReady && !bindingMode && !topstitchMode && !frozen && (
+          <div
+            role='group'
+            aria-label='Surface seam direction'
+            data-seam-surface-direction=''
+            className='flex shrink-0 flex-wrap items-center gap-2 border-t border-hairline px-3 py-1 md:px-5'
+          >
+            <Text size='micro' variant='label'>
+              Direction
+            </Text>
+            <ChipRow>
+              {SURFACE_DIRECTIONS.map(({ value, label }) => (
+                <Chip
+                  key={value}
+                  selected={surfaceDirection === value}
+                  pressed={surfaceDirection === value}
+                  disabled={busy}
+                  onClick={() => setSurfaceDirectionChoice({ pick, direction: value })}
+                >
+                  {label}
+                </Chip>
+              ))}
+            </ChipRow>
+          </div>
+        )}
 
         <div
           className='sticky bottom-0 box-content flex h-21 flex-none flex-wrap content-center items-center gap-x-3 border-t border-hairline bg-bgColor px-3 pb-[env(safe-area-inset-bottom)] md:gap-4.5 md:px-5'
