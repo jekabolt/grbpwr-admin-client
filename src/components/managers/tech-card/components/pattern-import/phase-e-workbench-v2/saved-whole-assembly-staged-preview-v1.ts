@@ -10,6 +10,10 @@ import type {
 import type { MeasurementSurfaceAcceptedClothV1 } from 'components/shared/measurement-watertight-surface-v1-stage';
 import { inspectOwnedActiveXpbdDeviceLeaseV1 } from 'lib/cloth/runtime/webgpu/xpbd-device-session';
 import type { SavedCompleteAssemblyNativeStitchAnchorsV1 } from './saved-complete-assembly-native-stitch-anchors-v1';
+import type { RestoredWholeSourceCutPlacementV1 } from 'components/cloth-simulation-spike/prepare-saved-complete-whole-source-cut-v1';
+import { DEFAULT_MEASUREMENT_PARTITIONED_SURFACE_CONTACT_BUDGET_V1 } from 'lib/cloth/body/measurement-surface-self-intersection-v1';
+import type { SavedWholeAssemblyPlacementLayoutV10 } from './saved-whole-assembly-placement-document-v10';
+import { canonicalizePatternImportDxfPhaseESavedAssemblyValueV1 as canonical } from './saved-assembly-topology-hash-v1';
 
 type Run = Parameters<typeof runStagedSourceCutFramesV1>[0];
 type Command = Parameters<typeof continueStagedSourceCutFramesV1>[1];
@@ -21,6 +25,7 @@ type DisplayedBody = ModelDisplayedTriangleBodyInputProjectionV1;
 export type SavedWholeAssemblyStagePlanV1 = Readonly<{
   source: Source;
   observedBody: DisplayedBody['hashes'];
+  layout?: SavedWholeAssemblyPlacementLayoutV10;
   frame: Omit<Run['frame'], 'bodyPositionsM' | 'bodyTriangles' | 'intent'>;
   commands: readonly [Command, ...Command[]];
   options: Pick<
@@ -39,6 +44,7 @@ export type PrepareSavedWholeAssemblyPreviewV1 = (
   body: DisplayedBody,
   signal: AbortSignal,
   assertCurrentSource: () => boolean,
+  savedPlacement?: RestoredWholeSourceCutPlacementV1,
 ) => Promise<SavedWholeAssemblyStagePlanV1>;
 
 export type SavedWholeAssemblyPreviewProgressV1 = Readonly<{
@@ -50,20 +56,16 @@ export type SavedWholeAssemblyPreviewProgressV1 = Readonly<{
   stopped?: Readonly<{ operationNumber: number; detail: string }>;
 }>;
 
-/** Hands the current saved source and rendered mannequin to the existing staged runtime. */
-export async function runSavedWholeAssemblyStagedPreviewV1(
-  input: Readonly<{
-    source: Source;
-    body: ModelDisplayedTriangleBodyOwnedInputV1;
-    ownedLease: Run['ownedLease'];
-    prepare: PrepareSavedWholeAssemblyPreviewV1;
-    isCurrent: () => boolean;
-    verifySource: (source: Source, signal: AbortSignal) => Promise<void>;
-    onAccepted: (progress: SavedWholeAssemblyPreviewProgressV1) => void;
-  }>,
-  signal: AbortSignal,
-): Promise<SavedWholeAssemblyPreviewProgressV1> {
-  const { source, body, ownedLease, prepare, verifySource } = input;
+type PrepareInput = Readonly<{
+  source: Source;
+  body: ModelDisplayedTriangleBodyOwnedInputV1;
+  prepare: PrepareSavedWholeAssemblyPreviewV1;
+  isCurrent: () => boolean;
+  savedPlacement?: RestoredWholeSourceCutPlacementV1;
+}>;
+
+async function prepareCurrent(input: PrepareInput, signal: AbortSignal) {
+  const { source, body, prepare, savedPlacement } = input;
   const isCurrent = () => !signal.aborted && input.isCurrent() && body.isCurrent();
   const requireCurrent = () => {
     signal.throwIfAborted();
@@ -73,8 +75,7 @@ export async function runSavedWholeAssemblyStagedPreviewV1(
   const displayed = projectCurrentModelDisplayedTriangleBodyInputV1(body);
   if (!displayed || source.unavailable.length > 0)
     throw new Error('The whole assembly requires current mannequin and native sewing inputs.');
-
-  const plan = await prepare(source, displayed, signal, isCurrent);
+  const plan = await prepare(source, displayed, signal, isCurrent, savedPlacement);
   requireCurrent();
   if (
     plan.source !== source ||
@@ -83,6 +84,94 @@ export async function runSavedWholeAssemblyStagedPreviewV1(
     plan.observedBody.bodyTrianglesUint32LeSha256 !== displayed.hashes.bodyTrianglesUint32LeSha256
   )
     throw new Error('The planned assembly differs from the current source or displayed body.');
+  if (savedPlacement) {
+    const saved = savedPlacement.layout;
+    const layout = plan.layout;
+    if (
+      !layout ||
+      layout.sizeId !== saved.sizeId ||
+      layout.sizeToken !== saved.sizeToken ||
+      layout.runtimeCandidateSha256 !== saved.runtimeCandidateSha256 ||
+      layout.cutGraphSha256 !== saved.cutGraphSha256 ||
+      canonical(layout.pieceRanges) !== canonical(saved.pieceRanges) ||
+      layout.positionsM.length !== saved.positionsM.length ||
+      layout.positionsM.some((coordinate, index) => coordinate !== saved.positionsM[index])
+    )
+      throw new Error('The current compiler did not restore the saved full-placement coordinates.');
+  }
+  return { plan, displayed, isCurrent, requireCurrent };
+}
+
+/** Captures only the current compiled initial placement, before any simulation has run. */
+export async function readCurrentWholeAssemblyInitialPlacementV1(
+  input: PrepareInput,
+  signal: AbortSignal,
+) {
+  const { plan, displayed, requireCurrent } = await prepareCurrent(input, signal);
+  const { layout } = plan;
+  if (!layout)
+    throw new Error('The current assembly compiler does not provide a saveable placement.');
+  const [
+    { snapshotGarmentStagedSourceCutCoreV1 },
+    { prepareSourceCutContactMeshV1 },
+    { prepareActualBodySourceCutContactV1 },
+  ] = await Promise.all([
+    import('lib/cloth/runtime/webgpu/garment-staged-source-cut-core-v1'),
+    import('lib/cloth/runtime/cpu/source-cut-contact-mesh-v1'),
+    import('components/cloth-simulation-spike/actual-body-source-cut-contact-v1'),
+  ]);
+  requireCurrent();
+  const snapshot = snapshotGarmentStagedSourceCutCoreV1(plan.frame.material);
+  const world = snapshot.uploads.positions;
+  if (
+    layout.positionsM.length !== (world.length / 4) * 3 ||
+    layout.positionsM.some(
+      (coordinate, index) => coordinate !== world[4 * Math.floor(index / 3) + (index % 3)],
+    )
+  )
+    throw new Error('The full placement differs from the compiler’s initial coordinates.');
+
+  const garment = prepareSourceCutContactMeshV1(snapshot.cut, plan.maxSurfaceTriangles);
+  const body = prepareActualBodySourceCutContactV1(
+    displayed.bodyPositionsM,
+    displayed.bodyTriangles,
+    130_000_000,
+  );
+  const signedVolume = body.bodyAudit.topology.signedVolumeM3;
+  const triangleCount = garment.topology.reduce((sum, part) => sum + part.triangleCount, 0);
+  const layeredBudget =
+    triangleCount >= 30_000
+      ? {
+          ...DEFAULT_MEASUREMENT_PARTITIONED_SURFACE_CONTACT_BUDGET_V1,
+          maxCandidatePairs: 1_200_000,
+          maxPairVisits: 4_000_000,
+        }
+      : undefined;
+  if (
+    Math.abs(signedVolume) <= 1e-12 ||
+    Math.sign(signedVolume) !== plan.frame.bodyOutwardSign ||
+    !body.validateFrame(garment, world).passed ||
+    !garment.validateSelfIntersection(world, layeredBudget).passed
+  )
+    throw new Error(
+      'The initial arrangement did not pass exact cloth and mannequin contact checks.',
+    );
+  requireCurrent();
+  return layout;
+}
+
+/** Hands the current saved source and rendered mannequin to the existing staged runtime. */
+export async function runSavedWholeAssemblyStagedPreviewV1(
+  input: PrepareInput &
+    Readonly<{
+      ownedLease: Run['ownedLease'];
+      verifySource: (source: Source, signal: AbortSignal) => Promise<void>;
+      onAccepted: (progress: SavedWholeAssemblyPreviewProgressV1) => void;
+    }>,
+  signal: AbortSignal,
+): Promise<SavedWholeAssemblyPreviewProgressV1> {
+  const { source, body, ownedLease, verifySource } = input;
+  const { plan, isCurrent, requireCurrent } = await prepareCurrent(input, signal);
 
   const commands = plan.commands.map((command) => ({ ...command }));
   const [first, ...following] = commands;

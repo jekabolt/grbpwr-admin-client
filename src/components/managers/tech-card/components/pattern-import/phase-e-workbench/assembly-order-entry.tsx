@@ -2389,7 +2389,9 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
     crossMaterialReview?.operationNumber === selectedOperationNumber
       ? crossMaterialReview
       : null;
-  const savedCrossMaterialModelId = activeCrossMaterialReview?.placement?.body.modelId;
+  const savedCrossMaterialModelId =
+    activeCrossMaterialReview?.wholeAssembly?.saved?.body.modelId ??
+    activeCrossMaterialReview?.placement?.body.modelId;
   const readActiveMannequinModelId = useCallback(
     (signal: AbortSignal) =>
       savedCrossMaterialModelId === undefined

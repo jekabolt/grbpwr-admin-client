@@ -63,9 +63,14 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
   );
   const savedCenter = review.placement?.placement.centerMm;
   const savedBody = review.placement?.body;
+  const savedWhole = review.wholeAssembly?.saved;
   const bodyMatchesPlacement = useMemo(
     () => !savedBody || matchesSavedBody(body?.project() ?? null, savedBody),
     [body, savedBody],
+  );
+  const bodyMatchesWhole = useMemo(
+    () => !savedWhole || matchesSavedBody(body?.project() ?? null, savedWhole.body),
+    [body, savedWhole],
   );
   const [editing, setEditing] = useState(false);
   const [x, setX] = useState(() => String(savedCenter?.[0] ?? 0));
@@ -99,9 +104,11 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
         body?.isCurrent() === true;
       if (!displayed || !isCurrent())
         throw new Error('Choose a current displayed mannequin and three placement coordinates.');
-      if (savedBody && !matchesSavedBody(displayed, savedBody))
+      const wholeRequested = previewKind.current === 'whole';
+      const expectedBody = wholeRequested ? savedWhole?.body : savedBody;
+      if (expectedBody && !matchesSavedBody(displayed, expectedBody))
         throw new Error('The displayed mannequin differs from the saved placement.');
-      if (previewKind.current === 'whole') {
+      if (wholeRequested) {
         const whole = review.wholeAssembly;
         if (!whole || !body) throw new Error('The saved assembly layout is unavailable.');
         const [source, { runSavedWholeAssemblyStagedPreviewV1 }] = await Promise.all([
@@ -114,6 +121,7 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
             body,
             ownedLease: lease,
             prepare: whole.prepare,
+            savedPlacement: whole.saved,
             isCurrent,
             verifySource: (_source, active) => review.verify(active),
             onAccepted(progress) {
@@ -219,7 +227,7 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
         await work?.catch(() => {});
       },
     };
-  }, [body, onAcceptedCloth, review, savedBody, validCenter, x, y, z]);
+  }, [body, onAcceptedCloth, review, savedBody, savedWhole, validCenter, x, y, z]);
 
   useLayoutEffect(() => {
     const cancel = () => {
@@ -246,8 +254,9 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
       editing ||
       placementSave.current ||
       status.pending ||
-      (kind === 'seam' ? !validCenter : !review.wholeAssembly) ||
-      !bodyMatchesPlacement ||
+      (kind === 'seam'
+        ? !validCenter || !bodyMatchesPlacement
+        : !review.wholeAssembly || !bodyMatchesWhole) ||
       !body?.isCurrent() ||
       !computeCanvas.current
     )
@@ -256,13 +265,14 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
     void lifecycle.start(host, computeCanvas.current, null, setStatus);
   };
 
-  async function savePlacement() {
+  async function savePlacement(kind: PreviewKind) {
+    const save = kind === 'whole' ? review.wholeAssembly?.save : review.savePlacement;
     if (
+      !save ||
       disabled ||
       status.pending ||
       placementSave.current ||
-      !canSave ||
-      !bodyMatchesPlacement ||
+      (kind === 'seam' ? !canSave || !bodyMatchesPlacement : editing || !bodyMatchesWhole) ||
       !body?.isCurrent()
     )
       return;
@@ -277,10 +287,8 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
       !current.current.disabled &&
       body.isCurrent();
     try {
-      await review.savePlacement(
-        { body, centerMm: [Number(x), Number(y), Number(z)], isCurrent },
-        controller.signal,
-      );
+      const input = { body, centerMm: [Number(x), Number(y), Number(z)] as const, isCurrent };
+      await save(input, controller.signal);
       if (isCurrent()) setPlacementStatus({ pending: false, error: null });
     } catch (error) {
       if (isCurrent())
@@ -351,24 +359,35 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
             type='button'
             variant='secondary'
             size='xs'
-            disabled={busy || editing || !bodyMatchesPlacement || !body?.isCurrent()}
+            disabled={busy || editing || !bodyMatchesWhole || !body?.isCurrent()}
             onClick={() => preview('whole')}
           >
             Preview full layout
           </Button>
         )}
-        {(!review.placement || editing) && (
+        {review.wholeAssembly?.save && (
+          <Button
+            type='button'
+            variant='secondary'
+            size='xs'
+            disabled={busy || editing || !bodyMatchesWhole || !body?.isCurrent()}
+            onClick={() => void savePlacement('whole')}
+          >
+            Save full placement
+          </Button>
+        )}
+        {review.savePlacement && (!review.placement || editing) && (
           <Button
             type='button'
             variant='secondary'
             size='xs'
             disabled={busy || !canSave || !bodyMatchesPlacement || !body?.isCurrent()}
-            onClick={() => void savePlacement()}
+            onClick={() => void savePlacement('seam')}
           >
             {placementStatus.pending ? 'Saving placement…' : 'Save placement'}
           </Button>
         )}
-        {review.placement && (
+        {review.savePlacement && review.placement && (
           <Button
             type='button'
             variant='secondary'
@@ -383,6 +402,17 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
       {review.placement && (
         <Text component='p' size='micro' role='status'>
           Saved initial placement · mannequin #{review.placement.body.modelId}
+        </Text>
+      )}
+      {savedWhole && (
+        <Text
+          component='p'
+          size='micro'
+          role='status'
+          data-whole-placement-xyz-sha={savedWhole.positionsSha256}
+          data-whole-placement-body-sha={savedWhole.body.observed.bodyPositionsFloat32LeSha256}
+        >
+          Saved full placement · mannequin #{savedWhole.body.modelId}
         </Text>
       )}
       {placementStatus.error && (

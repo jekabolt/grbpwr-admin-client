@@ -1,3 +1,4 @@
+import type { SavedWholeAssemblyPlacementLayoutV10 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-whole-assembly-placement-document-v10';
 import { prepareSourceCutSurfaceProjectionV1 } from 'lib/cloth/runtime/cpu/source-cut-surface-projection-v1';
 import {
   prepareGarmentStagedSourceCutCoreV1,
@@ -37,6 +38,18 @@ const CARRIER_SHA = 'e167a808c2832d2567484f2e2b161a5f17dbe0cc776e0717d848b6c3962
 const CANDIDATE_SHA = 'f3c95d5f52f26c93750edaaddfee1ebf03114ae30994d75f57f373195596d368';
 const DETACHED_BELT = '01M1M1ZAHFC325NZF44RAG1SM7';
 const LABEL = '01M75ACEBB74BMT91RJ7WSTTJY';
+
+type SealedWholeSourceCutFixtureV1 = Readonly<{
+  sourceSha256: string;
+  carrierSha256: string;
+  candidateSha256: string;
+}>;
+
+export type RestoredWholeSourceCutPlacementV1 = Readonly<{
+  carrierSha256: string;
+  retainedCarrierSha256: string;
+  layout: SavedWholeAssemblyPlacementLayoutV10;
+}>;
 
 type Candidate = {
   mesh: Omit<Core['mesh'], 'restPositions2Mm' | 'triangles'> & {
@@ -104,10 +117,22 @@ export async function prepareSavedCompleteWholeSourceCutV1(
     candidate: ArrayBuffer;
     assertCurrentSource: () => boolean;
     frameCount?: 1 | 4;
+    savedPlacement?: RestoredWholeSourceCutPlacementV1;
+    fixture?: SealedWholeSourceCutFixtureV1;
   }>,
   signal?: AbortSignal,
 ) {
-  const { source, candidate, assertCurrentSource } = input;
+  const {
+    source,
+    candidate,
+    assertCurrentSource,
+    savedPlacement,
+    fixture = {
+      sourceSha256: SOURCE_SHA,
+      carrierSha256: CARRIER_SHA,
+      candidateSha256: CANDIDATE_SHA,
+    },
+  } = input;
   function requireCurrent() {
     signal?.throwIfAborted();
     if (assertCurrentSource() !== true) throw new Error('The saved garment source has changed.');
@@ -117,8 +142,10 @@ export async function prepareSavedCompleteWholeSourceCutV1(
     source.schemaVersion !== 'saved-complete-assembly-native-stitch-anchors/1' ||
     source.cardId !== 2 ||
     source.cardLockVersion !== 1 ||
-    source.sourceSha256 !== SOURCE_SHA ||
-    source.savedCarrier?.sidecarSha256 !== CARRIER_SHA ||
+    source.sourceSha256 !== fixture.sourceSha256 ||
+    source.savedCarrier?.sidecarSha256 !==
+      (savedPlacement?.carrierSha256 ?? fixture.carrierSha256) ||
+    (savedPlacement && savedPlacement.retainedCarrierSha256 !== fixture.carrierSha256) ||
     source.sizeId !== 58 ||
     source.sizeToken !== 'M' ||
     source.sourceCuts.length !== 24 ||
@@ -130,7 +157,7 @@ export async function prepareSavedCompleteWholeSourceCutV1(
   )
     throw new RangeError('This diagnostic pants placement belongs to a different saved source.');
   const bytes = candidate.slice(0);
-  if ((await digest(bytes)) !== CANDIDATE_SHA)
+  if ((await digest(bytes)) !== fixture.candidateSha256)
     throw new RangeError('The sealed diagnostic pants placement has changed.');
   requireCurrent();
   const data = JSON.parse(new TextDecoder().decode(bytes)) as Candidate;
@@ -170,6 +197,80 @@ export async function prepareSavedCompleteWholeSourceCutV1(
   const ids = mesh.pieceRanges.map(({ pieceId }) => pieceId);
   const { materials, continuumMaterials, materialSolver } = data.profile;
   const world = Float32Array.from(data.world);
+  const [initialWorldSha256, cutGraphSha256] = await Promise.all([
+    digest(world.buffer),
+    digest(
+      new TextEncoder().encode(
+        JSON.stringify({
+          mesh: data.mesh,
+          cuts: data.cuts,
+          pairs: data.pairs,
+          profile: data.profile,
+          pressedCreases: data.pressedCreases,
+          expected: data.expected,
+        }),
+      ).buffer,
+    ),
+  ]);
+  if (initialWorldSha256 !== data.sourceScope.initialPositionsSha256)
+    throw new RangeError('The sealed diagnostic initial coordinates changed.');
+  requireCurrent();
+  const pieceRanges = mesh.pieceRanges.map(
+    ({ pieceId, vertexOffset, vertexCount, triangleOffset, triangleCount }) => ({
+      pieceId,
+      vertexOffset,
+      vertexCount,
+      triangleOffset,
+      triangleCount,
+    }),
+  );
+  const positionsM = new Float32Array((world.length / 4) * 3);
+  if (savedPlacement) {
+    const saved = savedPlacement.layout;
+    if (
+      saved.sizeId !== source.sizeId ||
+      saved.sizeToken !== source.sizeToken ||
+      saved.runtimeCandidateSha256 !== fixture.candidateSha256 ||
+      saved.cutGraphSha256 !== cutGraphSha256 ||
+      JSON.stringify(
+        saved.pieceRanges.map(
+          ({ pieceId, vertexOffset, vertexCount, triangleOffset, triangleCount }) => ({
+            pieceId,
+            vertexOffset,
+            vertexCount,
+            triangleOffset,
+            triangleCount,
+          }),
+        ),
+      ) !== JSON.stringify(pieceRanges) ||
+      saved.positionsM.length !== positionsM.length
+    )
+      throw new RangeError(
+        'The saved whole placement does not match the current material and cut graph.',
+      );
+    for (let particle = 0; particle < world.length / 4; particle++) {
+      for (let axis = 0; axis < 3; axis++) {
+        const value = saved.positionsM[3 * particle + axis]!;
+        if (!Number.isFinite(value) || Math.abs(value) > 10 || Object.is(value, -0))
+          throw new RangeError('The saved whole placement has an invalid coordinate.');
+        world[4 * particle + axis] = value;
+      }
+    }
+  }
+  for (let particle = 0; particle < world.length / 4; particle++) {
+    for (let axis = 0; axis < 3; axis++) {
+      const coordinate = world[4 * particle + axis]!;
+      positionsM[3 * particle + axis] = coordinate === 0 ? 0 : coordinate;
+    }
+  }
+  const layout: SavedWholeAssemblyPlacementLayoutV10 = {
+    sizeId: source.sizeId,
+    sizeToken: source.sizeToken,
+    runtimeCandidateSha256: fixture.candidateSha256,
+    cutGraphSha256,
+    pieceRanges,
+    positionsM,
+  };
   const material = prepareGarmentStagedSourceCutCoreV1(
     {
       mesh,
@@ -215,7 +316,6 @@ export async function prepareSavedCompleteWholeSourceCutV1(
   });
   const snapshot = snapshotGarmentStagedSourceCutCoreV1(material);
   const expected = [
-    [world.buffer, data.sourceScope.initialPositionsSha256],
     [snapshot.uploads.restPositions.buffer, data.expected.flatRestSha256],
     [snapshot.uploads.cutBendRest, data.expected.cutBendRestSha256],
     [snapshot.cut.cutParticleMassRecords, data.expected.cutMassSha256],
@@ -239,6 +339,7 @@ export async function prepareSavedCompleteWholeSourceCutV1(
     seams,
     surface,
     initialPositionsMInvMass: world,
+    layout,
     expectedBody: {
       positionsSha256: data.sourceScope.bodyPositionsSha256,
       trianglesSha256: data.sourceScope.bodyTrianglesSha256,

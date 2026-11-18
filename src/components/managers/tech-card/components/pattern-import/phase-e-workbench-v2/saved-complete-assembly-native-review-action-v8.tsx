@@ -20,12 +20,18 @@ import {
 import type { prepareCurrentSavedCrossMaterialPlacementV9 } from './saved-cross-material-placement-prepare-v9';
 import type { readSavedCompleteAssemblyNativeStitchAnchorsV1 } from './saved-complete-assembly-native-stitch-anchors-v1';
 import type { PrepareSavedWholeAssemblyPreviewV1 } from './saved-whole-assembly-staged-preview-v1';
+import type { RestoredWholeSourceCutPlacementV1 } from 'components/cloth-simulation-spike/prepare-saved-complete-whole-source-cut-v1';
+import {
+  SAVED_COMPLETE_ASSEMBLY_WHOLE_PLACEMENT_MEDIA_V10,
+  type readSavedWholeAssemblyPlacementDocumentV10,
+} from './saved-whole-assembly-placement-document-v10';
 import type { PatternImportDxfPhaseEZeroOperationSavedCardAuthorityRuntimeV1 as Authority } from './zero-operation-saved-card-authority-v1';
 import { resolvePatternImportDxfPhaseEZeroOperationSavedDxfCapabilityV1 } from './zero-operation-saved-dxf-capability-v1';
 
 type Pairing = 'start-to-start' | 'start-to-end';
 type Prepared = Awaited<ReturnType<typeof prepareSavedCompleteAssemblyNativeStitchReviewV8>>;
 type RestoredPlacement = Awaited<ReturnType<typeof readSavedCrossMaterialPlacementDocumentV9>>;
+type WholePlacement = Awaited<ReturnType<typeof readSavedWholeAssemblyPlacementDocumentV10>>;
 type PlacementInput = Omit<
   Parameters<typeof prepareCurrentSavedCrossMaterialPlacementV9>[0],
   'loadReview' | 'previousPlacementSha256'
@@ -42,9 +48,12 @@ export type SavedCrossMaterialReviewForPreviewV8 = Readonly<{
     load: (
       signal: AbortSignal,
     ) => ReturnType<typeof readSavedCompleteAssemblyNativeStitchAnchorsV1>;
+    saved?: RestoredWholeSourceCutPlacementV1 &
+      Readonly<{ body: WholePlacement['world']['body']; positionsSha256: string }>;
+    save?: (input: Omit<PlacementInput, 'centerMm'>, signal: AbortSignal) => Promise<void>;
   }>;
   placement?: RestoredPlacement['world'];
-  savePlacement: (input: PlacementInput, signal: AbortSignal) => Promise<void>;
+  savePlacement?: (input: PlacementInput, signal: AbortSignal) => Promise<void>;
 }>;
 
 type Review = Pick<Prepared, 'document' | 'sha256' | 'grid'>;
@@ -226,14 +235,15 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
       function publishRestored(
         restored: Awaited<ReturnType<typeof restoreSavedCompleteAssemblyNativeStitchReviewV8>>,
         current: typeof source,
-        placement?: RestoredPlacement,
+        placements: Readonly<{ narrow?: RestoredPlacement; whole?: WholePlacement }> = {},
         active = signal,
       ) {
+        const { narrow: placement, whole } = placements;
         active.throwIfAborted();
         if (restored.document.selection.operationNumber !== operationNumber)
           throw new Error('The saved review belongs to a different Assembly Order operation.');
         const { sha256 } = restored;
-        const carrierSha256 = placement?.sha256 ?? sha256;
+        const carrierSha256 = whole?.sha256 ?? placement?.sha256 ?? sha256;
         const load: SavedCrossMaterialReviewForPreviewV8['load'] = (active) =>
           readSavedCompleteAssemblyNativePhysicalSourceV8(
             abortableAdminService,
@@ -242,8 +252,24 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
             sizeAuthority,
             { sha256, operationNumber },
             active,
-            placement && { review: placement.review, placementSha256: carrierSha256 },
+            (whole || placement) && {
+              review: (whole ?? placement)!.review,
+              placementSha256: carrierSha256,
+            },
           );
+        const loadWhole: NonNullable<
+          SavedCrossMaterialReviewForPreviewV8['wholeAssembly']
+        >['load'] = async (active) => {
+          const { readSavedCompleteAssemblyNativeStitchAnchorsV1 } = await import(
+            './saved-complete-assembly-native-stitch-anchors-v1'
+          );
+          return readSavedCompleteAssemblyNativeStitchAnchorsV1(
+            current,
+            projection,
+            sizeAuthority,
+            active,
+          );
+        };
         setState({
           status: 'reopened',
           review: restored,
@@ -255,47 +281,86 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
             load,
             wholeAssembly: prepareWholeAssemblyPreview && {
               prepare: prepareWholeAssemblyPreview,
-              load: async (active) => {
-                const { readSavedCompleteAssemblyNativeStitchAnchorsV1 } = await import(
-                  './saved-complete-assembly-native-stitch-anchors-v1'
-                );
-                return readSavedCompleteAssemblyNativeStitchAnchorsV1(
-                  current,
-                  projection,
-                  sizeAuthority,
-                  active,
-                );
+              load: loadWhole,
+              saved: whole && {
+                carrierSha256,
+                retainedCarrierSha256: whole.retainedCarrier.sha256,
+                layout: whole.layout,
+                body: whole.world.body,
+                positionsSha256: whole.world.layout.positions.sha256,
               },
+              save: whole
+                ? undefined
+                : async (input, active) => {
+                    const [
+                      native,
+                      { readCurrentWholeAssemblyInitialPlacementV1 },
+                      { persistSavedWholeAssemblyPlacementV10 },
+                      { readCurrentSavedNeutralPlacementModelV1 },
+                    ] = await Promise.all([
+                      loadWhole(active),
+                      import('./saved-whole-assembly-staged-preview-v1'),
+                      import('./saved-whole-assembly-placement-storage-v10'),
+                      import('./saved-cross-material-placement-model-binding-v1'),
+                    ]);
+                    const layout = await readCurrentWholeAssemblyInitialPlacementV1(
+                      { ...input, source: native, prepare: prepareWholeAssemblyPreview },
+                      active,
+                    );
+                    const saved = await persistSavedWholeAssemblyPlacementV10(
+                      abortableAdminService,
+                      current,
+                      layout,
+                      (active) => {
+                        if (!input.isCurrent())
+                          throw new Error('The displayed mannequin or saved review changed.');
+                        return readCurrentSavedNeutralPlacementModelV1(input.body, active);
+                      },
+                      active,
+                    );
+                    if (input.isCurrent())
+                      publishRestored(
+                        restored,
+                        saved.source,
+                        {
+                          narrow: saved.reopened.narrowPlacement,
+                          whole: saved.reopened,
+                        },
+                        active,
+                      );
+                  },
             },
             placement: placement?.world,
-            async savePlacement(input, active) {
-              const [
-                { prepareCurrentSavedCrossMaterialPlacementV9 },
-                { persistSavedCrossMaterialPlacementV9 },
-                { readCurrentSavedNeutralPlacementModelV1 },
-              ] = await Promise.all([
-                import('./saved-cross-material-placement-prepare-v9'),
-                import('./saved-cross-material-placement-storage-v9'),
-                import('./saved-cross-material-placement-model-binding-v1'),
-              ]);
-              const prepared = await prepareCurrentSavedCrossMaterialPlacementV9(
-                { ...input, loadReview: load, previousPlacementSha256: placement?.sha256 },
-                active,
-              );
-              const saved = await persistSavedCrossMaterialPlacementV9(
-                abortableAdminService,
-                prepared,
-                (signal) => {
-                  if (!input.isCurrent())
-                    throw new Error('The displayed mannequin or saved review changed.');
-                  return readCurrentSavedNeutralPlacementModelV1(input.body, signal);
+            savePlacement: whole
+              ? undefined
+              : async (input, active) => {
+                  const [
+                    { prepareCurrentSavedCrossMaterialPlacementV9 },
+                    { persistSavedCrossMaterialPlacementV9 },
+                    { readCurrentSavedNeutralPlacementModelV1 },
+                  ] = await Promise.all([
+                    import('./saved-cross-material-placement-prepare-v9'),
+                    import('./saved-cross-material-placement-storage-v9'),
+                    import('./saved-cross-material-placement-model-binding-v1'),
+                  ]);
+                  const prepared = await prepareCurrentSavedCrossMaterialPlacementV9(
+                    { ...input, loadReview: load, previousPlacementSha256: placement?.sha256 },
+                    active,
+                  );
+                  const saved = await persistSavedCrossMaterialPlacementV9(
+                    abortableAdminService,
+                    prepared,
+                    (signal) => {
+                      if (!input.isCurrent())
+                        throw new Error('The displayed mannequin or saved review changed.');
+                      return readCurrentSavedNeutralPlacementModelV1(input.body, signal);
+                    },
+                    active,
+                    placement,
+                  );
+                  if (input.isCurrent())
+                    publishRestored(restored, saved.source, { narrow: saved.reopened }, active);
                 },
-                active,
-                placement,
-              );
-              if (input.isCurrent())
-                publishRestored(restored, saved.source, saved.reopened, active);
-            },
             async verify(active) {
               const latest = await readCompleteSavedAssemblySourceV1(
                 abortableAdminService(active),
@@ -335,7 +400,23 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
         );
         publishRestored(reopened, saved.current);
       } else if (action === 'reopen' || source.priorCarrier) {
-        if (source.priorCarrier?.mediaType === SAVED_COMPLETE_ASSEMBLY_PLACEMENT_MEDIA_V9) {
+        if (source.priorCarrier?.mediaType === SAVED_COMPLETE_ASSEMBLY_WHOLE_PLACEMENT_MEDIA_V10) {
+          const { readSavedWholeAssemblyPlacementDocumentV10 } = await import(
+            './saved-whole-assembly-placement-document-v10'
+          );
+          const placement = await readSavedWholeAssemblyPlacementDocumentV10(source, signal);
+          const reopened = await rebuildSavedCompleteAssemblyNativeStitchReviewFromExactBytesV8(
+            source,
+            projection,
+            sizeAuthority,
+            placement.review,
+            signal,
+          );
+          publishRestored(reopened, source, {
+            narrow: placement.narrowPlacement,
+            whole: placement,
+          });
+        } else if (source.priorCarrier?.mediaType === SAVED_COMPLETE_ASSEMBLY_PLACEMENT_MEDIA_V9) {
           const placement = await readSavedCrossMaterialPlacementDocumentV9(source, signal);
           const reopened = await rebuildSavedCompleteAssemblyNativeStitchReviewFromExactBytesV8(
             source,
@@ -344,7 +425,7 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
             placement.review,
             signal,
           );
-          publishRestored(reopened, source, placement);
+          publishRestored(reopened, source, { narrow: placement });
         } else {
           const reopened = await restoreSavedCompleteAssemblyNativeStitchReviewV8(
             source,
