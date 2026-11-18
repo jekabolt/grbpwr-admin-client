@@ -21,7 +21,9 @@ import { isRecordedDraftCadSessionV1 } from './draft-cad-session-v1';
 import { registerSavedDartTipFileV1 } from './draft-cad-saved-dart-tip-file-v1';
 import {
   canMoveSavedDartTipV1,
+  movedSavedFishEyePointsV1,
   selectSavedDartTipV1,
+  selectSavedFishEyeMoveV1,
   sameDartVertices,
 } from './draft-cad-saved-dart-tip-v1';
 
@@ -136,9 +138,11 @@ export async function compileSavedDraftGeometryReviewV1(
     last.target.pieceId === command.target.pieceId &&
     last.target.pieceLineKey === command.target.pieceLineKey &&
     last.payload.cutLineEntityId === command.payload.entityId;
+  const savedTip = command?.tool === 'dart' ? command.payload.savedTip : undefined;
+  const savedMove = command?.tool === 'fish-eye' ? command.payload.savedMove : undefined;
+  const savedDart = savedTip ?? savedMove;
   requireSavedEdit(
-    command &&
-      (parallel || (commands.length === 1 && command.tool === 'dart' && command.payload.savedTip)),
+    command && (parallel || (commands.length === 1 && savedDart)),
     'Record the saved dart edit or a Cut and parallel opening.',
   );
   const { pieceId, pieceLineKey } = command.target;
@@ -203,41 +207,57 @@ export async function compileSavedDraftGeometryReviewV1(
     requireSavedEdit(affectedBlockNames.length && current(), 'A graded piece alias changed.');
     await checkSavedParallelSpreadSourceV1(source.value, pieceId);
   } else {
-    requireSavedEdit(command.tool === 'dart' && command.payload.savedTip, 'Record a saved dart.');
-    const { base, savedTip } = command.payload;
     requireSavedEdit(
-      current() &&
-        savedTip.pieceId === pieceId &&
-        savedTip.pieceLineKey === pieceLineKey &&
-        savedTip.sourceSha256 === row.sha256 &&
-        savedTip.scopeKey === row.scopeKey &&
-        savedTip.sizeToken === sizeToken,
+      savedDart &&
+        current() &&
+        savedDart.pieceId === pieceId &&
+        savedDart.pieceLineKey === pieceLineKey &&
+        savedDart.sourceSha256 === row.sha256 &&
+        savedDart.scopeKey === row.scopeKey &&
+        savedDart.sizeToken === sizeToken,
       'The saved dart row, size or piece changed.',
     );
-    const candidate = selectSavedDartTipV1(compileInput, command.target);
-    requireSavedEdit(
-      candidate &&
-        candidate.savedTip.index === savedTip.index &&
-        candidate.savedTip.rank === savedTip.rank &&
-        candidate.savedTip.sizeId === savedTip.sizeId &&
-        sameDartVertices(candidate.savedTip.original, savedTip.original) &&
-        canMoveSavedDartTipV1(candidate.apexMm, command.payload.apexMm) &&
-        candidate.base.contourId === base.contourId &&
-        candidate.base.boundaryVertexIds.every((id, i) => id === base.boundaryVertexIds[i]) &&
-        candidate.base.progress === base.progress &&
-        candidate.intakeMm === command.payload.intakeMm,
-      'The saved dart or its two original feet changed.',
-    );
+    const base = command.tool === 'dart' ? command.payload.base : undefined;
+    const sameBinding = (candidate: typeof savedDart) =>
+      candidate.index === savedDart.index &&
+      candidate.rank === savedDart.rank &&
+      candidate.sizeId === savedDart.sizeId &&
+      sameDartVertices(candidate.original, savedDart.original);
+    if (command.tool === 'dart') {
+      const candidate = selectSavedDartTipV1(compileInput, command.target);
+      requireSavedEdit(
+        candidate &&
+          base &&
+          sameBinding(candidate.savedTip) &&
+          canMoveSavedDartTipV1(candidate.apexMm, command.payload.apexMm) &&
+          candidate.base.contourId === base.contourId &&
+          candidate.base.boundaryVertexIds.every((id, i) => id === base.boundaryVertexIds[i]) &&
+          candidate.base.progress === base.progress &&
+          candidate.intakeMm === command.payload.intakeMm,
+        'The saved dart or its two original feet changed.',
+      );
+    } else {
+      const candidate = selectSavedFishEyeMoveV1(compileInput, command.target);
+      requireSavedEdit(
+        command.tool === 'fish-eye' &&
+          savedMove &&
+          candidate &&
+          sameBinding(candidate.savedMove) &&
+          candidate.savedMove.sourcePathId === savedMove.sourcePathId &&
+          movedSavedFishEyePointsV1(savedMove.original, command.payload.centerMm),
+        'The exact saved fish-eye or its proposed centre changed.',
+      );
+    }
     const scope = one(draft.scopes.filter((s) => s.target.scopeKey === row.scopeKey));
     const block = one(
       scope?.manifest.blocks.filter(
-        (b) => b.identity === pieceId && b.sizeToken === sizeToken && b.sizeId === savedTip.sizeId,
+        (b) => b.identity === pieceId && b.sizeToken === sizeToken && b.sizeId === savedDart.sizeId,
       ) ?? [],
     );
     const cut = one(
       selection.selection.phaseD.contours.filter(
         (c) =>
-          c.contourId === base.contourId &&
+          (!base || c.contourId === base.contourId) &&
           c.pieceId === pieceId &&
           c.sizeToken === sizeToken &&
           c.role === 'cut-boundary',
@@ -258,11 +278,13 @@ export async function compileSavedDraftGeometryReviewV1(
       ),
     );
     const page = nativeRead.read.doc.pages[0];
+    const closed = Boolean(savedMove);
+    const nativeLabel = closed ? 'draft-cad:fish-eye' : 'draft-cad:dart';
     const markers = nativeRead.read.meta.authoredInternalByBlock?.get(block.block);
-    const marker = one(markers?.filter((m) => m.label === 'draft-cad:dart') ?? []);
+    const marker = one(markers?.filter((entry) => entry.label === nativeLabel) ?? []);
     requireSavedEdit(
-      group && page && marker && !marker.closed,
-      'The original native open dart is unavailable.',
+      group && page && marker && marker.closed === closed,
+      'The original native layer-8 dart is unavailable.',
     );
     const paths = new Map(page.paths.map((p) => [p.id, p]));
     const layer8 = group.paths
@@ -276,12 +298,13 @@ export async function compileSavedDraftGeometryReviewV1(
         b === 0 &&
         c === 0 &&
         dart &&
-        !dart.closed &&
+        dart.closed === closed &&
+        (!savedMove || dart.id === savedMove.sourcePathId) &&
         dart.src.block === block.block &&
-        sameDartVertices(dart.pts, savedTip.original) &&
+        sameDartVertices(dart.pts, savedDart.original) &&
         JSON.stringify(authoredInternalVertices(dart.pts, { x: e, y: f })) ===
           JSON.stringify(marker.vertices),
-      'The native dart no longer matches the ordered saved legs and tip.',
+      'The native dart no longer matches its ordered saved layer-8 vertices.',
     );
     const edges = await projectDxfSourceNativeStraightEdgeSelectedPathsV1(nativeRead.owner, {
       schemaVersion: DXF_SOURCE_NATIVE_STRAIGHT_EDGE_SELECTED_PATHS_REQUEST_V1,
@@ -290,8 +313,11 @@ export async function compileSavedDraftGeometryReviewV1(
       sourcePathIds: [pathId, dart.id].sort((a, b) => a - b),
     });
     requireSavedEdit(
-      edges.ok &&
-        edges.projection.complete &&
+      edges.ok && edges.projection.complete,
+      'The saved dart needs original native straight geometry.',
+    );
+    if (base) {
+      requireSavedEdit(
         one(
           edges.projection.descriptors.filter(
             (edge) =>
@@ -300,29 +326,34 @@ export async function compileSavedDraftGeometryReviewV1(
               edge.endVertexId === base.boundaryVertexIds[1],
           ),
         ),
-      'The dart feet need one original straight cut edge.',
-    );
+        'The dart feet need one original straight cut edge.',
+      );
+    }
     const legs = edges.projection.descriptors.filter((edge) => edge.path.sourcePathId === dart.id);
+    const legCount = closed ? 4 : 2;
     requireSavedEdit(
-      legs.length === 2 &&
-        [0, 1].every((i) =>
-          one(
+      legs.length === legCount &&
+        Array.from({ length: legCount }, (_, start) => start).every((start) => {
+          const end = (start + 1) % dart.pts.length;
+          return one(
             legs.filter(
               (edge) =>
-                !edge.path.closed &&
-                edge.path.startPointIndex === i &&
-                edge.path.endPointIndex === i + 1 &&
+                edge.path.closed === closed &&
+                edge.path.startPointIndex === start &&
+                edge.path.endPointIndex === end &&
                 sameDartVertices(
                   [
                     { x: edge.startMm[0], y: edge.startMm[1] },
                     { x: edge.endMm[0], y: edge.endMm[1] },
                   ],
-                  dart.pts.slice(i, i + 2),
+                  [dart.pts[start]!, dart.pts[end]!],
                 ),
             ),
-          ),
-        ),
-      'The original dart must contain exactly two native straight legs.',
+          );
+        }),
+      closed
+        ? 'The saved fish-eye needs four ordered native straight sides.'
+        : 'The original dart must contain exactly two native straight legs.',
     );
   }
   await verifyCurrentRow();

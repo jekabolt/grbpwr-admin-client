@@ -100,6 +100,11 @@ export type PatternImportDxfPhaseEDraftCadCanvasPropsV1 = Readonly<{
   activeDraftPieceId?: string | null;
   activeTool: PatternImportDxfPhaseEDraftCadToolV1;
   allowSavedParallelOpening?: boolean;
+  savedDartPaths?: readonly Readonly<{
+    pieceLineKey: string;
+    kind: 'dart' | 'fish-eye';
+    pointsMm: readonly PtMm[];
+  }>[];
   arrangeActive?: boolean;
   panActive?: boolean;
   crossScopeConnectActive?: boolean;
@@ -1581,6 +1586,7 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
   activeDraftPieceId = null,
   activeTool,
   allowSavedParallelOpening = false,
+  savedDartPaths = [],
   arrangeActive = false,
   panActive = false,
   crossScopeConnectActive = false,
@@ -2093,6 +2099,23 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
                         />
                       );
                     })}
+                    {savedDartPaths
+                      .filter(({ pieceLineKey }) => pieceLineKey === renderedPiece.pieceLineKey)
+                      .map(({ kind, pointsMm }) => (
+                        <polyline
+                          key={kind}
+                          data-draft-cad-saved-dart-kind={kind}
+                          points={ptsAttr(
+                            kind === 'fish-eye' ? [...pointsMm, pointsMm[0]!] : pointsMm,
+                          )}
+                          fill='none'
+                          stroke={SHEET_INK.ink}
+                          strokeWidth={1.1}
+                          strokeDasharray={`${unit * 4} ${unit * 3}`}
+                          vectorEffect='non-scaling-stroke'
+                          pointerEvents='none'
+                        />
+                      ))}
                   </g>
                 );
               })}

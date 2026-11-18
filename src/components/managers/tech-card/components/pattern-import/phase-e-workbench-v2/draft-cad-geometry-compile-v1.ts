@@ -102,6 +102,7 @@ export type PatternImportDxfPhaseEDraftCadCompiledFeatureV1 = Readonly<{
     | 'notch'
     | 'boundary-point'
     | 'moved-dart-tip'
+    | 'moved-fish-eye'
     | 'moved-vertex'
     | 'deleted-vertex'
     | 'edge-length'
@@ -421,6 +422,9 @@ function pathInsideCut(
       return inCut && holes.every((hole) => !insideRing(point, hole));
     })
   )
+    return false;
+
+  if (closed && holes.some((hole) => hole.some((point) => pointInPolygon(point, pts))))
     return false;
 
   const segmentCount = closed ? pts.length : pts.length - 1;
@@ -1025,6 +1029,27 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
           return blocked('source-binding-mismatch', 'The original dart feet changed.', command);
         dart.pts[1] = { ...command.payload.apexMm };
         output = 'moved-dart-tip';
+      } else if (command.tool === 'fish-eye' && command.payload.savedMove) {
+        const source = command.payload.savedMove;
+        const dart = size.internal[source.index];
+        if (
+          !hasSavedDraftGeometrySourceV1(input) ||
+          commands.length !== 1 ||
+          dart?.label !== 'draft-cad:fish-eye' ||
+          !dart.closed ||
+          dart.graded ||
+          dart.ranges.length !== 1 ||
+          dart.ranges[0]?.path !== source.sourcePathId ||
+          !pathInsideCut(dart, size) ||
+          !sameDartVertices(dart.pts, source.original)
+        )
+          return blocked(
+            'source-binding-mismatch',
+            'Review the original saved fish-eye on its exact piece and size.',
+            command,
+          );
+        dart.pts = internal.pts;
+        output = 'moved-fish-eye';
       } else {
         size.internal.push(internal);
         output = 'internal';

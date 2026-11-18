@@ -337,6 +337,7 @@ export async function compileDraftForOrdinaryReviewV1(
   const savedEdit = commands.find(
     (command) =>
       (command.tool === 'dart' && command.payload.savedTip) ||
+      (command?.tool === 'fish-eye' && command.payload.savedMove) ||
       (command.tool === 'spread' && command.payload.mode === 'parallel'),
   );
   if (savedEdit && prepareGeometry) {

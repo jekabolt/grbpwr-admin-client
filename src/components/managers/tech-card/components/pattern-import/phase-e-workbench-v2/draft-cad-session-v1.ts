@@ -122,6 +122,18 @@ export type PatternImportDxfPhaseEDraftCadRoundPieceV1 = Readonly<{
   placementPolicy: 'separate-writer-block';
 }>;
 
+export type SavedDraftDartPathBindingV1 = Readonly<{
+  pieceId: string;
+  pieceLineKey: string;
+  sourceSha256: string;
+  scopeKey: string;
+  sizeToken: string;
+  sizeId: number;
+  rank: number;
+  index: number;
+  original: readonly PtMm[];
+}>;
+
 type Command<Tool extends PatternImportDxfPhaseEDraftCadToolV1, Payload> = Readonly<{
   commandId: string;
   tool: Tool;
@@ -213,24 +225,22 @@ export type PatternImportDxfPhaseEDraftCadCommandV1 =
       {
         entityId: string;
         base: PatternImportDxfPhaseEDraftCadBoundaryAnchorV1;
-        savedTip?: Readonly<{
-          pieceId: string;
-          pieceLineKey: string;
-          sourceSha256: string;
-          scopeKey: string;
-          sizeToken: string;
-          sizeId: number;
-          rank: number;
-          index: number;
-          original: readonly PtMm[];
-        }>;
+        savedTip?: SavedDraftDartPathBindingV1;
         apexMm: PtMm;
         intakeMm: number;
       }
     >
   | Command<
       'fish-eye',
-      { entityId: string; centerMm: PtMm; axisMm: number; intakeMm: number; rotationDeg: number }
+      { entityId: string; centerMm: PtMm } & (
+        | { axisMm: number; intakeMm: number; rotationDeg: number; savedMove?: never }
+        | {
+            savedMove: SavedDraftDartPathBindingV1 & { readonly sourcePathId: number };
+            axisMm?: never;
+            intakeMm?: never;
+            rotationDeg?: never;
+          }
+      )
     >
   | Command<
       'spread',
@@ -381,7 +391,7 @@ function target(value: unknown): value is PatternImportDxfPhaseEDraftCadTargetV1
   return stableId(candidate.pieceId) && stableId(candidate.pieceLineKey);
 }
 
-function validSavedDartTip(value: unknown) {
+function validSavedDartPath(value: unknown, pointCount: number, requireSourcePath = false) {
   if (!value || typeof value !== 'object') return false;
   const p = value as Record<string, unknown>;
   return (
@@ -394,8 +404,12 @@ function validSavedDartTip(value: unknown) {
     [p.rank, p.index, p.sizeId].every(
       (n) => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0,
     ) &&
-    points(p.original, 3) &&
-    p.original.length === 3
+    (!requireSourcePath ||
+      (typeof p.sourcePathId === 'number' &&
+        Number.isSafeInteger(p.sourcePathId) &&
+        p.sourcePathId >= 0)) &&
+    points(p.original, pointCount) &&
+    p.original.length === pointCount
   );
 }
 
@@ -552,14 +566,19 @@ function validCommand(value: unknown): value is PatternImportDxfPhaseEDraftCadCo
         boundaryAnchor(payload.base) &&
         point(payload.apexMm) &&
         finitePositive(payload.intakeMm) &&
-        (payload.savedTip === undefined || validSavedDartTip(payload.savedTip))
+        (payload.savedTip === undefined || validSavedDartPath(payload.savedTip, 3))
       );
     case 'fish-eye':
       return (
         point(payload.centerMm) &&
-        finitePositive(payload.axisMm) &&
-        finitePositive(payload.intakeMm) &&
-        Number.isFinite(payload.rotationDeg)
+        (payload.savedMove !== undefined
+          ? validSavedDartPath(payload.savedMove, 4, true) &&
+            payload.axisMm === undefined &&
+            payload.intakeMm === undefined &&
+            payload.rotationDeg === undefined
+          : finitePositive(payload.axisMm) &&
+            finitePositive(payload.intakeMm) &&
+            Number.isFinite(payload.rotationDeg))
       );
     case 'spread':
       return (

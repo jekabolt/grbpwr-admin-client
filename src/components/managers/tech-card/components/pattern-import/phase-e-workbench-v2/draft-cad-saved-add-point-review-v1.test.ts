@@ -1,6 +1,11 @@
 import { cancelSavedDartTipReviewV1 } from './draft-cad-saved-dart-tip-file-v1';
 import { compileSavedDartTipReviewV1 } from './draft-cad-saved-dart-tip-review-v1';
-import { recordSavedDartTipV1, selectSavedDartTipV1 } from './draft-cad-saved-dart-tip-v1';
+import {
+  recordSavedDartTipV1,
+  recordSavedFishEyeMoveV1,
+  selectSavedDartTipV1,
+  selectSavedFishEyeMoveV1,
+} from './draft-cad-saved-dart-tip-v1';
 import { expect, it, vi } from 'vitest';
 import {
   createSavedThreePanelFixtureV1,
@@ -34,7 +39,7 @@ async function fixture(
   stable = false,
   separateAllowance = true,
   fiveRanks = false,
-  nativeDarts: boolean | 'orphan' | 'ambiguous' = false,
+  nativeDarts: boolean | 'orphan' | 'ambiguous' | 'ambiguous-fish-eye' = false,
   sourceDialect: 'r12' | 'r2000' = 'r12',
   spreadHoles = false,
 ) {
@@ -145,10 +150,19 @@ async function fixture(
             ],
           },
         );
-        if (nativeDarts === 'ambiguous')
-          size.internal.push(
-            structuredClone(size.internal.find((p) => p.label === 'draft-cad:dart')!),
-          );
+        if (spreadHoles)
+          size.drills.push({
+            kind: 'drill',
+            form: 'square',
+            at: { x: size.bbox.minX + 25, y: size.bbox.minY + 70 },
+            origin: 'operator',
+            confidence: 1,
+            ranges: [],
+          });
+        if (nativeDarts === 'ambiguous' || nativeDarts === 'ambiguous-fish-eye') {
+          const label = nativeDarts === 'ambiguous' ? 'draft-cad:dart' : 'draft-cad:fish-eye';
+          size.internal.push(structuredClone(size.internal.find((p) => p.label === label)!));
+        }
       }
   }
   seed.written = writeDxfDetailed(seed.job, { now: () => new Date('2026-11-17T00:00:00.000Z') });
@@ -2073,18 +2087,19 @@ it('reopens a native text mark without turning it into size, fold or quantity me
 });
 
 async function checkNativeOutlinePointEdit(
-  tool: 'move-point' | 'delete-point' | 'dart-tip' | 'parallel-spread',
+  tool: 'move-point' | 'delete-point' | 'dart-tip' | 'fish-eye-move' | 'parallel-spread',
   fiveRanks = false,
   sourceDialect: 'r12' | 'r2000' = 'r12',
 ) {
+  const savedDartEdit = tool === 'dart-tip' || tool === 'fish-eye-move';
   vi.stubGlobal('Worker', InProcessTransport);
   const f = await fixture(
     true,
     false,
     fiveRanks,
-    tool === 'dart-tip',
+    savedDartEdit,
     sourceDialect,
-    tool === 'parallel-spread',
+    tool === 'parallel-spread' || tool === 'fish-eye-move',
   );
   const worker = new ImportWorkerClient();
   const reviewFiles: File[] = [];
@@ -2140,7 +2155,12 @@ async function checkNativeOutlinePointEdit(
     const emptyInput = { ...f.compileInput, session: f.initial };
     const savedDart = tool === 'dart-tip' ? selectSavedDartTipV1(emptyInput, targetPiece) : null;
     const nextTip = savedDart ? { x: savedDart.apexMm.x + 3, y: savedDart.apexMm.y - 4 } : null;
-    const movedDart = nextTip && recordSavedDartTipV1(emptyInput, targetPiece, nextTip);
+    const fishEye =
+      tool === 'fish-eye-move' ? selectSavedFishEyeMoveV1(emptyInput, targetPiece) : null;
+    const nextCenter = fishEye ? { x: fishEye.centerMm.x + 3, y: fishEye.centerMm.y - 4 } : null;
+    const movedDart = nextTip
+      ? recordSavedDartTipV1(emptyInput, targetPiece, nextTip)
+      : nextCenter && recordSavedFishEyeMoveV1(emptyInput, targetPiece, nextCenter);
     const selected = targetPiece.contours.find((c) => c.role === 'cut-boundary')!;
     const bounds = bboxOf(selected.vertices.map((v) => v.pointMm)),
       slashX = bounds.minX + 38;
@@ -2174,7 +2194,7 @@ async function checkNativeOutlinePointEdit(
     }
     const edit = spreadSession
       ? { recorded: true, blocker: null, session: spreadSession }
-      : tool === 'dart-tip'
+      : savedDartEdit
         ? {
             recorded: movedDart?.ok,
             blocker: movedDart?.blocker?.detail,
@@ -2190,7 +2210,7 @@ async function checkNativeOutlinePointEdit(
       { ...f.compileInput, session: edit.session },
       undefined,
       undefined,
-      tool === 'dart-tip' || tool === 'parallel-spread'
+      savedDartEdit || tool === 'parallel-spread'
         ? () => compileSavedDartTipReviewV1(f.request, verifyRow)
         : undefined,
     );
@@ -2200,7 +2220,7 @@ async function checkNativeOutlinePointEdit(
         confirmedImportGenerationAtCompile: f.current.generation,
       }),
     ).toBe(true);
-    if (tool === 'dart-tip') {
+    if (savedDartEdit) {
       expect(f.source.native.draft.scopes[0]!.writerReplay!.job.dialect).toBe(sourceDialect);
       expect(compiled.artifact.compiledJob.dialect).toBe(sourceDialect);
       for (const text of [new TextDecoder().decode(f.seed.bytes), compiled.artifact.dxfText])
@@ -2222,7 +2242,7 @@ async function checkNativeOutlinePointEdit(
     const scope = reviewed.scopes[0]!;
     expect(scope.manifest.gate?.passed).toBe(true);
     expect(upload).not.toHaveBeenCalled();
-    if (tool === 'dart-tip' || tool === 'parallel-spread') {
+    if (savedDartEdit || tool === 'parallel-spread') {
       const noWrite = vi.fn();
       await expect(
         applyDirectDxfReviewedDraftV1(reviewed, [file], 1, () => true, noWrite),
@@ -2240,7 +2260,7 @@ async function checkNativeOutlinePointEdit(
           noWrite,
           file,
         ),
-      ).rejects.toThrow(tool === 'dart-tip' ? 'original saved dart' : 'original parallel opening');
+      ).rejects.toThrow(savedDartEdit ? 'original saved dart' : 'original parallel opening');
       const originalText = scope.dxfText;
       scope.dxfText += '\n';
       await expect(
@@ -2254,7 +2274,7 @@ async function checkNativeOutlinePointEdit(
       otherSize.cut = oldCut.map((p, i) => (i === 0 ? { ...p, x: p.x + 1 } : p));
       await expect(
         applyDirectDxfReviewedDraftV1(reviewed, [file], undefined, () => true, noWrite, file),
-      ).rejects.toThrow(tool === 'dart-tip' ? 'size blocks changed' : 'another size changed');
+      ).rejects.toThrow(savedDartEdit ? 'size blocks changed' : 'another size changed');
       otherSize.cut = oldCut;
       const before = f.current.row;
       f.current.row = { ...before, revision: before.revision + 1 };
@@ -2391,7 +2411,7 @@ async function checkNativeOutlinePointEdit(
         }
         return;
       }
-      if (tool === 'dart-tip') {
+      if (savedDartEdit) {
         cancelSavedDartTipReviewV1(file);
         const closedWrite = vi.fn();
         await expect(
@@ -2406,9 +2426,41 @@ async function checkNativeOutlinePointEdit(
         const changed = expected.find(
           (b) => b.identity === targetPiece.pieceId && b.sizeToken === 'M',
         )!;
-        const marker = changed.authoredInternal!.find((m) => m.label === 'draft-cad:dart')!;
-        marker.vertices[2]! += 3_000_000;
-        marker.vertices[3]! -= 4_000_000;
+        const label = tool === 'dart-tip' ? 'draft-cad:dart' : 'draft-cad:fish-eye';
+        const marker = changed.authoredInternal!.find((m) => m.label === label)!;
+        const movedIndices = tool === 'dart-tip' ? [1] : [0, 1, 2, 3];
+        for (const index of movedIndices) {
+          marker.vertices[index * 2]! += 3_000_000;
+          marker.vertices[index * 2 + 1]! -= 4_000_000;
+        }
+        const initialRaw = parseDxf(f.request.savedBytes, 'mm').dxf;
+        const savedRaw = parseDxf(bytes.buffer, 'mm').dxf;
+        for (const block of before.manifest.blocks) {
+          const rawLayers = (file: typeof initialRaw, layer: string) =>
+            file.blocks[block.block]!.entities.filter((entity) => entity.layer === layer)
+              .map((entity) => entityToChain(entity, 1, 0.001))
+              .filter((chain) => chain !== null);
+          const originalInternal = rawLayers(initialRaw, '8');
+          const restoredInternal = rawLayers(savedRaw, '8');
+          if (block.block === changed.block) {
+            const original = originalInternal[marker.index]!;
+            expect(original.closed).toBe(tool === 'fish-eye-move');
+            expect(restoredInternal[marker.index]!.closed).toBe(original.closed);
+            for (const index of movedIndices) {
+              original.pts[index]!.x += 3;
+              original.pts[index]!.y -= 4;
+            }
+          }
+          expect(restoredInternal).toEqual(originalInternal);
+          const drillPoints = (file: typeof initialRaw) =>
+            file.blocks[block.block]!.entities.filter(
+              ({ layer, type }) => layer === '13' && type === 'POINT',
+            );
+          expect(drillPoints(initialRaw)).toHaveLength(fishEye && sourceDialect === 'r12' ? 1 : 0);
+          expect(drillPoints(savedRaw)).toHaveLength(fishEye ? 1 : 0);
+          for (const layer of ['1', '14'])
+            expect(rawLayers(savedRaw, layer)).toEqual(rawLayers(initialRaw, layer));
+        }
         const signature = (blocks: typeof expected) =>
           blocks
             .map((b) => [b.block, b.identity, b.sizeId, b.sizeToken, b.authoredInternal])
@@ -2421,8 +2473,17 @@ async function checkNativeOutlinePointEdit(
           for (const size of p.sizes) {
             const decoded = restored.sizes.find((s) => s.sizeToken === size.sizeToken)!;
             const previous = structuredClone(size.internal);
-            if (p.identity === targetPiece.pieceId && size.sizeToken === 'M')
-              previous.find((p) => p.label === 'draft-cad:dart')!.pts[1] = nextTip!;
+            if (p.identity === targetPiece.pieceId && size.sizeToken === 'M') {
+              const feature = previous.find((entry) => entry.label === label)!;
+              for (const index of movedIndices) {
+                feature.pts[index]!.x += 3;
+                feature.pts[index]!.y -= 4;
+              }
+              if (fishEye)
+                expect(size.internal[fishEye.savedMove.index]?.ranges[0]?.path).toBe(
+                  fishEye.savedMove.sourcePathId,
+                );
+            }
             // Source path ids are issued by each fresh reader and differ between dialects.
             const geometry = (items: typeof previous) =>
               items.map(({ ranges, ...feature }) => ({
@@ -2432,6 +2493,20 @@ async function checkNativeOutlinePointEdit(
             expect(geometry(decoded.internal)).toEqual(geometry(previous));
             expect(decoded.cut).toEqual(size.cut);
             expect(decoded.seam).toEqual(size.seam);
+            expect(decoded.cutLoops).toEqual(size.cutLoops);
+            if (fishEye) {
+              expect(decoded.cutLoops).toHaveLength(2);
+              expect(decoded.drills).toHaveLength(1);
+              expect(size.drills).toHaveLength(1);
+              expect(size.drills[0]?.form).toBe(sourceDialect === 'r12' ? 'point' : 'square');
+              // The normal Wizard writes R12, which adds a companion POINT to the unchanged
+              // layer-8 drill square. The reader prefers that companion for the one drill.
+              expect(decoded.drills[0]).toMatchObject({
+                kind: 'drill',
+                form: 'point',
+                at: size.drills[0]!.at,
+              });
+            }
           }
         }
         return;
@@ -2548,6 +2623,97 @@ it.each(['r12', 'r2000'] as const)(
   'moves only the saved %s M dart tip through manual Apply and fresh native replay across five ranks',
   (dialect) => checkNativeOutlinePointEdit('dart-tip', true, dialect),
 );
+
+it.each(['r12', 'r2000'] as const)(
+  'moves only the saved %s M fish-eye through manual Apply and fresh native replay across five ranks',
+  (dialect) => checkNativeOutlinePointEdit('fish-eye-move', true, dialect),
+);
+
+it('rejects a fish-eye bound to the open dart path, the wrong rank or a cut hole', async () => {
+  vi.stubGlobal('Worker', InProcessTransport);
+  const f = await fixture(true, false, true, true, 'r12', true);
+  try {
+    const input = { ...f.compileInput, session: f.initial };
+    const piece = input.projection.pieces[0]!;
+    const fishEye = selectSavedFishEyeMoveV1(input, piece)!;
+    const move = recordSavedFishEyeMoveV1(input, piece, {
+      x: fishEye.centerMm.x + 3,
+      y: fishEye.centerMm.y - 4,
+    });
+    if (!move?.ok) throw Error('Fixture fish-eye unavailable');
+    const command = move.session.history[0]!.commands[0]!;
+    if (command.tool !== 'fish-eye' || !command.payload.savedMove)
+      throw Error('Fixture lost the original layer-8 path');
+    const selectedSize = f.source.native.draft.scopes[0]!.writerReplay!.job.pieces.find(
+      (p) => p.identity === piece.pieceId,
+    )!.sizes.find((size) => size.sizeToken === 'M')!;
+    const openDart = selectedSize.internal.find((feature) => feature.label === 'draft-cad:dart')!;
+    const wrongPath = openDart.ranges[0]!.path;
+    expect(wrongPath).not.toBe(fishEye.savedMove.sourcePathId);
+    const badBindings = [
+      { ...command.payload.savedMove, sourcePathId: wrongPath },
+      { ...command.payload.savedMove, rank: 1 },
+    ];
+    for (const savedMove of badBindings) {
+      const corrupt = recordPatternImportDxfPhaseEDraftCadTransactionV1(f.initial, {
+        transactionId: 'changed-fish-eye',
+        label: 'Move fish-eye',
+        commands: [{ ...command, payload: { ...command.payload, savedMove } }],
+      });
+      if (!corrupt.ok) throw Error(corrupt.blocker.detail);
+      f.current.session = corrupt.session;
+      const fresh = await createSavedThreePanelSourceV1(f.seed);
+      try {
+        const verify = vi.fn(async () => {});
+        await expect(
+          compileSavedDartTipReviewV1(
+            {
+              ...f.request,
+              sourceOwner: fresh.native.sourceOwner,
+              sourceRequest: { ...f.request.sourceRequest, draft: fresh.native.draft },
+            },
+            verify,
+          ),
+        ).rejects.toThrow('exact saved fish-eye');
+        expect(verify).not.toHaveBeenCalled();
+      } finally {
+        fresh.dispose();
+      }
+    }
+
+    expect((await compileDraftForOrdinaryReviewV1({ ...input, session: move.session })).ok).toBe(
+      false,
+    );
+    const insideHole = selectedSize.cutLoops![0]![0]!;
+    const crossesHole = recordSavedFishEyeMoveV1(input, piece, {
+      x: insideHole.x + 4,
+      y: insideHole.y + 3.5,
+    });
+    if (!crossesHole?.ok) throw Error('Fixture move into the hole unavailable');
+    f.current.session = crossesHole.session;
+    const blocked = await compileSavedDartTipReviewV1(f.request, async () => {});
+    expect(blocked.ok).toBe(false);
+    expect(blocked.blockers[0]?.detail).toContain('outside its holes');
+  } finally {
+    f.source.dispose();
+    vi.unstubAllGlobals();
+  }
+});
+
+it('does not guess an editable saved fish-eye among two typed native paths', async () => {
+  vi.stubGlobal('Worker', InProcessTransport);
+  const f = await fixture(true, false, true, 'ambiguous-fish-eye');
+  try {
+    const input = { ...f.compileInput, session: f.initial };
+    const piece = input.projection.pieces[0]!;
+    expect(selectSavedDartTipV1(input, piece)).not.toBeNull();
+    expect(selectSavedFishEyeMoveV1(input, piece)).toBeNull();
+    expect(recordSavedFishEyeMoveV1(input, piece, { x: 40, y: 20 })).toBeNull();
+  } finally {
+    f.source.dispose();
+    vi.unstubAllGlobals();
+  }
+});
 
 it('rejects cross-piece, cross-rank, changed tip, feet and alias during saved dart verification', async () => {
   vi.stubGlobal('Worker', InProcessTransport);

@@ -1,5 +1,10 @@
 import { SavedDartTipControlV1 } from './draft-cad-saved-dart-tip-control-v1';
-import { recordSavedDartTipV1, selectSavedDartTipV1 } from './draft-cad-saved-dart-tip-v1';
+import {
+  recordSavedDartTipV1,
+  recordSavedFishEyeMoveV1,
+  selectSavedDartTipV1,
+  selectSavedFishEyeMoveV1,
+} from './draft-cad-saved-dart-tip-v1';
 import { SavedDraftPieceCopyControlV1 } from './draft-cad-unlinked-piece-copy-control-v1';
 import type {
   PrepareSavedCopyReviewV1,
@@ -323,10 +328,10 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
       ? projection.pieces.find((p) => p.pieceId === selectedPieceIds[0])
       : null;
   const dartInput = { session, projection, selection, compileSource };
-  const savedDart =
-    selectedForCopy && prepareSavedGeometryReview && compiledReimportCapability.available
-      ? selectSavedDartTipV1(dartInput, selectedForCopy)
-      : null;
+  const savedEditPiece =
+    prepareSavedGeometryReview && compiledReimportCapability.available ? selectedForCopy : null;
+  const savedDart = savedEditPiece ? selectSavedDartTipV1(dartInput, savedEditPiece) : null;
+  const savedFishEye = savedEditPiece ? selectSavedFishEyeMoveV1(dartInput, savedEditPiece) : null;
   const copySelection = useRef<SavedCopySelectionV1 | null>(null);
   copySelection.current = selectedForCopy?.pieceLineKey
     ? {
@@ -711,9 +716,27 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
                   selectedForCopy.pieceLineKey,
                   confirmedImportGeneration,
                 ])}
-                apexMm={savedDart.apexMm}
+                positionMm={savedDart.apexMm}
                 onMove={(point) => {
                   const edit = recordSavedDartTipV1(dartInput, selectedForCopy, point);
+                  if (edit?.ok) publishSession(edit.session);
+                }}
+              />
+            )}
+            {savedFishEye && selectedForCopy && (
+              <SavedDartTipControlV1
+                kind='fish-eye'
+                key={JSON.stringify([
+                  savedFishEye.savedMove.sourceSha256,
+                  savedFishEye.savedMove.scopeKey,
+                  savedFishEye.savedMove.sizeToken,
+                  selectedForCopy.pieceLineKey,
+                  savedFishEye.savedMove.sourcePathId,
+                  confirmedImportGeneration,
+                ])}
+                positionMm={savedFishEye.centerMm}
+                onMove={(point) => {
+                  const edit = recordSavedFishEyeMoveV1(dartInput, selectedForCopy, point);
                   if (edit?.ok) publishSession(edit.session);
                 }}
               />
@@ -896,6 +919,26 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
             allowSavedParallelOpening={Boolean(
               prepareSavedGeometryReview && compiledReimportCapability.available,
             )}
+            savedDartPaths={[
+              ...(savedDart
+                ? [
+                    {
+                      pieceLineKey: savedDart.savedTip.pieceLineKey,
+                      kind: 'dart' as const,
+                      pointsMm: savedDart.savedTip.original,
+                    },
+                  ]
+                : []),
+              ...(savedFishEye
+                ? [
+                    {
+                      pieceLineKey: savedFishEye.savedMove.pieceLineKey,
+                      kind: 'fish-eye' as const,
+                      pointsMm: savedFishEye.savedMove.original,
+                    },
+                  ]
+                : []),
+            ]}
             session={session}
             projection={projection}
             scopeKey={topologyScopeKey}

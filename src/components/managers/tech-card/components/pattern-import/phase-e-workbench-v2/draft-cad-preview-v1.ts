@@ -1,3 +1,4 @@
+import { movedSavedFishEyePointsV1 } from './draft-cad-saved-dart-tip-v1';
 import { parallelOpeningAxisV1 } from './draft-cad-session-v1';
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 import { signedArea } from 'lib/pattern-import/semantics/geom';
@@ -672,6 +673,34 @@ export function buildPatternImportDxfPhaseEDraftCadPreviewV1(
         break;
       }
       case 'fish-eye': {
+        if (command.payload.savedMove) {
+          const pointsMm = movedSavedFishEyePointsV1(
+            command.payload.savedMove.original,
+            command.payload.centerMm,
+          );
+          if (!pointsMm) {
+            blockers.push(
+              commandBlocker(
+                command,
+                'invalid-command-geometry',
+                'Choose a different exact centre for the saved fish-eye.',
+              ),
+            );
+            break;
+          }
+          primitives.push(
+            deepFreeze({
+              ...base,
+              kind: 'path' as const,
+              pointsMm,
+              closed: true,
+              role: 'internal' as const,
+              stroke: 'dashed' as const,
+            }),
+          );
+          bounds = extendPoints(bounds, pointsMm);
+          break;
+        }
         const centerMm = clonePoint(command.payload.centerMm);
         if (
           !finitePoint(centerMm) ||

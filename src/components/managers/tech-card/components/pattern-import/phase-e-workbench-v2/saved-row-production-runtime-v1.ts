@@ -283,7 +283,13 @@ export function createPatternImportDxfPhaseESavedRowRuntimeV1(
   > = async (row, readCurrent) => {
     const opening = readCurrent(),
       command = opening?.session.history[0]?.commands[0];
-    if (!((command?.tool === 'dart' && command.payload.savedTip) || command?.tool === 'cut'))
+    if (
+      !(
+        (command?.tool === 'dart' && command.payload.savedTip) ||
+        (command?.tool === 'fish-eye' && command.payload.savedMove) ||
+        command?.tool === 'cut'
+      )
+    )
       throw new Error('Select the original saved geometry.');
     return withSavedDraftSource(
       row,

@@ -57,7 +57,10 @@ export function registerPatternImportDxfPhaseEPatternsFieldCompiledReimportOwner
       const addPoint = artifact.compiledFeatures.some((feature) => feature.tool === 'add-point');
       const pairedAllowance = requiresCurrentPairedAllowanceReviewV1(artifact);
       const savedGeometry = artifact.compiledFeatures.some(
-        (f) => f.output === 'moved-dart-tip' || f.output === 'parallel-spread',
+        ({ output }) =>
+          output === 'moved-dart-tip' ||
+          output === 'moved-fish-eye' ||
+          output === 'parallel-spread',
       );
       const manualApply =
         savedGeometry ||
