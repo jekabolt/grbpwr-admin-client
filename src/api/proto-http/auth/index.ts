@@ -181,6 +181,8 @@ export type GetInviteResponse = {
 export type AcceptInviteRequest = {
   token: string | undefined;
   password: string | undefined;
+  // handle is the person's name inside the team when the invited email has no account yet.
+  handle: string | undefined;
 };
 
 export type AcceptInviteResponse = {
