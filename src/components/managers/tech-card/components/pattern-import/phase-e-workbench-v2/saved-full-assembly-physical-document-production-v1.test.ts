@@ -396,6 +396,37 @@ describe('saved full-assembly physical document production consumer', () => {
     });
   });
 
+  it('shows the original storage refusal when the independent read still returns V6', async () => {
+    mocks.projectHost.mockResolvedValue({ ok: true, context: context() });
+    mocks.projectSnapshot.mockReset().mockReturnValue(freshSnapshot('e'.repeat(64)));
+    mocks.persist.mockResolvedValue({
+      ok: false,
+      writeOutcome: 'unknown',
+      receipt: null,
+      blockers: [
+        {
+          code: 'put-failed',
+          detail: 'Composite V7 PUT returned HTTP 400 (invalid_composite_v7).',
+        },
+      ],
+    });
+    const result = await persistCurrentSavedGenericObservedPhysicalHostV1({}, 4);
+    expect(result).toMatchObject({
+      ok: false,
+      writeOutcome: 'unknown',
+      blockers: [
+        {
+          code: 'put-failed',
+          detail:
+            'Composite V7 PUT returned HTTP 400 (invalid_composite_v7). Readback: Fresh saved Composite V7 differs from the intended exact bytes.',
+        },
+      ],
+    });
+    expect(mocks.persist).toHaveBeenCalledOnce();
+    expect(mocks.readSnapshot).toHaveBeenCalledTimes(2);
+    expect(mocks.verifyV7).not.toHaveBeenCalled();
+  });
+
   it.each([
     { ok: true, writeOutcome: 'verified', expected: 'acknowledged-unverified' },
     { ok: false, writeOutcome: 'unknown', expected: 'unknown' },

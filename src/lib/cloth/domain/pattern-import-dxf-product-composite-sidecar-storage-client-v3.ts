@@ -1,4 +1,5 @@
 import type { AdminService, TechCardPatternSemanticSidecar } from 'api/proto-http/admin';
+import { extractFieldViolations, violationReason } from 'utils/field-errors';
 
 import {
   PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_PERSISTENCE_REQUEST_V3,
@@ -276,6 +277,21 @@ class StorageFailure extends Error {
 
 function fail(code: Code, phase: Phase, detail: string): never {
   throw new StorageFailure(code, phase, detail);
+}
+
+function unconfirmedPutDetail(label: string, error: unknown): string {
+  const status = error instanceof Error && 'status' in error ? error.status : undefined;
+  if (typeof status !== 'number' || !Number.isInteger(status) || status < 400 || status > 599)
+    return `${label} PUT failed and may have committed.`;
+  let reason: string | undefined;
+  try {
+    reason = extractFieldViolations(error)
+      .map(({ description }) => violationReason(description))
+      .find((code) => /^[a-z][a-z0-9_]{0,79}$/.test(code));
+  } catch {
+    // A malformed gateway detail still leaves the independently known HTTP status.
+  }
+  return `${label} PUT returned HTTP ${status}${reason ? ` (${reason})` : ''}. Its outcome requires fresh verification.`;
 }
 
 function blocked(
@@ -778,7 +794,7 @@ export function createPatternImportDxfProductCompositeSidecarStorageWriterV3<
             'put',
             signal.aborted
               ? `${strategy.label} PUT was cancelled and may have committed.`
-              : `${strategy.label} PUT failed and may have committed.`,
+              : unconfirmedPutDetail(strategy.label, error),
           ),
           'unknown',
         );

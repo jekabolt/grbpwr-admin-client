@@ -434,7 +434,15 @@ export async function persistCurrentSavedGenericObservedPhysicalHostV1(
         blockers: Object.freeze([]) as readonly [],
       });
     } catch (error) {
-      return blocked(error, stored.ok ? 'acknowledged-unverified' : stored.writeOutcome);
+      const primary = !stored.ok && !controller.signal.aborted ? stored.blockers[0] : undefined;
+      const failure =
+        primary && error instanceof PhysicalDocumentPersistenceFailureV1
+          ? new PhysicalDocumentPersistenceFailureV1(
+              primary.code,
+              `${primary.detail} Readback: ${error.message}`,
+            )
+          : error;
+      return blocked(failure, stored.ok ? 'acknowledged-unverified' : stored.writeOutcome);
     }
   } catch (error) {
     return blocked(error);

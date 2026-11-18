@@ -99,4 +99,70 @@ describe('StorageWriterV3 pre-PUT currentness phase', () => {
     expect(get).toHaveBeenCalledTimes(1);
     expect(put).not.toHaveBeenCalled();
   });
+
+  it('retains a bounded server refusal without its raw response body or another PUT', async () => {
+    const get = vi.fn().mockRejectedValue(Object.assign(new Error('absent'), { status: 404 }));
+    const put = vi.fn().mockRejectedValue(
+      Object.assign(new Error('private response body'), {
+        status: 400,
+        details: [
+          {
+            '@type': 'type.googleapis.com/google.rpc.BadRequest',
+            fieldViolations: [
+              {
+                field: 'semantic_sidecar',
+                description: 'invalid_composite_v7; confidential server body',
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    const client = {
+      GetTechCardPatternSemanticSidecar: get,
+      PutTechCardPatternSemanticSidecar: put,
+    } as unknown as PatternImportDxfProductCompositeSidecarStorageServiceV3;
+    const writer = createPatternImportDxfProductCompositeSidecarStorageWriterV3(
+      { createClient: () => client, crypto },
+      {
+        requestSchemaVersion: REQUEST,
+        receiptSchemaVersion: RECEIPT,
+        mediaType: MEDIA_TYPE,
+        acceptedCurrentMediaTypes: Object.freeze([]),
+        label: 'Test composite',
+        prepare: async (request) => ({
+          authority: request.currentAuthority,
+          transport: {
+            patternVersion: 11,
+            postSaveReceiptSha256: 'c'.repeat(64),
+            selectedOperationNumber: 20,
+          },
+          previousSidecarSha256: null,
+          sidecarSha256: 'd'.repeat(64),
+          byteLength: 1,
+          bytes: new Uint8Array([1]),
+          mediaType: MEDIA_TYPE,
+        }),
+        verifyCanonical: async () => true,
+      },
+    );
+    const result = await writer.persist(
+      { schemaVersion: REQUEST, currentAuthority: authority },
+      new AbortController().signal,
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      writeOutcome: 'unknown',
+      blockers: [
+        {
+          code: 'put-failed',
+          phase: 'put',
+          detail:
+            'Test composite PUT returned HTTP 400 (invalid_composite_v7). Its outcome requires fresh verification.',
+        },
+      ],
+    });
+    expect(put).toHaveBeenCalledOnce();
+    expect(get).toHaveBeenCalledOnce();
+  });
 });
