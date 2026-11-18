@@ -28,6 +28,8 @@ import { readSavedGarmentLabelStitchAnchorV1 } from './saved-garment-label-stitc
 import type { PatternImportDxfPhaseESavedRowCardProjectionV1 } from './saved-row-production-runtime-v1';
 
 type OperationAnchorIdentity = Readonly<{
+  /** Zero-based ordinal in the exact persisted Complete Source operation list. */
+  operationOrder: number;
   operationNumber: number;
   seamKey: string;
   seamKind: common_TechCardSeam['kind'];
@@ -114,6 +116,9 @@ export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
   const jobsByRow = new Map<string, NativeAnchorJob[]>();
   const labels: SavedCompleteGarmentLabelAnchorV1[] = [];
   const spans: SavedCompleteNativeStitchAnchorV1[] = [];
+  const operationOrders = new Map(
+    source.operations.map(({ operationNumber }, index) => [operationNumber, index]),
+  );
   let nextIndex = 0;
   for (const { seam, anchors } of built.operationAnchors.physical) {
     if (seam.anchoredSize && seam.anchoredSize !== size.token)
@@ -128,7 +133,11 @@ export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
         anchor,
         source: binding,
       } = bound;
+      const operationOrder = operationOrders.get(operationNumber);
+      if (operationOrder === undefined)
+        throw new Error('A saved anchor has no persisted operation order.');
       const identity = {
+        operationOrder,
         operationNumber,
         seamKey,
         sideIndex,
@@ -291,14 +300,24 @@ export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
     },
     signal,
   );
-  if (fresh.priorCarrier?.sidecarSha256 !== source.priorCarrier?.sidecarSha256)
+  if (
+    fresh.priorCarrier?.sidecarSha256 !== source.priorCarrier?.sidecarSha256 ||
+    fresh.priorCarrier?.mediaType !== source.priorCarrier?.mediaType
+  )
     throw new Error('The saved Assembly carrier changed while reading its native stitch anchors.');
   const ownedSeamKeys = new Set(source.ownedSeams.map(({ seamKey }) => seamKey));
   return Object.freeze({
+    schemaVersion: 'saved-complete-assembly-native-stitch-anchors/1' as const,
     cardId: anchorRow.techCardId,
     cardLockVersion: anchorRow.cardLockVersion,
     sourceSha256: fresh.sourceSha256,
     serverAssemblyRevision: fresh.serverAssemblyRevision,
+    savedCarrier: fresh.priorCarrier
+      ? Object.freeze({
+          mediaType: fresh.priorCarrier.mediaType,
+          sidecarSha256: fresh.priorCarrier.sidecarSha256,
+        })
+      : null,
     sizeId: selectedSizeId,
     sizeToken: size.token,
     rows: Object.freeze(
@@ -310,6 +329,7 @@ export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
       ),
     ),
     sourceCuts: built.originalCutPaths,
+    operations: fresh.operations,
     spans: Object.freeze(spans),
     labelAnchors: Object.freeze(labels),
     poses: built.operationAnchors.poses,
