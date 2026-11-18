@@ -274,9 +274,15 @@ function existingExactSeamChoices(
   return Object.freeze(choices);
 }
 
-function stitchSeed(snapshot: SavedFullAssemblySnapshotProjectionV1): number {
+function stitchSeed(
+  snapshot: SavedFullAssemblySnapshotProjectionV1,
+  requestedOperationNumber?: number,
+): number {
   const operation = snapshot.operations.find(
-    ({ operationNumber, seamKeys }) => operationNumber > 0 && seamKeys.length > 0,
+    ({ operationNumber, seamKeys }) =>
+      operationNumber > 0 &&
+      seamKeys.length > 0 &&
+      (requestedOperationNumber === undefined || operationNumber === requestedOperationNumber),
   );
   if (!operation)
     fail('genuine-stitch-required', 'A positive seam-bearing Assembly operation is required.');
@@ -393,6 +399,7 @@ export const prepareSavedFullAssemblyGenericFirstBootstrapV1 = Object.freeze(
     cardProjection: PatternImportDxfPhaseESavedRowCardProjectionV1,
     signal?: AbortSignal,
     sourceSurface: SavedFullAssemblyFirstSourceSurfaceV1 = 'zero-allowance-cut',
+    requestedOperationNumber?: number,
   ): Promise<SavedFullAssemblyGenericFirstBootstrapV1> {
     check(signal);
     if (sourceSurface !== 'zero-allowance-cut' && sourceSurface !== 'native-drawn-sewing')
@@ -403,22 +410,21 @@ export const prepareSavedFullAssemblyGenericFirstBootstrapV1 = Object.freeze(
       'cancel' | 'dispose'
     > | null = null;
     try {
-      // The card projection chooses only a positive transport anchor. The generated bounded reader
-      // authenticates the complete current operation/seam payload and independently rejects drift.
-      const cardOperation = cardProjection.card.assembly?.ops.find(
-        ({ number, seamKeys }) => number > 0 && (seamKeys?.length ?? 0) > 0,
-      );
-      if (!cardOperation)
-        throw new SavedFullAssemblyGenericFirstBootstrapErrorV1(
-          'genuine-stitch-required',
-          'A positive seam-bearing Assembly operation is required.',
-        );
+      // The selected AO number is a transport anchor. Only the current server snapshot can
+      // confirm whether that numbered operation owns a seam.
+      const transportSeed =
+        requestedOperationNumber ??
+        cardProjection.card.assembly?.ops.find(
+          ({ number, seamKeys }) => number > 0 && (seamKeys?.length ?? 0) > 0,
+        )?.number;
+      if (transportSeed === undefined || !Number.isSafeInteger(transportSeed) || transportSeed <= 0)
+        fail('genuine-stitch-required', 'A positive seam-bearing Assembly operation is required.');
       receipt = await readSavedFullAssemblySnapshotV1(
-        { row, seedOperationNumber: cardOperation.number },
+        { row, seedOperationNumber: transportSeed },
         signal,
       );
       const snapshot = projectSavedFullAssemblySnapshotV1(receipt);
-      const seedOperationNumber = stitchSeed(snapshot);
+      const seedOperationNumber = stitchSeed(snapshot, requestedOperationNumber);
       if (
         snapshot.outer.status !== 'present' ||
         snapshot.outer.mediaType !==

@@ -266,6 +266,13 @@ describe('first physical authoring source lifetime', () => {
     expect(latest!.sourceStatus).toBe('placement-required');
 
     await act(async () => latest!.startFirstAuthoring());
+    expect(mocks.prepareFirst).toHaveBeenCalledWith(
+      row,
+      cardProjection,
+      expect.any(AbortSignal),
+      'native-drawn-sewing',
+      10,
+    );
     expect(latest!.firstAuthoring.status).toBe('compile-required');
 
     await act(async () => latest!.compileFirstAuthoring({} as never));

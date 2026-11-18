@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   foreignCancel: vi.fn(),
   exactHost: vi.fn(),
   foreignHost: vi.fn(),
+  readSnapshot: vi.fn(),
   snapshot: vi.fn(),
   decoded: vi.fn(),
   catalog: vi.fn(),
@@ -45,7 +46,7 @@ vi.mock('./foreign-saved-dxf-reprocess-host-v1', () => ({
 }));
 vi.mock('./saved-full-assembly-snapshot-production-v1', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./saved-full-assembly-snapshot-production-v1')>()),
-  readSavedFullAssemblySnapshotV1: async () => ({}),
+  readSavedFullAssemblySnapshotV1: mocks.readSnapshot,
   projectSavedFullAssemblySnapshotV1: mocks.snapshot,
   disposeSavedFullAssemblySnapshotV1: mocks.disposeReceipt,
 }));
@@ -117,6 +118,7 @@ function success() {
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.readSnapshot.mockResolvedValue({});
   mocks.exactRun.mockResolvedValue(success());
   mocks.foreignRun.mockResolvedValue(success());
   mocks.snapshot.mockReturnValue({
@@ -171,6 +173,48 @@ describe('native first bootstrap manifest-aware owner routing', () => {
     expect(mocks.exactHost).not.toHaveBeenCalled();
     expect(mocks.foreignHost).not.toHaveBeenCalled();
     expect(mocks.disposeReceipt).toHaveBeenCalledOnce();
+  });
+
+  it('loads the selected operation from the current server when the local projection has no seam keys', async () => {
+    const local = structuredClone(projection);
+    local.card.assembly!.ops[0]!.seamKeys = [];
+    const result = await prepareSavedFullAssemblyGenericFirstBootstrapV1(
+      row,
+      local,
+      undefined,
+      'native-drawn-sewing',
+      150,
+    );
+    expect(mocks.readSnapshot).toHaveBeenCalledExactlyOnceWith(
+      { row, seedOperationNumber: 150 },
+      undefined,
+    );
+    expect(result.seedOperationNumber).toBe(150);
+    expect(mocks.exactRun).toHaveBeenCalledOnce();
+  });
+
+  it('does not borrow a different saved operation when the selected operation has no seam', async () => {
+    mocks.snapshot.mockReturnValue({
+      ...mocks.snapshot(),
+      operations: [
+        { operationNumber: 150, seamKeys: ['seam'] },
+        { operationNumber: 160, seamKeys: [] },
+      ],
+    });
+    await expect(
+      prepareSavedFullAssemblyGenericFirstBootstrapV1(
+        row,
+        projection,
+        undefined,
+        'native-drawn-sewing',
+        160,
+      ),
+    ).rejects.toMatchObject({ code: 'genuine-stitch-required' });
+    expect(mocks.readSnapshot).toHaveBeenCalledExactlyOnceWith(
+      { row, seedOperationNumber: 160 },
+      undefined,
+    );
+    expect(mocks.exactRun).not.toHaveBeenCalled();
   });
 
   it('uses exact saved native replay for canonical wizard output and keeps original source draft identity', async () => {
