@@ -42,7 +42,7 @@ import {
   ringDistance,
   type NestSizeIn,
 } from './nest-walk';
-import { GFIT_REPAIR, repairSize, type GfitWall } from './repair';
+import { GFIT_REPAIR, looseWallsOn, repairSize, type GfitWall } from './repair';
 import { silentRead } from './silent-inputs';
 
 /** The repair's grade-model tolerance: the PDF one; `GRADE_TOL_P0=1` brings back the CAD one. */
@@ -156,8 +156,8 @@ export type RepairCtx = {
   wm: Pick<WallModel, 'mode' | 'byRank' | 'common'>;
   texts: readonly { id: TextId; at: PtMm }[];
   /**
-   * GRADE_P2_LOOSE (off by default): chains no size owns. Counted only where they lie in the
-   * size's place (repair.ts). Absent when the flag is off — the try is unchanged.
+   * Unassigned chains available to the fallback after the ordinary repair leaves a leak.
+   * repairSize checks each candidate against this size's corridor and both anchor outlines.
    */
   loose?: readonly RepairWallIn[];
 };
@@ -194,10 +194,7 @@ export function repairPass(
   const withBox = (ws: readonly RepairWallIn[]) => ws.map((w) => ({ w, box: bboxOf(w.pts) }));
   const commonB = withBox(ctx.common);
   // once per pass: the try loop used to rebuild this box for every size
-  const looseB =
-    typeof process !== 'undefined' && !!process.env?.GRADE_P2_LOOSE && ctx.loose
-      ? withBox(ctx.loose)
-      : null;
+  const looseB = looseWallsOn() && ctx.loose ? withBox(ctx.loose) : null;
   const ownOf = (r: number) => {
     let v = ownMemo.get(r);
     if (!v) ownMemo.set(r, (v = withBox(ctx.own(r))));
@@ -262,6 +259,7 @@ export function repairPass(
     kind: RepairRecord['kind'],
     /** ranks that are no anchor here (sizes the grade check holds) */
     exclude: ReadonlySet<number> = new Set(),
+    withLooseWalls = false,
   ): string[] => {
     const c = list[i];
     const r = c.rank;
@@ -300,7 +298,7 @@ export function repairPass(
       );
       return ['not-bracketed'];
     }
-    diag.tried++;
+    if (!withLooseWalls) diag.tried++;
     const ins: GfitSizeIn[] = anchors.map((x) => ({ rank: x.rank, outer: x.outer, anchor: true }));
     // the walls near the bracketing anchors (the size lies between them)
     const box = grown(bboxOf([...lo.outer, ...hi.outer]), GRADE_P2.boxPadMm);
@@ -316,9 +314,8 @@ export function repairPass(
         ws.push({ pts: w.pts, kind: 'common', closed: !!w.closed });
         chainOf.push(w.chain);
       }
-    // GRADE_P2_LOOSE: lines no size owns, near this size. Off by default — nothing is pushed,
-    // and the probe's wall list stays what it was.
-    if (looseB)
+    // Include nearby unassigned lines on the fallback attempt.
+    if (withLooseWalls && looseB)
       for (const { w, box: b } of looseB)
         if (meets(b, box)) {
           ws.push({ pts: w.pts, kind: 'loose', closed: !!w.closed });
@@ -377,18 +374,6 @@ export function repairPass(
         if (DEBUG) console.log(`GRADEP2   draw refused too: ${d.why.join(',')}`);
       }
     }
-    probeSink?.({
-      seed: c.seed,
-      rank: r,
-      kind,
-      ins,
-      walls: ws,
-      ...(rep.looseShare != null ? { looseShare: rep.looseShare } : {}),
-      tol: repairTol(),
-      strict: strictWhy,
-      draw: drawWhy,
-      drawn,
-    });
     let cand: PieceCandidate | null = null;
     if (!why.length && rep.outer && rep.from) {
       const ring0 = signedArea(rep.outer) < 0 ? rep.outer.slice().reverse() : rep.outer;
@@ -476,6 +461,29 @@ export function repairPass(
       if (verdict) why.push('E3-family');
       if (verdict && DEBUG) console.log(`GRADEP2   E3-family: ${verdict}`);
     }
+    // Try unassigned ink only for a leak the ordinary strict and draw paths both leave open.
+    // A nearer unassigned stroke can otherwise displace a valid outline (MDF451 B, size 2).
+    if (
+      why.length &&
+      kind === 'leak' &&
+      !withLooseWalls &&
+      rep.pred &&
+      looseB?.some(({ box: b }) => meets(b, box))
+    ) {
+      return tryRepair(list, i, kind, exclude, true);
+    }
+    probeSink?.({
+      seed: c.seed,
+      rank: r,
+      kind,
+      ins,
+      walls: ws,
+      ...(rep.looseShare != null ? { looseShare: rep.looseShare } : {}),
+      tol: repairTol(),
+      strict: strictWhy,
+      draw: drawWhy,
+      drawn,
+    });
     if (!why.length && cand) {
       if (DEBUG)
         console.log(

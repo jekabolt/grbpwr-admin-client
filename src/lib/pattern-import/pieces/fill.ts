@@ -78,6 +78,7 @@ import {
   type WallModel,
 } from './walls';
 import { rankLooks } from './identity';
+import { looseWallsOn } from './gfit/repair';
 import { gradeP2Off, repairPass, type RepairDiag } from './gfit/repair-hook';
 import {
   cleanSet,
@@ -1707,7 +1708,7 @@ function fillOneSheet(
   // the semantics block the family. Graded sheets on F4's own walls only (never the H1 solver's)
   if (model.mode === 'graded' && !graded?.walls && !solved && !gradeP2Off()) {
     const live = (ids: readonly ChainId[]) => itemsOf(set, ids).filter((it) => !excl.has(it.chain));
-    const looseOn = typeof process !== 'undefined' && !!process.env?.GRADE_P2_LOOSE;
+    const looseOn = looseWallsOn();
     diag.repair = repairPass(
       cands,
       {

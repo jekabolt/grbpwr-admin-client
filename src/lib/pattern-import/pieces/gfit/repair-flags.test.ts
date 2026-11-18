@@ -34,7 +34,7 @@ const FLAGS = [
   'GFIT_EDGE_ACCEPT',
   'GFIT_LOCAL_OFF',
   'GFIT_LOCAL_CORRIDOR',
-  'GRADE_P2_LOOSE',
+  'GRADE_P2_LOOSE_OFF',
   'GRADE_DRAW_OFF',
 ];
 // these pin repairSize's flags; the nest walk would take the families first
@@ -87,7 +87,6 @@ describe('GFIT_EDGE_ACCEPT', () => {
 
   it('does not close an edge size on an unranked chain', () => {
     process.env.GFIT_EDGE_ACCEPT = '1';
-    process.env.GRADE_P2_LOOSE = '1';
     const loose = repairSize(anchors, 6, [{ pts: ring(6), kind: 'loose', closed: true }], opts);
     expect(loose.ok).toBe(false);
     expect(loose.looseSkipped).toBe('extrapolated');
@@ -329,7 +328,6 @@ describe('GRADE_P2_LOOSE', () => {
       { pts: own, kind: 'own' },
       { pts: gap, kind: 'loose' },
     ];
-    process.env.GRADE_P2_LOOSE = '1';
     const on = repairSize(anchors, 2, walls, opts);
     expect(on.refusals, on.refusals.join(',')).toEqual([]);
     expect(on.ok).toBe(true);
@@ -346,7 +344,6 @@ describe('GRADE_P2_LOOSE', () => {
       { pts: own, kind: 'own' },
       { pts: neighbour, kind: 'loose' },
     ];
-    process.env.GRADE_P2_LOOSE = '1';
     const r = repairSize(anchors, 2, walls, opts);
     expect(r.ok).toBe(false);
     expect(r.refusals).toContain('E2-hole');
@@ -372,7 +369,6 @@ describe('GRADE_P2_LOOSE', () => {
     const cut = (p: PtMm) => Math.abs(p.y - h) < 1e-6 && p.x > 20 && p.x < 50;
     const left = pred.slice(0, pred.findIndex(cut));
     const right = pred.slice(pred.findLastIndex(cut) + 1);
-    process.env.GRADE_P2_LOOSE = '1';
     const kept = repairSize(
       fine,
       2,
@@ -406,7 +402,6 @@ describe('GRADE_P2_LOOSE', () => {
       .filter((p) => p.y < 1 && p.x >= 40 && p.x < 160)
       .map((p) => ({ x: p.x, y: p.y + 8 }));
     const own = pred.filter((p) => !(p.y < 1 && p.x < 160));
-    process.env.GRADE_P2_LOOSE = '1';
     const r = repairSize(
       straight,
       2,
@@ -449,7 +444,6 @@ describe('GRADE_P2_LOOSE', () => {
       { x: p.x + mid, y: p.y - 3 },
       { x: p.x + mid, y: p.y + 3 },
     ];
-    process.env.GRADE_P2_LOOSE = '1';
     const r = repairSize(
       family,
       3,
@@ -503,6 +497,7 @@ describe('GRADE_P2_LOOSE', () => {
   });
 
   it('flag off ignores the unranked chain', () => {
+    process.env.GRADE_P2_LOOSE_OFF = '1';
     const { own, gap } = split(30);
     const walls: GfitWall[] = [
       { pts: own, kind: 'own' },
@@ -529,13 +524,14 @@ describe('GRADE_P2_LOOSE', () => {
     };
     const list = () => [0, 1, 2, 3, 4].map((rank) => cand(rank, rank === 2 ? 'leak' : 'closed'));
     process.env.GRADE_DRAW_OFF = '1';
+    process.env.GRADE_P2_LOOSE_OFF = '1';
     const offList = list();
     repairPass(new Map([[1, offList]]), ctx);
     expect(probes.some((p) => p.walls.some((w) => w.kind === 'loose'))).toBe(false);
     expect(offList.find((c) => c.rank === 2)?.outcome).toBe('leak');
 
     probes.length = 0;
-    process.env.GRADE_P2_LOOSE = '1';
+    delete process.env.GRADE_P2_LOOSE_OFF;
     const onList = list();
     repairPass(new Map([[1, onList]]), ctx);
     const carried = probes
@@ -545,6 +541,18 @@ describe('GRADE_P2_LOOSE', () => {
     expect(carried).toHaveLength(1);
     expect(carried[0].pts).toEqual(gap);
     expect(onList.find((c) => c.rank === 2)?.outcome).toBe('closed');
+
+    // When its own ink already closes, even a nearby unassigned wall must not compete.
+    probes.length = 0;
+    const complete = list();
+    repairPass(new Map([[1, complete]]), {
+      ...ctx,
+      own: (r) => (r === 2 ? [{ chain: 1, pts: ring(2), closed: true }] : []),
+    });
+    expect(complete.find((c) => c.rank === 2)?.outcome).toBe('closed');
+    const plain = probes.filter((p) => p.rank === 2);
+    expect(plain).toHaveLength(1);
+    expect(plain[0].walls.some((w) => w.kind === 'loose')).toBe(false);
   });
 });
 

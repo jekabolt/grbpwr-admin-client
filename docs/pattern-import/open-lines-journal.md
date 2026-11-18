@@ -1650,3 +1650,28 @@ Pictures: red candidate against the adjacent closed sizes. Each row below passed
 | MDF383 | H front center | 2 | Left edge between 0 and 4, other edges shared |
 
 Verdict: accept 12 gains. Area criterion clarified with the owner: each new size must preserve the local area order; no new or worsened inversion. The existing Memoir sleeve inversion 2 → 4 (417.6 → 393.8 cm²) and MDF383 H 24 → 26 remain unchanged. Both remain separate baseline defects.
+
+### M2 unassigned lines after an ordinary repair fails (18–19 Nov 2026)
+
+Hypothesis: a stroke carrying no size label can fill a gap when it follows the predicted edge between two closed sizes. The first shot, c-m2-m/h against M1, gained 10/7 but lost 13/2. In MDF451 B size 2 the additional ink interrupted an existing repair. Replaying the same walls without loose ink gave four gaps totalling 34.79 mm and passed the draw check. Adding loose ink split that into six gaps totalling 19.51 mm and failed continuity. A closer stroke alone is insufficient evidence to replace a successful repair.
+
+Change: try the ordinary strict and draw repairs first. Only after they leave a leak, retry with nearby unassigned strokes under the existing corridor and neighbour checks. Both attempts use the same anchors and acceptance thresholds. A hook test reproduces the competition and verifies an ordinary success never tries a loose wall. Switch for the accepted path: GRADE_P2_LOOSE_OFF=1 disables it.
+
+Run: c-m2r-m/h against c-m1-m/h, 40 files per list. MDF492 hit the runner timeout and was retried alone with the same code and flags. The recovered file is included once.
+
+| File | Reviewed new piece and size | Picture verdict |
+|---|---|---|
+| MDF363 | L skirt back 18, C side back lower 24 | Side edges and hems follow the neighbouring sizes |
+| MDF387 | Front lining 10, back lining 10 | The varying edges sit between 8 and 12 |
+| MDF521 | K top skirt 20 | Graded outer curve and waist agree with 18 and 22 |
+| MDF426 | I train B 6 | Graded edge sits between the two adjoining widths |
+| MDF433 | F lower sleeves 6, 24, 26 | Graded ends maintain the size order |
+| MDF411 | F front skirt 18 | Side and upper edges follow the grade |
+| MDF372 | Left and right lower sleeves 22 | Tapers and lengths fit the size sequence |
+| MDF383 | B back center 18, D back belt 18 | Side edge and belt end follow the grade |
+| MDF502 | F cuffs 40, 42 | Both lengths lie between their neighbours |
+| MDF338 | G side back 8 | Waist and side curve follow neighbouring sizes |
+
+Two previously closed outlines on set40 changed from a nest-walk reconstruction to a repair confirmed by the walk. MDF387 G18 reduces derived length from 123 to 64 mm. The share within 1 mm of own or common ink increases from 86.07% to 86.44%. MDF438 D14 reduces derived length from 72 mm to zero and replaces a kink at the strap end. Own or common coverage rises from 96.21% to 98.36%, reaching 100% with the unassigned lines included. Measured by sampling each perimeter every millimetre and finding the nearest drawn segment in the saved repair input.
+
+Verdict: accepted on the corrected run. The new outlines matched all 17 visually reviewed trial outlines exactly. Set40 closed 3736 → 3746 of 4725, holdout40 2597 → 2604 of 3032. No losses, no new nesting flags in either mode, no listed wrong closure and all newly inserted areas are bracketed. Aside from the two documented set40 changes every previously closed outline was identical. Written DXF 2/40 and 7/40. MDF338 gained two blocks (214 → 216) but its export gate remains blocked. Wizard apply remains 0/40 and 4/40.

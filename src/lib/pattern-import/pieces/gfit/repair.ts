@@ -38,6 +38,10 @@ import { analyseOutline, ringOf } from './outline';
 export type GfitWallKind = 'own' | 'common' | 'overlay' | 'loose';
 export type GfitWall = { pts: readonly PtMm[]; kind: GfitWallKind; closed?: boolean };
 
+export function looseWallsOn(): boolean {
+  return typeof process === 'undefined' || process.env?.GRADE_P2_LOOSE_OFF !== '1';
+}
+
 export const GFIT_REPAIR = {
   corridorMm: 0.6,
   corridorStep: 0.25,
@@ -436,7 +440,7 @@ function repairWith(
   const touched = new Set<number>();
   // GRADE_P2_LOOSE: an unranked line covers a sample only inside the corridor and at least a
   // quarter step from both anchors, measured at the snapped ink, not at the prediction.
-  const looseOn = typeof process !== 'undefined' && !!process.env?.GRADE_P2_LOOSE;
+  const looseOn = looseWallsOn();
   // An edge or a local pair is not trusted to a step: a neighbour's own line can sit in the corridor.
   const looseBlocked: 'extrapolated' | 'local' | null = res.extrapolated
     ? 'extrapolated'
