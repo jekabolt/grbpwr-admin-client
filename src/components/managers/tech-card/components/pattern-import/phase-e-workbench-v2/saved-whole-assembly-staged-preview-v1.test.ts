@@ -61,7 +61,7 @@ function fixture() {
     sizeId: 58,
     savedCarrier: { mediaType: 'v10', sidecarSha256: 'exact-placement' },
     unavailable: [],
-  } as unknown as Request['source'];
+  } as unknown as NonNullable<Request['source']>;
   const body = { isCurrent: () => true } as Request['body'];
   const commands = [
     { operationOrder: 30, action: 'activate' },
@@ -119,10 +119,12 @@ describe('same Workbench staged checkpoint', () => {
 
     const resumed = new AbortController();
     const freshLease = { run: 2 } as unknown as Request['ownedLease'];
+    const { source, ...resumeRequest } = request;
     const final = await runSavedWholeAssemblyStagedPreviewV1(
-      { ...request, ownedLease: freshLease, resume: paused.paused },
+      { ...resumeRequest, ownedLease: freshLease, resume: paused.paused! },
       resumed.signal,
     );
+    expect(request.verifySource).toHaveBeenCalledWith(source, resumed.signal);
     expect(calls.start).toHaveBeenCalledTimes(1);
     expect(request.prepare).toHaveBeenCalledTimes(1);
     expect(calls.resume).toHaveBeenCalledExactlyOnceWith(
@@ -158,6 +160,26 @@ describe('same Workbench staged checkpoint', () => {
     ).rejects.toThrow('no longer resumable');
   });
 
+  it('rechecks current saved authority before resuming from the retained native source', async () => {
+    calls.start.mockResolvedValue(frame(1));
+    const { request } = fixture();
+    const signal = new AbortController().signal;
+    const paused = await runSavedWholeAssemblyStagedPreviewV1(
+      { ...request, pauseAfterAccepted: () => true },
+      signal,
+    );
+    const { source, ...resumeRequest } = request;
+    const verifySource = vi.fn().mockRejectedValue(new Error('The saved source changed.'));
+    await expect(
+      runSavedWholeAssemblyStagedPreviewV1(
+        { ...resumeRequest, verifySource, resume: paused.paused! },
+        signal,
+      ),
+    ).rejects.toThrow('The saved source changed.');
+    expect(verifySource).toHaveBeenCalledExactlyOnceWith(source, signal);
+    expect(calls.resume).not.toHaveBeenCalled();
+  });
+
   it('refuses a changed saved carrier before using the paused engine receipt', async () => {
     calls.start.mockResolvedValue(frame(1));
     const { request } = fixture();
@@ -169,7 +191,7 @@ describe('same Workbench staged checkpoint', () => {
     const source = {
       ...request.source,
       savedCarrier: { mediaType: 'v10', sidecarSha256: 'changed-placement' },
-    } as Request['source'];
+    } as NonNullable<Request['source']>;
     await expect(
       runSavedWholeAssemblyStagedPreviewV1({ ...request, source, resume: paused.paused }, signal),
     ).rejects.toThrow('different source or mannequin');

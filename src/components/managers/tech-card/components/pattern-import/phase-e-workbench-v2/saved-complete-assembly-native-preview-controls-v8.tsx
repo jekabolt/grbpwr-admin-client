@@ -122,24 +122,31 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
       if (wholeRequested) {
         const whole = review.wholeAssembly;
         if (!whole || !body) throw new Error('The saved assembly layout is unavailable.');
-        const [source, { runSavedWholeAssemblyStagedPreviewV1 }] = await Promise.all([
-          whole.load(signal),
-          import('./saved-whole-assembly-staged-preview-v1'),
-        ]);
         const resume = resumeRequested.current ? pausedCheckpoint.current : null;
         if (resumeRequested.current && !resume)
           throw new Error('The saved whole-assembly checkpoint is no longer available.');
+        const [runSource, { runSavedWholeAssemblyStagedPreviewV1 }] = await Promise.all([
+          resume ? { resume } : whole.load(signal).then((source) => ({ source })),
+          import('./saved-whole-assembly-staged-preview-v1'),
+        ]);
         const accepted = await runSavedWholeAssemblyStagedPreviewV1(
           {
-            source,
+            ...runSource,
             body,
             ownedLease: lease,
             prepare: whole.prepare,
             savedPlacement: whole.saved,
             isCurrent: isCurrentSource,
-            resume: resume ?? undefined,
             pauseAfterAccepted: () => pauseRequested.current,
-            verifySource: (_source, active) => review.verify(active),
+            async verifySource(verifiedSource, active) {
+              if (
+                verifiedSource.cardId !== review.cardId ||
+                verifiedSource.cardLockVersion !== review.lockVersion ||
+                verifiedSource.savedCarrier?.sidecarSha256 !== review.sha256
+              )
+                throw new Error('The accepted source no longer matches this saved assembly.');
+              await review.verify(active);
+            },
             onAccepted(progress) {
               onAcceptedCloth(progress.cloth);
               setAcceptedFrame({ number: progress.cloth.frameNumber, kind: 'whole' });

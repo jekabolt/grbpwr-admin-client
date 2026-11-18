@@ -202,17 +202,20 @@ const suspended = new WeakMap<SavedWholeAssemblyResumeV1, PausedRun>();
 
 /** Begins or continues the same accepted whole-assembly material and render program. */
 export async function runSavedWholeAssemblyStagedPreviewV1(
-  input: PrepareInput &
+  input: Omit<PrepareInput, 'source'> &
+    (
+      | Readonly<{ source: Source; resume?: SavedWholeAssemblyResumeV1 }>
+      | Readonly<{ source?: never; resume: SavedWholeAssemblyResumeV1 }>
+    ) &
     Readonly<{
       ownedLease: Run['ownedLease'];
       verifySource: (source: Source, signal: AbortSignal) => Promise<void>;
       onAccepted: (progress: SavedWholeAssemblyPreviewProgressV1) => void;
       pauseAfterAccepted?: () => boolean;
-      resume?: SavedWholeAssemblyResumeV1;
     }>,
   signal: AbortSignal,
 ): Promise<SavedWholeAssemblyPreviewProgressV1> {
-  const { source, body, ownedLease, verifySource, resume } = input;
+  const { body, ownedLease, verifySource, resume } = input;
   // A paused display and the ROOT program outlive the abort signal of the released device.
   const isCurrent = () => input.isCurrent() && body.isCurrent();
   const requireCurrent = () => {
@@ -223,6 +226,8 @@ export async function runSavedWholeAssemblyStagedPreviewV1(
   const prior = resume ? suspended.get(resume) : undefined;
   if (resume && !prior)
     throw new Error('The accepted whole-assembly frame is no longer resumable.');
+  const source = input.source ?? prior?.source;
+  if (!source) throw new Error('The current native assembly is unavailable.');
   const renderBody = projectCurrentModelDisplayedTriangleBodyInputV1(body);
   if (!renderBody) throw new Error('The displayed mannequin is no longer available.');
   if (
@@ -249,8 +254,8 @@ export async function runSavedWholeAssemblyStagedPreviewV1(
     resumeStagedSourceCutFramesV1: resumeOnLease,
   } = await import('components/cloth-simulation-spike/run-staged-source-cut-frames-v1');
 
-  async function initialize() {
-    const { plan } = await prepareCurrent(input, signal);
+  async function initialize(source: Source) {
+    const { plan } = await prepareCurrent({ ...input, source }, signal);
     const commands = plan.commands.map((command) => ({ ...command }));
     if (commands[0]?.action !== 'activate')
       throw new Error('The staged assembly has no first activation.');
@@ -278,7 +283,7 @@ export async function runSavedWholeAssemblyStagedPreviewV1(
       totalStages: plan.frame.seams.stages.length,
     };
   }
-  const initial = prior ? undefined : await initialize();
+  const initial = prior ? undefined : await initialize(source);
   const { commands, surface, ranges, observedBody, totalStages } = prior ?? initial!;
 
   await verifySource(source, signal);
