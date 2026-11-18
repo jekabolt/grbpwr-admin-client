@@ -9,6 +9,7 @@ import {
   isVerifiedCompleteSavedAssemblySourceV1,
   readCompleteSavedAssemblySourceV1,
   type CompleteSavedAssemblySourceV1,
+  type SavedAssemblyAuthoredFoldsV1,
 } from './saved-assembly-complete-source-rpc-v1';
 import type { SavedAssemblyPhysicalAnchorV1 } from './saved-assembly-operation-anchors-v1';
 import { createSavedFullAssemblyCompleteDxfHostsV1 } from './saved-full-assembly-complete-dxf-host-v1';
@@ -25,6 +26,7 @@ import {
   resolveSavedNativeSurfaceStitchAnchorV1,
   savedNativeInternalAnchorIndexV1,
 } from './saved-native-surface-stitch-anchor-v1';
+import { resolveSavedNativeAuthoredFoldGeometryV1 } from './saved-native-authored-fold-geometry-v1';
 import { readSavedGarmentLabelStitchAnchorV1 } from './saved-garment-label-stitch-anchor-v1';
 import type { PatternImportDxfPhaseESavedRowCardProjectionV1 } from './saved-row-production-runtime-v1';
 
@@ -71,6 +73,11 @@ type NativeAnchorJob = Readonly<{
   path: SavedAssemblyNativeSewingPathV1;
   index: number;
   internalIndex: number | null;
+}>;
+
+type AuthoredFoldJob = Readonly<{
+  authored: SavedAssemblyAuthoredFoldsV1['folds'][number];
+  path: SavedAssemblyNativeSewingPathV1;
 }>;
 
 type WholeAnchorInputs = Readonly<{
@@ -148,6 +155,7 @@ export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
   const { card, sizeDictionary, selectedSizeId } = structuredClone(input);
   const selectedSizes = projection.card.sizes.filter(({ sizeId }) => sizeId === selectedSizeId);
   const [size] = selectedSizes;
+  const authored = source.authoredFolds;
   const anchorRow = source.rows.find(({ scopeKey }) => scopeKey === 'main');
   if (
     !anchorRow ||
@@ -157,7 +165,8 @@ export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
     !card.techCard?.sizeIds?.includes(selectedSizeId) ||
     card.id !== anchorRow.techCardId ||
     card.lockVersion !== anchorRow.cardLockVersion ||
-    projection.cardLockVersion !== anchorRow.cardLockVersion
+    projection.cardLockVersion !== anchorRow.cardLockVersion ||
+    (authored && (authored.sizeId !== selectedSizeId || authored.sizeToken !== size.token))
   )
     throw new TypeError(
       'Whole native stitch anchors require a verified current card and exact size.',
@@ -234,11 +243,31 @@ export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
     }
   }
 
+  const foldJobsByRow = new Map<string, AuthoredFoldJob[]>();
+  for (const fold of authored?.folds ?? []) {
+    const paths = built.originalSewingPaths.filter(
+      ({ pieceLineKey }) => pieceLineKey === fold.fold.pieceLineKey,
+    );
+    if (paths.length !== 1)
+      throw new Error(`Saved fold ${fold.fold.foldKey} has no unique current native sewing piece.`);
+    const [path] = paths;
+    const lineKey = path.row.patternLineKey;
+    const existing = foldJobsByRow.get(lineKey);
+    const job = { authored: fold, path };
+    if (existing) existing.push(job);
+    else foldJobsByRow.set(lineKey, [job]);
+  }
+  const resolvedFolds = new Map<
+    string,
+    Awaited<ReturnType<typeof resolveSavedNativeAuthoredFoldGeometryV1>>
+  >();
   const nativeNotchesByPiece = new Map<string, readonly NativeNotchPoint[]>();
   const host = createSavedFullAssemblyCompleteDxfHostsV1(source, projection).createCanonical();
   try {
-    for (const [lineKey, jobs] of jobsByRow) {
+    for (const lineKey of new Set([...jobsByRow.keys(), ...foldJobsByRow.keys()])) {
       signal.throwIfAborted();
+      const jobs = jobsByRow.get(lineKey) ?? [];
+      const foldJobs = foldJobsByRow.get(lineKey) ?? [];
       const member = built.nativeRows.find(({ row }) => row.patternLineKey === lineKey);
       if (!member) throw new Error('The saved seam has no current native compiler row.');
       const native = consumeDxfProductSavedNativeCompilerSourceV1(
@@ -255,7 +284,7 @@ export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
       const { bytes } = await host.readAuthoritativeRow(member.row, signal, () => {});
       const file = new Uint8Array(bytes);
       try {
-        const firstPath = jobs[0]!.path;
+        const firstPath = jobs[0]?.path ?? foldJobs[0]!.path;
         const parsed = await parseSavedNativeStitchRowV1(file, `${firstPath.blockName}.dxf`);
         signal.throwIfAborted();
         if (parsed.failedFiles || parsed.skippedBlocks)
@@ -344,6 +373,16 @@ export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
             );
           }
         }
+        for (const { authored, path } of foldJobs) {
+          const rawBlock = savedNativeStitchRawBlockV1(native.value, path);
+          const block = layersByBlock.get(rawBlock);
+          if (!block) throw new Error('A current fold lacks its ordinary saved DXF occurrence.');
+          const fold = await resolveSavedNativeAuthoredFoldGeometryV1(
+            { authored, path, block, rawBlock, native: native.value, file },
+            signal,
+          );
+          resolvedFolds.set(fold.foldKey, fold);
+        }
       } finally {
         file.fill(0);
         bytes.fill(0);
@@ -358,6 +397,13 @@ export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
     {
       expectedServerAssemblyRevision: source.serverAssemblyRevision,
       expectedCompleteSourceSha256: source.sourceSha256,
+      ...(authored && {
+        authoredFolds: {
+          sizeId: authored.sizeId,
+          sizeToken: authored.sizeToken,
+          expectedSourceSha256: authored.sourceSha256,
+        },
+      }),
     },
     signal,
   );
@@ -401,6 +447,17 @@ export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
     spans: Object.freeze(spans),
     labelAnchors: Object.freeze(labels),
     poses: built.operationAnchors.poses,
+    ...(fresh.authoredFolds && {
+      authoredFoldSourceSha256: fresh.authoredFolds.sourceSha256,
+      authoredFolds: Object.freeze(
+        fresh.authoredFolds.folds.map(({ fold }) => {
+          const resolved = resolvedFolds.get(fold.foldKey!);
+          if (!resolved)
+            throw new Error('A verified authored fold has no current native geometry.');
+          return resolved;
+        }),
+      ),
+    }),
     rawUnownedSeams: Object.freeze(
       (card.seams ?? []).filter(({ seamKey }) => !ownedSeamKeys.has(seamKey)),
     ),
