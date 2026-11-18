@@ -157,7 +157,17 @@ function verifyRegisteredMaterialPairs(
   const compiled = compileSourceCutRegisteredStitchPairsV1(stitches, manifest.sampling, signal);
   const keys = new Set(stitches.map(({ seamId }) => seamId));
   const retained = candidatePairs.filter(({ seamId }) => keys.has(seamId));
-  if (canonical(compiled) !== canonical(retained))
+  const materialIdentity = (pairs: readonly Pair[]) =>
+    pairs.map(({ operationOrder, seamId, sourcePairIndex, sideA, sideB }) => [
+      operationOrder,
+      seamId,
+      sourcePairIndex,
+      sideA.pieceId,
+      ...sideA.positionMm,
+      sideB.pieceId,
+      ...sideB.positionMm,
+    ]);
+  if (canonical(materialIdentity(compiled)) !== canonical(materialIdentity(retained)))
     throw new RangeError('The diagnostic stations differ from their registered native parts.');
 }
 
