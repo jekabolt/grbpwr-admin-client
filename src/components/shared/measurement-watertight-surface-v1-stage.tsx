@@ -724,6 +724,38 @@ export function measurementSurfaceOrbitControlsEnabledV2(options: {
   );
 }
 
+/** Keep camera gestures separate from events owned by the stage and other pointers. */
+export function bindMeasurementSurfaceOrbitPointersV1(
+  canvas: HTMLCanvasElement,
+  isOrbitEnabled: () => boolean,
+): () => void {
+  const active = new Map<number, string>();
+  const down = (event: PointerEvent) => {
+    if (!isOrbitEnabled()) return;
+    const overlapsMouseGesture =
+      active.size > 0 &&
+      (event.pointerType !== 'touch' || [...active.values()].some((type) => type !== 'touch'));
+    if (active.has(event.pointerId) || overlapsMouseGesture) {
+      event.stopImmediatePropagation();
+      return;
+    }
+    active.set(event.pointerId, event.pointerType);
+  };
+  const end = (event: PointerEvent) => {
+    // Pinned OrbitControls assumes any surviving pointer is a tracked touch after an end.
+    if (!active.delete(event.pointerId)) event.stopImmediatePropagation();
+  };
+  canvas.addEventListener('pointerdown', down);
+  canvas.addEventListener('pointerup', end);
+  canvas.addEventListener('pointercancel', end);
+  return () => {
+    canvas.removeEventListener('pointerdown', down);
+    canvas.removeEventListener('pointerup', end);
+    canvas.removeEventListener('pointercancel', end);
+    active.clear();
+  };
+}
+
 export function measurementSurfaceJointGroupsSignatureV1(
   groups: readonly MeasurementSurfaceJointEditorGroupV1[],
 ): string {
@@ -1662,6 +1694,7 @@ export function MeasurementWatertightSurfaceV1Stage({
     let renderCount = 0;
     let resizeObserver: ResizeObserver | null = null;
     let controls: OrbitControls | null = null;
+    let removeOrbitPointerGuard: (() => void) | null = null;
     let renderer: THREE.WebGLRenderer | null = null;
     let geometry: THREE.BufferGeometry | null = null;
     let surfaceMaterial: THREE.MeshLambertMaterial | null = null;
@@ -2347,6 +2380,7 @@ export function MeasurementWatertightSurfaceV1Stage({
         if (controlsStartHandler) controls.removeEventListener('start', controlsStartHandler);
         controls.dispose();
       }
+      removeOrbitPointerGuard?.();
       if (contextCanvas && contextLostHandler) {
         contextCanvas.removeEventListener('webglcontextlost', contextLostHandler);
       }
@@ -3045,6 +3079,11 @@ export function MeasurementWatertightSurfaceV1Stage({
       contextCanvas.addEventListener('lostpointercapture', patternPiecePointerFinishHandler);
       window.addEventListener('keydown', cancelPatternPieceOnEscape, true);
 
+      // Stage-specific pointer handlers get the event before the orbit controller.
+      removeOrbitPointerGuard = bindMeasurementSurfaceOrbitPointersV1(
+        renderer.domElement,
+        () => controls?.enabled === true,
+      );
       controls = new OrbitControls(camera, renderer.domElement);
       controls.enabled = interactive;
       controls.enableDamping = false;
