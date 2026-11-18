@@ -1,3 +1,4 @@
+import { mirrorSizeAcrossGrain } from 'lib/pattern-import/semantics/pairs';
 import { createPatternImportDxfPhaseEDraftCadCompileSourceV1 } from './draft-cad-compile-source-v1';
 import { readDxf } from 'lib/pattern-import/adapters/dxf/extract';
 import { segmentDxf } from 'lib/pattern-import/adapters/dxf/segment';
@@ -31,7 +32,7 @@ import {
   acknowledgeUnlinkedDraftPieceCopyV1,
 } from './draft-cad-unlinked-piece-copy-review-v1';
 
-async function seedCopy(ranks = 1, hole = false) {
+async function seedCopy(ranks = 1, hole = false, mirror = false) {
   const f = await createSavedThreePanelFixtureV1(2);
   const tokens = ranks === 1 ? ['M'] : ['S', 'M'];
   f.job.sizes = tokens.map((token, rank) => ({
@@ -58,6 +59,14 @@ async function seedCopy(ranks = 1, hole = false) {
         x: p.x + (p.x > x ? rank * 4 : 0),
         y: p.y + (p.y > y ? rank * 4 : 0),
       }));
+      if (mirror && index === 0) {
+        // One clipped corner provides a handed outline; each grade has a separately drawn grain.
+        const maxX = Math.max(...cut.map((p) => p.x)),
+          maxY = Math.max(...cut.map((p) => p.y));
+        const corner = cut.findIndex((p) => p.x === maxX && p.y === maxY);
+        if (corner < 0) throw Error('Missing exterior corner');
+        cut.splice(corner, 1, { x: maxX, y: maxY - 16 - rank }, { x: maxX - 16 - rank, y: maxY });
+      }
       return {
         ...structuredClone(base),
         rank,
@@ -68,6 +77,43 @@ async function seedCopy(ranks = 1, hole = false) {
           x: p.x + (p.x === x ? 10 : -10),
           y: p.y + (p.y === y ? 10 : -10),
         })),
+        ...(mirror && index === 0
+          ? {
+              grain: {
+                ...base.grain!,
+                a: { x: x + 40 + 2 * rank, y: y + 12 },
+                b: { x: x + 40 + 2 * rank, y: y + 82 },
+              },
+              internal: [
+                {
+                  kind: 'internal' as const,
+                  origin: 'operator' as const,
+                  confidence: 1,
+                  ranges: [],
+                  closed: false,
+                  pts: [
+                    { x: x + 48 + rank, y: y + 33 },
+                    { x: x + 52 + rank, y: y + 35 },
+                    { x: x + 50 + rank, y: y + 40 },
+                  ],
+                },
+              ],
+              notches: [
+                {
+                  kind: 'notch' as const,
+                  origin: 'operator' as const,
+                  confidence: 1,
+                  ranges: [],
+                  at: { x: x + 23 + rank, y },
+                  seg: [
+                    { x: x + 23 + rank, y },
+                    { x: x + 23 + rank, y: y + 4 },
+                  ] as [{ x: number; y: number }, { x: number; y: number }],
+                  depthMm: 4,
+                },
+              ],
+            }
+          : {}),
         drills: [
           {
             kind: 'drill',
@@ -105,8 +151,8 @@ async function seedCopy(ranks = 1, hole = false) {
   return f;
 }
 
-async function chosen(ranks: number) {
-  const f = await seedCopy(ranks, true);
+async function chosen(ranks: number, mirror = false) {
+  const f = await seedCopy(ranks, true, mirror);
   const ordinary = await draftThroughWizardStages(
     new File([f.written.dxfText], 'original.dxf'),
     f.card,
@@ -159,10 +205,14 @@ async function chosen(ranks: number) {
   return { f, source, current, input, selected, catalog: catalog.catalog };
 }
 
-it.each([1, 2])(
-  'verifies every rank and drill and persists FP_2 to a fresh independent line (%s ranks)',
-  async (ranks) => {
-    const { f, source, current, input } = await chosen(ranks);
+it.each(
+  [1, 2].flatMap((ranks) =>
+    (['duplicate', 'mirror-across-grain'] as const).map((mode) => ({ ranks, mode })),
+  ),
+)(
+  'verifies explicit $mode on $ranks ranks through manual Apply and fresh reopen',
+  async ({ ranks, mode }) => {
+    const { f, source, current, input } = await chosen(ranks, mode === 'mirror-across-grain');
     const uploaded: { bytes: Uint8Array<ArrayBuffer> | null } = { bytes: null };
     const url = 'https://saved-full-assembly.invalid/new-copy.dxf';
     const upload = vi
@@ -172,7 +222,7 @@ it.each([1, 2])(
         return { url, filename, sizeBytes: uploaded.bytes.length };
       });
     try {
-      const review = await prepareUnlinkedDraftPieceCopyV1(input);
+      const review = await prepareUnlinkedDraftPieceCopyV1({ ...input, mode });
       expect(() => takeUnlinkedDraftPieceCopyReviewV1({ ...review })).toThrow();
       const { file, identity } = takeUnlinkedDraftPieceCopyReviewV1(review);
       expect(identity).toBe('FP_2');
@@ -310,13 +360,59 @@ it.each([1, 2])(
           f.written.dxfText,
           'FP',
           identity,
+          mode,
         )(new TextDecoder().decode(f.bytes));
+        if (mode === 'mirror-across-grain')
+          for (const { token } of f.job.sizes) {
+            const catalog = await buildPatternImportDxfProductPhaseEAuthoringCatalogV1(
+              readback.native.draft,
+              'main',
+              token,
+            );
+            if (!catalog.ok) throw Error(catalog.blockers[0].detail);
+            expect(catalog.catalog.assemblyInferred).toBe(false);
+            const orig = catalog.catalog.pieces.find((p) => p.pieceId === 'FP')!,
+              mir = catalog.catalog.pieces.find((p) => p.pieceId === identity)!;
+            expect([orig.pieceLineKey, mir.pieceLineKey]).toEqual([sourceKey, newKey]);
+            const sourceIds = new Set(
+              orig.contours.flatMap((c) => [
+                c.contourId,
+                ...c.boundaryVertices.map((v) => v.vertexId),
+              ]),
+            );
+            const mirrorIds = mir.contours.flatMap((c) => [
+              c.contourId,
+              ...c.boundaryVertices.map((v) => v.vertexId),
+            ]);
+            expect(mirrorIds.length).toBeGreaterThan(1);
+            expect(mirrorIds.every((id) => !sourceIds.has(id))).toBe(true);
+          }
         const pieces = readback.native.draft.scopes[0]!.writerReplay!.job.pieces;
         for (const id of ['FP', identity]) {
           const piece = pieces.find((p) => p.identity === id)!;
           expect(piece.sizes.map((s) => s.rank)).toEqual(f.job.sizes.map((s) => s.rank));
           for (const size of piece.sizes) {
             expect(size.drills).toHaveLength(1);
+            if (mode === 'mirror-across-grain') {
+              expect(size.cut).toHaveLength(5);
+              expect(size.notches).toHaveLength(1);
+              expect(
+                size.internal.filter((mark) => !mark.closed && mark.pts.length === 3),
+              ).toHaveLength(1);
+              if (id === identity) {
+                const sourceSize = pieces
+                  .find((p) => p.identity === 'FP')!
+                  .sizes.find((v) => v.rank === size.rank)!;
+                const relative = (s: typeof size, pt: { x: number; y: number }) =>
+                  pt.x - s.grain!.a.x;
+                expect(relative(size, size.drills[0]!.at)).toBe(
+                  -relative(sourceSize, sourceSize.drills[0]!.at),
+                );
+                expect(relative(size, size.notches[0]!.at)).toBe(
+                  -relative(sourceSize, sourceSize.notches[0]!.at),
+                );
+              }
+            }
             expect(size.internal.filter((i) => i.label === 'hole')).toEqual([]);
             expect(size.cutLoops?.map((loop) => signedArea(loop))).toEqual([
               -5 * (5 + size.rank),
@@ -374,6 +470,120 @@ it('requires the exact native hole and drill on every source and duplicate rank'
     expect(() => prove(writeDxfDetailed(job).dxfText)).toThrow();
   }
 });
+
+it('refuses mirror substitutes, modified rank geometry, missing grain, changed material and multi-instance pieces', async () => {
+  const f = await seedCopy(2, true, true),
+    original = f.job.pieces[0]!,
+    mirror = structuredClone(original);
+  mirror.identity = 'FP_2';
+  mirror.displayName = 'FP_2';
+  mirror.mods = ['2'];
+  mirror.seed = 3;
+  mirror.sizes = original.sizes.map((s) => mirrorSizeAcrossGrain(s)!.size);
+  f.job.pieces.push(mirror);
+  const verify = nativePieceCopyVerifier(f.written.dxfText, 'FP', 'FP_2', 'mirror-across-grain');
+  const good = writeDxfDetailed(f.job);
+  verify(good.dxfText);
+  for (const change of [
+    'unreflected',
+    'other-axis',
+    'hole',
+    'seam',
+    'drill',
+    'notch',
+    'internal',
+    'rank',
+    'original',
+    'cross-material',
+    'linked-pair',
+    'multi-instance',
+  ] as const) {
+    const job = structuredClone(f.job),
+      copy = job.pieces[2]!,
+      size = copy.sizes[1]!;
+    if (change === 'unreflected') copy.sizes = structuredClone(original.sizes);
+    if (change === 'other-axis') {
+      size.grain!.a.x++;
+      size.grain!.b.x++;
+    }
+    if (change === 'hole') size.cutLoops![0]!.reverse();
+    if (change === 'seam') size.seam![0]!.x += 0.001;
+    if (change === 'drill') size.drills[0]!.at.x += 0.001;
+    if (change === 'notch') size.notches[0]!.at.x += 0.001;
+    if (change === 'internal') size.internal[0]!.pts[1]!.y += 0.001;
+    if (change === 'rank') copy.sizes.pop();
+    if (change === 'original') job.pieces[1]!.sizes[0]!.drills = [];
+    let output = writeDxfDetailed(job).dxfText;
+    if (change === 'cross-material' || change === 'linked-pair' || change === 'multi-instance') {
+      const m = readManifest(output)!,
+        c = m.pieces.find((p) => p.identity === copy.identity)!;
+      if (change === 'cross-material') c.fabrics = ['lining'];
+      if (change === 'linked-pair') {
+        c.pairHand = 'L';
+        c.pairOf = 'FP';
+        const origin = m.pieces.find((p) => p.identity === 'FP')!;
+        origin.pairOf = c.identity;
+        origin.pairHand = 'R';
+      }
+      if (change === 'multi-instance') c.piecesPerGarment = 2;
+      output = embedManifest(output, m);
+    }
+    expect(() => verify(output), change).toThrow();
+  }
+  const label = serialize([
+    [1, 'Piece Name: FP'],
+    [50, '0.000000'],
+    [7, 'STANDARD'],
+  ]);
+  expect(f.written.dxfText).toContain(label);
+  const typed = f.written.dxfText.replace(
+    label,
+    serialize([
+      [1, 'Piece Name: FP'],
+      [50, '0.000000'],
+      [7, 'GRBPWR_CAD_TEXT'],
+    ]),
+  );
+  expect(() => nativePieceCopyVerifier(typed, 'FP', 'FP_2', 'mirror-across-grain')).toThrow(
+    'unsupported native text mark',
+  );
+  for (const axis of ['missing', 'nonrepresentable'] as const) {
+    const job = structuredClone(f.job);
+    job.pieces.pop();
+    const size = job.pieces[0]!.sizes[0]!;
+    if (axis === 'missing') size.grain = null;
+    else size.grain!.b.x += 7;
+    expect(
+      () =>
+        nativePieceCopyVerifier(writeDxfDetailed(job).dxfText, 'FP', 'FP_2', 'mirror-across-grain'),
+      axis,
+    ).toThrow(/grain axis|coordinate grid/);
+  }
+});
+
+it.each(['horizontal', 'diagonal'] as const)(
+  'verifies a reflected native block on an exact %s grain',
+  async (axis) => {
+    const f = await seedCopy(1, true, true),
+      original = f.job.pieces[0]!,
+      grain = original.sizes[0]!.grain!;
+    grain.b = { x: grain.a.x + 40, y: grain.a.y + (axis === 'diagonal' ? 40 : 0) };
+    const text = writeDxfDetailed(f.job).dxfText;
+    const mirror = structuredClone(original);
+    mirror.identity = 'FP_2';
+    mirror.displayName = 'FP_2';
+    mirror.mods = ['2'];
+    mirror.seed = 3;
+    mirror.sizes = original.sizes.map((s) => mirrorSizeAcrossGrain(s)!.size);
+    f.job.pieces.push(mirror);
+    nativePieceCopyVerifier(
+      text,
+      'FP',
+      'FP_2',
+      'mirror-across-grain',
+    )(writeDxfDetailed(f.job).dxfText);
+  },
+);
 
 async function decodeCutFixture(text: string, generatedFusing = false) {
   return readDxf(
@@ -511,7 +721,7 @@ it.each([
   expect(() => dxfFastPath(read, segmentDxf(read))).toThrow('Native DXF cut hole');
 });
 
-it('checks the selected saved source on the mounted Duplicate piece button and refuses a cancelled or moved review', async () => {
+async function checkMountedCopy(mode: 'duplicate' | 'mirror-across-grain') {
   const [{ chromium }, { createServer }, { mkdtemp, rm }, { tmpdir }, { join }] = await Promise.all(
     [
       import('playwright'),
@@ -521,7 +731,7 @@ it('checks the selected saved source on the mounted Duplicate piece button and r
       import('node:path'),
     ],
   );
-  const { f, source, current, selected, catalog } = await chosen(2);
+  const { f, source, current, selected, catalog } = await chosen(2, mode === 'mirror-across-grain');
   const cacheDir = await mkdtemp(join(tmpdir(), 'ac13-vite-'));
   const server = await createServer({
     cacheDir,
@@ -586,6 +796,7 @@ it('checks the selected saved source on the mounted Duplicate piece button and r
       (json) => window.mountSavedCopyFixture(JSON.parse(json)),
       JSON.stringify({
         row: f.row,
+        mode,
         card: f.card,
         text: f.written.dxfText,
         source: current.session.source,
@@ -595,8 +806,13 @@ it('checks the selected saved source on the mounted Duplicate piece button and r
       }),
     );
     try {
-      const duplicate = page.getByText('Duplicate piece', { exact: true }),
-        review = page.getByRole('button', { name: 'Review unlinked copy' });
+      const duplicate = page.getByText(
+          mode === 'mirror-across-grain' ? 'Mirror piece' : 'Duplicate piece',
+          { exact: true },
+        ),
+        review = page.getByRole('button', {
+          name: mode === 'mirror-across-grain' ? 'Review unlinked mirror' : 'Review unlinked copy',
+        });
       await page
         .locator('[data-draft-cad-arrange-tool]')
         .click({ timeout: 10000 })
@@ -666,7 +882,12 @@ it('checks the selected saved source on the mounted Duplicate piece button and r
     await server.close();
     await rm(cacheDir, { recursive: true, force: true });
   }
-}, 90000);
+}
+it.each(['duplicate', 'mirror-across-grain'] as const)(
+  'opens a mounted %s review and refuses a cancelled or moved source',
+  checkMountedCopy,
+  90000,
+);
 
 declare global {
   interface Window {

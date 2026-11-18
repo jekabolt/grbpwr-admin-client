@@ -1,3 +1,4 @@
+import type { NativePieceCopyMode } from 'lib/pattern-import/fabrics/native-piece-copy-review';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from 'ui/components/button';
 import { openSavedCopyInPatternsReviewV1 } from './cad-command-compiled-reimport-handoff-v1';
@@ -10,9 +11,11 @@ import type {
 
 export function SavedDraftPieceCopyControlV1({
   prepare,
+  mode,
   readSelection,
   session,
 }: {
+  mode: NativePieceCopyMode;
   prepare?: PrepareSavedCopyReviewV1;
   readSelection: () => SavedCopySelectionV1 | null;
   session: PatternImportDxfPhaseEDraftCadSessionV1;
@@ -27,8 +30,9 @@ export function SavedDraftPieceCopyControlV1({
     setReview(null);
     setMessage('');
     if (expanded && prepare) {
-      void prepare(readSelection)
+      void prepare(readSelection, mode)
         .then((r) => {
+          if (r.mode !== mode) throw new Error('The reviewed copy operation changed.');
           if (current) setReview(r);
         })
         .catch((error) => {
@@ -43,7 +47,7 @@ export function SavedDraftPieceCopyControlV1({
     return () => {
       current = false;
     };
-  }, [expanded, prepare, readSelection, session]);
+  }, [expanded, prepare, readSelection, session, mode]);
   const [opening, setOpening] = useState(false);
   const open = async () => {
     const element = details.current;
@@ -72,7 +76,9 @@ export function SavedDraftPieceCopyControlV1({
       onToggle={(e) => setExpanded(e.currentTarget.open)}
       className='relative text-xs'
     >
-      <summary className='cursor-pointer'>Duplicate piece</summary>
+      <summary className='cursor-pointer'>
+        {mode === 'mirror-across-grain' ? 'Mirror piece' : 'Duplicate piece'}
+      </summary>
       {expanded && (
         <div className='absolute left-0 top-full z-20 grid min-w-52 gap-2 border border-hairline bg-bgColor p-2 shadow'>
           <span role='status'>
@@ -80,7 +86,9 @@ export function SavedDraftPieceCopyControlV1({
               ? 'Select one piece in an unmodified saved Draft with Patterns available.'
               : message ||
                 (review
-                  ? `Create ${review.identity} without copying its seam bindings.`
+                  ? mode === 'mirror-across-grain'
+                    ? `Mirror across each size’s grain to create ${review.identity} without seam bindings.`
+                    : `Create ${review.identity} without copying its seam bindings.`
                   : 'Checking the saved piece and its sizes…')}
           </span>
           <Button
@@ -91,7 +99,7 @@ export function SavedDraftPieceCopyControlV1({
             loading={opening}
             onClick={open}
           >
-            Review unlinked copy
+            {mode === 'mirror-across-grain' ? 'Review unlinked mirror' : 'Review unlinked copy'}
           </Button>
         </div>
       )}

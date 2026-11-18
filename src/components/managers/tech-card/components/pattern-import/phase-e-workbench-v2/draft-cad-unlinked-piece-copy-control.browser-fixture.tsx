@@ -1,3 +1,4 @@
+import type { NativePieceCopyMode } from 'lib/pattern-import/fabrics/native-piece-copy-review';
 import { ImportWizard } from '../import-wizard';
 import { createRoot } from 'react-dom/client';
 import {
@@ -23,6 +24,7 @@ export async function mountSavedPieceCopyControl(f: {
   row: Row;
   card: CardContext;
   text: string;
+  mode: NativePieceCopyMode;
   source: PatternImportDxfPhaseEDraftCadSourceV1;
   selected: PatternImportDxfPhaseEDraftCadWorkspacePropsV1['selection'];
   catalog: Parameters<typeof projectPatternImportDxfProductPhaseEAssemblyV1>[0];
@@ -69,11 +71,17 @@ export async function mountSavedPieceCopyControl(f: {
       render();
     },
   });
-  const prepare: PrepareSavedCopyReviewV1 = (readSelection) =>
-    runtime.prepareSavedPieceCopyReview!(f.row, () => {
-      const selected = readSelection();
-      return selected ? { row: f.row, sizeToken: 'M', generation: 0, session, ...selected } : null;
-    });
+  const prepare: PrepareSavedCopyReviewV1 = (readSelection, mode) =>
+    runtime.prepareSavedPieceCopyReview!(
+      f.row,
+      () => {
+        const selected = readSelection();
+        return selected
+          ? { row: f.row, sizeToken: 'M', generation: 0, session, ...selected }
+          : null;
+      },
+      mode,
+    );
   const root = createRoot(document.getElementById('root')!);
   function render() {
     root.render(
@@ -122,7 +130,9 @@ export async function mountSavedPieceCopyControl(f: {
       if (!closed || file)
         throw Error('The actual Patterns Wizard did not close the reviewed File.');
       const held = closed;
-      nativePieceCopyVerifier(f.text, 'FP', 'FP_2')(await held.text());
+      nativePieceCopyVerifier(f.text, 'FP', 'FP_2', f.mode)(await held.text());
+      if (f.mode === 'mirror-across-grain' && held.name !== 'unlinked-draft-mirror.dxf')
+        throw Error('Wrong mirror handoff File');
       const draft = await draftThroughWizardStages(held, f.card);
       // A file selected through the wizard picker must never downgrade this run to ordinary Apply.
       const copy = new File([held], held.name, { type: held.type });

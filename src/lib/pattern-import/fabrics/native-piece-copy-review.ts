@@ -72,7 +72,151 @@ function nativeBlock(block: RawBlock, record: ManifestBlock) {
   });
 }
 
-function inventory(text: string) {
+export type NativePieceCopyMode = 'duplicate' | 'mirror-across-grain';
+
+/** Coordinates relative to each block's directed, written grain. A reflection must land exactly
+ * on the other block's six-decimal DXF grid. Winding carries the cut/hole distinction. */
+function grainFrame(block: RawBlock, record: ManifestBlock, reflect: boolean) {
+  const { identity } = record;
+  const axes = block.entities.filter((e) => e.type === 'LINE' && e.layer === '7');
+  requireMatch(axes.length === 1, 'mirror requires one native grain axis per size');
+  const axis = axes[0]!,
+    ox = coordinate(read(axis, 10)),
+    oy = coordinate(read(axis, 20));
+  const dx = coordinate(read(axis, 11)) - ox,
+    dy = coordinate(read(axis, 21)) - oy,
+    norm = dx * dx + dy * dy;
+  requireMatch(norm > 0n, 'mirror requires a nonzero native grain axis');
+  const point = (e: RawEntity, index = 10, map = reflect) => {
+    const x = coordinate(read(e, index)) - ox,
+      y = coordinate(read(e, index + 10)) - oy;
+    if (!map) return x + ',' + y;
+    const along = 2n * (dx * x + dy * y),
+      nx = dx * along - norm * x,
+      ny = dy * along - norm * y;
+    requireMatch(
+      nx % norm === 0n && ny % norm === 0n,
+      'reflection falls outside the exact written coordinate grid',
+    );
+    return nx / norm + ',' + ny / norm;
+  };
+  function attributes(e: RawEntity) {
+    const fields = allowed[e.type];
+    requireMatch(
+      fields &&
+        e.tags.length === fields.length &&
+        fields.every((code) => read(e, code) !== undefined),
+      'missing or ambiguous native attributes',
+    );
+    return e.tags
+      .filter((t) => ![10, 20, 11, 21].includes(t.code))
+      .map(({ code, value }) => [
+        code,
+        e.type === 'TEXT' && code === 1 && value === `Piece Name: ${identity}`
+          ? { pieceName: true }
+          : value,
+      ]);
+  }
+  const outer = block.entities.find((e) => e.type === 'POLYLINE' && e.layer === '1');
+  requireMatch(
+    outer && block.entities.filter((e) => e.type === 'POLYLINE' && e.layer === '14').length <= 1,
+    'ambiguous native cut or seam',
+  );
+  return JSON.stringify({
+    entities: block.entities.map((e, index) => {
+      const tags = attributes(e);
+      if (e.type === 'TEXT') {
+        const value = read(e, 1) ?? '';
+        const attribute =
+          e.layer === '1' &&
+          /^(Piece Name|Size|Quantity|Material|Category|Annotation): /.test(value);
+        const foldLabel = e.layer === '15' && /^HALF - CUT [1-9]\d* ON FOLD$/.test(value);
+        requireMatch(
+          read(e, 7) === 'STANDARD' && (attribute || foldLabel),
+          'unsupported native text mark in mirrored piece',
+        );
+        // R12 positions these upright labels from the grain midpoint. Geometry marks require their own reflected anchor.
+        return [e.type, e.layer, tags, point(e, 10, false)];
+      }
+      if (e.type === 'LINE') {
+        requireMatch(e.layer === '7' || e.layer === '4', 'unsupported mirror line role');
+        return [e.type, e.layer, tags, point(e), point(e, 11)];
+      }
+      if (e.type === 'POINT') {
+        const marker = block.entities[index - 1];
+        requireMatch(
+          e.layer === '13' &&
+            marker?.type === 'POLYLINE' &&
+            marker.layer === '8' &&
+            read(marker, 70) === '1',
+          'missing native drill contour',
+        );
+        for (const axisCode of [10, 20]) {
+          const values = marker.children.map((v) => coordinate(read(v, axisCode)));
+          const lo = values.reduce((a, b) => (a < b ? a : b)),
+            hi = values.reduce((a, b) => (a > b ? a : b));
+          requireMatch(
+            lo + hi === 2n * coordinate(read(e, axisCode)),
+            'drill contour and native centre disagree',
+          );
+        }
+        return [e.type, e.layer, tags, point(e)];
+      }
+      requireMatch(
+        e.type === 'POLYLINE' &&
+          ['1', '14', '6', '8'].includes(e.layer) &&
+          e.seqend &&
+          read(e, 66) === '1',
+        'unsupported mirror contour role',
+      );
+      const closed = read(e, 70) === '1';
+      requireMatch(closed || read(e, 70) === '0', 'unsupported contour flags');
+      if (e.layer === '1' || e.layer === '14') {
+        requireMatch(closed && e.children.length >= 3, 'a cut or seam ring is open');
+        let area = 0n;
+        for (const [i, v] of e.children.entries()) {
+          const next = e.children[(i + 1) % e.children.length]!;
+          area +=
+            coordinate(read(v, 10)) * coordinate(read(next, 20)) -
+            coordinate(read(v, 20)) * coordinate(read(next, 10));
+        }
+        requireMatch(
+          e.layer === '14' || e === outer ? area > 0n : area < 0n,
+          'cut, seam or hole winding changed',
+        );
+      }
+      let points = e.children.map((v) => {
+        requireMatch(v.type === 'VERTEX' && v.layer === e.layer, 'wrong native vertex role');
+        attributes(v);
+        return point(v);
+      });
+      requireMatch(points.length >= (closed ? 3 : 2), 'missing native vertices');
+      if (closed) {
+        requireMatch(new Set(points).size === points.length, 'ambiguous closed native vertex');
+        // Cut/seam loops keep their winding after reflection. The writer draws each drill
+        // outline with standard winding and emits its own exact centre as the following POINT.
+        const next = block.entities[index + 1];
+        if (
+          reflect &&
+          (e.layer === '1' ||
+            e.layer === '14' ||
+            (e.layer === '8' && next?.type === 'POINT' && next.layer === '13'))
+        )
+          points.reverse();
+        const start = points.reduce((min, p, i) => (p < points[min]! ? i : min), 0);
+        points = [...points.slice(start), ...points.slice(0, start)];
+      }
+      return [e.type, e.layer, tags, points];
+    }),
+    authoredInternal: record.authoredInternal?.map(({ index, label, closed }) => ({
+      index,
+      label,
+      closed,
+    })),
+  });
+}
+
+function inventory(text: string, mirror?: { id: string; reflect: boolean }) {
   requireMatch(text.length > 0 && text.length <= PATIMPORT.maxInputBytes, 'invalid DXF size');
   const manifest = readManifest(text);
   requireMatch(manifest && manifest.sizes.length > 0, 'no saved writer manifest or sizes');
@@ -102,6 +246,7 @@ function inventory(text: string) {
     'missing, transformed or ambiguous native insertion',
   );
   const shapes = new Map<string, Map<string, string>>();
+  const grainRanks = new Map<string, string>();
   for (const b of manifest.blocks) {
     const native = raw.blocks.get(b.block);
     requireMatch(
@@ -117,6 +262,7 @@ function inventory(text: string) {
     const ranks = shapes.get(b.identity) ?? new Map<string, string>();
     requireMatch(!ranks.has(key), 'duplicate native size rank');
     ranks.set(key, nativeBlock(native, b));
+    if (mirror?.id === b.identity) grainRanks.set(key, grainFrame(native, b, mirror.reflect));
     shapes.set(b.identity, ranks);
   }
   requireMatch(
@@ -125,7 +271,7 @@ function inventory(text: string) {
       new Set(manifest.pieces.map((p) => p.identity)).size === manifest.pieces.length,
     'missing writer piece',
   );
-  return { manifest, shapes };
+  return { manifest, shapes, grainRanks };
 }
 
 /** Every original native block and exactly one additional independent piece must survive the ordinary writer. */
@@ -133,10 +279,13 @@ export function nativePieceCopyVerifier(
   sourceText: string,
   sourceIdentity: string,
   copyIdentity: string,
+  mode: NativePieceCopyMode = 'duplicate',
 ) {
-  const source = inventory(sourceText);
+  requireMatch(mode === 'duplicate' || mode === 'mirror-across-grain', 'unknown copy operation');
+  const mirror = mode === 'mirror-across-grain';
+  const source = inventory(sourceText, mirror ? { id: sourceIdentity, reflect: true } : undefined);
   return (resultText: string) => {
-    const result = inventory(resultText);
+    const result = inventory(resultText, mirror ? { id: copyIdentity, reflect: false } : undefined);
     const original = source.shapes.get(sourceIdentity),
       copied = result.shapes.get(copyIdentity);
     const sourcePiece = source.manifest.pieces.find((p) => p.identity === sourceIdentity);
@@ -166,9 +315,36 @@ export function nativePieceCopyVerifier(
         sameRanks(ranks, result.shapes.get(name)),
         `native layer, mark, geometry or rank changed on ${name}`,
       );
+    if (mirror) {
+      const resultPieces = new Map(result.manifest.pieces.map((p) => [p.identity, p]));
+      requireMatch(
+        source.manifest.pieces.every((p) => {
+          const current = resultPieces.get(p.identity);
+          return (
+            current &&
+            current.pairHand === p.pairHand &&
+            current.pairOf === p.pairOf &&
+            current.piecesPerGarment === p.piecesPerGarment &&
+            current.fused === p.fused &&
+            JSON.stringify(current.fabrics) === JSON.stringify(p.fabrics)
+          );
+        }),
+        'an existing piece changed its material, quantities or hand',
+      );
+    }
     requireMatch(
-      sameRanks(original, copied),
-      'the duplicate changed a native layer, mark, coordinate or rank',
+      mirror
+        ? sourcePiece.fabrics.length > 0 &&
+            sourcePiece.piecesPerGarment === 1 &&
+            copy.piecesPerGarment === 1 &&
+            JSON.stringify(sourcePiece.fabrics) === JSON.stringify(copy.fabrics) &&
+            sourcePiece.fused === copy.fused &&
+            source.grainRanks.size === source.manifest.sizes.length &&
+            sameRanks(source.grainRanks, result.grainRanks)
+        : sameRanks(original, copied),
+      mirror
+        ? 'the new piece differs from the exact reflected native layers, marks, material or ranks'
+        : 'the duplicate changed a native layer, mark, coordinate or rank',
     );
   };
 }

@@ -1,3 +1,4 @@
+import type { NativePieceCopyMode } from 'lib/pattern-import/fabrics/native-piece-copy-review';
 import type { CopyReview, SavedCopyCurrentV1 } from './draft-cad-unlinked-piece-copy-review-v1';
 import { DXF_PRODUCT_SAVED_REPROCESS_REQUEST_V1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 import {
@@ -79,6 +80,7 @@ export type PatternImportDxfPhaseESavedRowProductionRuntimeV1 = Readonly<{
   prepareSavedPieceCopyReview?: (
     row: DxfProductSavedRowIdentityV1,
     readCurrent: () => Omit<SavedCopyCurrentV1, 'card'> | null,
+    mode?: NativePieceCopyMode,
   ) => Promise<CopyReview>;
   dispose: () => void;
   snapshot: () => Readonly<{
@@ -299,7 +301,7 @@ export function createPatternImportDxfPhaseESavedRowRuntimeV1(
         },
       );
     },
-    async prepareSavedPieceCopyReview(row, readCurrent) {
+    async prepareSavedPieceCopyReview(row, readCurrent, mode) {
       const opening = readCurrent();
       if (
         !opening ||
@@ -317,6 +319,7 @@ export function createPatternImportDxfPhaseESavedRowRuntimeV1(
           );
           return prepareUnlinkedDraftPieceCopyV1({
             ...proof,
+            mode,
             readCurrentRow,
             readCurrent: () => {
               const current = readCurrent();

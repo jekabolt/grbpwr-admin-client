@@ -679,23 +679,27 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
                 onCrossScopeConnect && !crossScopeConnectDisabled,
               )}
             />
-            {arrangeActive && selectedPieceIds.length === 1 && (
-              <SavedDraftPieceCopyControlV1
-                key={JSON.stringify([
-                  selectedPieceIds[0],
-                  selectedForCopy?.pieceLineKey,
-                  materialScopeKey,
-                  confirmedImportGeneration,
-                ])}
-                session={session}
-                readSelection={readCopySelection}
-                prepare={
-                  compiledReimportCapability.available && copySelection.current
-                    ? prepareSavedPieceCopyReview
-                    : undefined
-                }
-              />
-            )}
+            {arrangeActive &&
+              selectedPieceIds.length === 1 &&
+              (['duplicate', 'mirror-across-grain'] as const).map((mode) => (
+                <SavedDraftPieceCopyControlV1
+                  mode={mode}
+                  key={JSON.stringify([
+                    mode,
+                    selectedPieceIds[0],
+                    selectedForCopy?.pieceLineKey,
+                    materialScopeKey,
+                    confirmedImportGeneration,
+                  ])}
+                  session={session}
+                  readSelection={readCopySelection}
+                  prepare={
+                    compiledReimportCapability.available && copySelection.current
+                      ? prepareSavedPieceCopyReview
+                      : undefined
+                  }
+                />
+              ))}
             {showPatternImportDxfPhaseECadContextualPressV1(
               arrangeActive,
               selectedPieceIds,

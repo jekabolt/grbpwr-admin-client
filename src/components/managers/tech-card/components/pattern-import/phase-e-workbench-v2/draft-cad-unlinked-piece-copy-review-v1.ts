@@ -4,7 +4,11 @@ import {
   type DxfProductSavedNativeCompilerSourceOwnerV1,
   type DxfProductSavedNativeCompilerSourceRequestV1,
 } from 'lib/pattern-import/dxf-product-saved-native-reprocess-owner-v1';
-import { nativePieceCopyVerifier } from 'lib/pattern-import/fabrics/native-piece-copy-review';
+import { mirrorSizeAcrossGrain } from 'lib/pattern-import/semantics/pairs';
+import {
+  nativePieceCopyVerifier,
+  type NativePieceCopyMode,
+} from 'lib/pattern-import/fabrics/native-piece-copy-review';
 import { sealApplyNewPieceIntent } from 'lib/pattern-import/fabrics/apply-new-piece-intent';
 import { aliasNames, aliasKey } from 'lib/pattern-import/fabrics/draft';
 import type { CardDraft } from 'lib/pattern-import/types';
@@ -31,6 +35,7 @@ export type SavedCopySelectionV1 = Readonly<{
 export type SavedCopyCurrentV1 = SavedAddPointCurrentV1 & SavedCopySelectionV1;
 export type CopyReview = Readonly<{
   kind: 'unlinked-draft-piece-copy/1';
+  mode: NativePieceCopyMode;
   cardId: number;
   scopeKey: string;
   generation: number;
@@ -38,6 +43,7 @@ export type CopyReview = Readonly<{
 }>;
 export type PrepareSavedCopyReviewV1 = (
   readSelection: () => SavedCopySelectionV1 | null,
+  mode?: NativePieceCopyMode,
 ) => Promise<CopyReview>;
 type State = {
   file: File;
@@ -59,6 +65,7 @@ function requireCopy(ok: unknown, reason: string): asserts ok {
 
 /** Only a checked saved source and the exact current selected piece can mint a review File. */
 export async function prepareUnlinkedDraftPieceCopyV1(input: {
+  mode?: NativePieceCopyMode;
   sourceOwner: DxfProductSavedNativeCompilerSourceOwnerV1;
   sourceRequest: DxfProductSavedNativeCompilerSourceRequestV1;
   savedBytes: ArrayBuffer;
@@ -193,6 +200,24 @@ export async function prepareUnlinkedDraftPieceCopyV1(input: {
   while (names.has(`${sourceIdentity}_${suffix}`.toUpperCase())) suffix++;
   const identity = `${sourceIdentity}_${suffix}`,
     copy = structuredClone(piece);
+  const mode = input.mode ?? 'duplicate';
+  requireCopy(mode === 'duplicate' || mode === 'mirror-across-grain', 'unknown copy operation');
+  if (mode === 'mirror-across-grain') {
+    const scopeKeys = new Set(
+      [scope.target.scopeKey, scope.target.fabricPurpose, scope.target.bomLineKey].filter(Boolean),
+    );
+    requireCopy(
+      piece.piecesPerGarment === 1 &&
+        piece.fabrics.length > 0 &&
+        piece.fabrics.every((key) => scopeKeys.has(key)),
+      'the mirror requires one independent instance in one material',
+    );
+    copy.sizes = piece.sizes.map((size) => {
+      const transformed = mirrorSizeAcrossGrain(size);
+      requireCopy(transformed, 'each size needs its own verified grain axis');
+      return transformed.size;
+    });
+  }
   copy.identity = identity;
   copy.displayName = identity;
   copy.mods = [...piece.mods, String(suffix)];
@@ -200,13 +225,18 @@ export async function prepareUnlinkedDraftPieceCopyV1(input: {
   requireCopy(Number.isSafeInteger(copy.seed), 'no available piece seed');
   job.pieces.push(copy);
   const written = writeDxfDetailed(job, { now: () => new Date(replay.createdAt) });
-  const verifyGeometry = nativePieceCopyVerifier(sourceText, sourceIdentity, identity);
+  const verifyGeometry = nativePieceCopyVerifier(sourceText, sourceIdentity, identity, mode);
   verifyGeometry(written.dxfText);
-  const file = new File([written.dxfText], 'unlinked-draft-copy.dxf', { type: 'image/vnd.dxf' });
+  const file = new File(
+    [written.dxfText],
+    mode === 'mirror-across-grain' ? 'unlinked-draft-mirror.dxf' : 'unlinked-draft-copy.dxf',
+    { type: 'image/vnd.dxf' },
+  );
   const sha = await sha256Hex(await file.arrayBuffer());
   check();
   const review = Object.freeze({
     kind: 'unlinked-draft-piece-copy/1' as const,
+    mode,
     cardId: row.techCardId,
     scopeKey: row.scopeKey,
     generation,

@@ -2054,16 +2054,20 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
         }
       : undefined;
   const prepareSavedPieceCopyReview = useCallback<PrepareSavedCopyReviewV1>(
-    async (readSelection) => {
+    async (readSelection, mode) => {
       const start = activeSavedDraftRef.current,
         captured = draftCadSessionRef.current;
       if (!start?.runtime.prepareSavedPieceCopyReview || !captured)
         throw new Error('The saved Draft is no longer available.');
-      return start.runtime.prepareSavedPieceCopyReview(start.row, () => {
-        const current = readSavedDraft(start.runtime, captured),
-          selection = readSelection();
-        return current && selection ? { ...current, ...selection } : null;
-      });
+      return start.runtime.prepareSavedPieceCopyReview(
+        start.row,
+        () => {
+          const current = readSavedDraft(start.runtime, captured),
+            selection = readSelection();
+          return current && selection ? { ...current, ...selection } : null;
+        },
+        mode,
+      );
     },
     [readSavedDraft],
   );
