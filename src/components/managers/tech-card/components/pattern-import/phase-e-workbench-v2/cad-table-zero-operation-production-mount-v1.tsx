@@ -1,10 +1,13 @@
 import type { common_TechCard } from 'api/proto-http/admin';
+import { isGenerated } from 'lib/fusing-dxf/generated-pattern';
 import {
   useSizeNames,
   useSizeOrdering,
 } from 'components/managers/model/components/use-size-systems';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -86,6 +89,8 @@ import {
   createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1,
   type PatternImportDxfPhaseEZeroOperationSavedCardAuthorityRuntimeV1,
 } from './zero-operation-saved-card-authority-v1';
+
+const SavedGeneratedFusingView = lazy(() => import('./saved-generated-fusing-view'));
 
 export const PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_OPERATION_PRODUCTION_MOUNT_V1 =
   'pattern-import-dxf-phase-e-cad-table-zero-operation-production-mount/1' as const;
@@ -758,6 +763,11 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
     sizeToken,
     sourceSurface,
   );
+  const generatedRows =
+    selectedScope?.isInterlining && !useFreshSession
+      ? effectiveSavedCard?.techCard?.patterns?.filter((pattern) => pattern.bomLineKey === scopeKey)
+      : undefined;
+  const generatedFusing = Boolean(generatedRows?.length === 1 && isGenerated(generatedRows[0]!));
   const preparationKey =
     useFreshSession && cardSession
       ? `fresh:${cardSession.techCardId}:${generation}:${effectiveSavedCard?.lockVersion ?? -1}:${scopeKey}:${sizeToken}`
@@ -772,7 +782,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
     resolvedSavedCard: null,
   }));
   useEffect(() => {
-    if (!choices.ok || !scopeKey || !sizeToken) {
+    if (!choices.ok || !scopeKey || !sizeToken || generatedFusing) {
       setPreparation({
         status: 'idle',
         key: preparationKey,
@@ -889,6 +899,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
   }, [
     cardSession,
     choices.ok,
+    generatedFusing,
     effectiveSavedCard,
     generation,
     orderSizeIds,
@@ -901,7 +912,8 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
     useFreshSession,
   ]);
 
-  const currentPreparation = preparation.key === preparationKey ? preparation : null;
+  const currentPreparation =
+    !generatedFusing && preparation.key === preparationKey ? preparation : null;
   const prepared =
     currentPreparation?.status === 'settled' && currentPreparation.result?.ok
       ? (currentPreparation.result as Prepared)
@@ -1125,7 +1137,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
           }
           data-cad-zero-operation-selected-authority='absent'
           data-cad-zero-operation-proposal='absent'
-          className='min-w-0 overflow-hidden border border-borderColor bg-bgColor'
+          className={`min-w-0 overflow-hidden border border-borderColor bg-bgColor ${generatedFusing ? 'flex h-full min-h-0 flex-col' : ''}`}
         >
           {choices.ok && (
             <div className='flex min-h-9 flex-wrap items-center gap-2 border-b border-borderColor px-2 py-1'>
@@ -1167,7 +1179,35 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
             </div>
           )}
 
-          {blocker && (
+          {generatedFusing &&
+            effectiveSavedCard &&
+            savedAuthority &&
+            selectedSize &&
+            selectedScope && (
+              <Suspense
+                fallback={
+                  <Text component='p' size='micro' role='status'>
+                    Reading saved fusing…
+                  </Text>
+                }
+              >
+                <SavedGeneratedFusingView
+                  key={JSON.stringify([
+                    preparationKey,
+                    generatedRows?.[0]?.lineKey,
+                    generatedRows?.[0]?.savedRowRevision,
+                    generatedRows?.[0]?.sha256,
+                  ])}
+                  techCard={effectiveSavedCard}
+                  scope={selectedScope}
+                  size={selectedSize}
+                  authority={savedAuthority}
+                  orderSizeIds={orderSizeIds}
+                  sizeNameById={sizeNameById}
+                />
+              </Suspense>
+            )}
+          {!generatedFusing && blocker && (
             <div data-cad-zero-operation-blocker={blocker.code}>
               <CalloutBox tone='error' className='m-2 text-small'>
                 <b>2D table unavailable.</b> {blocker.detail}
