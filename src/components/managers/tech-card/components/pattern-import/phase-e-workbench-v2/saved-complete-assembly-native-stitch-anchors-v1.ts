@@ -19,6 +19,7 @@ import {
   readSavedNativeStraightStitchPathsV1,
   resolveSavedLegacyNativeStitchRangeV1,
   savedNativeStitchRawBlockV1,
+  type SavedNativeStitchCompilerSourceV1,
 } from './saved-legacy-native-stitch-run-v8';
 import {
   resolveSavedNativeSurfaceStitchAnchorV1,
@@ -77,6 +78,60 @@ type WholeAnchorInputs = Readonly<{
   sizeDictionary: readonly common_Size[];
   selectedSizeId: number;
 }>;
+
+type OriginalCut = Awaited<
+  ReturnType<typeof prepareSavedFullAssemblyCompleteNativeRowsV1>
+>['originalCutPaths'][number];
+
+type NativeNotchPoint = Readonly<{
+  nativePathId: number;
+  rawBlock: string;
+  entityOp: number;
+  positionMm: readonly [number, number];
+}>;
+
+/** Keeps the original POINT occurrence separate from any inferred seam registration. */
+function recordSavedNativeNotchPoints(
+  native: SavedNativeStitchCompilerSourceV1,
+  cuts: readonly OriginalCut[],
+  byPiece: Map<string, readonly NativeNotchPoint[]>,
+) {
+  const { doc, meta } = native.nativeRead.read;
+  for (const { paths, styles } of doc.pages) {
+    const layerByStyle = new Map(styles.map(({ id, layer }) => [id, layer]));
+    const layerOne = new Map<string, number[]>();
+    const notchPoints = new Map<string, NativeNotchPoint[]>();
+    for (const path of paths) {
+      const rawBlock = path.src.block;
+      if (!rawBlock) continue;
+      const layer = layerByStyle.get(path.style);
+      if (layer === '1' && path.closed) {
+        const sameBlock = layerOne.get(rawBlock);
+        if (sameBlock) sameBlock.push(path.id);
+        else layerOne.set(rawBlock, [path.id]);
+      }
+      if (layer !== '4' || meta.pathEntity[path.id] !== 'POINT') continue;
+      const at = meta.points[path.id]?.at;
+      if (!at || !Number.isFinite(at.x) || !Number.isFinite(at.y)) continue;
+      const mark: NativeNotchPoint = Object.freeze({
+        nativePathId: path.id,
+        rawBlock,
+        entityOp: path.src.op,
+        positionMm: Object.freeze([at.x, at.y] as const),
+      });
+      const sameBlock = notchPoints.get(rawBlock);
+      if (sameBlock) sameBlock.push(mark);
+      else notchPoints.set(rawBlock, [mark]);
+    }
+    for (const { nativePathId, pieceLineKey } of cuts) {
+      const original = paths.find((path) => path.id === nativePathId);
+      const rawBlock = original?.src.block;
+      const bound = rawBlock ? layerOne.get(rawBlock) : undefined;
+      if (rawBlock && bound?.length === 1 && bound[0] === nativePathId)
+        byPiece.set(pieceLineKey, Object.freeze(notchPoints.get(rawBlock) ?? []));
+    }
+  }
+}
 
 /** Reads native physical anchors in saved operation, seam, side and part order for one exact size. */
 export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
@@ -179,6 +234,7 @@ export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
     }
   }
 
+  const nativeNotchesByPiece = new Map<string, readonly NativeNotchPoint[]>();
   const host = createSavedFullAssemblyCompleteDxfHostsV1(source, projection).createCanonical();
   try {
     for (const [lineKey, jobs] of jobsByRow) {
@@ -191,6 +247,11 @@ export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
       );
       if (!native.ok)
         throw new Error(native.blockers[0]?.detail ?? 'The native compiler source is unavailable.');
+      recordSavedNativeNotchPoints(
+        native.value,
+        built.originalCutPaths.filter(({ row }) => row.patternLineKey === lineKey),
+        nativeNotchesByPiece,
+      );
       const { bytes } = await host.readAuthoritativeRow(member.row, signal, () => {});
       const file = new Uint8Array(bytes);
       try {
@@ -328,7 +389,14 @@ export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
         }),
       ),
     ),
-    sourceCuts: built.originalCutPaths,
+    sourceCuts: Object.freeze(
+      built.originalCutPaths.map((cut) =>
+        Object.freeze({
+          ...cut,
+          nativeNotchPoints: nativeNotchesByPiece.get(cut.pieceLineKey) ?? null,
+        }),
+      ),
+    ),
     operations: fresh.operations,
     spans: Object.freeze(spans),
     labelAnchors: Object.freeze(labels),

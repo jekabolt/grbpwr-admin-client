@@ -52,6 +52,12 @@ export async function bindSavedFullAssemblyNativeCutPathsV1(
   )
     throw new Error('Each selected native cut needs one saved piece alias in the exact material.');
   const paths = new Map(phaseD.source.paths.map((path) => [path.pathId, path]));
+  const writerJob = draft.scopes.find(({ target }) => target.scopeKey === row.scopeKey)
+    ?.writerReplay?.job;
+  const writerPieces =
+    writerJob?.scope.scopeKey === row.scopeKey && writerJob.techCardId === row.techCardId
+      ? writerJob.pieces
+      : [];
   return Object.freeze(
     catalogResult.catalog.pieces.map((piece) => {
       const matches = aliases.filter(({ pieceLineKey }) => pieceLineKey === piece.pieceLineKey);
@@ -66,6 +72,12 @@ export async function bindSavedFullAssemblyNativeCutPathsV1(
       const path = sourcePaths?.length === 1 ? paths.get(sourcePaths[0]!) : undefined;
       if (contour.length !== 1 || !cut?.closed || !path?.closed)
         throw new Error(`No original closed cut path is bound to ${matches[0].blockName}.`);
+      const writerMatches = writerPieces.filter(({ identity }) => identity === piece.pieceId);
+      const writerSizes =
+        writerMatches.length === 1
+          ? writerMatches[0].sizes.filter(({ sizeToken: token }) => token === sizeToken)
+          : [];
+      const grain = writerSizes.length === 1 ? writerSizes[0].grain : null;
       return Object.freeze({
         row,
         sizeToken,
@@ -76,6 +88,18 @@ export async function bindSavedFullAssemblyNativeCutPathsV1(
         nativePathId: path.pathId,
         sourceInstancePath: path.provenance.instancePath,
         nativePointsMm: path.pointsMm,
+        grain:
+          grain &&
+          grain.origin !== 'proposed' &&
+          Number.isFinite(grain.angleDeg) &&
+          grain.angleDeg >= 0 &&
+          grain.angleDeg < 360
+            ? Object.freeze({
+                angleDegrees: grain.angleDeg,
+                origin: grain.origin,
+                evidence: Object.freeze([...(grain.evidence ?? [])]),
+              })
+            : null,
       });
     }),
   );
