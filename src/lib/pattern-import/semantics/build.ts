@@ -17,6 +17,11 @@
 //                `_L` drawn + `_R` = its mirror across the grain (G12), ppg per hand;
 //   7. growth  — cut area must grow with size (G8) → 'non-monotone' when > 2 sizes.
 
+import {
+  equalAxisPoint,
+  hasSingleCutEdge,
+  isReadProductFoldAxis,
+} from '../adapters/dxf/product-fold-axis';
 import { resolveNativeCutLoops } from '../adapters/dxf/native-cut-holes';
 import { isMirrorSymmetric } from '../ai/geom';
 import { chainView, partAt, sheetView } from '../assemble/composite';
@@ -1757,7 +1762,26 @@ export function buildPieceSpecsDetailed(
       let halfEdge: FoldEdge | null = null;
       if (wantFold !== false) {
         foldFeat = (feats.find((f) => f.kind === 'fold') as FoldFeature | undefined) ?? null;
-        if (foldFeat) fold = { a: foldFeat.a, b: foldFeat.b };
+        if (foldFeat && halfPick && isReadProductFoldAxis(foldFeat)) {
+          if (
+            !equalAxisPoint(halfPick.a, foldFeat.a) ||
+            !equalAxisPoint(halfPick.b, foldFeat.b) ||
+            feats.filter((f) => f.kind === 'fold').length !== 1 ||
+            !hasSingleCutEdge(outer, foldFeat.a, foldFeat.b)
+          ) {
+            blockedHere = {
+              reason: 'fold-unresolved',
+              detail: `${card.token}: selected half axis does not exact-match the native cut edge`,
+            };
+            break;
+          }
+          halfEdge = {
+            a: foldFeat.a,
+            b: foldFeat.b,
+            lenMm: Math.hypot(foldFeat.b.x - foldFeat.a.x, foldFeat.b.y - foldFeat.a.y),
+          };
+          halfSizes.push(`${card.token}: selected exact native half axis`);
+        } else if (foldFeat) fold = { a: foldFeat.a, b: foldFeat.b };
         else if (halfPick) {
           // L13: the edge the sheet points at in THIS size (parallel to the answer), else the
           // straight run matching the answered edge — no convex-hull filter (a half whose tips
@@ -2062,7 +2086,14 @@ export function buildPieceSpecsDetailed(
       lastGrain = grain;
 
       // L13: the half's fold line — the cut line's own run along the fold edge
-      const halfLine = halfEdge ? halfFoldLine(halfEdge, cut) : null;
+      const halfLine =
+        halfEdge && foldFeat
+          ? hasSingleCutEdge(cut, foldFeat.a, foldFeat.b)
+            ? ([foldFeat.a, foldFeat.b] as const)
+            : null
+          : halfEdge
+            ? halfFoldLine(halfEdge, cut)
+            : null;
       if (halfEdge && !halfLine) {
         blockedHere = {
           reason: 'fold-unresolved',

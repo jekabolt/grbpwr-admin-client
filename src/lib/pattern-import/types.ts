@@ -3313,6 +3313,16 @@ export type StageName =
   | 'write';
 
 /** Input/output of each stage as the worker sees them (session-held artifacts by id). */
+export type ProductDxfFoldAxis = {
+  seed: SeedId;
+  block: string;
+  identity: string;
+  size: string;
+  rank: number;
+  a: PtMm;
+  b: PtMm;
+};
+
 export type StageIO = {
   extract: {
     in: { opts: ExtractOpts };
@@ -3327,6 +3337,8 @@ export type StageIO = {
        * sheet, legend and seed steps.
        */
       presegmented?: boolean;
+      /** Actual header of a single, manifest-bearing native product DXF. */
+      productWriterDialect?: WriteJob['dialect'];
       /** Traced raster pages (F11): the correction each page already carries (`IRPage.calibration`). */
       calibrations?: { file: FileId; page: PageIndex; calibration: RasterCalibration }[];
       /** PASSPORT Ф1: what the document says, as read before any piece (absent = nothing read). */
@@ -3446,6 +3458,8 @@ export type StageIO = {
     out: {
       seeds: Seed[];
       families: PieceFamily[];
+      /** Same native decoder, exact Layer 6 path and one owning cut edge. */
+      productFoldAxes?: ProductDxfFoldAxis[];
       /** D6: the pieces read across the tile sheets (copies, alternatives, splits); null = one sheet. */
       sheets?: SheetPieces | null;
       /**

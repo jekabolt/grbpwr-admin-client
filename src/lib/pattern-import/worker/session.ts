@@ -6,6 +6,8 @@
 // polupalto at 777 MB RSS in node with docs + sheet alive). Once a sheet is assembled the docs are
 // dropped; the file bytes stay in the blob store (Blob, not a JS ArrayBuffer), so re-assembling a
 // different sheet or with a hand grid re-reads them (seconds) instead of keeping them (hundreds MB).
+import { isNativeCutOrFoldPolyline } from '../adapters/dxf/extract';
+import { productDxfFoldAxes } from '../adapters/dxf/product-fold-axis';
 import { readManifestBytes } from '../manifest';
 import { sha256Hex as hashNativeOutput } from '../adapters/vector/builder';
 import { readProtectedLineSplit } from '../write/read-protected-line-split';
@@ -1242,6 +1244,16 @@ export class Session {
       scale,
       warnings,
       presegmented: !!this.dxf,
+      ...(this.files.length === 1 &&
+      this.dxf?.read.meta.manifest &&
+      !this.dxf.read.meta.binary &&
+      !this.dxf.read.meta.generatedFusing &&
+      (this.dxf.read.meta.version === 'AC1009' || this.dxf.read.meta.version === 'AC1015')
+        ? {
+            productWriterDialect:
+              this.dxf.read.meta.version === 'AC1009' ? ('r12' as const) : ('r2000' as const),
+          }
+        : {}),
       calibrations: this.calibrations.length ? this.calibrations : undefined,
       ...(this.passport ? { passport: this.passport } : {}),
     };
@@ -1823,7 +1835,14 @@ export class Session {
       this.setAside = [];
       this.run = this.run ?? this.fast.run;
       this.wallSet = this.fast.chains;
-      return { seeds: this.fast.seeds, families };
+      const productFoldAxes = this.dxf
+        ? productDxfFoldAxes(this.dxf.read, families, isNativeCutOrFoldPolyline)
+        : [];
+      return {
+        seeds: this.fast.seeds,
+        families,
+        ...(productFoldAxes.length ? { productFoldAxes } : {}),
+      };
     }
     const base = this.chains;
     if (!base) throw new ImportError('out-of-order', 'trace the lines first', 'pieces');

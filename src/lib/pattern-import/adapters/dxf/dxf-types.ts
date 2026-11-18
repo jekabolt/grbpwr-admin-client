@@ -101,6 +101,8 @@ export type DxfMeta = {
   binary: 'r12' | 'r13+' | null;
   units: DxfUnits;
   manifest: boolean;
+  /** Blocks marked as confirmed single half-on-fold in the validated product manifest. */
+  halfFoldBlocks?: ReadonlySet<string>;
   /** Manifest blocks explicitly emitted with a sewing boundary and zero allowance. */
   zeroAllowanceSeamBlocks?: ReadonlyMap<string, NonNullable<ManifestBlock['contour']>>;
   authoredInternalByBlock?: ReadonlyMap<string, readonly ManifestAuthoredInternalPath[]>;

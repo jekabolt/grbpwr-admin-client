@@ -239,6 +239,10 @@ const MAX_STRAIGHT_EDGE_BLOCKERS = 4_096;
 const MAX_STRAIGHT_EDGE_PATH_COVERAGE = 100_000;
 const MAX_STRAIGHT_EDGE_COORDINATE_ABS_MM = 1_000_000_000;
 
+// The ordinary decoder owns these path objects. Only all-straight, unresampled source intervals qualify.
+const nativeCutAndFoldPolylines = new WeakSet<IRPath>();
+export const isNativeCutOrFoldPolyline = (path: IRPath) => nativeCutAndFoldPolylines.has(path);
+
 class Builder {
   paths: IRPath[] = [];
   texts: IRText[] = [];
@@ -272,6 +276,7 @@ class Builder {
     readonly opts: ExtractOpts,
     readonly provenanceCapture: ProvenanceCapture | null = null,
     readonly straightEdgeCapture: StraightEdgeCapture | null = null,
+    readonly productManifestPresent = false,
   ) {
     for (const l of raw.layers) this.addLayer(l.name);
     const handleCounts = new Map<string, number>();
@@ -777,6 +782,20 @@ class Builder {
         block: ctx.block,
       },
     });
+    if (
+      this.productManifestPresent &&
+      (e.layer === '1' || e.layer === '6') &&
+      (e.type === 'POLYLINE' || e.type === 'LWPOLYLINE') &&
+      em.straightEdgeFacts?.length === (em.closed ? em.pts.length : em.pts.length - 1) &&
+      em.straightEdgeFacts.every(
+        (f, i) =>
+          f.kind === 'line' &&
+          f.startPointIndex === i &&
+          f.endPointIndex === (i + 1) % em.pts.length,
+      )
+    ) {
+      nativeCutAndFoldPolylines.add(this.paths[id]!);
+    }
     this.pathEntity.push(e.type);
     const provenance = this.capturePathProvenance(id, e, ctx, em);
     this.captureStraightEdgeAuthority(id, e, ctx, em, provenance);
@@ -1436,7 +1455,7 @@ function textOf(
   // TEXT / ATTRIB / ATTDEF — OCS
   const m = mul(ctx.M, ocsOf(tg));
   const value =
-    e.type === 'ATTDEF' && rawStr(tg, 1) === '' ? (str(tg, 2) ?? '') : (rawStr(tg, 1) ?? '');
+    e.type === 'ATTDEF' && rawStr(tg, 1) === '' ? str(tg, 2) ?? '' : rawStr(tg, 1) ?? '';
   const text = decodeTextValue(value);
   const h = numOr(tg, 40, 2.5);
   const rot = (numOr(tg, 50, 0) * Math.PI) / 180;
@@ -1665,7 +1684,7 @@ function walk(list: RawEntity[], ctx: Ctx, b: Builder, newGroupPerInsert: boolea
           angleDeg,
           z: numOr(e.tags, 30, 0) * scaleOf(ctx.M),
           thickness: numOr(e.tags, 39, 0),
-          layer: b.paths[id] ? (b.styles[b.paths[id].style].layer ?? e.layer) : e.layer,
+          layer: b.paths[id] ? b.styles[b.paths[id].style].layer ?? e.layer : e.layer,
         };
       }
     }
@@ -1923,6 +1942,7 @@ async function readDxfInternal(
     },
     provenanceCapture,
     straightEdgeCapture,
+    manifest && dec.binary === null && !file.generatedFusing && !dec.generatedFusing,
   );
   b.warnings.push(...raw.warnings);
   // Unscoped parser recovery cannot establish selected-path completeness.
@@ -2028,12 +2048,24 @@ async function readDxfInternal(
     pages: [page],
     warnings: b.warnings,
   };
+  let halfFoldBlocks: DxfMeta['halfFoldBlocks'];
   let zeroAllowanceSeamBlocks: DxfMeta['zeroAllowanceSeamBlocks'];
   let authoredInternalByBlock: DxfMeta['authoredInternalByBlock'];
   let authoredTextByBlock: DxfMeta['authoredTextByBlock'];
   if (manifest && dec.binary === null && !file.generatedFusing && !dec.generatedFusing) {
     try {
       const conversion = readManifestBytes(file.bytes);
+      const halfIdentities = new Set(
+        conversion?.pieces
+          .filter((p) => p.halfFold && !p.unfoldedFold && !p.pairOf && p.piecesPerGarment === 1)
+          .map((p) => p.identity),
+      );
+      if (halfIdentities.size)
+        halfFoldBlocks = new Set(
+          conversion?.blocks
+            .filter((b) => halfIdentities.has(b.identity) && b.contour)
+            .map((b) => b.block),
+        );
       const zeroAllowancePieces = new Set(
         conversion?.pieces
           .filter((piece) => piece.allowanceMm === 0)
@@ -2067,6 +2099,7 @@ async function readDxfInternal(
     binary: dec.binary,
     units,
     manifest,
+    ...(halfFoldBlocks?.size ? { halfFoldBlocks } : {}),
     ...(zeroAllowanceSeamBlocks?.size ? { zeroAllowanceSeamBlocks } : {}),
     ...(authoredInternalByBlock?.size ? { authoredInternalByBlock } : {}),
     ...(authoredTextByBlock?.size ? { authoredTextByBlock } : {}),

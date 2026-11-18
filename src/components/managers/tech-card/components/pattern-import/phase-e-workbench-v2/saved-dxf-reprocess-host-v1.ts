@@ -1,3 +1,4 @@
+import { contourSignature, contourSigCap } from 'lib/pattern-import/manifest/contour-sig';
 import { DXF_NATIVE_SEWING_REPLAY_REQUEST_V1 } from 'lib/pattern-import/dxf-native-sewing-replay-v1';
 import { readManifestBytes } from 'lib/pattern-import/manifest';
 import {
@@ -428,6 +429,90 @@ export function buildPatternImportDxfExactManifestPieceOverridesV1(
   return overrides;
 }
 
+function savedHalfFoldChoices(
+  row: DxfProductSavedRowIdentityV1,
+  card: CardContext,
+  manifest: ConversionManifest,
+  initial: StageIO['semantics']['out'],
+  pieces: StageIO['pieces']['out'],
+  overrides: StageIO['semantics']['in']['pieceOverrides'],
+): NonNullable<StageIO['semantics']['in']['operatorFold']> {
+  const choices: NonNullable<StageIO['semantics']['in']['operatorFold']> = {};
+  const halves = manifest.pieces.filter((p) => p.halfFold);
+  if (!halves.length) return choices;
+  const inScope = (scopeKey: string) => scopeKey.trim() === row.scopeKey;
+  const patterns = card.existingPatterns?.filter((p) => inScope(p.scopeKey)) ?? [];
+  if (
+    patterns.length !== 1 ||
+    patterns[0]!.scopeKey !== row.scopeKey ||
+    patterns[0]!.lineKey !== row.patternLineKey
+  )
+    throw new Error('Saved half-on-fold pattern line differs from the current row.');
+  const scopeAliases = card.existingAliases?.filter((a) => inScope(a.scopeKey)) ?? [];
+  const indexes = exactManifestPieceIndexes(initial.pieces, manifest);
+  for (const half of halves) {
+    const blocks = manifest.blocks.filter((b) => b.identity === half.identity);
+    const block = blocks[0];
+    if (
+      half.unfoldedFold ||
+      half.pairOf ||
+      half.piecesPerGarment !== 1 ||
+      blocks.length !== 1 ||
+      !block?.contour
+    )
+      throw new Error('Saved half requires one confirmed piece, size and signed cut boundary.');
+    const aliases = scopeAliases.filter(
+      (a) => a.blockName.trim().toUpperCase() === half.identity.toUpperCase(),
+    );
+    const alias = aliases[0];
+    const lines = card.existingPieces.filter((p) => p.lineKey === alias?.pieceLineKey);
+    if (
+      aliases.length !== 1 ||
+      !alias?.pieceLineKey ||
+      alias.scopeKey !== row.scopeKey ||
+      alias.blockName !== half.identity ||
+      scopeAliases.filter((a) => a.pieceLineKey === alias.pieceLineKey).length !== 1 ||
+      lines.length !== 1 ||
+      lines[0]!.cutSymmetry !== 'TECH_CARD_PIECE_CUT_SYMMETRY_FOLD' ||
+      lines[0]!.piecesPerGarment !== 1
+    )
+      throw new Error('Saved half has no unique current fold line and block alias.');
+    const axes =
+      pieces.productFoldAxes?.filter(
+        (a) =>
+          a.identity === half.identity && a.block === block.block && a.size === block.sizeToken,
+      ) ?? [];
+    const axis = axes[0];
+    if (
+      axes.length !== 1 ||
+      !axis ||
+      !manifest.sizes.some(
+        (s) => s.rank === axis.rank && s.token === axis.size && s.sizeId === block.sizeId,
+      )
+    )
+      throw new Error('Saved half has no exact native axis at the saved size.');
+    const index = initial.pieces.findIndex((p) => p.seed === axis.seed);
+    const manifestIndex = indexes[index];
+    const candidate = pieces.families.find((f) => f.seed === axis.seed)?.candidates[0];
+    const signature =
+      candidate && contourSignature(candidate.outer, contourSigCap(manifest.blocks.length));
+    if (
+      manifestIndex === undefined ||
+      manifest.pieces[manifestIndex] !== half ||
+      !overrides?.[axis.seed] ||
+      !signature ||
+      signature.dev !== block.contour.dev ||
+      signature.pts.length !== block.contour.pts.length ||
+      !signature.pts.every((v, i) => v === block.contour!.pts[i])
+    )
+      throw new Error('Saved half native owner or signed cut boundary differs.');
+    // In the generic override false means the operator rejected folding. A saved half has its own explicit choice.
+    delete overrides[axis.seed]!.unfoldedFold;
+    choices[axis.seed] = { a: axis.a, b: axis.b, half: true };
+  }
+  return choices;
+}
+
 function restoreExactSavedWriterPieces(
   pieces: readonly PieceSpec[],
   manifest: Pick<ConversionManifest, 'pieces' | 'blocks'>,
@@ -489,6 +574,7 @@ function semanticsInput(
   scopeKey: string,
   pieceOverrides: StageIO['semantics']['in']['pieceOverrides'],
   manifest: ConversionManifest,
+  operatorFold: StageIO['semantics']['in']['operatorFold'] = {},
 ): StageIO['semantics']['in'] {
   return {
     fileAllowance: buildPatternImportDxfSavedManifestAllowanceV1(manifest),
@@ -496,7 +582,7 @@ function semanticsInput(
     presegmentedIdentities: cardPresegmentedIdentities(card, scopeKey),
     operatorGrain: {},
     aiQuantity: {},
-    operatorFold: {},
+    operatorFold,
     foldListChecked: [],
   };
 }
@@ -703,9 +789,17 @@ async function reprocessSavedDxf(
       initialSemantics,
       manifest,
     );
+    const operatorFold = savedHalfFoldChoices(
+      input.row,
+      card,
+      manifest,
+      initialSemantics,
+      pieces,
+      overrides,
+    );
     let semantics = await run(
       'semantics',
-      semanticsInput(card, input.row.scopeKey, overrides, manifest),
+      semanticsInput(card, input.row.scopeKey, overrides, manifest, operatorFold),
       9,
       'restoring saved piece semantics',
     );
@@ -721,7 +815,7 @@ async function reprocessSavedDxf(
     );
     semantics = await run(
       'semantics',
-      semanticsInput(card, input.row.scopeKey, overrides, manifest),
+      semanticsInput(card, input.row.scopeKey, overrides, manifest, operatorFold),
       11,
       'sealing saved piece semantics',
     );
@@ -759,7 +853,7 @@ async function reprocessSavedDxf(
         scopes: [target],
         assignment,
         sizes: structuredClone(manifest.sizes),
-        dialect: 'r12',
+        dialect: extracted.productWriterDialect ?? 'r12',
         generator: manifest.generator,
         ...(manifest.autopilot ? { autopilot: structuredClone(manifest.autopilot) } : {}),
         ...(manifest.replay ? { replay: structuredClone(manifest.replay) } : {}),

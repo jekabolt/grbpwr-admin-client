@@ -35,9 +35,13 @@ vi.mock('./phase-e-workbench-v2/saved-dxf-reprocess-host-v1', async (importOrigi
   };
 });
 
-it.each([[['M']], [['XS', 'S', 'M', 'L', 'XL']]])(
-  'replays genuine wizard apply bytes and receipt for sizes %j through the saved-row session',
-  async (tokens) => {
+it.each([
+  { tokens: ['M'], half: false },
+  { tokens: ['XS', 'S', 'M', 'L', 'XL'], half: false },
+  { tokens: ['M'], half: true },
+])(
+  'replays genuine wizard apply bytes and receipt for $tokens and confirmed half $half through the saved-row session',
+  async ({ tokens, half }) => {
     const fixture = await createSavedThreePanelFixtureV1(2);
     const sizes = tokens.map((token, rank) => ({
       sizeId: tokens.length === 1 ? 7 : rank + 5,
@@ -46,6 +50,7 @@ it.each([[['M']], [['XS', 'S', 'M', 'L', 'XL']]])(
       name: token,
       sourceLabel: token,
     }));
+    if (half) fixture.card.existingPieces[0]!.cutSymmetry = 'TECH_CARD_PIECE_CUT_SYMMETRY_FOLD';
     const live: LiveCard = {
       patterns: [],
       pieces: fixture.card.existingPieces,
@@ -117,9 +122,42 @@ it.each([[['M']], [['XS', 'S', 'M', 'L', 'XL']]])(
         }
       }
     }
-    const input = new File([writeDxfDetailed(job, { embed: null }).dxfText], 'original.dxf');
+    const front = job.pieces[0]!,
+      frontSize = front.sizes[0]!;
+    const a = frontSize.cut[1]!,
+      b = frontSize.cut[0]!;
+    if (half) {
+      front.halfFold = { evidence: ['confirmed half on fold'] };
+      frontSize.fold = { kind: 'fold', origin: 'operator', confidence: 1, ranges: [], a, b };
+      for (const piece of job.pieces) {
+        piece.sizes[0]!.seam = structuredClone(piece.sizes[0]!.cut);
+        piece.allowance = { meaning: 'cut', allowanceMm: 0, origin: 'operator', evidence: [] };
+      }
+    }
+    const input = new File(
+      [writeDxfDetailed(job, half ? {} : { embed: null }).dxfText],
+      'original.dxf',
+    );
     const originalSha = await digestFullAssemblyFixture(new Uint8Array(await input.arrayBuffer()));
-    const draft = await draftThroughWizardStages(input, context);
+    const draft = await draftThroughWizardStages(
+      input,
+      context,
+      undefined,
+      undefined,
+      half
+        ? (initial) => {
+            const piece = initial.pieces.find((p) => p.displayName === front.displayName)!;
+            return {
+              operatorFold: { [piece.seed]: { a, b, half: true } },
+              pieceOverrides: { [piece.seed]: { allowance: front.allowance } },
+            };
+          }
+        : undefined,
+    );
+    if (half)
+      expect(
+        draft.scopes[0]!.writerReplay!.job.pieces.find((p) => p.halfFold)?.sizes[0]!.fold,
+      ).toMatchObject({ a, b });
     expect(draft.dxfNativeSewingReplay?.pipeline?.contentBinding?.sourceSha256).toBe(originalSha);
 
     const downloadUrl = 'https://saved-full-assembly.invalid/current-download.dxf';
@@ -207,6 +245,14 @@ it.each([[['M']], [['XS', 'S', 'M', 'L', 'XL']]])(
       expect(proof.ok, JSON.stringify(proof)).toBe(true);
       const saved = card.techCard!.patterns![0];
       const savedSha = await digestFullAssemblyFixture(bytes);
+      if (half) {
+        const reopened = session!.draft.scopes[0]!.writerReplay!.job.pieces.filter(
+          (p) => p.halfFold,
+        );
+        expect(reopened).toHaveLength(1);
+        expect(reopened[0]!.sizes[0]!.fold).toMatchObject({ a, b });
+        expect(reopened[0]!.unfoldedFold).toBe(false);
+      }
       expect(proof.evidence?.productExportSha256).toBe(savedSha);
       expect(session!.draft.dxfNativeSewingReplay?.replayReady).toBe(true);
       if (tokens.length > 1) {
