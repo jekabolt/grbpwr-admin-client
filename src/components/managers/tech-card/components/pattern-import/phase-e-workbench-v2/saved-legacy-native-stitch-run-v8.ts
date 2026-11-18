@@ -38,7 +38,7 @@ const maxRingVertices = 256;
 
 export function bindSavedLegacyRingV1(
   legacy: readonly PointMm[],
-  native: SavedAssemblyNativeSewingPathV1,
+  native: Pick<SavedAssemblyNativeSewingPathV1, 'nativePointsMm' | 'vertexIds'>,
 ) {
   const points = native.nativePointsMm;
   const count = points.length;
@@ -286,6 +286,27 @@ export function resolveSavedLegacyNativeStitchRangeV1(
     return { from, to, a, b, lengthMm, nativeCurveId: edge.native.sourceCurveId, reverse };
   };
   const edges = ids.slice(1).map((to, i) => originalEdge(ids[i]!, to));
+  return Object.freeze({
+    sourceFileId: path.sourceFileId,
+    nativePathId: path.nativePathId,
+    fullRunVertexIds: Object.freeze(ids),
+    ...clipSavedNativeStraightWalkV1(edges, range),
+  });
+}
+
+/** Clip a verified, directed walk along the cumulative lengths of its original straight edges. */
+export function clipSavedNativeStraightWalkV1(
+  edges: readonly Readonly<{
+    from: string;
+    to: string;
+    a: Readonly<{ x: number; y: number }>;
+    b: Readonly<{ x: number; y: number }>;
+    lengthMm: number;
+    nativeCurveId: string;
+    reverse: boolean;
+  }>[],
+  range: readonly [number, number],
+) {
   let totalMm = 0;
   const walk = edges.map((edge) => {
     const startMm = totalMm;
@@ -346,9 +367,6 @@ export function resolveSavedLegacyNativeStitchRangeV1(
   }
   if (!intervals.length) throw new Error('The saved range has no exact native curve intervals.');
   return Object.freeze({
-    sourceFileId: path.sourceFileId,
-    nativePathId: path.nativePathId,
-    fullRunVertexIds: Object.freeze(ids),
     fraction: Object.freeze([...range] as const),
     start: at(range[0]),
     end: at(range[1]),

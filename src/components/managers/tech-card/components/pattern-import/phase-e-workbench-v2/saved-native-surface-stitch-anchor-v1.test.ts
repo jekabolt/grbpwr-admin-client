@@ -1,0 +1,365 @@
+import { createHash } from 'node:crypto';
+import { describe, expect, it } from 'vitest';
+import { innerAnchor } from 'components/managers/tech-card/components/step-seams/step-seams-model';
+import { buildAssemblyPieces } from 'components/managers/tech-card/techpack/assembly-geometry-build';
+import { segmentPiece } from 'lib/assembly-skeleton/geometry/segment';
+import { grainRotation } from 'lib/pom/upright';
+import { anchorOf } from 'lib/seams/anchor';
+import { runsOfPiece } from 'lib/seams/frame';
+import { readDxf } from 'lib/pattern-import/adapters/dxf/extract';
+import { anchorToWire } from 'lib/seams/wire';
+import {
+  parseSavedNativeStitchRowV1,
+  readSavedNativeStraightStitchPathsV1,
+  resolveSavedLegacyNativeStitchRangeV1,
+} from './saved-legacy-native-stitch-run-v8';
+import { resolveSavedNativeSurfaceStitchAnchorV1 as resolve } from './saved-native-surface-stitch-anchor-v1';
+
+type Input = Parameters<typeof resolve>[0];
+function savedAnchor(anchor: Parameters<typeof anchorToWire>[0]): Input['anchor'] {
+  const wire = anchorToWire(anchor);
+  return { ...wire, placement: wire.placement, layer: wire.layer };
+}
+function sha(value: unknown) {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+}
+const signal = new AbortController().signal;
+const pieceKey = 'test-pocket';
+const sourceFileId = 'surface-range-fixture';
+const blockName = 'POCKET_M';
+const line = [
+  [15, 20],
+  [31, 20],
+  [31, 32],
+  [47, 32],
+];
+function polyline(layer: string, points: number[][], closed: boolean) {
+  return [
+    0,
+    'POLYLINE',
+    8,
+    layer,
+    66,
+    1,
+    70,
+    Number(closed),
+    10,
+    0,
+    20,
+    0,
+    ...points.flatMap(([x, y]) => [0, 'VERTEX', 8, layer, 10, x, 20, y, 30, 0, 70, 0]),
+    0,
+    'SEQEND',
+    8,
+    layer,
+  ];
+}
+async function fixture(reverse = false, innerPath = line) {
+  const file = new TextEncoder().encode(
+    [
+      0,
+      'SECTION',
+      2,
+      'HEADER',
+      9,
+      '$ACADVER',
+      1,
+      'AC1009',
+      9,
+      '$INSUNITS',
+      70,
+      4,
+      0,
+      'ENDSEC',
+      0,
+      'SECTION',
+      2,
+      'BLOCKS',
+      0,
+      'BLOCK',
+      8,
+      0,
+      2,
+      blockName,
+      70,
+      0,
+      10,
+      0,
+      20,
+      0,
+      ...polyline(
+        '1',
+        [
+          [0, 0],
+          [84, 0],
+          [75, 62],
+          [3, 55],
+        ],
+        true,
+      ),
+      ...polyline(
+        '14',
+        [
+          [3, 3],
+          [63, 3],
+          [63, 43],
+          [3, 43],
+        ],
+        true,
+      ),
+      ...polyline('8', innerPath, false),
+      0,
+      'ENDBLK',
+      0,
+      'ENDSEC',
+      0,
+      'SECTION',
+      2,
+      'ENTITIES',
+      0,
+      'INSERT',
+      8,
+      0,
+      2,
+      blockName,
+      10,
+      0,
+      20,
+      0,
+      0,
+      'ENDSEC',
+      0,
+      'EOF',
+      '',
+    ].join('\n'),
+  );
+  const fileName = blockName + '.dxf';
+  const read = await readDxf(
+    { id: sourceFileId, name: fileName, bytes: file.buffer },
+    { sagittaMm: 0.1, keepFills: true },
+  );
+  const page = read.doc.pages[0]!;
+  const raw14 = page.paths.find(
+    (path) => page.styles.find((s) => s.id === path.style)?.layer === '14',
+  )!;
+  const row = { sha256: createHash('sha256').update(file).digest('hex') };
+  const parent = {
+    row,
+    sourceFileId,
+    blockName,
+    pieceLineKey: pieceKey,
+    nativePathId: raw14.id,
+  } as Input['parent'];
+  const exact = await readSavedNativeStraightStitchPathsV1(file, parent, [raw14.id], signal);
+  const edges = exact.descriptors.toSorted(
+    (a, b) => a.path.startPointIndex - b.path.startPointIndex,
+  );
+  const path = {
+    ...parent,
+    vertexIds: edges.map((e) => e.startVertexId),
+    nativePointsMm: edges.map((e) => ({ x: e.startMm[0], y: e.startMm[1] })),
+  };
+  const block = (await parseSavedNativeStitchRowV1(file, fileName)).pieces
+    .filter((p) => p.blockName === blockName)
+    .map((p) =>
+      reverse
+        ? {
+            ...p,
+            inner: p.inner?.map((entry) =>
+              entry.layer === '8' ? { ...entry, pts: entry.pts.toReversed() } : entry,
+            ),
+          }
+        : p,
+    );
+  const card = {
+    techCard: {
+      pieces: [{ lineKey: pieceKey, name: 'Pocket', piecesPerGarment: 1, materials: [] }],
+      bomItems: [],
+    },
+  } as unknown as Input['card'];
+  const owner = {
+    piece: block.find((v) => v.layer === '1')!,
+    block: blockName,
+    size: 'M',
+    instances: 1,
+    layer: '1',
+    grainLayer: '7',
+    sizes: ['M'],
+    layers: block,
+  };
+  const drawing = buildAssemblyPieces(card, new Map([[pieceKey, owner]]), '7');
+  const part = drawing.pieces.get(pieceKey)!;
+  const anchor = innerAnchor(part.geom, 0, part.inner[0]!, drawing.grainDeg.get(pieceKey)!)!;
+  const nativeSource = { sourceFileId, nativeRead: { read } } as Input['nativeSource'];
+  return {
+    card,
+    sizeToken: 'M',
+    grainLayer: '7',
+    file,
+    block,
+    rawBlock: blockName,
+    nativeSource,
+    parent: path,
+    anchor: savedAnchor(anchor),
+    index: 0,
+  };
+}
+describe('saved native open L8 arclength', () => {
+  it.each([false, true])(
+    'recovers a sliced original straight chain (ordinary traversal reversed %s)',
+    async (reverse) => {
+      const input = await fixture(reverse);
+      const whole = await resolve(input, signal);
+      // Exact serialized whole-path result from 4378bfc2, before fractional L8 support.
+      expect(sha(whole)).toBe(
+        reverse
+          ? 'fbfe13b4418b16d86e4d254ecd01e8725d2805fd76aa16e028b0f0fa70fc98dc'
+          : '91bd6846b70302abc85304d13cab0d24631edf689fe7e80fe1db315118efe0a6',
+      );
+      expect(whole.reverse).toBe(reverse);
+      expect(whole.lengthMm).toBe(44);
+      expect(whole.nativePointsMm).toHaveLength(4);
+      expect(whole.intervals).toHaveLength(3);
+      expect(whole).not.toHaveProperty('fraction');
+      const a = {
+        ...input.anchor,
+        rangeFrom: 6 / 44,
+        rangeTo: 36 / 44,
+        layer: 'TECH_CARD_SEAM_LAYER_UNDER' as const,
+      };
+      const span = await resolve({ ...input, anchor: a }, signal);
+      expect(span.lengthMm).toBeCloseTo(30, 12);
+      expect(span.intervals.map((x) => x.nativeCurveId)).toEqual(
+        whole.intervals.map((x) => x.nativeCurveId),
+      );
+      expect(span.orderedNativeVertexIds).toEqual(whole.orderedNativeVertexIds.slice(1, 3));
+      expect(span.intervals[1]).toEqual(whole.intervals[1]);
+      const [x0, y0] = whole.firstMm,
+        [x1, y1] = whole.nativePointsMm[1]!;
+      expect(span.firstMm).toEqual([x0 + ((x1 - x0) * 6) / 16, y0 + ((y1 - y0) * 6) / 16]);
+      expect(span.intervals[0]!.t0).toBe(whole.reverse ? 1 - 6 / 16 : 6 / 16);
+      expect(span.intervals[2]!.t1).toBe(0.5);
+      expect(span.nativePointsMm).toEqual([
+        span.firstMm,
+        ...whole.nativePointsMm.slice(1, 3),
+        span.lastMm,
+      ]);
+      const within = await resolve(
+        { ...input, anchor: { ...a, rangeFrom: 1 / 44, rangeTo: 2 / 44 } },
+        signal,
+      );
+      expect(within.intervals).toHaveLength(1);
+      expect(within.orderedNativeVertexIds).toEqual([]);
+      const vertexToVertex = await resolve(
+        { ...input, anchor: { ...a, rangeFrom: 16 / 44, rangeTo: 28 / 44 } },
+        signal,
+      );
+      expect(vertexToVertex.intervals).toEqual([whole.intervals[1]]);
+      expect(vertexToVertex.orderedNativeVertexIds).toEqual(
+        whole.orderedNativeVertexIds.slice(1, 3),
+      );
+    },
+  );
+  it('refuses a legacy drawing whose simplification moves the saved arclength endpoint', async () => {
+    const input = await fixture(false, [line[0]!, [23, 20.25], ...line.slice(1)]);
+    const whole = await resolve(input, signal);
+    expect(whole.rawNativePoints).toBeGreaterThan(whole.ordinaryDrawingPoints);
+    await expect(
+      resolve({ ...input, anchor: { ...input.anchor, rangeFrom: 8 / 44, rangeTo: 0.9 } }, signal),
+    ).rejects.toThrow('does not reproduce the native arclength');
+  });
+  it('retains the complete serialized L14 results for both whole and sliced runs', async () => {
+    const input = await fixture();
+    const cut = input.block.find((entry) => entry.layer === '1')!;
+    const sewing = input.block.find((entry) => entry.layer === '14')!;
+    const geom = segmentPiece({
+      pieceKey,
+      name: blockName,
+      piece: sewing,
+      piecesPerGarment: 1,
+      cutSymmetry: null,
+      cloth: null,
+      fused: false,
+    });
+    const run = runsOfPiece(geom)[0]!;
+    const anchor = savedAnchor(anchorOf(geom, run, grainRotation(cut)));
+    const exact = await readSavedNativeStraightStitchPathsV1(
+      input.file,
+      input.parent,
+      [input.parent.nativePathId],
+      signal,
+    );
+    const hashes = [
+      [0, 1],
+      [0.2, 0.85],
+    ].map(([rangeFrom, rangeTo]) => {
+      const result = resolveSavedLegacyNativeStitchRangeV1(
+        input.block,
+        input.parent,
+        { ...anchor, rangeFrom, rangeTo },
+        exact.descriptors,
+      );
+      return sha(result);
+    });
+    // The unmodified L14 reader at 4378bfc2 produced these complete wire results.
+    expect(hashes).toEqual([
+      '626a01c4d326a8f8a6d54255b2fcdd250dac0fcf4a69b4984f8a4aaf0c515024',
+      'c3e00bb6ae6b87018f526f4703d4bc449e5f84303963708dedbaae29b6f2f5ff',
+    ]);
+  });
+  it('rejects a changed source SHA or two matching raw paths for a fractional anchor', async () => {
+    const input = await fixture();
+    const anchor = { ...input.anchor, rangeFrom: 0.2, rangeTo: 0.6 };
+    const parent = { ...input.parent, row: { ...input.parent.row, sha256: 'a'.repeat(64) } };
+    await expect(resolve({ ...input, parent, anchor }, signal)).rejects.toThrow();
+    const read = input.nativeSource.nativeRead.read;
+    const pages = read.doc.pages.map((page) => {
+      const l8 = page.paths.find(
+        (path) => page.styles.find((style) => style.id === path.style)?.layer === '8',
+      )!;
+      return { ...page, paths: [...page.paths, { ...l8, id: l8.id + 1000 }] };
+    });
+    const nativeSource = {
+      ...input.nativeSource,
+      nativeRead: {
+        ...input.nativeSource.nativeRead,
+        read: { ...read, doc: { ...read.doc, pages } },
+      },
+    };
+    await expect(resolve({ ...input, nativeSource, anchor }, signal)).rejects.toThrow(
+      'one exact original L8 path',
+    );
+  });
+  it('refuses invalid windows, transformed anchors and a different fingerprint', async () => {
+    const input = await fixture();
+    for (const [rangeFrom, rangeTo] of [
+      [0, 2],
+      [-0.01, 0],
+      [0.5, 0.5],
+      [0.6, 0.4],
+      [NaN, 1],
+    ]) {
+      await expect(
+        resolve({ ...input, anchor: { ...input.anchor, rangeFrom, rangeTo } }, signal),
+      ).rejects.toThrow('bounded line range');
+    }
+    await expect(
+      resolve(
+        {
+          ...input,
+          anchor: { ...input.anchor, placement: { xMm: 0, yMm: 0, rotDeg: 0, flip: false } },
+        },
+        signal,
+      ),
+    ).rejects.toThrow('untransformed');
+    await expect(
+      resolve(
+        {
+          ...input,
+          anchor: { ...input.anchor, rangeFrom: 0.1, rangeTo: 0.9, contourSig: 'other' },
+        },
+        signal,
+      ),
+    ).rejects.toThrow('fingerprint');
+  });
+});
