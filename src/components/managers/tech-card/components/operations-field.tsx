@@ -8567,7 +8567,7 @@ export function OperationsField({
       }
     : {
         status: 'available',
-        ingest: (candidate) => {
+        ingest: (candidate, { focusDraft } = { focusDraft: true }) => {
           if (!techCardId || candidate.techCardId !== techCardId)
             return {
               ok: false,
@@ -8600,7 +8600,7 @@ export function OperationsField({
               inputKeys: [...preparedPress.row.inputKeys],
             }),
           );
-          setSelected(liveOperations.length);
+          if (focusDraft) setSelected(liveOperations.length);
           return {
             ok: true,
             inserted: 1,

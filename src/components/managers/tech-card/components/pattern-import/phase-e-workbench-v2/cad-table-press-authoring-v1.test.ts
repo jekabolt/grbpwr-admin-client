@@ -4,7 +4,11 @@ import {
 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 import { describe, expect, it } from 'vitest';
 
-import { planPatternImportDxfPhaseECadTablePressForProjectionV1 } from './cad-table-press-authoring-v1';
+import { BUNDLED_WORK_CATALOG } from '../../operation-work';
+import {
+  planPatternImportDxfPhaseECadTablePressForProjectionV1,
+  preparePatternImportDxfPhaseECadTablePressDraftRowV1,
+} from './cad-table-press-authoring-v1';
 
 const cameraMm = { minX: 0, minY: 0, maxX: 100, maxY: 100, padding: 0 };
 const projection: PatternImportDxfProductPhaseEAssemblyProjectionV1 = {
@@ -49,6 +53,23 @@ describe('Press on a saved pattern set', () => {
         pressEquipment: selection.pressEquipment,
       },
     });
+  });
+
+  it('supplies the required zone to the ordinary operation writer', () => {
+    const selected = planPatternImportDxfPhaseECadTablePressForProjectionV1({
+      ...selection,
+      readPieceScopeKeys: () => ['main'],
+    });
+    if (!selected.ok) throw new Error(selected.blocker.detail);
+
+    expect(
+      preparePatternImportDxfPhaseECadTablePressDraftRowV1({
+        candidate: selected.candidate,
+        historyKey: 'press-draft',
+        existingHistoryKeys: [],
+        workCatalog: BUNDLED_WORK_CATALOG,
+      }),
+    ).toMatchObject({ ok: true, row: { zone: 'TECH_CARD_GARMENT_ZONE_OTHER' } });
   });
 
   it.each([[], ['pocketing'], ['main', 'interlining']])(

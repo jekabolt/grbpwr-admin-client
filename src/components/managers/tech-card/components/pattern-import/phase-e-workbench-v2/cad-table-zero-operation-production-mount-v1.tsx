@@ -1156,7 +1156,8 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
             pressAction,
             pressEquipment,
           });
-          if (planned.ok) return pressAuthoringHandoff.ingest(planned.candidate);
+          if (planned.ok)
+            return pressAuthoringHandoff.ingest(planned.candidate, { focusDraft: false });
           return { ok: false, inserted: 0, historyKey: null, blocker: planned.blocker };
         }}
       />

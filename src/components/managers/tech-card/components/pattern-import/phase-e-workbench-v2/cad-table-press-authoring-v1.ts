@@ -93,6 +93,7 @@ export type PatternImportDxfPhaseECadTablePressDraftRowV1 = Readonly<{
   historyKey: string;
   operationNumber: 0;
   operationType: 'TECH_CARD_OPERATION_TYPE_PRESS';
+  zone: 'TECH_CARD_GARMENT_ZONE_OTHER';
   work: string;
   draft: true;
   inputKeys: readonly string[];
@@ -131,6 +132,7 @@ export type PatternImportDxfPhaseECadTablePressAuthoringOwnerV1 =
       status: 'available';
       ingest: (
         candidate: PatternImportDxfPhaseECadTablePressCandidateV1,
+        options?: Readonly<{ focusDraft: boolean }>,
       ) => PatternImportDxfPhaseECadTablePressAuthoringResultV1;
     }>
   | Readonly<{
@@ -319,6 +321,7 @@ export function preparePatternImportDxfPhaseECadTablePressDraftRowV1(
       historyKey: input.historyKey,
       operationNumber: 0 as const,
       operationType: 'TECH_CARD_OPERATION_TYPE_PRESS' as const,
+      zone: 'TECH_CARD_GARMENT_ZONE_OTHER' as const,
       work,
       draft: true as const,
       inputKeys: Object.freeze(inputKeys),
