@@ -7,6 +7,7 @@ import {
   projectDxfSourceNativeStraightEdgeSelectedPathsV1 as project,
   projectDxfSourceNativeStraightEdgeAuthorityV1 as whole,
   readDxfWithSourceNativeStraightEdgeAuthorityV1 as read,
+  readDxfWithSourceNativeStraightEdgeSelectedPathAuthorityV1 as readScoped,
 } from './dxf-source-native-straight-edge-authority-v1';
 
 // Genuine native decoder and private one-shot owner. Shapes are explicitly authored ASCII DXF,
@@ -42,9 +43,83 @@ function success(result: Awaited<ReturnType<typeof project>>) {
   if (!result.ok) throw new Error(JSON.stringify(result));
   return result.projection;
 }
+function scopedRead(entities: string, request: unknown) {
+  return readScoped(
+    { id: sourceFileId, name: 'selected.dxf', bytes: dxf(entities) },
+    { sagittaMm: 0.05, keepFills: true },
+    request,
+  );
+}
 afterEach(() => vi.restoreAllMocks());
 
 describe('selected native straight paths: genuine decoder scope and coverage', () => {
+  it('reopens only the exact selected paths and seals the same covered subset as a whole read', async () => {
+    const entities = polygon() + polygon('B1') + polygon('C1', true);
+    const f = await fixture(entities);
+    const selected = await scopedRead(entities, f.request([0, 1]));
+    if (!selected.ok) throw new Error(JSON.stringify(selected));
+    expect(selected.value.scope).toEqual({
+      kind: 'exact-selected-source-paths',
+      sourcePathIds: [0, 1],
+      wholeFileCompletenessClaimed: false,
+    });
+    expect(Object.isFrozen(selected.value.scope?.sourcePathIds)).toBe(true);
+    const subset = await project(selected.value.owner, f.request([1]));
+    expect(subset).toEqual(await project(f.owner, f.request([1])));
+    expect(success(subset).complete).toBe(true);
+    expect(await project(selected.value.owner, f.request([1]))).toMatchObject({
+      ok: false,
+      blockers: [{ code: 'stale-owner' }],
+    });
+  });
+
+  it('does not widen scoped authority to a different valid path or to the whole file', async () => {
+    const entities = polygon() + polygon('B1');
+    const f = await fixture(entities);
+    const first = await scopedRead(entities, f.request([0]));
+    if (!first.ok) throw new Error(JSON.stringify(first));
+    expect(await project(first.value.owner, f.request([0, 1]))).toMatchObject({
+      ok: false,
+      blockers: [{ code: 'source-path-scope-mismatch' }],
+    });
+    expect(await project(first.value.owner, f.request([0]))).toMatchObject({
+      ok: false,
+      blockers: [{ code: 'stale-owner' }],
+    });
+    const second = await scopedRead(entities, f.request([0]));
+    if (!second.ok) throw new Error(JSON.stringify(second));
+    expect(
+      whole(second.value.owner, {
+        schemaVersion: WHOLE_SCHEMA,
+        sourceFileId,
+        sourceSha256: f.request().sourceSha256,
+      }),
+    ).toMatchObject({ ok: false, blockers: [{ code: 'source-path-scope-mismatch' }] });
+  });
+
+  it('refuses changed bytes, unsupported or missing requested paths, and global extraction loss', async () => {
+    const entities = polygon() + polygon('B1', true);
+    const f = await fixture(entities);
+    expect(await scopedRead(polygon('D1') + polygon('B1', true), f.request())).toMatchObject({
+      ok: false,
+      blockers: [{ code: 'source-identity-mismatch' }],
+    });
+    expect(await scopedRead(entities, f.request([1]))).toMatchObject({
+      ok: false,
+      blockers: [{ sourcePathId: 1 }],
+    });
+    expect(await scopedRead(entities, f.request([100]))).toMatchObject({
+      ok: false,
+      blockers: [{ sourcePathId: 100 }],
+    });
+    const missingBlock = polygon() + '0\nINSERT\n5\nE1\n2\nMISSING\n10\n0\n20\n0\n';
+    const global = await fixture(missingBlock);
+    expect(await scopedRead(missingBlock, global.request())).toMatchObject({
+      ok: false,
+      blockers: [{ sourcePathId: null }],
+    });
+  });
+
   it('seals exact selected path with complete native corner/segment identities and detached immutable output', async () => {
     const f = await fixture(polygon() + polygon('B1'));
     const projected = success(await project(f.owner, f.request([1])));

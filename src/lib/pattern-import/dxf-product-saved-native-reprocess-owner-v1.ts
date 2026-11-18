@@ -1,12 +1,16 @@
 import type { DxfNativeSewingReplayStageOutputV1 } from './dxf-native-sewing-replay-v1';
+import { layerKind } from './adapters/dxf/segment';
 import {
   createDxfProductSavedForeignReprocessOwnerV1,
   type DxfProductSavedForeignReprocessRequestV1,
   type DxfProductSavedForeignReprocessBlockerV1,
 } from './dxf-product-saved-foreign-reprocess-owner-v1';
 import {
+  DXF_SOURCE_NATIVE_STRAIGHT_EDGE_SELECTED_PATHS_REQUEST_V1,
   readDxfWithSourceNativeStraightEdgeAuthorityV1,
+  readDxfWithSourceNativeStraightEdgeSelectedPathAuthorityV1,
   type DxfSourceNativeStraightEdgeBlockerCodeV1,
+  type DxfSourceNativeStraightEdgeBlockerV1,
   type DxfSourceNativeStraightEdgeReadV1,
 } from './dxf-source-native-straight-edge-authority-v1';
 import {
@@ -110,7 +114,7 @@ export type DxfProductSavedNativeCompilerSourceResultV1 =
 
 type NativeReprocessClaims = Readonly<
   Omit<typeof DXF_PRODUCT_SAVED_NATIVE_REPROCESS_CLAIMS_V1, 'sourceDecodePasses'> & {
-    sourceDecodePasses: 2 | 3 | null;
+    sourceDecodePasses: 2 | 3 | 4 | 5 | null;
   }
 >;
 
@@ -305,12 +309,34 @@ function createNativeReprocessOwner<Request>(
   // wrapped async reprocess callback publishes this value before baseOwner.run() resolves, but a
   // direct read after assigning null above is otherwise incorrectly narrowed to null/never.
   const readActiveNative = (): DxfSourceNativeStraightEdgeReadV1 | null => activeNativeRead;
+  const refuseNativeRead = (first: DxfSourceNativeStraightEdgeBlockerV1 | undefined): never => {
+    activeNativeFailure = Object.freeze({
+      code: 'source-native-read-blocked' as const,
+      detail: first?.detail ?? 'Verified saved DXF could not mint native line authority.',
+      ...(first ? { nativeCode: first.code } : {}),
+    });
+    throw new Error(activeNativeFailure.detail);
+  };
 
   const wrappedHost: DxfProductSavedReprocessHostV1 = Object.freeze({
     readAuthoritativeRow: (expected, signal, onProgress) =>
       host.readAuthoritativeRow(expected, signal, onProgress),
     async reprocess(input, signal, onProgress) {
-      let decodeBytes: Uint8Array | null = input.bytes.slice();
+      const decodeBytes = input.bytes.slice();
+      const decodeOpts = { sagittaMm: PATIMPORT.sagittaMm, keepFills: true };
+      const exactNativeBinding = (native: DxfSourceNativeStraightEdgeReadV1) => {
+        if (
+          native.provenance.sourceFileId !== input.sourceFileId ||
+          native.read.doc.file.sha256 !== input.row.sha256
+        ) {
+          activeNativeFailure = nativeBindingFailure(
+            'Native read identity does not exact-match the verified saved row.',
+          );
+          throw new Error(activeNativeFailure.detail);
+        }
+        return native;
+      };
+      let scopedBytes: Uint8Array<ArrayBuffer> | undefined;
       try {
         if (!(decodeBytes.buffer instanceof ArrayBuffer)) {
           activeNativeFailure = nativeBindingFailure(
@@ -324,38 +350,25 @@ function createNativeReprocessOwner<Request>(
             name: input.syntheticFilename,
             bytes: decodeBytes.buffer,
           },
-          { sagittaMm: PATIMPORT.sagittaMm, keepFills: true },
+          decodeOpts,
           { sourceFileId: input.sourceFileId },
         );
-        if (!native.ok) {
-          const first = native.blockers[0];
-          activeNativeFailure = Object.freeze({
-            code: 'source-native-read-blocked' as const,
-            detail: first?.detail ?? 'Verified saved DXF could not mint native line authority.',
-            ...(first ? { nativeCode: first.code } : {}),
-          });
-          throw new Error(activeNativeFailure.detail);
+        signal.throwIfAborted();
+        if (native.ok) {
+          activeNativeRead = exactNativeBinding(native.value);
+        } else {
+          const blocker = native.blockers[0];
+          if (blocker?.code !== 'canonical-bytes-exceeded') refuseNativeRead(blocker);
+          // The production import host may transfer its input buffer into the worker.
+          scopedBytes = input.bytes.slice();
         }
-        if (
-          native.value.provenance.sourceFileId !== input.sourceFileId ||
-          native.value.read.doc.file.sha256 !== input.row.sha256
-        ) {
-          activeNativeFailure = nativeBindingFailure(
-            'Native read identity does not exact-match the verified saved row.',
-          );
-          throw new Error(activeNativeFailure.detail);
-        }
-        activeNativeRead = native.value;
       } finally {
-        try {
-          decodeBytes?.fill(0);
-        } finally {
-          decodeBytes = null;
-        }
+        decodeBytes.fill(0);
       }
 
       try {
         const rebuilt = await host.reprocess(input, signal, onProgress);
+        signal.throwIfAborted();
         const descriptor = Object.getOwnPropertyDescriptor(rebuilt, 'nativeSewingReplay');
         if (descriptor) {
           if (!('value' in descriptor) || !descriptor.enumerable)
@@ -382,10 +395,63 @@ function createNativeReprocessOwner<Request>(
           freeze(content);
           activeNativeSewing = content;
         }
+        if (scopedBytes) {
+          const sewing = readActiveSewing();
+          if (!sewing?.replayReady)
+            throw new Error(
+              sewing?.blockers[0]?.detail ?? 'Scoped native read requires exact sewing replay.',
+            );
+          const { contours } = sewing.replay.carrier;
+          if (
+            !contours.length ||
+            contours.some(
+              (contour) =>
+                contour.role !== 'sewing-boundary' ||
+                contour.geometry.kind !== 'seam' ||
+                !contour.closed ||
+                contour.lineage.sourcePathIds.length !== 1,
+            )
+          )
+            throw new Error('Scoped native read requires exact closed sewing replay lineage.');
+          const sourcePathIds = [
+            ...new Set(contours.map((contour) => contour.lineage.sourcePathIds[0])),
+          ].sort((a, b) => a - b);
+          const native = await readDxfWithSourceNativeStraightEdgeSelectedPathAuthorityV1(
+            { id: input.sourceFileId, name: input.syntheticFilename, bytes: scopedBytes.buffer },
+            decodeOpts,
+            {
+              schemaVersion: DXF_SOURCE_NATIVE_STRAIGHT_EDGE_SELECTED_PATHS_REQUEST_V1,
+              sourceFileId: input.sourceFileId,
+              sourceSha256: input.row.sha256,
+              sourcePathIds,
+            },
+          );
+          signal.throwIfAborted();
+          if (!native.ok) return refuseNativeRead(native.blockers[0]);
+          const declaredSewingPaths = new Set(
+            native.value.read.doc.pages.flatMap((page) =>
+              page.paths
+                .filter(
+                  (path) =>
+                    path.closed && layerKind(page.styles[path.style]?.layer ?? null) === 'seam',
+                )
+                .map(({ id }) => id),
+            ),
+          );
+          if (sourcePathIds.some((id) => !declaredSewingPaths.has(id))) {
+            activeNativeFailure = nativeBindingFailure(
+              'Scoped sewing replay includes a path without a declared native sewing layer.',
+            );
+            throw new Error(activeNativeFailure.detail);
+          }
+          activeNativeRead = exactNativeBinding(native.value);
+        }
         return rebuilt;
       } catch (error) {
         activeNativeRead = null;
         throw error;
+      } finally {
+        scopedBytes?.fill(0);
       }
     },
     readCurrentRowIdentity: (expected, signal) => host.readCurrentRowIdentity(expected, signal),
@@ -449,6 +515,14 @@ function createNativeReprocessOwner<Request>(
         version: DXF_PRODUCT_SAVED_NATIVE_COMPILER_SOURCE_OWNER_V1,
         opaque: 'module-private-weak-owner' as const,
       });
+      const sewing = readActiveSewing();
+      let sourceDecodePasses: NativeReprocessClaims['sourceDecodePasses'] = 2;
+      if (sewing?.replayReady) {
+        const workerScoped = sewing.claims.successfulReplayExtraOriginalByteDecodePasses === 2;
+        sourceDecodePasses = nativeRead.scope ? (workerScoped ? 5 : 4) : workerScoped ? 4 : 3;
+      } else if (sewing) {
+        sourceDecodePasses = null;
+      }
       compilerSourceState.set(sourceOwner, {
         consumed: false,
         row: base.row,
@@ -478,11 +552,7 @@ function createNativeReprocessOwner<Request>(
         blockers: Object.freeze([]) as readonly [],
         claims: Object.freeze({
           ...DXF_PRODUCT_SAVED_NATIVE_REPROCESS_CLAIMS_V1,
-          sourceDecodePasses: readActiveSewing()
-            ? readActiveSewing()?.replayReady
-              ? (3 as const)
-              : null
-            : (2 as const),
+          sourceDecodePasses,
         }),
       });
     } finally {

@@ -224,6 +224,7 @@ type ProvenanceCapture = {
 
 type StraightEdgeCapture = {
   readonly sourceFileId: string;
+  readonly selectedPathIds?: ReadonlySet<PathId>;
   readonly candidates: DxfSourceNativeStraightEdgeDecodedCandidateV1[];
   readonly blockers: DxfSourceNativeStraightEdgeDecodedBlockerV1[];
   readonly identities: Set<string>;
@@ -533,6 +534,7 @@ class Builder {
         closed: em.closed,
         rejected: false,
       });
+    if (capture.selectedPathIds && !capture.selectedPathIds.has(pathId)) return;
     if (e.handle && this.duplicateEntityHandles.has(e.handle.toUpperCase())) {
       this.straightEdgeBlocker(
         'identity-rejected',
@@ -2262,10 +2264,12 @@ export async function decodeDxfSourceNativeStraightEdgesInternalV1(
   opts: ExtractOpts,
   sourceFileId: string,
   progress?: Progress,
+  selectedPathIds?: ReadonlySet<PathId>,
 ): Promise<DxfSourceNativeStraightEdgesInternalReadV1> {
   const provenanceCapture: ProvenanceCapture = { sourceFileId, paths: [], blockers: [] };
   const straightEdgeCapture: StraightEdgeCapture = {
     sourceFileId,
+    selectedPathIds,
     candidates: [],
     blockers: [],
     identities: new Set(),

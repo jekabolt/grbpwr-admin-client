@@ -89,6 +89,24 @@ function fixture(sewing = true, clockwise = false, sizeTokens = ['S']): string {
     })),
   );
 }
+
+/** Budget pressure from real straight edges on an unrelated layer of the same DXF. */
+function overWholeAuthorityBudget(text: string): string {
+  const lines = text.trimEnd().split(/\r?\n/);
+  const entitiesStart = lines.indexOf('ENTITIES');
+  const end = lines.findIndex((line, index) => index > entitiesStart && line === 'ENDSEC');
+  if (entitiesStart < 0 || end < 0) throw new Error('Authored fixture has no entity section.');
+  const vertices = Array.from(
+    { length: 6000 },
+    (_, i) => `10\n${10 + (i % 3000)}\n20\n${i < 3000 ? 0 : 100}\n`,
+  ).join('');
+  const shapes = Array.from(
+    { length: 6 },
+    (_, i) => `0\nLWPOLYLINE\n5\n${(0x8000 + i).toString(16)}\n8\n99\n90\n6000\n70\n1\n${vertices}`,
+  ).join('');
+  lines.splice(end - 1, 0, shapes.trimEnd());
+  return lines.join('\n') + '\n';
+}
 // Modify one declared L14 DXF entity by group codes, never by finding a coordinate match.
 function modifyNativeSeam(kind: 'curved' | 'multi-path' | 'open' | 'inferred-layer8'): string {
   const lines = fixture().trimEnd().split(/\r?\n/);
@@ -202,6 +220,30 @@ async function segmentation(text = fixture()) {
 }
 
 describe('explicit native drawn sewing replay (CPU, genuine DXF source chain)', () => {
+  it('bounds whole authority and replays only the existing private sewing paths from original bytes', async () => {
+    const text = overWholeAuthorityBudget(fixture());
+    const whole = await readDxfWithSourceNativeStraightEdgeAuthorityV1(
+      { id: '0', name: 'fixture.dxf', bytes: bytes(text) },
+      opts,
+      { sourceFileId },
+    );
+    expect(whole).toMatchObject({ ok: false, blockers: [{ code: 'canonical-bytes-exceeded' }] });
+    const { session } = await prepared(text);
+    try {
+      const replay = await session.runStage('dxf-native-sewing-replay', request, ctx);
+      if (!replay.replayReady) throw new Error(JSON.stringify(replay.blockers));
+      expect(replay.claims.successfulReplayExtraOriginalByteDecodePasses).toBe(2);
+      expect(replay.replay.carrier.contours).toHaveLength(1);
+      expect(replay.replay.carrier.contours[0]).toMatchObject({
+        role: 'sewing-boundary',
+        geometry: { kind: 'seam' },
+        lineage: { sourcePathIds: [expect.any(Number)] },
+      });
+    } finally {
+      session.close();
+    }
+  }, 30_000);
+
   it('captures genuine original-worker authoring views through the production wizard bridge', async () => {
     const sizeTokens = ['XS', 'S', 'M', 'L', 'XL'];
     const text = fixture(true, false, sizeTokens);

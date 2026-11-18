@@ -36,6 +36,10 @@ const CLAIMS = Object.freeze({
   storedSeamAuthorityUsed: false as const,
   productionReady: false as const,
 });
+const SCOPED_CLAIMS = Object.freeze({
+  ...CLAIMS,
+  successfulReplayExtraOriginalByteDecodePasses: 2 as const,
+});
 export type DxfNativeSewingReplayStageOutputV1 =
   | Readonly<{
       schemaVersion: typeof DXF_NATIVE_SEWING_REPLAY_V1;
@@ -43,7 +47,7 @@ export type DxfNativeSewingReplayStageOutputV1 =
       pipeline: DxfPipelineProvenanceStageOutputV1;
       replay: Extract<DxfProductPhaseDReplayStageOutputV1, { replayReady: true }>;
       blockers: readonly [];
-      claims: typeof CLAIMS;
+      claims: typeof CLAIMS | typeof SCOPED_CLAIMS;
     }>
   | Readonly<{
       schemaVersion: typeof DXF_NATIVE_SEWING_REPLAY_V1;
@@ -124,7 +128,11 @@ export async function buildDxfNativeSewingReplayV1(
   lineage: DxfCandidateLineageSidecarV1,
   pieces: readonly PieceSpec[],
   traces: readonly DxfNativeSewingTraceV1[],
-  native: DxfSourceNativeStraightEdgeProjectionV1,
+  native: Pick<
+    DxfSourceNativeStraightEdgeProjectionV1,
+    'sourceFileId' | 'sourceSha256' | 'descriptors' | 'blockers'
+  >,
+  sourceDecodePasses: 1 | 2 = 1,
 ): Promise<DxfNativeSewingReplayStageOutputV1> {
   const refuse = (detail: string) =>
     blockedDxfNativeSewingReplayV1([dxfPipelineBlockerV1('candidate-lineage-missing', detail)]);
@@ -258,6 +266,6 @@ export async function buildDxfNativeSewingReplayV1(
     pipeline,
     replay,
     blockers: Object.freeze([] as const),
-    claims: CLAIMS,
+    claims: sourceDecodePasses === 2 ? SCOPED_CLAIMS : CLAIMS,
   });
 }

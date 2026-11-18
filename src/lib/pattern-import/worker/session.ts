@@ -129,8 +129,11 @@ import {
 } from '../dxf-native-sewing-replay-v1';
 import {
   readDxfWithSourceNativeStraightEdgeAuthorityV1,
+  readDxfWithSourceNativeStraightEdgeSelectedPathAuthorityV1,
   projectDxfSourceNativeStraightEdgeAuthorityV1,
+  projectDxfSourceNativeStraightEdgeSelectedPathsV1,
   DXF_SOURCE_NATIVE_STRAIGHT_EDGE_PROJECTION_REQUEST_V1,
+  DXF_SOURCE_NATIVE_STRAIGHT_EDGE_SELECTED_PATHS_REQUEST_V1,
 } from '../dxf-source-native-straight-edge-authority-v1';
 import { createDxfSourceCurveIdV1 } from '../dxf-path-provenance-v1';
 import { extractRasterImageDetailed } from '../adapters/raster';
@@ -2515,21 +2518,55 @@ export class Session {
     );
     const bytes = await blob.arrayBuffer();
     current();
+    const file = { id: String(sourceIndex), name: this.files[sourceIndex].name, bytes };
     // Extra opt-in decode is intentional: parameter-space labels alone never prove a straight line.
     const nativeRead = await readDxfWithSourceNativeStraightEdgeAuthorityV1(
-      { id: String(sourceIndex), name: this.files[sourceIndex].name, bytes },
+      file,
       DEFAULT_OPTS,
       { sourceFileId },
       () => current(),
     );
     current();
-    if (!nativeRead.ok)
-      return refuse(nativeRead.blockers.map((blocker) => blocker.detail).join('; '));
-    const native = projectDxfSourceNativeStraightEdgeAuthorityV1(nativeRead.value.owner, {
-      schemaVersion: DXF_SOURCE_NATIVE_STRAIGHT_EDGE_PROJECTION_REQUEST_V1,
-      sourceFileId,
-      sourceSha256,
-    });
+    let native;
+    let sourceDecodePasses: 1 | 2 = 1;
+    if (nativeRead.ok) {
+      native = projectDxfSourceNativeStraightEdgeAuthorityV1(nativeRead.value.owner, {
+        schemaVersion: DXF_SOURCE_NATIVE_STRAIGHT_EDGE_PROJECTION_REQUEST_V1,
+        sourceFileId,
+        sourceSha256,
+      });
+    } else {
+      if (nativeRead.blockers[0]?.code !== 'canonical-bytes-exceeded')
+        return refuse(nativeRead.blockers.map((blocker) => blocker.detail).join('; '));
+      if (
+        lineage.entries.some(
+          (entry) => entry.sourceGeometry !== 'seam' || entry.sourcePathIds.length !== 1,
+        )
+      )
+        return refuse('Scoped native sewing requires one exact path per private candidate.');
+      const sourcePathIds = [
+        ...new Set(lineage.entries.map((entry) => entry.sourcePathIds[0])),
+      ].sort((a, b) => a - b);
+      const request = {
+        schemaVersion: DXF_SOURCE_NATIVE_STRAIGHT_EDGE_SELECTED_PATHS_REQUEST_V1,
+        sourceFileId,
+        sourceSha256,
+        sourcePathIds,
+      };
+      const scoped = await readDxfWithSourceNativeStraightEdgeSelectedPathAuthorityV1(
+        file,
+        DEFAULT_OPTS,
+        request,
+        () => current(),
+      );
+      current();
+      if (!scoped.ok) return refuse(scoped.blockers.map((blocker) => blocker.detail).join('; '));
+      native = await projectDxfSourceNativeStraightEdgeSelectedPathsV1(scoped.value.owner, request);
+      current();
+      if (native.ok && !native.projection.complete)
+        return refuse(native.projection.blockers.map((blocker) => blocker.detail).join('; '));
+      sourceDecodePasses = 2;
+    }
     if (!native.ok) return refuse(native.blockers.map((blocker) => blocker.detail).join('; '));
     current();
     const result = await buildDxfNativeSewingReplayV1(
@@ -2537,6 +2574,7 @@ export class Session {
       semantics.pieces,
       traces,
       native.projection,
+      sourceDecodePasses,
     );
     current();
     return result;
