@@ -22,6 +22,7 @@ export type SavedCompleteWholeSourceCutV1 = Readonly<{
   sourceCuts: readonly Readonly<{
     pieceLineKey: string;
     nativePointsMm: readonly Readonly<{ x: number; y: number }>[];
+    grain?: Readonly<{ angleDegrees: number }> | null;
   }>[];
   operations: readonly Readonly<{ operationNumber: number }>[];
   spans: readonly Readonly<{ operationOrder: number; operationNumber: number }>[];
@@ -29,6 +30,7 @@ export type SavedCompleteWholeSourceCutV1 = Readonly<{
     operationOrder: number;
     operationNumber: number;
     pieceLineKey: string;
+    geometry?: Readonly<{ outlineMm: readonly (readonly [number, number])[] }> | null;
   }>[];
   unavailable: readonly unknown[];
 }>;
@@ -43,6 +45,7 @@ type SealedWholeSourceCutFixtureV1 = Readonly<{
   sourceSha256: string;
   carrierSha256: string;
   candidateSha256: string;
+  coverage?: 'all-native-cuts';
 }>;
 
 export type RestoredWholeSourceCutPlacementV1 = Readonly<{
@@ -81,6 +84,7 @@ type Candidate = {
     bodyPositionsSha256: string;
     bodyTrianglesSha256: string;
     provisionalSourceOperations: readonly number[];
+    authoredGrainDegrees?: Core['grains'];
   };
   outwardSign: 1 | -1;
 };
@@ -108,6 +112,16 @@ function sameCut(
         }),
       ),
   );
+}
+
+function labelCorners(outline: readonly (readonly [number, number])[]) {
+  return outline.flatMap(([x, y], index) => {
+    const [px, py] = outline[(index + outline.length - 1) % outline.length];
+    const [nx, ny] = outline[(index + 1) % outline.length];
+    const cross = (x - px) * (ny - y) - (y - py) * (nx - x);
+    const dot = (x - px) * (nx - x) + (y - py) * (ny - y);
+    return cross === 0 && dot > 0 ? [] : [{ x, y }];
+  });
 }
 
 /** Bind the diagnostic pants placement to the exact saved source before using the existing solver. */
@@ -167,16 +181,27 @@ export async function prepareSavedCompleteWholeSourceCutV1(
       { ...entry, cut: { ...entry.cut, triangles: Uint32Array.from(entry.cut.triangles) } },
     ]),
   );
-  const native = new Map(source.sourceCuts.map((cut) => [cut.pieceLineKey, cut.nativePointsMm]));
+  const native = new Map(source.sourceCuts.map((cut) => [cut.pieceLineKey, cut]));
+  const allNative = fixture.coverage === 'all-native-cuts';
   if (
     native.size !== 24 ||
     !native.has(DETACHED_BELT) ||
-    cuts.has(DETACHED_BELT) ||
+    cuts.size !== native.size + (allNative ? 1 : 0) ||
+    !cuts.has(LABEL) ||
+    cuts.has(DETACHED_BELT) !== allNative ||
     [...cuts].some(
-      ([id, { cut }]) => id !== LABEL && !sameCut(native.get(id) ?? [], cut.verticesMm),
+      ([id, { cut }]) =>
+        id !== LABEL && !sameCut(native.get(id)?.nativePointsMm ?? [], cut.verticesMm),
     )
   )
     throw new RangeError('A saved native cut differs from the sealed diagnostic placement.');
+  const generatedLabel = source.labelAnchors[0].geometry;
+  if (
+    allNative &&
+    (!generatedLabel ||
+      !sameCut(labelCorners(generatedLabel.outlineMm), cuts.get(LABEL)!.cut.verticesMm))
+  )
+    throw new RangeError('The generated label differs from the current original pattern.');
   const stages = new Map<number, number>();
   for (const span of [...source.spans, ...source.labelAnchors]) {
     if (source.operations[span.operationOrder]?.operationNumber !== span.operationNumber)
@@ -196,6 +221,19 @@ export async function prepareSavedCompleteWholeSourceCutV1(
   };
   const ids = mesh.pieceRanges.map(({ pieceId }) => pieceId);
   const { materials, continuumMaterials, materialSolver } = data.profile;
+  const suppliedGrain = data.sourceScope.authoredGrainDegrees ?? [];
+  const grains = allNative ? suppliedGrain : ids.map((pieceId) => ({ pieceId, grainDegrees: 0 }));
+  if (
+    allNative &&
+    (grains.length !== ids.length ||
+      new Set(grains.map(({ pieceId }) => pieceId)).size !== ids.length ||
+      grains.some(({ pieceId, grainDegrees }) =>
+        pieceId === LABEL
+          ? grainDegrees !== 0
+          : grainDegrees !== native.get(pieceId)?.grain?.angleDegrees,
+      ))
+  )
+    throw new RangeError('The diagnostic cloth grain differs from the original DXF grain.');
   const world = Float32Array.from(data.world);
   const [initialWorldSha256, cutGraphSha256] = await Promise.all([
     digest(world.buffer),
@@ -207,6 +245,7 @@ export async function prepareSavedCompleteWholeSourceCutV1(
           pairs: data.pairs,
           profile: data.profile,
           pressedCreases: data.pressedCreases,
+          ...(allNative ? { grains } : {}),
           expected: data.expected,
         }),
       ).buffer,
@@ -274,7 +313,7 @@ export async function prepareSavedCompleteWholeSourceCutV1(
   const material = prepareGarmentStagedSourceCutCoreV1(
     {
       mesh,
-      grains: ids.map((pieceId) => ({ pieceId, grainDegrees: 0 })),
+      grains,
       assignments: [
         { id: materials[0].id, materialRevision: materials[0].revision, pieceIds: ids },
       ],
