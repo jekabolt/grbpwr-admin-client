@@ -45,7 +45,7 @@ export type SavedCrossMaterialReviewForPreviewV8 = Readonly<{
   sha256: string;
   patternSize: CadWorkbenchSavedReviewSizeV1;
   load: (signal: AbortSignal) => ReturnType<typeof readSavedCompleteAssemblyNativePhysicalSourceV8>;
-  verify: (signal: AbortSignal) => Promise<void>;
+  verify: (signal: AbortSignal, expectedAuthoredFoldSourceSha256?: string) => Promise<void>;
   wholeAssembly?: Readonly<{
     prepare: PrepareSavedWholeAssemblyPreviewV1;
     load: (
@@ -247,6 +247,12 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
           throw new Error('The saved review belongs to a different Assembly Order operation.');
         const { sha256 } = restored;
         const carrierSha256 = whole?.sha256 ?? placement?.sha256 ?? sha256;
+        const authoredFolds = current.operations.some(({ foldKeys }) => foldKeys?.length)
+          ? {
+              sizeId: restored.document.selection.sizeId,
+              sizeToken: restored.document.selection.sizeToken,
+            }
+          : undefined;
         const load: SavedCrossMaterialReviewForPreviewV8['load'] = (active) =>
           readSavedCompleteAssemblyNativePhysicalSourceV8(
             abortableAdminService,
@@ -266,8 +272,22 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
           const { readSavedCompleteAssemblyNativeStitchAnchorsV1 } = await import(
             './saved-complete-assembly-native-stitch-anchors-v1'
           );
+          const nativeSource = authoredFolds
+            ? await readCompleteSavedAssemblySourceV1(
+                abortableAdminService(active),
+                exact.row,
+                {
+                  expectedServerAssemblyRevision: current.serverAssemblyRevision,
+                  expectedCompleteSourceSha256: current.sourceSha256,
+                  authoredFolds,
+                },
+                active,
+              )
+            : current;
+          if (nativeSource.priorCarrier?.sidecarSha256 !== carrierSha256)
+            throw new Error('The reviewed sewing runs changed before whole-assembly preparation.');
           return readSavedCompleteAssemblyNativeStitchAnchorsV1(
-            current,
+            nativeSource,
             projection,
             sizeAuthority,
             active,
@@ -370,13 +390,20 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
                   if (input.isCurrent())
                     publishRestored(restored, saved.source, { narrow: saved.reopened }, active);
                 },
-            async verify(active) {
+            async verify(active, expectedAuthoredFoldSourceSha256) {
               const latest = await readCompleteSavedAssemblySourceV1(
                 abortableAdminService(active),
                 exact.row,
                 {
                   expectedServerAssemblyRevision: current.serverAssemblyRevision,
                   expectedCompleteSourceSha256: current.sourceSha256,
+                  ...(authoredFolds &&
+                    expectedAuthoredFoldSourceSha256 && {
+                      authoredFolds: {
+                        ...authoredFolds,
+                        expectedSourceSha256: expectedAuthoredFoldSourceSha256,
+                      },
+                    }),
                 },
                 active,
               );

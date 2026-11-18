@@ -148,7 +148,7 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
                 verifiedSource.savedCarrier?.sidecarSha256 !== review.sha256
               )
                 throw new Error('The accepted source no longer matches this saved assembly.');
-              await review.verify(active);
+              await review.verify(active, verifiedSource.authoredFoldSourceSha256);
             },
             onAccepted(progress) {
               onAcceptedCloth(progress.cloth);
