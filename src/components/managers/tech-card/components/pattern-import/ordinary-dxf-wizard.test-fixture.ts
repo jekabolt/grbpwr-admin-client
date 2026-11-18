@@ -12,6 +12,7 @@ import type { CardContext, ImportClient } from './client';
 import {
   captureDirectDxfAuthoringV1,
   directDxfAuthoringOpenFileV1,
+  buildOrdinaryWizardReviewV1,
 } from './direct-dxf-authoring-capture-v1';
 import { cardPresegmentedIdentities } from './entry';
 
@@ -129,7 +130,11 @@ export async function draftThroughWizardStages(
       dialect: 'r12',
       generator: 'grbpwr-admin pattern-import (worker)',
     });
-    return cardBuildDraft(written, { card, semantics, ...capture });
+    return buildOrdinaryWizardReviewV1([file], cardBuildDraft, written, {
+      card,
+      semantics,
+      ...capture,
+    }).draft;
   } finally {
     client.dispose?.();
   }

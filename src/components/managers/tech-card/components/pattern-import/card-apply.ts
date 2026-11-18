@@ -113,6 +113,7 @@ export function createCardApply(deps: {
         readPreviousLockVersion: deps.readPreviousLockVersion,
         onReplaced: deps.onReplaced,
         replaceMatchingFile: options?.replaceMatchingFile,
+        newPieceIntent: options?.newPieceIntent,
         unsaved: deps.unsaved,
         landed: deps.landed,
         rebuilding: deps.rebuilding,

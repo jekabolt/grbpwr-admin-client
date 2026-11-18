@@ -1,6 +1,7 @@
 import {
   directDxfAuthoringOpenFileV1,
   applyDirectDxfReviewedDraftV1,
+  buildOrdinaryWizardReviewV1,
   captureDirectDxfAuthoringV1,
 } from './direct-dxf-authoring-capture-v1';
 // The wizard's state machine (08-CONTRACT §4.2). One session per run; every field of
@@ -93,7 +94,6 @@ import { driveTick, newDriveState, type DriveState, type DriveStopWhy } from './
 import { autopilotRecordOf, mergeAssumptions, type Assumption } from './autopilot/types';
 import { aiAsideAssumptions } from './autopilot/ai-pages';
 import { answerRecordOf } from './autopilot/replay-record';
-import { acceptCurrentFindings } from './steps/accepted-findings';
 import {
   before,
   cloneInput,
@@ -1498,8 +1498,11 @@ export function useImportSession(deps: {
             // files reuses them (autopilot/replay.ts); never a reason not to write
             ...replayOf(),
           });
-          const draft = buildDraft(out, { card: rc(), semantics: sem, ...authoringCapture });
-          const accepted = acceptCurrentFindings(out.gate, draft, rc().existingShapes ?? []);
+          const accepted = buildOrdinaryWizardReviewV1(iRef.current.fileList, buildDraft, out, {
+            card: rc(),
+            semantics: sem,
+            ...authoringCapture,
+          });
           patch({ draft: accepted.draft, gate: accepted.gate, step: 'check' });
           return;
         }
@@ -1554,14 +1557,16 @@ export function useImportSession(deps: {
               iRef.current.fileList,
               ev.token,
               () => sRef.current.draft === built && applyLock.current === lock && !cardStale(),
-              () =>
+              (reviewOptions) =>
                 applyDraft(
                   built,
                   (p) => {
                     progress[p.scopeKey] = p.state;
                     setApply({ phase: 'running', progress: { ...progress } });
                   },
-                  ev.replaceMatchingFile ? { replaceMatchingFile: true } : undefined,
+                  ev.replaceMatchingFile
+                    ? { ...reviewOptions, replaceMatchingFile: true }
+                    : reviewOptions,
                 ),
             );
           } catch (e) {

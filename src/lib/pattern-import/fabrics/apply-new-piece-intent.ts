@@ -12,6 +12,7 @@ type NewPieceRequest = Readonly<{
   writerIdentity: string;
   /** A key minted by the existing draft and required to be absent from the live card. */
   expectedLineKey: string;
+  retainedSource?: Readonly<{ blockName: string; lineKey: string }>;
 }>;
 
 type NewPieceBinding = NewPieceRequest &
@@ -66,12 +67,30 @@ function resolveDraftTarget({ draft, scopeKey, writerIdentity, expectedLineKey }
   return { blockName, pieceName: piece.name, dxfText: scope.dxfText };
 }
 
+function retainsSourceAlias(
+  aliases: readonly Readonly<{ scopeKey: string; blockName: string; pieceLineKey: string }>[],
+  binding: NewPieceRequest,
+) {
+  const source = binding.retainedSource;
+  if (!source) return true;
+  const matches = aliases.filter(
+    (a) => aliasKey(a.scopeKey, a.blockName) === aliasKey(binding.scopeKey, source.blockName),
+  );
+  return (
+    source.lineKey !== binding.expectedLineKey &&
+    matches.length === 1 &&
+    matches[0]!.scopeKey === binding.scopeKey &&
+    matches[0]!.blockName === source.blockName &&
+    matches[0]!.pieceLineKey === source.lineKey
+  );
+}
+
 /** Seals a review's explicit new-piece decision for the existing Apply owner. */
 export function sealApplyNewPieceIntent(request: NewPieceRequest): ApplyNewPieceIntent | null {
   const { techCardId } = request.draft;
   if (!Number.isSafeInteger(techCardId) || techCardId <= 0) return null;
   const target = resolveDraftTarget(request);
-  if (!target) return null;
+  if (!target || !retainsSourceAlias(request.draft.aliases, request)) return null;
   try {
     const manifest = readManifest(target.dxfText);
     const piece = manifest?.pieces.find(({ identity }) => identity === request.writerIdentity);
@@ -88,7 +107,17 @@ export function sealApplyNewPieceIntent(request: NewPieceRequest): ApplyNewPiece
     return null;
   }
   const intent = Object.freeze({}) as ApplyNewPieceIntent;
-  sealedIntents.set(intent, Object.freeze({ ...request, ...target, techCardId }));
+  sealedIntents.set(
+    intent,
+    Object.freeze({
+      ...request,
+      ...(request.retainedSource
+        ? { retainedSource: Object.freeze({ ...request.retainedSource }) }
+        : {}),
+      ...target,
+      techCardId,
+    }),
+  );
   return intent;
 }
 
@@ -106,6 +135,17 @@ export function checkApplyNewPieceIntent(
     target.blockName !== binding.blockName ||
     target.pieceName !== binding.pieceName ||
     target.dxfText !== binding.dxfText ||
+    !retainsSourceAlias(draft.aliases, binding) ||
+    (binding.retainedSource &&
+      (live.pieces.filter((p) => p.lineKey === binding.retainedSource!.lineKey).length !== 1 ||
+        !retainsSourceAlias(
+          live.aliases.map((a) => ({
+            scopeKey: scopeOf(a, 'link'),
+            blockName: a.blockName ?? '',
+            pieceLineKey: a.pieceLineKey ?? '',
+          })),
+          binding,
+        ))) ||
     live.pieces.some(
       ({ lineKey, name }) =>
         lower(lineKey) === lower(binding.expectedLineKey) ||
@@ -142,6 +182,13 @@ export function planPreservesNewPiece(
     ),
   );
   return (
+    retainsSourceAlias(
+      plan.commitBindings.flatMap((scope) => scope.aliases),
+      binding,
+    ) &&
+    (!binding.retainedSource ||
+      (written as LivePiece[]).filter((p) => p.lineKey === binding.retainedSource!.lineKey)
+        .length === 1) &&
     newRows.length === 1 &&
     newRows[0].lineKey === binding.expectedLineKey &&
     newRows[0].name === binding.pieceName &&

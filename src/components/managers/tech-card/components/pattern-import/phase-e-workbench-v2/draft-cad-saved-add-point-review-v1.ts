@@ -76,7 +76,10 @@ const checked = new WeakMap<NativeReviewProof, ReviewState>();
 function requireReview(claim: unknown, reason: string): asserts claim {
   if (!claim) throw new Error(`Added vertex review refused: ${reason}.`);
 }
-function sameRow(a: DxfProductSavedRowIdentityV1, b: DxfProductSavedRowIdentityV1) {
+export function sameSavedDraftRowV1(
+  a: DxfProductSavedRowIdentityV1,
+  b: DxfProductSavedRowIdentityV1,
+) {
   return (
     a.techCardId === b.techCardId &&
     a.scopeKey === b.scopeKey &&
@@ -136,7 +139,7 @@ export async function prepareSavedAddPointReviewV1(input: {
       now.session === session &&
       now.generation === generation &&
       now.sizeToken === sizeToken &&
-      sameRow(row, now.row);
+      sameSavedDraftRowV1(row, now.row);
     return valid ? aliases : null;
   };
   const isCurrent = () => currentAliases() !== null;
@@ -146,7 +149,7 @@ export async function prepareSavedAddPointReviewV1(input: {
     input.sourceRequest,
   );
   requireReview(
-    source.ok && !source.value.reconstruction && sameRow(row, source.value.row),
+    source.ok && !source.value.reconstruction && sameSavedDraftRowV1(row, source.value.row),
     'the saved source capability does not match the current own-format row',
   );
   const saved = input.savedBytes.slice(0),
@@ -167,9 +170,9 @@ export async function prepareSavedAddPointReviewV1(input: {
       dxfProvenance: nativeSewing.pipeline,
       dxfPhaseDReplay: nativeSewing.replay,
     });
-  let target: Awaited<ReturnType<typeof selectedDraft>> = null;
+  let target: Awaited<ReturnType<typeof selectMatchingSavedDraftV1>> = null;
   for (const variant of variants) {
-    const candidate = await selectedDraft(variant, row.scopeKey, sizeToken, session);
+    const candidate = await selectMatchingSavedDraftV1(variant, row.scopeKey, sizeToken, session);
     if (candidate) {
       target = candidate;
       break;
@@ -333,7 +336,7 @@ export async function prepareSavedAddPointReviewV1(input: {
   return owner;
 }
 
-async function selectedDraft(
+export async function selectMatchingSavedDraftV1(
   draft: CardDraft,
   scopeKey: string,
   sizeToken: string,

@@ -1,3 +1,4 @@
+import type { ApplyNewPieceIntent } from 'lib/pattern-import/fabrics/apply-new-piece-intent';
 // What the wizard needs from the outside world, as three narrow seams.
 //
 // The wizard is written against the CONTRACT (lib/pattern-import/types.ts §11), not against an
@@ -170,5 +171,5 @@ export type ApplyProgress = { scopeKey: string; state: 'uploading' | 'uploaded' 
 export type ApplyDraftFn = (
   draft: CardDraft,
   onProgress?: (p: ApplyProgress) => void,
-  options?: Readonly<{ replaceMatchingFile?: true }>,
+  options?: Readonly<{ replaceMatchingFile?: true; newPieceIntent?: ApplyNewPieceIntent }>,
 ) => Promise<ApplyResult>;

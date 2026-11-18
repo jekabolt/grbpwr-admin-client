@@ -1,4 +1,5 @@
-import type { ApplyDraftFn } from './client';
+import { acceptCurrentFindings } from './steps/accepted-findings';
+import type { ApplyDraftFn, DraftBuilder } from './client';
 import {
   bindReviewedAddPointWorkerOpen,
   verifyReviewedAddPointAtApply,
@@ -39,19 +40,62 @@ export async function directDxfAuthoringOpenFileV1(
   return opened;
 }
 
+// Routing hint only. The independent saved-copy owner authenticates the original File and exact writer result.
+const unlinkedPieceCopyFiles = new WeakSet<File>();
+export function markUnlinkedPieceCopyFileV1(file: File) {
+  unlinkedPieceCopyFiles.add(file);
+}
+
+const reviewedCopyScopes = new WeakMap<CardDraft['scopes'][number], File>();
+
+/** The output scope has object identity across impact answers; a copied DTO cannot claim the original wizard run. */
+export function buildOrdinaryWizardReviewV1(
+  files: readonly File[],
+  build: DraftBuilder,
+  written: Parameters<DraftBuilder>[0],
+  context: Parameters<DraftBuilder>[1],
+) {
+  const accepted = acceptCurrentFindings(
+    written.gate,
+    build(written, context),
+    context.card.existingShapes ?? [],
+  );
+  if (
+    files.length === 1 &&
+    unlinkedPieceCopyFiles.has(files[0]!) &&
+    accepted.draft.scopes.length === 1
+  )
+    reviewedCopyScopes.set(accepted.draft.scopes[0]!, files[0]!);
+  return accepted;
+}
+
+export function isOrdinaryWizardCopyScopeV1(file: File, scope: CardDraft['scopes'][number]) {
+  return reviewedCopyScopes.get(scope) === file;
+}
+
 /** A protected wizard result must be explicitly applied against the same saved row and current review. */
 export async function applyDirectDxfReviewedDraftV1(
   draft: CardDraft,
   files: readonly File[],
   autopilotToken: number | undefined,
   isCurrent: () => boolean,
-  apply: () => ReturnType<ApplyDraftFn>,
+  apply: (options?: Parameters<ApplyDraftFn>[2]) => ReturnType<ApplyDraftFn>,
 ): ReturnType<ApplyDraftFn> {
   if (draft.scopes.some((scope) => scope.writerReplay?.retainedLineSplit)) {
     if (autopilotToken != null)
       throw new Error('Confirm the saved Add point with the Apply button.');
     await verifyReviewedAddPointAtApply(files);
     if (!isCurrent()) throw new Error('The reviewed Add point source changed before Apply.');
+  }
+  if (files.some((file) => unlinkedPieceCopyFiles.has(file))) {
+    if (files.length !== 1 || autopilotToken != null)
+      throw new Error('Confirm the single unlinked piece copy with the Apply button.');
+    const { acknowledgeUnlinkedDraftPieceCopyV1 } = await import(
+      './phase-e-workbench-v2/draft-cad-unlinked-piece-copy-review-v1'
+    );
+    const newPieceIntent = await acknowledgeUnlinkedDraftPieceCopyV1(files[0]!, draft);
+    if (!isCurrent()) throw new Error('The reviewed unlinked copy changed before Apply.');
+    return apply({ newPieceIntent });
   }
   return apply();
 }
