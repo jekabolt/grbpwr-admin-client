@@ -146,7 +146,13 @@ function sectionAt(
     const b = hull[(i + 1) % hull.length];
     girthM += Math.hypot(b[0] - a[0], b[1] - a[1]);
   }
-  return { minX, maxX, back: sideZ - Math.min(...zs), girthM };
+  return {
+    minX,
+    maxX,
+    back: sideZ - Math.min(...zs),
+    girthM,
+    outlineM: section.selectedLoop.perimeterM,
+  };
 }
 
 /** Crotch: lowest 2 mm level whose section still spans the midline by 30 mm each way. */
@@ -213,6 +219,13 @@ describe('female hip back share (HSRD-100 female mean)', () => {
           tapeAt(after, basis.indices, station) - tapeAt(solved.positionsM, basis.indices, station);
         expect(Math.abs(moved) * 1000).toBeLessThanOrEqual(0.5);
       }
+
+      // The gluteal cleft keeps its depth: the section outline, which dips into the cleft where the
+      // tape bridges it (the ANSUR harness reports this outline as hip girth), does not grow either.
+      // A back stretched about the seam deepened the cleft and added 3.7-7.7 mm here.
+      const outlineAt = (positionsM: Float32Array) =>
+        sectionAt(positionsM, basis.indices, hipStationM[1], hipStationM)!.outlineM;
+      expect((outlineAt(after) - outlineAt(solved.positionsM)) * 1000).toBeLessThanOrEqual(0.5);
 
       // Every level from the crotch to the waist station keeps its tape girth: no bias, and no level
       // off by more than the facet ripple of a section cut between vertex rows.

@@ -37,6 +37,13 @@ const RATIO_SOLVE_TOLERANCE = 0.0002;
 const RATIO_RESULT_TOLERANCE = 0.005;
 /** Side-seam ramp half-width (m): the push fades in over 10 mm on either side of the seam line. */
 const SEAM_RAMP_M = 0.01;
+/**
+ * A point behind the seam is pushed by the depth of the back envelope above it (the line a tape
+ * lies on), so the gluteal cleft moves with the buttocks and keeps its depth. The envelope takes
+ * over from the point's own depth between 5 mm and 20 mm behind the seam line.
+ */
+const CLEFT_RAMP_START_M = 0.005;
+const CLEFT_RAMP_M = 0.015;
 const SECTION_POLICY = Object.freeze({ weldToleranceM: 0.00002 });
 const PROFILE_STEP_M = 0.002;
 const TABLE_STEP_M = 0.004;
@@ -330,6 +337,56 @@ function bandComponent(
   return member;
 }
 
+/** Back half of a section's convex hull as z over x, x ascending (the back is -z). */
+interface BackEnvelopeV1 {
+  readonly xs: readonly number[];
+  readonly zs: readonly number[];
+}
+
+function backEnvelope(pointsM: readonly MeshPlaneSectionVec3V1[]): BackEnvelopeV1 {
+  const sorted = pointsM
+    .map(([x, , z]) => [x, z] as const)
+    .sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const chain: (readonly [number, number])[] = [];
+  for (const point of sorted) {
+    // Equal x: the first (backmost) point stands for the column.
+    if (chain.length > 0 && chain[chain.length - 1][0] === point[0]) continue;
+    while (chain.length >= 2) {
+      const o = chain[chain.length - 2];
+      const a = chain[chain.length - 1];
+      if ((a[0] - o[0]) * (point[1] - o[1]) - (a[1] - o[1]) * (point[0] - o[0]) > 0) break;
+      chain.pop();
+    }
+    chain.push(point);
+  }
+  return { xs: chain.map(([x]) => x), zs: chain.map(([, z]) => z) };
+}
+
+function envelopeZ(envelope: BackEnvelopeV1, x: number): number {
+  const { xs, zs } = envelope;
+  const last = xs.length - 1;
+  if (x <= xs[0]) return zs[0];
+  if (x >= xs[last]) return zs[last];
+  let lo = 0;
+  let hi = last;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (xs[mid] <= x) lo = mid;
+    else hi = mid;
+  }
+  return zs[lo] + ((zs[hi] - zs[lo]) * (x - xs[lo])) / (xs[hi] - xs[lo]);
+}
+
+/**
+ * Depth behind the seam line that drives the push: the point's own depth near the seam, the depth
+ * of the back envelope above it further back, so a point inside the cleft moves as the tape line.
+ */
+function pushDepth(sideZ: number, z: number, envelopeZAtX: number): number {
+  const behind = sideZ - z;
+  const t = Math.min(Math.max((behind - CLEFT_RAMP_START_M) / CLEFT_RAMP_M, 0), 1);
+  return behind + t * t * (3 - 2 * t) * Math.max(0, z - envelopeZAtX);
+}
+
 /** C1 ramp: 0 in front of the seam band, the distance behind the seam line past it. */
 function seamRamp(behindM: number): number {
   if (behindM >= SEAM_RAMP_M) return behindM;
@@ -341,6 +398,7 @@ function seamRamp(behindM: number): number {
  * Female only: deepens the buttock behind the side-seam line until the hip back share reaches
  * FEMALE_HIP_BACK_OVER_HIP_GIRTH_V1, and scales each moved section in plane back to its own tape
  * girth, so every level, the hip station included, keeps the girth the waist/hip solve gave it.
+ * Points inside the gluteal cleft move with the tape line over it, so the cleft keeps its depth.
  * The change is a smooth bump centred on the hip level that ends above the crotch and well below
  * the waist station, so the waist girth, the legs and every limb are untouched. Heights never change. A body already at or above the share, or one
  * that would need more than the bounded change, is returned unchanged.
@@ -435,13 +493,17 @@ export function applyFemaleHipBackShareV1(options: {
     };
   };
   const bumpAt = (y: number) => smoothBump(y - levelY, y < levelY ? radiusDown : radiusUp);
+  const envelopes = table.map((stats) => backEnvelope(stats.pointsM));
 
   // The posterior push of each level, per unit of back scale, on that level's own section points.
   const levelPush = table.map((stats, index) => {
     const bump = bumpAt(tableYs[index]);
     const radiusX = (stats.maxX - stats.minX) / 2;
     return stats.pointsM.map(
-      ([x, , z]) => -bump * lateralWeight(x - stats.centerX, radiusX) * seamRamp(stats.sideZ - z),
+      ([x, , z]) =>
+        -bump *
+        lateralWeight(x - stats.centerX, radiusX) *
+        seamRamp(pushDepth(stats.sideZ, z, envelopeZ(envelopes[index], x))),
     );
   });
   /**
@@ -480,11 +542,14 @@ export function applyFemaleHipBackShareV1(options: {
     const row = lookup(y);
     const w = bumpAt(y) * lateralWeight(x - row.centerX, row.radiusX);
     if (w <= 0) continue;
+    const envelopeZAtX =
+      envelopeZ(envelopes[row.index], x) * (1 - row.t) +
+      envelopeZ(envelopes[row.index + 1], x) * row.t;
     moved.push(v);
     rows.push({ index: row.index, t: row.t });
     offsetX.push(x - row.centerX);
     offsetZ.push(z - row.sideZ);
-    pushZ.push(-w * seamRamp(row.sideZ - z));
+    pushZ.push(-w * seamRamp(pushDepth(row.sideZ, z, envelopeZAtX)));
   }
   const deform = (backScale: number, scales = levelScales(backScale)) => {
     const out = options.positionsM.slice();
