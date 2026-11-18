@@ -194,7 +194,8 @@ export type ProductionRunCoverageSource =
   | "PRODUCTION_RUN_COVERAGE_SOURCE_MIXED";
 export type TechCardSavedAssemblySnapshotProfile =
   | "TECH_CARD_SAVED_ASSEMBLY_SNAPSHOT_PROFILE_UNKNOWN"
-  | "TECH_CARD_SAVED_ASSEMBLY_SNAPSHOT_PROFILE_COMPLETE_SOURCE_V1";
+  | "TECH_CARD_SAVED_ASSEMBLY_SNAPSHOT_PROFILE_COMPLETE_SOURCE_V1"
+  | "TECH_CARD_SAVED_ASSEMBLY_SNAPSHOT_PROFILE_COMPLETE_SOURCE_WITH_AUTHORED_FOLDS_V1";
 // AccessLevel is the level of access an account has to a section. WRITE implies READ.
 export type AccessLevel =
   | "ACCESS_LEVEL_UNSPECIFIED"
@@ -14974,6 +14975,9 @@ export type GetTechCardSavedAssemblySnapshotRequest = {
   expectedAssemblyTopologySha256?: string;
   profile?: TechCardSavedAssemblySnapshotProfile;
   expectedCompleteSourceSha256?: string;
+  // Required for the authored-fold profile. A current card size ID from the size dictionary.
+  selectedSizeId?: number;
+  expectedAuthoredFoldSourceSha256?: string;
 };
 
 export type TechCardSavedAssemblySourceAliasV1 = {
@@ -15003,6 +15007,27 @@ export type TechCardSavedAssemblyCompleteSourceV1 = {
   garmentLabels: common_TechCardGarmentLabel[] | undefined;
 };
 
+export type TechCardSavedAssemblyAuthoredFoldV1 = {
+  operationNumber: number | undefined;
+  operationOrder: number | undefined;
+  fold: common_TechCardPieceFold | undefined;
+  sourceFingerprint: string | undefined;
+};
+
+// Authored source witnesses for the selected rank. The fold coordinates and anchored_size
+// remain as stored. Native per-rank geometry resolution belongs to the compiler.
+export type TechCardSavedAssemblyAuthoredFoldSourceV1 = {
+  completeSourceSha256: string | undefined;
+  selectedSizeId: number | undefined;
+  selectedSizeToken: string | undefined;
+  // In persisted operation order, then in each operation's fold_keys order.
+  folds: TechCardSavedAssemblyAuthoredFoldV1[] | undefined;
+  // SHA-256("tech-card-saved-assembly-authored-fold-source/1" + NUL + canonical_json).
+  sourceSha256: string | undefined;
+  // Sorted-key protobuf JSON of the first four fields with EmitUnpopulated enabled.
+  canonicalJson: string | undefined;
+};
+
 export type GetTechCardSavedAssemblySnapshotResponse = {
   row: TechCardSavedPatternRowIdentity | undefined;
   selectedOperationNumber: number | undefined;
@@ -15013,8 +15038,10 @@ export type GetTechCardSavedAssemblySnapshotResponse = {
   topologyCanonicalJson: string | undefined;
   // Existing anchor carrier read in the same database snapshot. Its own CAS governs carrier bytes.
   semanticSidecar?: TechCardPatternSemanticSidecar;
-  // Present only for COMPLETE_SOURCE_V1, which leaves the selected-operation fields unset.
+  // Present for both complete-source profiles, which leave selected-operation fields unset.
   completeSourceV1?: TechCardSavedAssemblyCompleteSourceV1;
+  // Present only for COMPLETE_SOURCE_WITH_AUTHORED_FOLDS_V1, even when no folds are linked.
+  authoredFoldSourceV1?: TechCardSavedAssemblyAuthoredFoldSourceV1;
 };
 
 export type UpsertTechCardSeamsRequest = {
