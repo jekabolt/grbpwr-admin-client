@@ -321,31 +321,63 @@ function exactPieces(
   );
 }
 
-function validateSide(
+type CompileSeamSide =
+  SavedFullAssemblyGenericFirstCompileChoicesV1['seamChoices'][number]['sides'][number];
+
+function prepareCompileSeamSide(
   bootstrap: SavedFullAssemblyGenericFirstBootstrapV1,
-  side: SavedFullAssemblyGenericFirstCompileChoicesV1['seamChoices'][number]['sides'][number],
+  side: CompileSeamSide,
   expectedLine: string,
-): void {
+): CompileSeamSide {
   if (side.pieceLineKey !== expectedLine || side.anchors[0] === side.anchors[1])
     fail('invalid-authoring-choices', 'A seam side differs from the current AO piece-line order.');
   const piece = bootstrap.catalog.pieces.filter(
     ({ pieceId, pieceLineKey }) => pieceId === side.pieceId && pieceLineKey === side.pieceLineKey,
   );
-  const contour = piece[0]?.contours.filter(
-    ({ contourId, role }) =>
-      contourId === side.contourId &&
-      role === savedFullAssemblyFirstContourRoleV1(bootstrap.sourceSurface),
-  );
-  const vertices = contour?.[0]?.boundaryVertices ?? [];
+  const contours =
+    piece[0]?.contours.filter(
+      ({ contourId, role }) =>
+        contourId === side.contourId &&
+        role === savedFullAssemblyFirstContourRoleV1(bootstrap.sourceSurface),
+    ) ?? [];
+  if (piece.length !== 1 || contours.length !== 1)
+    fail(
+      'invalid-authoring-choices',
+      'A seam side must select exact source-surface contour and boundary vertex identities.',
+    );
+  const contour = contours[0];
+  const vertices = contour.boundaryVertices;
+  const [firstId, secondId] = side.anchors;
+  const start = vertices.findIndex(({ vertexId }) => vertexId === firstId);
+  const end = vertices.findIndex(({ vertexId }) => vertexId === secondId);
   if (
-    piece.length !== 1 ||
-    contour?.length !== 1 ||
-    side.anchors.some((anchor) => !vertices.some(({ vertexId }) => vertexId === anchor))
+    start < 0 ||
+    end < 0 ||
+    start !== vertices.findLastIndex(({ vertexId }) => vertexId === firstId) ||
+    end !== vertices.findLastIndex(({ vertexId }) => vertexId === secondId)
   )
     fail(
       'invalid-authoring-choices',
       'A seam side must select exact source-surface contour and boundary vertex identities.',
     );
+  const follows = (first: number, second: number) =>
+    second === first + 1 || (contour.closed && first === vertices.length - 1 && second === 0);
+  const inCatalogOrder = follows(start, end);
+  if (
+    (side.direction !== 'forward' && side.direction !== 'reverse') ||
+    (!inCatalogOrder && !(side.direction === 'reverse' && follows(end, start)))
+  )
+    fail(
+      'invalid-authoring-choices',
+      'Choose one adjacent exact source edge in the given direction.',
+    );
+
+  // Saved V4 and the table can express a reversed side in traversal order. The compiler takes
+  // one catalog-ordered native edge occurrence plus a separate direction.
+  const anchors: CompileSeamSide['anchors'] = inCatalogOrder
+    ? [firstId, secondId]
+    : [secondId, firstId];
+  return Object.freeze({ ...side, anchors: Object.freeze(anchors) });
 }
 
 /**
@@ -600,17 +632,20 @@ export function buildSavedFullAssemblyGenericFirstCompileRequestV1(
     );
     if (choice.length !== 1 || !operation)
       fail('invalid-authoring-choices', 'Seam operation ownership differs from the current AO.');
-    validateSide(bootstrap, choice[0]!.sides[0], stored.pieceLineKeys[0]);
-    validateSide(bootstrap, choice[0]!.sides[1], stored.pieceLineKeys[1]);
+    const sideA = prepareCompileSeamSide(bootstrap, choice[0]!.sides[0], stored.pieceLineKeys[0]);
+    const sideB = prepareCompileSeamSide(bootstrap, choice[0]!.sides[1], stored.pieceLineKeys[1]);
+    if ((sideA.direction === sideB.direction ? 'same' : 'reversed') !== stored.direction)
+      fail(
+        'invalid-authoring-choices',
+        'The seam directions must match the current Assembly Order.',
+      );
     return Object.freeze({
       id: stored.seamKey,
       sourceSeamKey: stored.seamKey,
       clientOperationId: operation.clientOperationId,
       mapping: 'equal' as const,
       lengthRatio: 1 as const,
-      sides: Object.freeze(
-        choice[0]!.sides.map((side) => Object.freeze({ ...side })),
-      ) as (typeof choice)[0]['sides'],
+      sides: Object.freeze([sideA, sideB] as const),
     });
   });
   const material = structuredClone(profile.material);

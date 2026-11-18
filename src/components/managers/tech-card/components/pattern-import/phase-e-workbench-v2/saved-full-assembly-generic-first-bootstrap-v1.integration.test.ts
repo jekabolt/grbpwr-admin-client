@@ -211,9 +211,15 @@ beforeEach(() => {
 });
 
 describe('genuine first-authoring catalog → full assembly compiler', () => {
-  it.each(['zero-allowance-cut', 'native-drawn-sewing'] as const)(
-    'compiles genuine $0 source with exact catalog IDs',
-    async (sourceSurface) => {
+  it.each([
+    { sourceSurface: 'zero-allowance-cut', anchorOrder: 'catalog', mapping: 'equal' },
+    { sourceSurface: 'native-drawn-sewing', anchorOrder: 'catalog', mapping: 'equal' },
+    { sourceSurface: 'native-drawn-sewing', anchorOrder: 'traversal', mapping: 'equal' },
+    { sourceSurface: 'native-drawn-sewing', anchorOrder: 'traversal', mapping: 'eased' },
+    { sourceSurface: 'native-drawn-sewing', anchorOrder: 'traversal', mapping: 'gathered' },
+  ] as const)(
+    'validates $mapping on genuine $sourceSurface with $anchorOrder anchors',
+    async ({ sourceSurface, anchorOrder, mapping }) => {
       const source =
         sourceSurface === 'native-drawn-sewing'
           ? await nativeDrawnSource()
@@ -257,14 +263,18 @@ describe('genuine first-authoring catalog → full assembly compiler', () => {
             ) ?? [];
           expect(contours).toHaveLength(1);
           const contour = contours[0]!;
+          const anchors = [
+            contour.boundaryVertices[ordinal]!.vertexId,
+            contour.boundaryVertices[(ordinal + 1) % contour.boundaryVertices.length]!.vertexId,
+          ] as [string, string];
+          // The native replay may carry reversed anchors in traversal order. In particular this
+          // fixture's B span is the closing edge, from the last catalog vertex to vertex zero.
+          if (anchorOrder === 'traversal' && direction === 'reverse') anchors.reverse();
           return Object.freeze({
             pieceId,
             pieceLineKey,
             contourId: contour.contourId,
-            anchors: Object.freeze([
-              contour.boundaryVertices[ordinal]!.vertexId,
-              contour.boundaryVertices[(ordinal + 1) % contour.boundaryVertices.length]!.vertexId,
-            ]) as readonly [string, string],
+            anchors: Object.freeze(anchors),
             direction,
           });
         };
@@ -351,6 +361,29 @@ describe('genuine first-authoring catalog → full assembly compiler', () => {
         ).toEqual(
           choices.seamChoices.flatMap(({ sides }) => sides.map(({ contourId }) => contourId)),
         );
+        const chosenB = choices.seamChoices[0]!.sides[1];
+        const expectedNativeAnchors =
+          anchorOrder === 'traversal' ? [...chosenB.anchors].reverse() : chosenB.anchors;
+        expect(request.intent.seams[0]!.sides[1]).toMatchObject({
+          anchors: expectedNativeAnchors,
+          direction: 'reverse',
+        });
+        if (mapping !== 'equal') {
+          const refused = await session.consume({
+            ...request,
+            intent: {
+              ...request.intent,
+              seams: [{ ...request.intent.seams[0]!, mapping, lengthRatio: 1.1 }],
+            },
+          } as unknown as SavedFullAssemblyCompileRequestV1);
+          expect(refused, JSON.stringify(refused.blockers)).toMatchObject({
+            compiled: false,
+            blockers: [
+              expect.objectContaining({ detail: expect.stringMatching(/equal|mapping/i) }),
+            ],
+          });
+          return;
+        }
         const result = await session.consume(request);
         expect(result.compiled, result.blockers.map(({ detail }) => detail).join('; ')).toBe(true);
         expect(result.evidence?.zeroAllowanceEquivalence).toHaveLength(
@@ -359,6 +392,14 @@ describe('genuine first-authoring catalog → full assembly compiler', () => {
         expect(result.graph?.source.handoffSource.exportSha256).toBe(seed.row.sha256);
         expect(request.sourceRequest.draft).toBe(source.native.draft);
         if (sourceSurface === 'native-drawn-sewing') {
+          expect(result.graph?.seams[0]).toMatchObject({
+            mapping: 'equal',
+            lengthRatio: 1,
+            sides: [
+              { direction: 'forward' },
+              { direction: 'reverse', anchors: expectedNativeAnchors },
+            ],
+          });
           expect(result.evidence?.sourceSurface).toBe('explicit-native-drawn-sewing');
           expect(result.evidence?.writerSha256).not.toBe(seed.row.sha256);
           expect(result.graph?.source.handoffSource.exporterId).toBe(

@@ -67,7 +67,9 @@ function fixture() {
               closed: true,
               boundaryVertices: [
                 { ordinal: 0, vertexId: 'front-v0', normalizedArc: 0 },
-                { ordinal: 1, vertexId: 'front-v1', normalizedArc: 0.5 },
+                { ordinal: 1, vertexId: 'front-v1', normalizedArc: 0.25 },
+                { ordinal: 2, vertexId: 'front-v2', normalizedArc: 0.5 },
+                { ordinal: 3, vertexId: 'front-v3', normalizedArc: 0.75 },
               ],
             },
           ],
@@ -83,7 +85,9 @@ function fixture() {
               closed: true,
               boundaryVertices: [
                 { ordinal: 0, vertexId: 'back-v0', normalizedArc: 0 },
-                { ordinal: 1, vertexId: 'back-v1', normalizedArc: 0.5 },
+                { ordinal: 1, vertexId: 'back-v1', normalizedArc: 0.25 },
+                { ordinal: 2, vertexId: 'back-v2', normalizedArc: 0.5 },
+                { ordinal: 3, vertexId: 'back-v3', normalizedArc: 0.75 },
               ],
             },
           ],
@@ -195,6 +199,11 @@ describe('saved full assembly first physical bootstrap', () => {
       seamIds: ['side-seam'],
     });
     expect(request.intent.seams[0].sides[0].anchors).toEqual(['front-v0', 'front-v1']);
+    expect(request.intent.seams[0].sides[1]).toMatchObject({
+      anchors: ['back-v0', 'back-v1'],
+      direction: 'reverse',
+    });
+    expect(choices.seamChoices[0].sides[1].anchors).toEqual(['back-v1', 'back-v0']);
     expect(request.intent.compile.materials[0]).toMatchObject({
       id: 'browser-medium-isotropic-diagnostic-material',
       bendComplianceInvNm: { warp: 0.0006, weft: 0.0006 },
@@ -205,6 +214,39 @@ describe('saved full assembly first physical bootstrap', () => {
       weft: 1.2e-10,
       shear: 5e-10,
     });
+  });
+
+  it.each([
+    ['skipped vertex', ['front-v0', 'front-v2']],
+    ['backwards forward side', ['front-v1', 'front-v0']],
+  ] as const)('rejects a %s without changing the saved seam', (_label, anchors) => {
+    const { bootstrap, choices } = fixture();
+    const bad: SavedFullAssemblyGenericFirstCompileChoicesV1 = {
+      ...choices,
+      seamChoices: [
+        {
+          ...choices.seamChoices[0]!,
+          sides: [
+            { ...choices.seamChoices[0]!.sides[0], anchors },
+            choices.seamChoices[0]!.sides[1],
+          ],
+        },
+      ],
+    };
+
+    expect(() => buildSavedFullAssemblyGenericFirstCompileRequestV1(bootstrap, bad)).toThrow(
+      /adjacent exact source edge/,
+    );
+  });
+
+  it('requires the same relative direction saved on the Assembly operation', () => {
+    const { bootstrap, choices } = fixture();
+    expect(() =>
+      buildSavedFullAssemblyGenericFirstCompileRequestV1(
+        { ...bootstrap, seams: [{ ...bootstrap.seams[0]!, direction: 'same' }] },
+        choices,
+      ),
+    ).toThrow(/match the current Assembly Order/);
   });
 
   it('does not infer a seam edge from V6 presentation data', () => {
