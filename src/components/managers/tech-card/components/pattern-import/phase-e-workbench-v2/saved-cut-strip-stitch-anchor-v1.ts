@@ -1,8 +1,8 @@
-import type { TechCardSeamAnchor } from 'api/proto-http/common';
 import { stripDrawingsOf } from 'components/managers/tech-card/components/cut-strips/strip-pieces';
 import { buildAssemblyPiecesFromInput } from 'components/managers/tech-card/techpack/assembly-geometry-build';
 import { anchorOf } from 'lib/seams/anchor';
 import { runById } from 'lib/seams/frame';
+import type { TechCardSeamAnchorWire } from 'lib/seams/types';
 import { anchorFromWire, anchorToWire } from 'lib/seams/wire';
 import type { SavedAssemblyCutStripSourceV1 } from './saved-assembly-complete-source-rpc-v1';
 import { canonicalizePatternImportDxfPhaseESavedAssemblyValueV1 as canonical } from './saved-assembly-topology-hash-v1';
@@ -10,7 +10,7 @@ import { canonicalizePatternImportDxfPhaseESavedAssemblyValueV1 as canonical } f
 /** Exact generated edge from the saved trim dimensions and the same geometry used by Assembly Order. */
 export function readSavedCutStripStitchAnchorV1(
   binding: SavedAssemblyCutStripSourceV1,
-  anchor: TechCardSeamAnchor,
+  anchor: TechCardSeamAnchorWire,
   sizeId: number,
   sizeToken: string,
 ) {
