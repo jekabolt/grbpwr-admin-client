@@ -2444,14 +2444,13 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
         signal,
       );
     },
-    viewport: (interaction) =>
-      crossMaterialPreviewControls ?? (
-        <CadWorkbenchPhysicalHostProductionMountV1
-          state={savedClothPhysicalHost}
-          disabled={frozen}
-          interaction={interaction}
-        />
-      ),
+    viewport: (interaction) => (
+      <CadWorkbenchPhysicalHostProductionMountV1
+        state={savedClothPhysicalHost}
+        disabled={frozen}
+        interaction={interaction}
+      />
+    ),
   };
   const prepareSavedAllMaterialScopeStaging = useCallback<
     NonNullable<PatternImportDxfPhaseEMultiseamSavedSessionV2['prepareAllMaterialScopeStaging']>

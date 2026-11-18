@@ -49,6 +49,7 @@ import {
   listPatternImportDxfPhaseECadTableZeroOperationFreshChoicesV1,
   preparePatternImportDxfPhaseECadTableZeroOperationFreshV1,
   type PatternImportDxfPhaseECadTableZeroOperationFreshBlockerV1,
+  type PatternImportDxfPhaseECadTableZeroOperationFreshChoiceV1,
   type PatternImportDxfPhaseECadTableZeroOperationFreshChoicesResultV1,
   type PatternImportDxfPhaseECadTableZeroOperationFreshPreparationResultV1,
 } from './cad-table-zero-operation-fresh-preparation-v1';

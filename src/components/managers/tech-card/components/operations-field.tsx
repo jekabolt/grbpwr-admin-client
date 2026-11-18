@@ -7026,7 +7026,7 @@ function PatternImportDxfPhaseECadTableTopLevelZeroOperationMountV1({
   });
   const physicalHost: CadWorkbenchPhysicalHostV1 = {
     onDisplayedBodyInputV1: savedClothPhysicalHost.onDisplayedBodyInputV1,
-    panel: (
+    panel: () => (
       <SavedClothPhysicalControlsV1 host={savedClothPhysicalHost} row={null} disabled={disabled} />
     ),
   };
