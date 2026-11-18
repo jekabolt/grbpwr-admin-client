@@ -610,6 +610,29 @@ export async function restoreSavedCompleteAssemblyNativeStitchReviewV8(
   const text = new TextDecoder('utf-8', { fatal: true }).decode(
     Uint8Array.from(binary, (character) => character.charCodeAt(0)),
   );
+  const rebuilt = await rebuildSavedCompleteAssemblyNativeStitchReviewFromExactBytesV8(
+    source,
+    projection,
+    dictionary,
+    { text, sha256: carrier.sidecarSha256 ?? '' },
+    signal,
+    includePhysicalCuts,
+  );
+  if (rebuilt.reviewReceiptSha256 !== carrier.postSaveReceiptSha256)
+    throw new Error('The saved review receipt differs from the fresh complete native preparation.');
+  return rebuilt;
+}
+
+/** Replays exact historical V8 bytes after the containing carrier has been verified. */
+export async function rebuildSavedCompleteAssemblyNativeStitchReviewFromExactBytesV8(
+  source: CompleteSavedAssemblySourceV1,
+  projection: Parameters<CompletePreparation>[1],
+  dictionary: NonNullable<Parameters<CompletePreparation>[3]>,
+  storedReview: Readonly<{ text: string; sha256: string }>,
+  signal: AbortSignal,
+  includePhysicalCuts = false,
+) {
+  const { text, sha256 } = storedReview;
   const stored = JSON.parse(text) as Awaited<
     ReturnType<typeof prepareSavedCompleteAssemblyNativeStitchReviewV8>
   >['document'];
@@ -640,11 +663,8 @@ export async function restoreSavedCompleteAssemblyNativeStitchReviewV8(
     signal,
     includePhysicalCuts,
   );
-  if (
-    rebuilt.sha256 !== carrier.sidecarSha256 ||
-    rebuilt.reviewReceiptSha256 !== carrier.postSaveReceiptSha256
-  )
-    throw new Error('The saved review differs from the fresh complete native preparation.');
+  if (rebuilt.sha256 !== sha256 || canonical(rebuilt.document) !== text)
+    throw new Error('The saved V8 bytes differ from the fresh complete native preparation.');
   return rebuilt;
 }
 
@@ -656,14 +676,24 @@ export async function readSavedCompleteAssemblyNativePhysicalSourceV8(
   dictionary: NonNullable<Parameters<CompletePreparation>[3]>,
   expected: Readonly<{ sha256: string; operationNumber: number }>,
   signal: AbortSignal,
+  retained?: Readonly<{ review: { text: string; sha256: string }; placementSha256: string }>,
 ) {
-  const restored = await restoreSavedCompleteAssemblyNativeStitchReviewV8(
-    source,
-    projection,
-    dictionary,
-    signal,
-    true,
-  );
+  const restored = retained
+    ? await rebuildSavedCompleteAssemblyNativeStitchReviewFromExactBytesV8(
+        source,
+        projection,
+        dictionary,
+        retained.review,
+        signal,
+        true,
+      )
+    : await restoreSavedCompleteAssemblyNativeStitchReviewV8(
+        source,
+        projection,
+        dictionary,
+        signal,
+        true,
+      );
   const { document, gridRequest, grid, cuts, sha256 } = restored;
   if (
     sha256 !== expected.sha256 ||
@@ -681,7 +711,7 @@ export async function readSavedCompleteAssemblyNativePhysicalSourceV8(
     },
     signal,
   );
-  if (current.priorCarrier?.sidecarSha256 !== sha256)
+  if (current.priorCarrier?.sidecarSha256 !== (retained?.placementSha256 ?? sha256))
     throw new Error('The saved review changed while preparing the staged cloth.');
   return Object.freeze({
     document,

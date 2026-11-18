@@ -10,13 +10,24 @@ import {
   persistSavedCompleteAssemblyNativeStitchReviewV8,
   prepareSavedCompleteAssemblyNativeStitchReviewV8,
   readSavedCompleteAssemblyNativePhysicalSourceV8,
+  rebuildSavedCompleteAssemblyNativeStitchReviewFromExactBytesV8,
   restoreSavedCompleteAssemblyNativeStitchReviewV8,
 } from './saved-complete-assembly-native-stitch-review-v8';
+import {
+  readSavedCrossMaterialPlacementDocumentV9,
+  SAVED_COMPLETE_ASSEMBLY_PLACEMENT_MEDIA_V9,
+} from './saved-cross-material-placement-document-v9';
+import type { prepareCurrentSavedCrossMaterialPlacementV9 } from './saved-cross-material-placement-prepare-v9';
 import type { PatternImportDxfPhaseEZeroOperationSavedCardAuthorityRuntimeV1 as Authority } from './zero-operation-saved-card-authority-v1';
 import { resolvePatternImportDxfPhaseEZeroOperationSavedDxfCapabilityV1 } from './zero-operation-saved-dxf-capability-v1';
 
 type Pairing = 'start-to-start' | 'start-to-end';
 type Prepared = Awaited<ReturnType<typeof prepareSavedCompleteAssemblyNativeStitchReviewV8>>;
+type RestoredPlacement = Awaited<ReturnType<typeof readSavedCrossMaterialPlacementDocumentV9>>;
+type PlacementInput = Omit<
+  Parameters<typeof prepareCurrentSavedCrossMaterialPlacementV9>[0],
+  'loadReview'
+>;
 export type SavedCrossMaterialReviewForPreviewV8 = Readonly<{
   cardId: number;
   lockVersion: number;
@@ -24,6 +35,8 @@ export type SavedCrossMaterialReviewForPreviewV8 = Readonly<{
   sha256: string;
   load: (signal: AbortSignal) => ReturnType<typeof readSavedCompleteAssemblyNativePhysicalSourceV8>;
   verify: (signal: AbortSignal) => Promise<void>;
+  placement?: RestoredPlacement['world'];
+  savePlacement?: (input: PlacementInput, signal: AbortSignal) => Promise<void>;
 }>;
 
 type Review = Pick<Prepared, 'document' | 'sha256' | 'grid'>;
@@ -203,11 +216,24 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
       function publishRestored(
         restored: Awaited<ReturnType<typeof restoreSavedCompleteAssemblyNativeStitchReviewV8>>,
         current: typeof source,
+        placement?: RestoredPlacement,
+        active = signal,
       ) {
-        signal.throwIfAborted();
+        active.throwIfAborted();
         if (restored.document.selection.operationNumber !== operationNumber)
           throw new Error('The saved review belongs to a different Assembly Order operation.');
         const { sha256 } = restored;
+        const carrierSha256 = placement?.sha256 ?? sha256;
+        const load: SavedCrossMaterialReviewForPreviewV8['load'] = (active) =>
+          readSavedCompleteAssemblyNativePhysicalSourceV8(
+            abortableAdminService,
+            current,
+            projection,
+            sizeAuthority,
+            { sha256, operationNumber },
+            active,
+            placement && { review: placement.review, placementSha256: carrierSha256 },
+          );
         setState({
           status: 'reopened',
           review: restored,
@@ -215,16 +241,38 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
             cardId: exact.row.techCardId,
             lockVersion: exact.row.cardLockVersion,
             operationNumber,
-            sha256,
-            load: (active) =>
-              readSavedCompleteAssemblyNativePhysicalSourceV8(
-                abortableAdminService,
-                current,
-                projection,
-                sizeAuthority,
-                { sha256, operationNumber },
-                active,
-              ),
+            sha256: carrierSha256,
+            load,
+            placement: placement?.world,
+            savePlacement: placement
+              ? undefined
+              : async (input, active) => {
+                  const [
+                    { prepareCurrentSavedCrossMaterialPlacementV9 },
+                    { persistSavedCrossMaterialPlacementV9 },
+                    { readCurrentSavedNeutralPlacementModelV1 },
+                  ] = await Promise.all([
+                    import('./saved-cross-material-placement-prepare-v9'),
+                    import('./saved-cross-material-placement-storage-v9'),
+                    import('./saved-cross-material-placement-model-binding-v1'),
+                  ]);
+                  const prepared = await prepareCurrentSavedCrossMaterialPlacementV9(
+                    { ...input, loadReview: load },
+                    active,
+                  );
+                  const saved = await persistSavedCrossMaterialPlacementV9(
+                    abortableAdminService,
+                    prepared,
+                    (signal) => {
+                      if (!input.isCurrent())
+                        throw new Error('The displayed mannequin or saved review changed.');
+                      return readCurrentSavedNeutralPlacementModelV1(input.body, signal);
+                    },
+                    active,
+                  );
+                  if (input.isCurrent())
+                    publishRestored(restored, saved.source, saved.reopened, active);
+                },
             async verify(active) {
               const latest = await readCompleteSavedAssemblySourceV1(
                 abortableAdminService(active),
@@ -235,7 +283,7 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
                 },
                 active,
               );
-              if (latest.priorCarrier?.sidecarSha256 !== sha256)
+              if (latest.priorCarrier?.sidecarSha256 !== carrierSha256)
                 throw new Error('The reviewed sewing runs changed during the cloth preview.');
             },
           },
@@ -264,13 +312,25 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
         );
         publishRestored(reopened, saved.current);
       } else if (action === 'reopen' || source.priorCarrier) {
-        const reopened = await restoreSavedCompleteAssemblyNativeStitchReviewV8(
-          source,
-          projection,
-          sizeAuthority,
-          signal,
-        );
-        publishRestored(reopened, source);
+        if (source.priorCarrier?.mediaType === SAVED_COMPLETE_ASSEMBLY_PLACEMENT_MEDIA_V9) {
+          const placement = await readSavedCrossMaterialPlacementDocumentV9(source, signal);
+          const reopened = await rebuildSavedCompleteAssemblyNativeStitchReviewFromExactBytesV8(
+            source,
+            projection,
+            sizeAuthority,
+            placement.review,
+            signal,
+          );
+          publishRestored(reopened, source, placement);
+        } else {
+          const reopened = await restoreSavedCompleteAssemblyNativeStitchReviewV8(
+            source,
+            projection,
+            sizeAuthority,
+            signal,
+          );
+          publishRestored(reopened, source);
+        }
       } else {
         const review = await prepareSavedCompleteAssemblyNativeStitchReviewV8(
           source,

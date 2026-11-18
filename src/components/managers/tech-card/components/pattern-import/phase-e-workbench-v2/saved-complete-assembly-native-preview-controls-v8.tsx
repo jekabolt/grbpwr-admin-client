@@ -27,15 +27,21 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
 }) {
   const id = useId();
   const computeCanvas = useRef<HTMLCanvasElement>(null);
+  const placementSave = useRef<AbortController | null>(null);
   const [lifecycle] = useState(() => createCadWorkbenchPreviewLifecycleV1());
   const [status, setStatus] = useState<CadWorkbenchPreviewStatusV1>({
     pending: false,
     error: null,
   });
+  const [placementStatus, setPlacementStatus] = useState<CadWorkbenchPreviewStatusV1>({
+    pending: false,
+    error: null,
+  });
   const [acceptedFrame, setAcceptedFrame] = useState<number | null>(null);
-  const [x, setX] = useState('0');
-  const [y, setY] = useState('1010');
-  const [z, setZ] = useState('220');
+  const savedCenter = review.placement?.placement.centerMm;
+  const [x, setX] = useState(() => String(savedCenter?.[0] ?? 0));
+  const [y, setY] = useState(() => String(savedCenter?.[1] ?? 1010));
+  const [z, setZ] = useState(() => String(savedCenter?.[2] ?? 220));
   const current = useRef<Readonly<{ review: typeof review; body: typeof body; disabled: boolean }>>(
     {
       review,
@@ -64,7 +70,26 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
         body?.isCurrent() === true;
       if (!displayed || !validCenter || !isCurrent())
         throw new Error('Choose a current displayed mannequin and three placement coordinates.');
-      const source = await review.load(signal);
+      const load = review.load(signal);
+      const source = await load;
+      if (review.placement && body) {
+        const { prepareCurrentSavedCrossMaterialPlacementV9 } = await import(
+          './saved-cross-material-placement-prepare-v9'
+        );
+        const restored = await prepareCurrentSavedCrossMaterialPlacementV9(
+          {
+            loadReview: () => load,
+            body,
+            centerMm: [Number(x), Number(y), Number(z)],
+            isCurrent,
+          },
+          signal,
+        );
+        if (restored.sha256 !== review.sha256)
+          throw new Error(
+            'The current mannequin and cuts could not reproduce the saved placement.',
+          );
+      }
       const [
         { runDirectedSourceCutPreviewV1 },
         { buildSavedCrossMaterialDiagnosticInputsV1, SAVED_CROSS_MATERIAL_DIAGNOSTIC_SCHEDULE_V1 },
@@ -138,6 +163,9 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
 
   useLayoutEffect(() => {
     const cancel = () => {
+      placementSave.current?.abort();
+      placementSave.current = null;
+      setPlacementStatus({ pending: false, error: null });
       onAcceptedCloth(undefined);
       setAcceptedFrame(null);
       setStatus({ pending: false, error: null });
@@ -152,10 +180,49 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
   }, [body, disabled, host, lifecycle, onAcceptedCloth]);
 
   const preview = () => {
-    if (disabled || !validCenter || !body?.isCurrent() || !computeCanvas.current) return;
+    if (
+      disabled ||
+      placementSave.current ||
+      !validCenter ||
+      !body?.isCurrent() ||
+      !computeCanvas.current
+    )
+      return;
     void lifecycle.start(host, computeCanvas.current, null, setStatus);
   };
 
+  async function savePlacement() {
+    if (disabled || status.pending || placementSave.current || !validCenter || !body?.isCurrent())
+      return;
+    if (!review.savePlacement) return;
+    const controller = new AbortController();
+    placementSave.current = controller;
+    setPlacementStatus({ pending: true, error: null });
+    const isCurrent = () =>
+      placementSave.current === controller &&
+      !controller.signal.aborted &&
+      current.current.review === review &&
+      current.current.body === body &&
+      !current.current.disabled &&
+      body.isCurrent();
+    try {
+      await review.savePlacement(
+        { body, centerMm: [Number(x), Number(y), Number(z)], isCurrent },
+        controller.signal,
+      );
+      if (isCurrent()) setPlacementStatus({ pending: false, error: null });
+    } catch (error) {
+      if (isCurrent())
+        setPlacementStatus({
+          pending: false,
+          error: error instanceof Error ? error.message : 'The placement could not be saved.',
+        });
+    } finally {
+      if (placementSave.current === controller) placementSave.current = null;
+    }
+  }
+
+  const busy = disabled || status.pending || placementStatus.pending;
   return (
     <section
       aria-label='Cross-material cloth preview'
@@ -175,10 +242,9 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
               name={`${id}-${axis}`}
               value={value}
               inputMode='decimal'
-              disabled={disabled || status.pending}
-              onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                setValue(event.target.value)
-              }
+              disabled={busy}
+              readOnly={!!review.placement}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => setValue(event.target.value)}
             />
           </label>
         ))}
@@ -186,7 +252,7 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
           type='button'
           variant='main'
           size='xs'
-          disabled={disabled || status.pending || !validCenter || !body?.isCurrent()}
+          disabled={busy || !validCenter || !body?.isCurrent()}
           onClick={preview}
         >
           {status.pending
@@ -195,7 +261,28 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
               ? 'Preview cloth'
               : 'Refresh cloth'}
         </Button>
+        {review.savePlacement && (
+          <Button
+            type='button'
+            variant='secondary'
+            size='xs'
+            disabled={busy || !validCenter || !body?.isCurrent()}
+            onClick={() => void savePlacement()}
+          >
+            {placementStatus.pending ? 'Saving placement…' : 'Save placement'}
+          </Button>
+        )}
       </div>
+      {review.placement && (
+        <Text component='p' size='micro' role='status'>
+          Saved initial placement · mannequin #{review.placement.body.modelId}
+        </Text>
+      )}
+      {placementStatus.error && (
+        <Text component='p' size='micro' role='alert'>
+          {placementStatus.error}
+        </Text>
+      )}
       <Text component='p' size='micro' role={status.error ? 'alert' : 'status'}>
         {status.error ??
           (acceptedFrame === null

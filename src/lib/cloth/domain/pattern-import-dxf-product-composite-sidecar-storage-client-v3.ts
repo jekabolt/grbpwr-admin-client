@@ -153,6 +153,7 @@ export type PatternImportDxfProductCompositeSidecarStoragePlannedWriteV3<
     selectedOperationNumber: number;
   }>;
   previousSidecarSha256: string | null;
+  previousPostSaveReceiptSha256?: string;
   sidecarSha256: string;
   byteLength: number;
   bytes: Uint8Array<ArrayBuffer>;
@@ -537,12 +538,15 @@ function verifyCurrentTransportBinding(
   if (!row) return;
   if (
     row.patternVersion !== planned.transport.patternVersion ||
-    row.postSaveReceiptSha256 !== planned.transport.postSaveReceiptSha256
+    row.postSaveReceiptSha256 !==
+      (planned.previousPostSaveReceiptSha256 ?? planned.transport.postSaveReceiptSha256)
   )
     fail(
       'current-readback-invalid',
       'current-get',
-      'Current sidecar metadata differs from its preserved semantic-product-v1 receipt.',
+      planned.previousPostSaveReceiptSha256 === undefined
+        ? 'Current sidecar metadata differs from its preserved semantic-product-v1 receipt.'
+        : 'Current sidecar metadata differs from its verified prior receipt.',
     );
 }
 
@@ -719,6 +723,9 @@ export function createPatternImportDxfProductCompositeSidecarStorageWriterV3<
           planned.byteLength < 1 ||
           planned.byteLength > MAX_SIDECAR_BYTES ||
           (planned.previousSidecarSha256 !== null && !SHA256.test(planned.previousSidecarSha256)) ||
+          (planned.previousPostSaveReceiptSha256 !== undefined &&
+            (planned.previousSidecarSha256 === null ||
+              !SHA256.test(planned.previousPostSaveReceiptSha256))) ||
           !Number.isSafeInteger(planned.transport.patternVersion) ||
           planned.transport.patternVersion < 1 ||
           !SHA256.test(planned.transport.postSaveReceiptSha256) ||

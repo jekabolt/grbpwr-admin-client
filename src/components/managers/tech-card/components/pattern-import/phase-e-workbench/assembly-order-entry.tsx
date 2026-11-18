@@ -2383,6 +2383,14 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
     crossMaterialReview?.operationNumber === selectedOperationNumber
       ? crossMaterialReview
       : null;
+  const savedCrossMaterialModelId = activeCrossMaterialReview?.placement?.body.modelId;
+  const readActiveMannequinModelId = useCallback(
+    (signal: AbortSignal) =>
+      savedCrossMaterialModelId === undefined
+        ? readSavedMannequinModelId(signal)
+        : Promise.resolve(savedCrossMaterialModelId),
+    [readSavedMannequinModelId, savedCrossMaterialModelId],
+  );
   const crossMaterialPreviewControls = activeCrossMaterialReview ? (
     <Suspense fallback={null}>
       <SavedCompleteAssemblyNativePreviewControlsV8
@@ -2402,8 +2410,9 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
     arrangementSourceKey: JSON.stringify([
       physicalRow,
       savedProjection.ok ? savedProjection.selectedOperationNumber : null,
+      activeCrossMaterialReview?.placement ? activeCrossMaterialReview.sha256 : null,
     ]),
-    onReadSavedMannequinModelId: readSavedMannequinModelId,
+    onReadSavedMannequinModelId: readActiveMannequinModelId,
     onSaveMannequinArrangement: saveMannequinArrangement,
     onReadMannequinArrangement: async (input, signal) => {
       if (!savedProjection.ok || input.scopeKey !== savedProjection.row.scopeKey) return null;
