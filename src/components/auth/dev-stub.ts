@@ -101,7 +101,10 @@ export async function stubAnswer(method: string, body: string | null): Promise<u
             : undefined,
       };
     }
-    default:
-      return {};
+    default: {
+      // console and people calls (lane C2)
+      const { consoleStubAnswer } = await import('components/console/dev-stub');
+      return consoleStubAnswer(method, body) ?? {};
+    }
   }
 }

@@ -315,7 +315,8 @@ const PrintSmokePage = lazyRoute(() =>
 const HOST_KIND = currentHost().kind;
 const RootApp = lazyRoute(() => import('components/auth/root-app'));
 const ConsoleApp = lazyRoute(() => import('components/shell/console-layout'));
-const PeoplePage = lazyRoute(() => import('components/shell/people-page'));
+const ConsoleHome = lazyRoute(() => import('components/console/console-page'));
+const PeoplePage = lazyRoute(() => import('components/people/people-page'));
 const Handoff = lazyRoute(() =>
   import('components/auth/handoff').then((m) => ({ default: m.Handoff })),
 );
@@ -421,7 +422,13 @@ const ProtectedBare = () => (
 // The root and console hosts get their own route trees; team and legacy hosts keep the admin's.
 const HostRoutes = ({ children }: { children: ReactNode }) => (
   <Suspense fallback={<LoadingFallback />}>
-    {HOST_KIND === 'root' ? <RootApp /> : HOST_KIND === 'console' ? <ConsoleApp /> : children}
+    {HOST_KIND === 'root' ? (
+      <RootApp />
+    ) : HOST_KIND === 'console' ? (
+      <ConsoleApp home={<ConsoleHome />} />
+    ) : (
+      children
+    )}
   </Suspense>
 );
 

@@ -4,6 +4,7 @@ import * as DialogPrimitives from '@radix-ui/react-dialog';
 
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ADMIN_GROUP, isActiveRoute, NAV_GROUPS, ROUTES } from 'constants/routes';
+import { currentHost } from 'lib/host';
 import { cn } from 'lib/utility';
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
@@ -28,6 +29,8 @@ export function MobileNavMenu() {
   // хотя бы его. На десктопе тот же пункт живёт в шапке рядом с «logout»; здесь шапка занята
   // тремя элементами, поэтому он приходит последней плиткой.
   const profileActive = isActiveRoute(pathname, ROUTES.me);
+  const peopleActive = isActiveRoute(pathname, ROUTES.people);
+  const team = currentHost().kind === 'team';
 
   return (
     <DialogPrimitives.Root open={open} onOpenChange={setOpen}>
@@ -100,6 +103,22 @@ export function MobileNavMenu() {
                       my profile
                     </Link>
                   </DialogPrimitives.Close>
+                  {team && (
+                    <DialogPrimitives.Close asChild>
+                      <Link
+                        to={ROUTES.people}
+                        aria-current={peopleActive ? 'page' : undefined}
+                        className={cn(
+                          'flex min-h-12 items-center justify-center border border-borderColor px-2 py-3 text-center leading-tight uppercase transition-colors active:opacity-80',
+                          peopleActive
+                            ? 'bg-textColor text-bgColor'
+                            : 'hover:bg-textColor hover:text-bgColor',
+                        )}
+                      >
+                        people
+                      </Link>
+                    </DialogPrimitives.Close>
+                  )}
                 </div>
               </section>
             </div>
