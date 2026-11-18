@@ -110,6 +110,8 @@ export type PlannedBlock = {
    * is only a reference (layer 8): a mirror line there would double the piece.
    */
   foldIsMirror: boolean;
+  /** A written mirror axis on a confirmed half. Older unresolved folds also set foldIsMirror. */
+  confirmedHalfFold?: true;
   drills: PlannedDrill[];
   grain: PlannedGrain | null;
   notches: PlannedNotch[];
@@ -486,6 +488,7 @@ export function planBlocks(
         internal,
         foldLines,
         foldIsMirror,
+        ...(foldIsMirror && w.spec.halfFold ? { confirmedHalfFold: true as const } : {}),
         drills: s.drills.map((d) => ({
           at: d.at,
           form: d.form ?? 'square',

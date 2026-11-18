@@ -210,10 +210,11 @@ export function writeR2000(blocks: readonly PlannedBlock[]): string {
     for (const mark of block.size.pointMarks ?? [])
       markLayers.add(AUTHORED_POINT_LAYERS[mark.kind]);
   }
-  const layers: readonly [string, number][] = [
+  const layers: [string, number][] = [
     ...CLO_LAYERS,
     ...[...markLayers].map((name): [string, number] => [name, 8]),
   ];
+  if (blocks.some((block) => block.confirmedHalfFold)) layers.push(['6', 3]);
   tableHead('LAYER', 3, layers.length);
   for (const [n, c] of layers) {
     E(0, 'LAYER');
@@ -340,7 +341,10 @@ export function writeR2000(blocks: readonly PlannedBlock[]): string {
     if (b.seam) lw(o, '14', b.seam, true); // seam line first, as CLO does
     lw(o, '1', b.cut, true); // final cutting line
     for (const loop of b.cutLoops) lw(o, '1', loop, true);
-    for (const ip of b.internal) lw(o, '8', ip.pts, ip.closed);
+    b.internal.forEach((line, index) => {
+      const isHalfAxis = b.confirmedHalfFold && index === b.internal.length - 1;
+      lw(o, isHalfAxis ? '6' : '8', line.pts, line.closed);
+    });
     for (const d of b.drills) lw(o, '8', drillMark(d), true);
     if (b.grain) lw(o, '7', [b.grain.tail, b.grain.tip, b.grain.barb], false);
     for (const n of b.notches) {

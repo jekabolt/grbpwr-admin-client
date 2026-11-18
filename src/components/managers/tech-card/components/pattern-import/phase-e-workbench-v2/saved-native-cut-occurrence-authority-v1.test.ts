@@ -8,6 +8,8 @@ import { buildAst } from 'lib/pattern-import/adapters/dxf/ast';
 import { tokenize } from 'lib/pattern-import/adapters/dxf/tags';
 import { readDxf } from 'lib/pattern-import/adapters/dxf/extract';
 import { segmentDxf } from 'lib/pattern-import/adapters/dxf/segment';
+import { unfold } from 'lib/pattern-import/semantics/fold';
+import type { RawEntity } from 'lib/pattern-import/adapters/dxf/ast';
 import { readManifest } from 'lib/pattern-import/manifest';
 import { writeDxfDetailed } from 'lib/pattern-import/write';
 import { buildPatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
@@ -213,10 +215,7 @@ it.each(['r12', 'r2000'] as const)(
       { sagittaMm: 0.05, keepFills: true },
     );
     const back = segmentDxf(read).pieces.find((p) => p.identity === 'BACK')!;
-    expect(Object.values(back.roles).filter((r) => r === 'fold')).toHaveLength(
-      dialect === 'r12' ? 1 : 0,
-    );
-    if (dialect === 'r2000') expect(Object.values(back.roles)).toContain('internal');
+    expect(Object.values(back.roles).filter((r) => r === 'fold')).toHaveLength(1);
     expect(read.meta.groups.filter((g) => g.block === 'BACK_M')).toHaveLength(1);
   },
 );
@@ -275,3 +274,119 @@ it('refuses an ordinary saved pair when semantic identities differ and both nati
     host.dispose();
   }
 });
+
+function polylinePoints(entity: RawEntity) {
+  if (entity.type === 'POLYLINE')
+    return entity.children.map((vertex) => ({
+      x: Number(vertex.tags.find((t) => t.code === 10)!.value),
+      y: Number(vertex.tags.find((t) => t.code === 20)!.value),
+    }));
+  expect(entity.type).toBe('LWPOLYLINE');
+  const xs = entity.tags.filter((t) => t.code === 10),
+    ys = entity.tags.filter((t) => t.code === 20);
+  return xs.map((x, i) => ({ x: Number(x.value), y: Number(ys[i]!.value) }));
+}
+it.each(['r12', 'r2000'] as const)(
+  'uses the exact written half axis and keeps the unfolded axis and unrelated lines internal in %s',
+  async (dialect) => {
+    const f = await createSavedThreePanelFixtureV1(2);
+    f.job.dialect = dialect;
+    for (const [i, piece] of f.job.pieces.entries()) {
+      const size = piece.sizes[0]!;
+      const fold = {
+        kind: 'fold' as const,
+        origin: 'operator' as const,
+        confidence: 1,
+        ranges: [],
+        a: size.cut[0]!,
+        b: size.cut[1]!,
+      };
+      size.fold = fold;
+      size.internal.push({
+        kind: 'internal',
+        origin: 'operator',
+        confidence: 1,
+        ranges: [],
+        pts: [
+          { x: fold.a.x + 10, y: 20 },
+          { x: fold.a.x + 25, y: 35 },
+          { x: fold.a.x + 28, y: 40 },
+        ],
+        closed: false,
+      });
+      if (i === 0) piece.halfFold = { evidence: ['confirmed half on fold'] };
+      else {
+        const full = unfold(size.cut, fold)!;
+        expect(full).toBeTruthy();
+        size.cut = full.pts;
+        size.seam = structuredClone(full.pts);
+        piece.unfoldedFold = true;
+      }
+    }
+    const written = writeDxfDetailed(f.job);
+    const text = written.dxfText,
+      raw = buildAst(tokenize(text).tags),
+      manifest = readManifest(text)!;
+    const parsed = await readDxf(
+      { id: 'fold-roles', name: 'fold-roles.dxf', bytes: new TextEncoder().encode(text).buffer },
+      { sagittaMm: 0.05, keepFills: true },
+    );
+    const seg = segmentDxf(parsed);
+    expect(raw.layers.filter((layer) => layer.name === '6')).toHaveLength(1);
+    for (const [i, piece] of f.job.pieces.entries()) {
+      const block = written.plan.blocks.find((b) => b.identity === piece.identity)!;
+      const axis = block.size.fold!;
+      const entities = raw.blocks.get(block.name)!.entities;
+      const featureLines = entities.filter((e) => e.layer === '6' || e.layer === '8');
+      expect(featureLines.map((e) => [e.layer, polylinePoints(e)])).toEqual([
+        ['8', block.internal[0]!.pts],
+        [
+          i === 0 ? '6' : '8',
+          [axis.a, { x: (axis.a.x + axis.b.x) / 2, y: (axis.a.y + axis.b.y) / 2 }, axis.b],
+        ],
+      ]);
+      expect(manifest.pieces[i]!.halfFold).toBe(i === 0 ? true : undefined);
+      expect(manifest.pieces[i]!.unfoldedFold).toBe(i !== 0);
+      const roles = Object.values(seg.pieces.find((p) => p.identity === piece.identity)!.roles);
+      expect(roles.filter((r) => r === 'fold')).toHaveLength(i === 0 ? 1 : 0);
+      expect(roles.filter((r) => r === 'internal')).toHaveLength(i === 0 ? 1 : 2);
+    }
+  },
+);
+it.each(['absent', 'reference', 'unconfirmed'] as const)(
+  'preserves existing R2000 bytes for a piece whose confirmed half-fold is %s',
+  async (variant) => {
+    const f = await createSavedThreePanelFixtureV1(2);
+    f.job.dialect = 'r2000';
+    if (variant !== 'absent') {
+      const piece = f.job.pieces[0]!,
+        size = piece.sizes[0]!;
+      size.fold = {
+        kind: 'fold',
+        origin: 'operator',
+        confidence: 1,
+        ranges: [],
+        a: size.cut[0]!,
+        b: size.cut[1]!,
+      };
+      if (variant === 'reference') {
+        const full = unfold(size.cut, size.fold)!;
+        size.cut = full.pts;
+        size.seam = structuredClone(full.pts);
+        piece.unfoldedFold = true;
+      }
+    }
+    const written = writeDxfDetailed(f.job, { now: () => new Date(f.written.manifest.createdAt) });
+    const raw = buildAst(tokenize(written.dxfText).tags);
+    expect(raw.layers.some((l) => l.name === '6')).toBe(false);
+    const hash = await digestFullAssemblyFixture(new TextEncoder().encode(written.dxfText));
+    // Complete file hashes from the pre-fix writer at f2f8b6d78 with the same pinned clock.
+    expect(hash).toBe(
+      {
+        absent: '9f6feee307f193e8c938bbb83a901abd8843195cbc730279e262afdde152582c',
+        reference: '6191c279a41faa81e6080b6393d87c8c8ced969b4084fed16ade7d24e8a716ae',
+        unconfirmed: '4ac0d6888f5600eb970d66d87a1168a85fab4ae207ab61554b8be4b1a0cbc478',
+      }[variant],
+    );
+  },
+);
