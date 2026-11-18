@@ -14,6 +14,7 @@ import {
   type UniformWaistHipSparseFieldV1,
 } from './makehuman-uniform-waist-hip-modes-v1';
 import { measureMeshPlaneSectionPerimetersV1 } from './mesh-plane-section-perimeter-v1';
+import { meshPlaneSectionLoopTapePerimeterMV1 } from './mesh-plane-section-tape-girth-v1';
 
 export const MEASUREMENT_OPEN_REFERENCE_UNIFORM_WAIST_HIP_SOLVER_V1 =
   'measurement-open-reference-uniform-waist-hip-solver/v1' as const;
@@ -327,7 +328,9 @@ function measureSectionMm(positionsM: Float32Array, plan: SectionTrianglePlanV1)
   if (!result.ok || !result.selectedLoop) {
     throw new Error(result.ok ? 'Torso section selection failed.' : result.errors.join('; '));
   }
-  const perimeterMm = result.selectedLoop.perimeterM * 1000;
+  // The typed waist/hip is a tape girth: the taut hull bridges the gluteal cleft and spine
+  // groove that the raw loop follows, so the solve targets the hull, not the loop.
+  const perimeterMm = meshPlaneSectionLoopTapePerimeterMV1(result.selectedLoop) * 1000;
   if (!Number.isFinite(perimeterMm) || perimeterMm <= 0) {
     throw new Error('Torso section perimeter is invalid.');
   }

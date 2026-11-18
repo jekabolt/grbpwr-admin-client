@@ -34,6 +34,7 @@ import {
 } from './measurement-open-reference-display-v1';
 import { measureFemaleTorsoSectionGirthMmV1 } from './measurement-open-reference-female-torso-stage-v1';
 import { createMeasurementOpenReferenceUniformWaistHipRuntimeV1 } from './measurement-open-reference-uniform-waist-hip-runtime-v1';
+import { measureMeshHorizontalSectionTapeGirthMmV1 } from './mesh-plane-section-tape-girth-v1';
 
 const cwd = process.cwd();
 const basis = parseMakeHumanOpenReferenceBasisV1(
@@ -142,7 +143,9 @@ describe('beta torso worker: female bust proxy (lane-female-bust-rev2 §5)', () 
   it.each([
     [835, 720],
     [820, 720],
-    [840, 680],
+    // 840/680 left this list on purpose (tape-girth lane): the bust tape tops out near 816 mm
+    // on a 680 mm ribcage, so that pair is now honestly limited below instead of passing
+    // only because the raw skin loop was longer than the tape.
     [870, 740],
   ] as const)(
     'female %i/%i: chest and under bust represented at the apex plane, shoulder as typed',
@@ -161,14 +164,15 @@ describe('beta torso worker: female bust proxy (lane-female-bust-rev2 §5)', () 
       expect(result.chestStationOriginM).toEqual(bust.apexStationOriginM);
       expect(result.chestStationOriginM![1]).toBeGreaterThan(result.underBustStationOriginM![1]);
       expect(result.chestStationOriginM![1]).toBeLessThanOrEqual(bust.armpitLineOriginM[1] + 1e-9);
-      // Achieved girths on the output mesh, measured independently of the solver.
+      // Achieved girths on the output mesh, measured independently of the solver. The bust is a
+      // tape girth (the hull bridges the cleavage); the under bust is still held on the loop.
       expect(
         Math.abs(
-          measureFemaleTorsoSectionGirthMmV1({
+          (measureMeshHorizontalSectionTapeGirthMmV1({
             positionsM: result.positionsM,
             triangleIndices: basis.indices,
             originM: result.chestStationOriginM!,
-          }) - chestMm,
+          }) ?? Number.NaN) - chestMm,
         ),
       ).toBeLessThanOrEqual(1);
       expect(
@@ -208,6 +212,38 @@ describe('beta torso worker: female bust proxy (lane-female-bust-rev2 §5)', () 
     );
     expect(result.chestShoulderRepresentedMeasurements).toContain('shoulderBreadthMm');
     expect(result.positionsM).not.toBe(sourcePositionsM);
+    expect(result.positionsM.every(Number.isFinite)).toBe(true);
+  }, 60_000);
+
+  it('female 840/680: the bust tape cannot reach 840 on a 680 ribcage and says so', () => {
+    const measurements = measurementsFor(840, 680);
+    const value = solve(measurements);
+    report('840/680', measurements, value);
+    const { result } = value;
+    expect(chestStatusOf(result)).toBe('limited');
+    expect(underBustStatusOf(result)).toBe('represented');
+    expect(result.chestShoulderDiagnostics).toEqual(
+      expect.arrayContaining([
+        'chestCircumferenceMm:female-bust-quality-fraction-limited',
+        'chestCircumferenceMm:target-limited-to-quality-safe-endpoint',
+      ]),
+    );
+    const tapeMm = measureMeshHorizontalSectionTapeGirthMmV1({
+      positionsM: result.positionsM,
+      triangleIndices: basis.indices,
+      originM: result.chestStationOriginM!,
+    });
+    expect(tapeMm).toBeLessThan(840 - 1);
+    expect(
+      Math.abs(
+        measureFemaleTorsoSectionGirthMmV1({
+          positionsM: result.positionsM,
+          triangleIndices: basis.indices,
+          originM: result.underBustStationOriginM!,
+        }) - 680,
+      ),
+    ).toBeLessThanOrEqual(1);
+    expect(result.chestShoulderRepresentedMeasurements).toContain('shoulderBreadthMm');
     expect(result.positionsM.every(Number.isFinite)).toBe(true);
   }, 60_000);
 
@@ -256,11 +292,12 @@ describe('beta torso worker: female bust proxy (lane-female-bust-rev2 §5)', () 
           'underBustCircumferenceMm:female-bust-depth-crosstalk-limited',
         );
       }
-      const chestAfterMm = measureFemaleTorsoSectionGirthMmV1({
-        positionsM: result.positionsM,
-        triangleIndices: basis.indices,
-        originM: result.chestStationOriginM!,
-      });
+      const chestAfterMm =
+        measureMeshHorizontalSectionTapeGirthMmV1({
+          positionsM: result.positionsM,
+          triangleIndices: basis.indices,
+          originM: result.chestStationOriginM!,
+        }) ?? Number.NaN;
       if (chestStatusOf(result) === 'represented') {
         expect(Math.abs(chestAfterMm - 835)).toBeLessThanOrEqual(2);
       }

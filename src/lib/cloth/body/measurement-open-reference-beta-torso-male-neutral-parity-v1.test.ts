@@ -35,14 +35,20 @@ import { createMeasurementOpenReferenceUniformWaistHipRuntimeV1 } from './measur
  * chest-point plane the guide draws (station Y moved, new `chest-station:chest-point-template`
  * diagnostic), and the worker result carries the solved `shoulderChordVertices` for the guide.
  * Female is untouched by that lane; any other drift here is still a regression.
+ *
+ * Re-baselined a second time by the tape-girth lane, on purpose: typed chest, waist and hip are
+ * now solved to the tape (convex hull) girth of the section instead of the raw loop, which follows
+ * the spine groove and the hollows under the arms and so read 10-45 mm long. The depth proxy keeps
+ * the tape at its own and sibling stations, and the arm-length diagnostic was renamed to its true
+ * reason (`armLengthMm:centerline-proxy-not-acromion-sleeve`).
  */
 const EXPECTED_WORKER_SHA256 = {
-  male: 'ce63667f697af486a35b359901308dd4c57d8a8160017d01834b34accf813051',
-  neutral: '225eab424de16bb34e14e34a16d0b68534de5a89f28664eff7fad27da60b5109',
+  male: 'f42c288706802890ed39800d0c92c9359a57625c6188002a26897ee72b5795b4',
+  neutral: 'dff31b89514a20e5f2f141fc255df94ae49da312f67a6bd17e9eb927ef477f37',
 } as const;
 const EXPECTED_RUNTIME_SHA256 = {
-  male: 'a55a5aa2bf71cef88941f38c98bfd428f4972fad6d563c1657acb67a96bfaa73',
-  neutral: 'c1da43ca2afa83be308e5f9446646bb4d0f274b83e294f1f9f65db6bfaa5dc28',
+  male: '22d7316f05877bd9a9c62f35c6baf3cf222243683c93f9bb8d03432b9694c932',
+  neutral: '26cd3c9c5038289c71db1fdbe698aa3ad6bf8bbc6e59a3f259ef63320f80f2dd',
 } as const;
 
 const torsoBundle = parseMakeHumanTorsoShapeDeltaBundleV1(

@@ -8,6 +8,7 @@ import {
   type MeshPlaneSectionLoopV1,
   type MeshPlaneSectionVec3V1,
 } from './mesh-plane-section-perimeter-v1';
+import { meshPlaneSectionLoopTapePerimeterMV1 } from './mesh-plane-section-tape-girth-v1';
 
 export const MEASUREMENT_OPEN_REFERENCE_TORSO_DEPTH_PROXY_V1 =
   'measurement-open-reference-torso-depth-proxy/v1' as const;
@@ -73,6 +74,7 @@ export interface MeasurementOpenReferenceTorsoDepthModeResultV1 {
   readonly boundedTargetDepthMm: number;
   readonly baselineDepthMm: number;
   readonly achievedDepthMm: number;
+  /** Tape (convex hull) girth at the depth station, the quantity the depth field preserves. */
   readonly baselinePerimeterMm: number;
   readonly achievedPerimeterMm: number;
   readonly depthCoefficient: number;
@@ -121,7 +123,13 @@ const CLAIMS = Object.freeze({
 
 type StationSnapshotV1 = Readonly<{
   depthMm: number;
+  /** Raw plane-section loop length; held at protected stations (under bust). */
   perimeterMm: number;
+  /**
+   * Tape (convex hull) girth of the same loop. Chest, waist and hip are typed as tape girths and
+   * solved to them, so the depth field preserves this one at its own and sibling stations.
+   */
+  tapePerimeterMm: number;
   centerX: number;
   centerZ: number;
   radiusX: number;
@@ -214,6 +222,7 @@ function stationSnapshot(options: {
   return Object.freeze({
     depthMm: (maximumZ - minimumZ) * 1000,
     perimeterMm: loop.perimeterM * 1000,
+    tapePerimeterMm: meshPlaneSectionLoopTapePerimeterMV1(loop) * 1000,
     centerX: (minimumX + maximumX) / 2,
     centerZ: (minimumZ + maximumZ) / 2,
     radiusX: Math.max((maximumX - minimumX) / 2, 0.001),
@@ -467,8 +476,8 @@ export function solveMeasurementOpenReferenceTorsoDepthProxyV1(options: {
           boundedTargetDepthMm,
           baselineDepthMm: baseline.depthMm,
           achievedDepthMm: baseline.depthMm,
-          baselinePerimeterMm: baseline.perimeterMm,
-          achievedPerimeterMm: baseline.perimeterMm,
+          baselinePerimeterMm: baseline.tapePerimeterMm,
+          achievedPerimeterMm: baseline.tapePerimeterMm,
           depthCoefficient: 1,
           widthCoefficient: 1,
           maximumSiblingDepthDriftMm: 0,
@@ -505,7 +514,7 @@ export function solveMeasurementOpenReferenceTorsoDepthProxyV1(options: {
           triangleIndices: options.triangleIndices,
           originM: station.originM,
         });
-        const drift = measured.perimeterMm - baseline.perimeterMm;
+        const drift = measured.tapePerimeterMm - baseline.tapePerimeterMm;
         if (Math.abs(drift) < Math.abs(bestDrift)) {
           bestPositions = candidate;
           bestSnapshot = measured;
@@ -550,7 +559,9 @@ export function solveMeasurementOpenReferenceTorsoDepthProxyV1(options: {
       const depthResidualMm = Math.abs(
         candidate.snapshot.depthMm - (baseline.depthMm + requestedDeltaMm * fraction),
       );
-      const perimeterDriftMm = Math.abs(candidate.snapshot.perimeterMm - baseline.perimeterMm);
+      const perimeterDriftMm = Math.abs(
+        candidate.snapshot.tapePerimeterMm - baseline.tapePerimeterMm,
+      );
       if (
         depthResidualMm > policy.maximumDepthResidualMm ||
         perimeterDriftMm > policy.maximumCircumferenceDriftMm
@@ -570,7 +581,9 @@ export function solveMeasurementOpenReferenceTorsoDepthProxyV1(options: {
             originM: sibling.originM,
           });
           siblingDepthDrifts.push(Math.abs(measured.depthMm - siblingBaseline.depthMm));
-          siblingPerimeterDrifts.push(Math.abs(measured.perimeterMm - siblingBaseline.perimeterMm));
+          siblingPerimeterDrifts.push(
+            Math.abs(measured.tapePerimeterMm - siblingBaseline.tapePerimeterMm),
+          );
         }
       } catch {
         failureCode = 'section-invalid';
@@ -667,8 +680,8 @@ export function solveMeasurementOpenReferenceTorsoDepthProxyV1(options: {
         boundedTargetDepthMm,
         baselineDepthMm: baseline.depthMm,
         achievedDepthMm: accepted.snapshot.depthMm,
-        baselinePerimeterMm: baseline.perimeterMm,
-        achievedPerimeterMm: accepted.snapshot.perimeterMm,
+        baselinePerimeterMm: baseline.tapePerimeterMm,
+        achievedPerimeterMm: accepted.snapshot.tapePerimeterMm,
         depthCoefficient: accepted.depthCoefficient,
         widthCoefficient: accepted.widthCoefficient,
         maximumSiblingDepthDriftMm: accepted.siblingDepthDriftMm,

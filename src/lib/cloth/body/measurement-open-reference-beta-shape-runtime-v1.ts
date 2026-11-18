@@ -11,6 +11,10 @@ import {
   type MakeHuman2ArmLengthProxyAppliedV1,
 } from './makehuman2-pose-compatible-length-runtime-v1';
 import {
+  measureMeshTapeGirthClosureV1,
+  meshPlaneSectionLoopTapePerimeterMV1,
+} from './mesh-plane-section-tape-girth-v1';
+import {
   loadMakeHuman2PoseCompatibleLengthPackV1,
   MAKEHUMAN2_POSE_COMPATIBLE_LENGTH_PACK_METADATA_V1,
   type MakeHuman2PoseCompatibleLengthPackV1,
@@ -399,8 +403,11 @@ function measureUnshapedBaseChestMm(
       selection: { kind: 'nearest-seed', seedM: stationOriginM },
       policy: { weldToleranceM: 0.00002 },
     });
+    // Same tape (hull) girth the chest solve targets, so the halfway retry stays in one unit.
     const measuredMm =
-      section.ok && section.selectedLoop ? section.selectedLoop.perimeterM * 1000 : Number.NaN;
+      section.ok && section.selectedLoop
+        ? meshPlaneSectionLoopTapePerimeterMV1(section.selectedLoop) * 1000
+        : Number.NaN;
     return Number.isFinite(measuredMm) && measuredMm > 0 ? measuredMm : undefined;
   } catch {
     return undefined;
@@ -1124,11 +1131,15 @@ async function createBetaShapeRuntimeOnceV1(options: {
           armProxy: armLength,
         }),
       );
+      // Always limited, also when the proxy meets its target: the typed sleeve is applied as the
+      // upperarm-head -> lowerarm-head -> wrist-head joint centerline, which starts below and inside
+      // the acromion, so the acromion-to-wrist sleeve on the mannequin stays shorter than typed
+      // (ANSUR II check: about 50 mm on every base). The reason is the proxy, not a safe range.
       limited.push('armLengthMm');
       diagnostics.push(
         armLength.targetStatus === 'bounded-endpoint'
           ? 'armLengthMm:centerline-proxy-limited-to-bounded-endpoint'
-          : 'armLengthMm:centerline-proxy-applied',
+          : 'armLengthMm:centerline-proxy-not-acromion-sleeve',
       );
       shapedRuntime = withDisplayPositions(
         shapedRuntime,
@@ -1254,6 +1265,32 @@ async function createBetaShapeRuntimeOnceV1(options: {
         poseCompatibleArmLengthProxy: undefined,
       });
     }
+  }
+
+  // Typed chest/waist/hip are tape girths. Re-measure the tape on the final mesh, after every
+  // later stage and rollback: a girth whose tape misses the typed value is limited, never applied.
+  for (const closure of measureMeshTapeGirthClosureV1({
+    positionsM: shapedRuntime.displayMesh.positions,
+    triangleIndices: shapedRuntime.displayMesh.indices,
+    stations: {
+      chestCircumferenceMm: chestStationOriginM,
+      waistCircumferenceMm: options.waistHipRuntime.sectionModes?.find(
+        ({ measurementKey }) => measurementKey === 'waistCircumferenceMm',
+      )?.stationOriginM,
+      hipCircumferenceMm: options.waistHipRuntime.sectionModes?.find(
+        ({ measurementKey }) => measurementKey === 'hipCircumferenceMm',
+      )?.stationOriginM,
+    },
+    targetsMm: {
+      chestCircumferenceMm: options.measurements.chestCircumferenceMm,
+      waistCircumferenceMm: options.measurements.waistCircumferenceMm,
+      hipCircumferenceMm: options.measurements.hipCircumferenceMm,
+    },
+  })) {
+    if (closure.withinTolerance || !represented.includes(closure.key)) continue;
+    removeKey(represented, closure.key);
+    limited.push(closure.key);
+    diagnostics.push(`${closure.key}:final-tape-girth-limited`);
   }
 
   const representedVisualControls = stableKeys(represented);

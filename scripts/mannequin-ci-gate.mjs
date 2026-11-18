@@ -73,6 +73,7 @@ const unitFiles = Object.freeze([
   'src/lib/cloth/body/mesh-surface-topology-v1.test.ts',
   'src/lib/cloth/body/mesh-surface-path-v1.test.ts',
   'src/lib/cloth/body/mesh-surface-geodesic-v1.test.ts',
+  'src/lib/cloth/body/mesh-plane-section-tape-girth-v1.test.ts',
   'src/lib/cloth/body/measurement-surface-anchors-v1.test.ts',
   'src/lib/cloth/body/measurement-surface-anchors-morph-v1.test.ts',
 ]);

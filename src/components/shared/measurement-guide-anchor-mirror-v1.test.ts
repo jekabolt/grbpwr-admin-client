@@ -36,6 +36,7 @@ import { createMeasurementOpenReferenceLimbSubsetRuntimeV1 } from 'lib/cloth/bod
 import { createMeasurementOpenReferenceUniformWaistHipRuntimeV1 } from 'lib/cloth/body/measurement-open-reference-uniform-waist-hip-runtime-v1';
 import { snapMeshMirrorPairsV1 } from 'lib/cloth/body/mesh-mirror-pair-snap-v1';
 import { measureMeshPlaneSectionPerimetersV1 } from 'lib/cloth/body/mesh-plane-section-perimeter-v1';
+import { meshPlaneSectionLoopTapePerimeterMV1 } from 'lib/cloth/body/mesh-plane-section-tape-girth-v1';
 import { createMeshSurfaceTopologyV1 } from 'lib/cloth/body/mesh-surface-topology-v1';
 
 const readAsset = (path: string) => readFileSync(resolve(process.cwd(), path));
@@ -254,7 +255,8 @@ describe('measurement guide anchors on off-mirror bodies v1', () => {
       const points = pathPoints(guide.paths[0], built.mesh.positions);
       const offPlaneM = Math.max(...points.map((point) => Math.abs(point[1] - stationY)));
       expect(offPlaneM).toBeLessThan(0.0005);
-      // The skin ring on that plane is the girth the engine closed.
+      // The tape around the skin ring on that plane (its convex hull) is the girth the engine
+      // closed: typed chest is a tape girth, which bridges the hollows the raw loop follows.
       const ring = measureMeshPlaneSectionPerimetersV1({
         positionsM: built.mesh.positions,
         triangleIndices: built.mesh.indices,
@@ -264,10 +266,11 @@ describe('measurement guide anchors on off-mirror bodies v1', () => {
         policy: { weldToleranceM: 0.00002 },
       });
       expect(ring.ok && ring.selectedLoop).toBeTruthy();
-      expect(((ring.ok && ring.selectedLoop?.perimeterM) || NaN) * 1000).toBeCloseTo(
-        built.measurements.chestCircumferenceMm ?? NaN,
-        0,
-      );
+      expect(
+        (ring.ok && ring.selectedLoop
+          ? meshPlaneSectionLoopTapePerimeterMV1(ring.selectedLoop)
+          : NaN) * 1000,
+      ).toBeCloseTo(built.measurements.chestCircumferenceMm ?? NaN, 0);
     },
     180_000,
   );

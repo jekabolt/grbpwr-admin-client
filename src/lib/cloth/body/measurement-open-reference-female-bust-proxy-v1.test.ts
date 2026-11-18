@@ -187,14 +187,19 @@ function describeRow(label: string, result: ReturnType<typeof solve>, solveTimeM
   );
 }
 
+// Re-baselined by the tape-girth lane, on purpose: the bust is now solved to the tape (hull) girth
+// at the apex plane, which bridges the cleavage the raw loop dips into (about 50 mm at a full bust).
+// The deformation the quality gate admits is unchanged, so the represented range ends that much
+// lower on the tape. 840/680 left the represented pairs: its tape stops near 816 mm on every tried
+// height (quality fraction), and it is now asserted as honestly limited instead.
 const PRODUCTION_PAIRS = [
   [820, 720],
   [835, 715],
   [835, 725],
-  [840, 680],
   [860, 760],
   [870, 740],
 ] as const;
+const TAPE_LIMITED_PRODUCTION_PAIR = [840, 680] as const;
 
 describe('measurement open-reference female bust proxy v1', () => {
   // Every solve is synchronous. Yielding a macrotask between tests lets the worker answer
@@ -223,7 +228,8 @@ describe('measurement open-reference female bust proxy v1', () => {
     const rows: string[] = [];
     let previousForwardMm = Number.NEGATIVE_INFINITY;
     let previousArmpitLineMm = Number.NEGATIVE_INFINITY;
-    for (let targetMm = 770; targetMm <= 890; targetMm += 20) {
+    // Tape range at UB 720 ends at 860 (loop range was 770..910); see PRODUCTION_PAIRS.
+    for (let targetMm = 770; targetMm <= 850; targetMm += 20) {
       const { result, solveTimeMs } = timedSolve(testFixture, targetMm, 720);
       expect(result.status).toBe('represented');
       expect(result.underBust.status).toBe('represented');
@@ -293,6 +299,19 @@ describe('measurement open-reference female bust proxy v1', () => {
       expect(result.modeResult?.solveIterations).toBeLessThanOrEqual(3);
       return describeRow(`${chestMm}/${underBustMm}`, result, solveTimeMs);
     });
+    const [limitedChestMm, limitedUnderBustMm] = TAPE_LIMITED_PRODUCTION_PAIR;
+    const { result: limited, solveTimeMs } = timedSolve(
+      testFixture,
+      limitedChestMm,
+      limitedUnderBustMm,
+    );
+    expect(limited.status).toBe('limited');
+    expect(limited.diagnostics.map(({ code }) => code)).toContain('quality-fraction-limited');
+    expect(limited.modeResult?.achievedMm).toBeLessThan(limitedChestMm - 1);
+    expect(limited.underBust.status).toBe('represented');
+    expect(limited.underBust.absoluteResidualMm).toBeLessThanOrEqual(0.5);
+    expect(limited.qualityGate?.safe).toBe(true);
+    rows.push(describeRow(`${limitedChestMm}/${limitedUnderBustMm}`, limited, solveTimeMs));
     console.info(`[female bust production pairs 1720]\n${rows.join('\n')}`);
   }, 120_000);
 
@@ -344,7 +363,8 @@ describe('measurement open-reference female bust proxy v1', () => {
     const testFixture = fixture();
     const result = solve(testFixture, 820);
     expect(result.modeResult?.coefficient).toBe(0);
-    expect(result.underBust.coefficient).toBeCloseTo(-0.12, 2);
+    // Re-baselined from -0.12 by the tape-girth lane: the band now closes the tape girth.
+    expect(result.underBust.coefficient).toBeCloseTo(-0.103, 2);
     const baseUnderBustMm = perimeterMm(
       testFixture.display.mesh.positions,
       testFixture.display.mesh.indices,
@@ -395,6 +415,12 @@ describe('measurement open-reference female bust proxy v1', () => {
         expect(result.qualityGate?.safe).toBe(true);
         return describeRow(`${chestMm}/${underBustMm}`, result, solveTimeMs);
       });
+      const [limitedChestMm, limitedUnderBustMm] = TAPE_LIMITED_PRODUCTION_PAIR;
+      const limited = solve(testFixture, limitedChestMm, limitedUnderBustMm);
+      expect(limited.status).toBe('limited');
+      expect(limited.modeResult?.achievedMm).toBeLessThan(limitedChestMm - 1);
+      expect(limited.underBust.status).toBe('represented');
+      expect(limited.qualityGate?.safe).toBe(true);
       console.info(`[female bust production pairs ${heightMm}]\n${rows.join('\n')}`);
     },
     120_000,
@@ -403,10 +429,12 @@ describe('measurement open-reference female bust proxy v1', () => {
   // The represented chest range on a 10 mm grid starts within 10 mm of `first` and ends within
   // 10 mm of `last`. With statuses monotonic along the grid, that is exactly: represented at
   // first+10 and last-10, and chest limited at first-20 and last+20.
+  // Re-baselined by the tape-girth lane (was 730..860, 770..910, 810..960 on the loop): the lower
+  // ends hold, the upper ends are the same admitted deformation read on the tape.
   it.each([
-    [680, 730, 860],
-    [720, 770, 910],
-    [760, 810, 960],
+    [680, 730, 810],
+    [720, 770, 860],
+    [760, 810, 900],
   ] as const)(
     '8. keeps the UB %i represented chest range within 10 mm of %i..%i',
     (underBustMm, expectedFirstMm, expectedLastMm) => {
