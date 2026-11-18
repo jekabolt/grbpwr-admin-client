@@ -173,6 +173,9 @@ export type PatternImportDxfPhaseEDraftCadWorkspacePropsV1 = Readonly<{
   prepareSavedDartTip?: () => ReturnType<
     typeof import('./draft-cad-saved-dart-tip-review-v1').compileSavedDartTipReviewV1
   >;
+  prepareSavedGeometryReview?: () => ReturnType<
+    typeof import('./draft-cad-saved-dart-tip-review-v1').compileSavedDraftGeometryReviewV1
+  >;
   prepareSavedPairedAllowance?: () => Promise<SavedDraftPairedAllowanceAuthorityV1>;
   onSelectMaterialScope?: (scopeKey: string) => void;
   workspaceContextControl?: ReactNode;
@@ -212,6 +215,7 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
   prepareSavedAddPointReview,
   prepareSavedPairedAllowance,
   prepareSavedDartTip,
+  prepareSavedGeometryReview = prepareSavedDartTip,
   prepareSavedPieceCopyReview,
   onSelectMaterialScope,
   workspaceContextControl,
@@ -320,7 +324,7 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
       : null;
   const dartInput = { session, projection, selection, compileSource };
   const savedDart =
-    selectedForCopy && prepareSavedDartTip && compiledReimportCapability.available
+    selectedForCopy && prepareSavedGeometryReview && compiledReimportCapability.available
       ? selectSavedDartTipV1(dartInput, selectedForCopy)
       : null;
   const copySelection = useRef<SavedCopySelectionV1 | null>(null);
@@ -506,7 +510,7 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
       input,
       prepareSavedAddPointReview,
       prepareSavedPairedAllowance,
-      prepareSavedDartTip,
+      prepareSavedGeometryReview,
     );
     if (compiledReimportEpoch.current !== epoch) return;
     setCompileState(executePatternImportDxfPhaseEDraftCadCompileUiActionV1(input, () => result));
@@ -889,6 +893,9 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
             ) : null}
           </div>
           <PatternImportDxfPhaseEDraftCadCanvasV1
+            allowSavedParallelOpening={Boolean(
+              prepareSavedGeometryReview && compiledReimportCapability.available,
+            )}
             session={session}
             projection={projection}
             scopeKey={topologyScopeKey}

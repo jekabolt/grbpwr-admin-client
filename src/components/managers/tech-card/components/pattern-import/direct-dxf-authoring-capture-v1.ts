@@ -1,3 +1,4 @@
+import { savedReviewLabelV1 } from './phase-e-workbench-v2/draft-cad-saved-dart-tip-file-v1';
 import {
   isSavedDartTipReviewFileV1,
   bindSavedDartTipWizardScopeV1,
@@ -98,7 +99,7 @@ export async function applyDirectDxfReviewedDraftV1(
   )
     throw new Error(
       pinnedSavedFile && isSavedDartTipReviewFileV1(pinnedSavedFile)
-        ? 'The original saved dart review File is no longer available.'
+        ? `The original ${savedReviewLabelV1(pinnedSavedFile)} review File is no longer available.`
         : 'The original unlinked copy File or its review is no longer available.',
     );
   await verifySavedDartTipApplyV1(draft, files, autopilotToken != null, isCurrent);

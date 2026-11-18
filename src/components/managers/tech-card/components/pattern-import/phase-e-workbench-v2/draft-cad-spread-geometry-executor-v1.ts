@@ -266,13 +266,14 @@ function derivedIdentity(
   source: PieceSpec,
   cut: CutCommand,
   spread: SpreadCommand,
+  pivot: PtMm,
 ): readonly [string, string] {
   const fingerprint = fnv1a64(
     JSON.stringify({
       source: source.identity,
       line: spread.target.pieceLineKey,
       cut: normalizedCut(cut.payload.pointsMm),
-      pivot: normalizedPoint(spread.payload.pivotMm),
+      pivot: normalizedPoint(pivot),
       amountMm: spread.payload.amountMm,
     }),
   )
@@ -303,6 +304,7 @@ export function executePatternImportDxfPhaseEDraftCadSpreadGeometryV1(
     spread.payload.cutLineEntityId !== cut.payload.entityId ||
     spread.target.pieceId !== cut.target.pieceId ||
     spread.target.pieceLineKey !== cut.target.pieceLineKey ||
+    spread.payload.mode === 'parallel' ||
     !finitePoint(spread.payload.pivotMm)
   )
     return blocked(
@@ -317,6 +319,7 @@ export function executePatternImportDxfPhaseEDraftCadSpreadGeometryV1(
       spread.target.pieceId,
     );
 
+  const pivotMm = spread.payload.pivotMm;
   const sourceMatches = sourceJob.pieces.filter(
     ({ identity }) => identity === spread.target.pieceId,
   );
@@ -367,7 +370,7 @@ export function executePatternImportDxfPhaseEDraftCadSpreadGeometryV1(
         `Spread size ${stationarySize.sizeToken} does not expose exactly two slash endpoints.`,
         source.identity,
       );
-    const pivotMatches = shared.filter((point) => samePoint(point, spread.payload.pivotMm));
+    const pivotMatches = shared.filter((point) => samePoint(point, pivotMm));
     if (pivotMatches.length !== 1)
       return blocked(
         'invalid-pivot',
@@ -422,7 +425,7 @@ export function executePatternImportDxfPhaseEDraftCadSpreadGeometryV1(
       source.identity,
     );
 
-  const identities = derivedIdentity(source, cut, spread);
+  const identities = derivedIdentity(source, cut, spread, pivotMm);
   if (
     job.pieces.some(
       (piece) =>

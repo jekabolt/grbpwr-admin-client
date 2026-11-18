@@ -1,3 +1,4 @@
+import { parallelOpeningAxisV1 } from './draft-cad-session-v1';
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 import { signedArea } from 'lib/pattern-import/semantics/geom';
 import type { AuthoredNotchShape, PtMm } from 'lib/pattern-import/types';
@@ -719,6 +720,34 @@ export function buildPatternImportDxfPhaseEDraftCadPreviewV1(
             candidate.target.pieceId === command.target.pieceId &&
             candidate.target.pieceLineKey === command.target.pieceLineKey,
         );
+        if (command.payload.mode === 'parallel') {
+          const axis = cut?.tool === 'cut' && parallelOpeningAxisV1(cut.payload.pointsMm);
+          if (!axis || cut?.tool !== 'cut' || !(command.payload.amountMm > 0)) {
+            blockers.push(
+              commandBlocker(
+                command,
+                'anchor-unavailable',
+                'Choose a registered horizontal or vertical Cut on this piece.',
+              ),
+            );
+            break;
+          }
+          const delta =
+            command.payload.amountMm * (command.payload.movingSide === 'positive' ? 1 : -1);
+          const pointsMm = cut.payload.pointsMm.map((p) => ({ ...p, [axis]: p[axis] + delta }));
+          primitives.push(
+            deepFreeze({
+              ...base,
+              kind: 'path' as const,
+              pointsMm,
+              closed: false,
+              role: 'construction' as const,
+              stroke: 'dashed' as const,
+            }),
+          );
+          bounds = extendPoints(bounds, pointsMm);
+          break;
+        }
         const pivotMm = clonePoint(command.payload.pivotMm);
         if (!cut || !finitePoint(pivotMm) || !(command.payload.amountMm > 0)) {
           blockers.push(

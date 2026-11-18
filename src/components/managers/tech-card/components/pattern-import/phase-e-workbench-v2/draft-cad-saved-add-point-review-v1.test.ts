@@ -7,7 +7,7 @@ import {
   createSavedThreePanelSourceV1,
   digestFullAssemblyFixture,
 } from './saved-full-assembly-compile-session-v1.test-fixture';
-import { bboxOf, areaOf } from 'lib/pattern-import/semantics/geom';
+import { bboxOf, areaOf, signedArea } from 'lib/pattern-import/semantics/geom';
 import { writeDxfDetailed } from 'lib/pattern-import/write';
 import { readProtectedLineSplit } from 'lib/pattern-import/write/read-protected-line-split';
 import { readManifest, embedManifest } from 'lib/pattern-import/manifest';
@@ -36,6 +36,7 @@ async function fixture(
   fiveRanks = false,
   nativeDarts: boolean | 'orphan' | 'ambiguous' = false,
   sourceDialect: 'r12' | 'r2000' = 'r12',
+  spreadHoles = false,
 ) {
   const seed = await createSavedThreePanelFixtureV1(2);
   if (stable) {
@@ -87,6 +88,22 @@ async function fixture(
         };
       });
     }
+  }
+  if (spreadHoles) {
+    for (const piece of seed.job.pieces)
+      for (const size of piece.sizes) {
+        const { minX, minY } = size.bbox;
+        const hole = (x: number, y: number) => [
+          { x, y },
+          { x, y: y + 7 },
+          { x: x + 8, y: y + 7 },
+          { x: x + 8, y },
+        ];
+        size.cutLoops = [hole(minX + 13, minY + 30), hole(minX + 70, minY + 50)];
+        size.areaMm2 -= 112;
+        size.pointMarks = [{ kind: 'draft-point', at: { x: minX + 22, y: minY + 20 } }];
+        size.textMarks = [{ text: 'Pocket', at: { x: minX + 75, y: minY + 20 } }];
+      }
   }
   seed.job.dialect = sourceDialect;
   if (nativeDarts) {
@@ -2056,12 +2073,19 @@ it('reopens a native text mark without turning it into size, fold or quantity me
 });
 
 async function checkNativeOutlinePointEdit(
-  tool: 'move-point' | 'delete-point' | 'dart-tip',
+  tool: 'move-point' | 'delete-point' | 'dart-tip' | 'parallel-spread',
   fiveRanks = false,
   sourceDialect: 'r12' | 'r2000' = 'r12',
 ) {
   vi.stubGlobal('Worker', InProcessTransport);
-  const f = await fixture(true, false, fiveRanks, tool === 'dart-tip', sourceDialect);
+  const f = await fixture(
+    true,
+    false,
+    fiveRanks,
+    tool === 'dart-tip',
+    sourceDialect,
+    tool === 'parallel-spread',
+  );
   const worker = new ImportWorkerClient();
   const reviewFiles: File[] = [];
   const unregister = registerPatternImportDxfPhaseEPatternsFieldCompiledReimportOwnerV1({
@@ -2117,8 +2141,40 @@ async function checkNativeOutlinePointEdit(
     const savedDart = tool === 'dart-tip' ? selectSavedDartTipV1(emptyInput, targetPiece) : null;
     const nextTip = savedDart ? { x: savedDart.apexMm.x + 3, y: savedDart.apexMm.y - 4 } : null;
     const movedDart = nextTip && recordSavedDartTipV1(emptyInput, targetPiece, nextTip);
-    const edit =
-      tool === 'dart-tip'
+    const selected = targetPiece.contours.find((c) => c.role === 'cut-boundary')!;
+    const bounds = bboxOf(selected.vertices.map((v) => v.pointMm)),
+      slashX = bounds.minX + 38;
+    let spreadSession: typeof f.initial | null = null;
+    if (tool === 'parallel-spread') {
+      const canvas = await import('./draft-cad-canvas-v1');
+      const target = { pieceId: targetPiece.pieceId, pieceLineKey: targetPiece.pieceLineKey };
+      const cut = recordPatternImportDxfPhaseEDraftCadTransactionV1(f.initial, {
+        transactionId: 'initial-cut',
+        label: 'Vertical cut',
+        commands: [
+          {
+            tool: 'cut',
+            commandId: 'first-cut',
+            target,
+            payload: {
+              pointsMm: [
+                { x: slashX, y: bounds.minY - 30 },
+                { x: slashX, y: bounds.maxY + 30 },
+              ],
+              keepSide: 'both',
+              entityId: 'first-slash',
+            },
+          },
+        ],
+      });
+      if (!cut.ok) throw Error(cut.blocker.detail);
+      const spread = canvas.recordDraftParallelOpeningV1(cut.session, target, 12, 1);
+      if (!spread?.recorded.ok) throw Error('The selected Cut could not register the opening.');
+      spreadSession = spread.recorded.session;
+    }
+    const edit = spreadSession
+      ? { recorded: true, blocker: null, session: spreadSession }
+      : tool === 'dart-tip'
         ? {
             recorded: movedDart?.ok,
             blocker: movedDart?.blocker?.detail,
@@ -2134,7 +2190,9 @@ async function checkNativeOutlinePointEdit(
       { ...f.compileInput, session: edit.session },
       undefined,
       undefined,
-      tool === 'dart-tip' ? () => compileSavedDartTipReviewV1(f.request, verifyRow) : undefined,
+      tool === 'dart-tip' || tool === 'parallel-spread'
+        ? () => compileSavedDartTipReviewV1(f.request, verifyRow)
+        : undefined,
     );
     if (!compiled.ok) throw Error(JSON.stringify(compiled.blockers));
     expect(
@@ -2164,7 +2222,7 @@ async function checkNativeOutlinePointEdit(
     const scope = reviewed.scopes[0]!;
     expect(scope.manifest.gate?.passed).toBe(true);
     expect(upload).not.toHaveBeenCalled();
-    if (tool === 'dart-tip') {
+    if (tool === 'dart-tip' || tool === 'parallel-spread') {
       const noWrite = vi.fn();
       await expect(
         applyDirectDxfReviewedDraftV1(reviewed, [file], 1, () => true, noWrite),
@@ -2182,7 +2240,7 @@ async function checkNativeOutlinePointEdit(
           noWrite,
           file,
         ),
-      ).rejects.toThrow('original saved dart');
+      ).rejects.toThrow(tool === 'dart-tip' ? 'original saved dart' : 'original parallel opening');
       const originalText = scope.dxfText;
       scope.dxfText += '\n';
       await expect(
@@ -2196,7 +2254,7 @@ async function checkNativeOutlinePointEdit(
       otherSize.cut = oldCut.map((p, i) => (i === 0 ? { ...p, x: p.x + 1 } : p));
       await expect(
         applyDirectDxfReviewedDraftV1(reviewed, [file], undefined, () => true, noWrite, file),
-      ).rejects.toThrow('size blocks changed');
+      ).rejects.toThrow(tool === 'dart-tip' ? 'size blocks changed' : 'another size changed');
       otherSize.cut = oldCut;
       const before = f.current.row;
       f.current.row = { ...before, revision: before.revision + 1 };
@@ -2283,6 +2341,56 @@ async function checkNativeOutlinePointEdit(
     const reopened = await createSavedThreePanelSourceV1({ ...f.seed, bytes, row, card }, true);
     try {
       expect(reopened.native.row).toEqual(row);
+      if (tool === 'parallel-spread') {
+        const before = f.source.native.draft.scopes[0]!,
+          after = reopened.native.draft.scopes[0]!;
+        expect(after.manifest.sizes).toEqual(before.manifest.sizes);
+        expect(
+          after.manifest.blocks.map((b) => [b.identity, b.sizeToken, b.sizeId, b.block]),
+        ).toEqual(before.manifest.blocks.map((b) => [b.identity, b.sizeToken, b.sizeId, b.block]));
+        expect(
+          card.existingAliases?.filter((a) => a.pieceLineKey === targetPiece.pieceLineKey).length,
+        ).toBeGreaterThan(0);
+        for (const piece of before.writerReplay!.job.pieces) {
+          const saved = after.writerReplay!.job.pieces.find((p) => p.identity === piece.identity)!;
+          expect(saved.sizes.map((s) => s.sizeToken)).toEqual(garmentRanks);
+          for (const priorSize of piece.sizes) {
+            const restored = saved.sizes.find((s) => s.sizeToken === priorSize.sizeToken)!;
+            const dx = restored.bbox.minX - priorSize.bbox.minX,
+              dy = restored.bbox.minY - priorSize.bbox.minY;
+            const edited = piece.identity === targetPiece.pieceId;
+            const map = (p: { x: number; y: number }) => ({
+              x: p.x + dx + (edited && p.x > slashX ? 12 : 0),
+              y: p.y + dy,
+            });
+            const sameRing = (a: typeof restored.cut, b: typeof restored.cut) =>
+              expect(a.map((p) => JSON.stringify(p)).sort()).toEqual(
+                b.map((p) => JSON.stringify(p)).sort(),
+              );
+            sameRing(restored.cut, priorSize.cut.map(map));
+            sameRing(restored.seam!, priorSize.seam!.map(map));
+            expect(priorSize.cutLoops).toHaveLength(2);
+            expect(restored.cutLoops).toHaveLength(2);
+            for (const [i, loop] of priorSize.cutLoops!.entries()) {
+              sameRing(restored.cutLoops![i]!, loop.map(map));
+              expect(signedArea(restored.cutLoops![i]!)).toBeLessThan(0);
+            }
+            expect(restored.grain?.a).toEqual(map(priorSize.grain!.a));
+            expect(restored.grain?.b).toEqual(map(priorSize.grain!.b));
+            expect(restored.pointMarks).toEqual(
+              priorSize.pointMarks!.map((m) => ({ ...m, at: map(m.at) })),
+            );
+            expect(restored.textMarks).toEqual(
+              priorSize.textMarks!.map((m) => ({ ...m, at: map(m.at) })),
+            );
+            expect(restored.areaMm2 - priorSize.areaMm2).toBeCloseTo(
+              edited ? 12 * (priorSize.bbox.maxY - priorSize.bbox.minY) : 0,
+              6,
+            );
+          }
+        }
+        return;
+      }
       if (tool === 'dart-tip') {
         cancelSavedDartTipReviewV1(file);
         const closedWrite = vi.fn();
@@ -2521,4 +2629,9 @@ it.each(['orphan', 'ambiguous'] as const)(
       vi.unstubAllGlobals();
     }
   },
+);
+
+it.each(['r12', 'r2000'] as const)(
+  'applies a parallel opening to the saved %s piece and keeps ten graded blocks with their holes',
+  (dialect) => checkNativeOutlinePointEdit('parallel-spread', true, dialect),
 );

@@ -384,7 +384,9 @@ function commandParameters(
     case 'spread':
       return Object.freeze([
         Object.freeze({ label: 'Amount', value: `${command.payload.amountMm} mm` }),
-        Object.freeze({ label: 'Pivot', value: pointLabel(command.payload.pivotMm) }),
+        command.payload.mode === 'parallel'
+          ? Object.freeze({ label: 'Parallel opening', value: command.payload.movingSide })
+          : Object.freeze({ label: 'Pivot', value: pointLabel(command.payload.pivotMm) }),
         Object.freeze({ label: 'Cut', value: command.payload.cutLineEntityId }),
       ]);
     case 'dart':
@@ -538,7 +540,9 @@ function cadCommandShapeValid(command: PatternImportDxfPhaseEDraftCadCommandV1):
     );
   if (command.tool === 'spread')
     return (
-      finitePoint(command.payload.pivotMm) &&
+      (command.payload.mode === 'parallel'
+        ? ['positive', 'negative'].includes(command.payload.movingSide)
+        : finitePoint(command.payload.pivotMm)) &&
       CAD_STABLE_ID.test(command.payload.cutLineEntityId) &&
       Number.isFinite(command.payload.amountMm) &&
       command.payload.amountMm > 0

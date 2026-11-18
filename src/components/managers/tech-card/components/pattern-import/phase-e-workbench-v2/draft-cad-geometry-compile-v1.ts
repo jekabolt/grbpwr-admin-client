@@ -1,4 +1,5 @@
-import { hasSavedDartTipSourceV1 } from './draft-cad-saved-dart-tip-review-v1';
+import { applyDraftParallelSpreadV1 } from './draft-cad-parallel-spread-v1';
+import { hasSavedDraftGeometrySourceV1 } from './draft-cad-saved-dart-tip-review-v1';
 import { sameDartVertices } from './draft-cad-saved-dart-tip-v1';
 import { applyAffine, closestOnPolyline, pointInPolygon } from 'lib/pattern-import/semantics/geom';
 import { normalizeAuthoredText } from 'lib/pattern-import/manifest/authored-text';
@@ -107,6 +108,7 @@ export type PatternImportDxfPhaseEDraftCadCompiledFeatureV1 = Readonly<{
     | 'piece-create'
     | 'split'
     | 'slash-guide'
+    | 'parallel-spread'
     | 'spread';
   derivedPieceIds?: readonly [string, string];
   /** Session-local topology identity; the ordinary re-import remains canonical topology owner. */
@@ -813,6 +815,47 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
     if (command.tool === 'spread') {
       const pairedCut = spreadPair.get(command.commandId);
       const cutPrimitive = pairedCut ? primitiveFor(preview.primitives, pairedCut) : null;
+      if (command.payload.mode === 'parallel') {
+        if (
+          !hasSavedDraftGeometrySourceV1(input) ||
+          !pairedCut ||
+          commands.length !== 2 ||
+          commands[0]?.commandId !== pairedCut.commandId ||
+          commands[1]?.commandId !== command.commandId ||
+          replay.retainedLineSplit ||
+          primitive.kind !== 'path' ||
+          primitive.role !== 'construction' ||
+          cutPrimitive?.kind !== 'path' ||
+          cutPrimitive.role !== 'cut-intent'
+        )
+          return blocked(
+            'spread-geometry-blocked',
+            'Use one registered Cut followed by one parallel opening on its original piece.',
+            command,
+          );
+        const opened = applyDraftParallelSpreadV1(job, pairedCut, command);
+        if (!opened.ok) return blocked('spread-geometry-blocked', opened.detail, command);
+        job = opened.job;
+        compiledFeatures.push(
+          {
+            commandId: pairedCut.commandId,
+            entityId: pairedCut.payload.entityId,
+            tool: 'cut',
+            pieceId: pairedCut.target.pieceId,
+            sizeToken: selected.sizeToken,
+            output: 'slash-guide',
+          },
+          {
+            commandId: command.commandId,
+            entityId: command.payload.entityId,
+            tool: 'spread',
+            pieceId: command.target.pieceId,
+            sizeToken: selected.sizeToken,
+            output: 'parallel-spread',
+          },
+        );
+        continue;
+      }
       if (
         primitive.kind !== 'point' ||
         primitive.indicator !== 'cross' ||
@@ -962,7 +1005,7 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
         const tip = command.payload.savedTip,
           dart = size.internal[tip.index];
         if (
-          !hasSavedDartTipSourceV1(input) ||
+          !hasSavedDraftGeometrySourceV1(input) ||
           commands.length !== 1 ||
           dart?.label !== 'draft-cad:dart' ||
           dart.closed ||

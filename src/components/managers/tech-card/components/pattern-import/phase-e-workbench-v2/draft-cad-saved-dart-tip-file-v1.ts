@@ -5,8 +5,15 @@ type Verify = (draft: CardDraft, scope: Scope, isCurrent: () => boolean) => Prom
 const files = new WeakMap<File, Verify | null>();
 const scopes = new WeakMap<Scope, { file: File; text: string }>();
 
-export function registerSavedDartTipFileV1(file: File, verify: Verify) {
+const labels = new WeakMap<File, 'saved dart' | 'parallel opening'>();
+export const savedReviewLabelV1 = (file: File) => labels.get(file) ?? 'saved geometry';
+export function registerSavedDartTipFileV1(
+  file: File,
+  verify: Verify,
+  label: 'saved dart' | 'parallel opening' = 'saved dart',
+) {
   if (files.has(file)) throw new Error('This dart review File is already bound.');
+  labels.set(file, label);
   files.set(file, verify);
 }
 export const isSavedDartTipReviewFileV1 = (file: File) => files.has(file);
@@ -36,6 +43,6 @@ export async function verifySavedDartTipApplyV1(
     scopes.get(scope)?.file !== file ||
     scopes.get(scope)?.text !== scope.dxfText
   )
-    throw new Error('Confirm the current saved dart review with Apply.');
+    throw new Error('Confirm the current saved geometry review with Apply.');
   await verify(draft, scope, () => files.get(file) === verify && isCurrent());
 }

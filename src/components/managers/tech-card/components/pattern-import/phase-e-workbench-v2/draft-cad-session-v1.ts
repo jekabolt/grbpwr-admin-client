@@ -64,6 +64,15 @@ export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_PRODUCTIVE_TOOLS_V1 = Object.f
   'notch',
 ] as const satisfies readonly PatternImportDxfPhaseEDraftCadToolV1[]);
 
+export function validParallelDisplacementV1(amount: number) {
+  return Number.isFinite(amount) && amount !== 0 && Number(amount.toFixed(6)) === amount;
+}
+export function parallelOpeningAxisV1(points: readonly PtMm[]) {
+  const [a, b] = points;
+  if (points.length !== 2 || !a || !b) return null;
+  return a.x === b.x && a.y !== b.y ? 'x' : a.y === b.y && a.x !== b.x ? 'y' : null;
+}
+
 export type PatternImportDxfPhaseEDraftCadTargetV1 = Readonly<
   Pick<
     PatternImportDxfProductPhaseEAuthoringCatalogV1['pieces'][number],
@@ -227,10 +236,12 @@ export type PatternImportDxfPhaseEDraftCadCommandV1 =
       'spread',
       {
         entityId: string;
-        pivotMm: PtMm;
         cutLineEntityId: string;
         amountMm: number;
-      }
+      } & (
+        | { mode?: 'pivot'; pivotMm: PtMm }
+        | { mode: 'parallel'; movingSide: 'positive' | 'negative' }
+      )
     >
   | Command<
       'gather',
@@ -552,7 +563,10 @@ function validCommand(value: unknown): value is PatternImportDxfPhaseEDraftCadCo
       );
     case 'spread':
       return (
-        point(payload.pivotMm) &&
+        (payload.mode === 'parallel'
+          ? payload.pivotMm === undefined &&
+            (payload.movingSide === 'positive' || payload.movingSide === 'negative')
+          : (payload.mode === undefined || payload.mode === 'pivot') && point(payload.pivotMm)) &&
         stableId(payload.cutLineEntityId) &&
         finitePositive(payload.amountMm)
       );

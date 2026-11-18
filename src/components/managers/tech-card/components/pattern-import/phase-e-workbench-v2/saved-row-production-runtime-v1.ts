@@ -82,7 +82,13 @@ export type PatternImportDxfPhaseESavedRowProductionRuntimeV1 = Readonly<{
     row: DxfProductSavedRowIdentityV1,
     readCurrent: () => Omit<SavedAddPointCurrentV1, 'card'> | null,
   ) => ReturnType<
-    typeof import('./draft-cad-saved-dart-tip-review-v1').compileSavedDartTipReviewV1
+    typeof import('./draft-cad-saved-dart-tip-review-v1').compileSavedDraftGeometryReviewV1
+  >;
+  prepareSavedGeometryReview?: (
+    row: DxfProductSavedRowIdentityV1,
+    readCurrent: () => Omit<SavedAddPointCurrentV1, 'card'> | null,
+  ) => ReturnType<
+    typeof import('./draft-cad-saved-dart-tip-review-v1').compileSavedDraftGeometryReviewV1
   >;
   prepareSavedPairedAllowance?: (
     row: DxfProductSavedRowIdentityV1,
@@ -272,6 +278,35 @@ export function createPatternImportDxfPhaseESavedRowRuntimeV1(
     }
   }
 
+  const prepareSavedGeometryReview: NonNullable<
+    PatternImportDxfPhaseESavedRowProductionRuntimeV1['prepareSavedGeometryReview']
+  > = async (row, readCurrent) => {
+    const opening = readCurrent(),
+      command = opening?.session.history[0]?.commands[0];
+    if (!((command?.tool === 'dart' && command.payload.savedTip) || command?.tool === 'cut'))
+      throw new Error('Select the original saved geometry.');
+    return withSavedDraftSource(
+      row,
+      command.target.pieceId,
+      async (proof, card, readCurrentRow) => {
+        const { compileSavedDraftGeometryReviewV1 } = await import(
+          './draft-cad-saved-dart-tip-review-v1'
+        );
+        return compileSavedDraftGeometryReviewV1(
+          {
+            ...proof,
+            readCurrent: () => {
+              const current = readCurrent();
+              return !disposed && current ? { ...current, card } : null;
+            },
+          },
+          async () => {
+            await readCurrentRow();
+          },
+        );
+      },
+    );
+  };
   const preparationOwner = createPatternImportDxfPhaseESavedRowPreparationOwnerV1({
     createSavedReprocessHost,
     readAuthoritativeAssembly: deps.snapshot.authorityAdapter.readAuthoritativeAssembly,
@@ -312,33 +347,8 @@ export function createPatternImportDxfPhaseESavedRowRuntimeV1(
         },
       );
     },
-    async prepareSavedDartTip(row, readCurrent) {
-      const opening = readCurrent(),
-        command = opening?.session.history[0]?.commands[0];
-      if (command?.tool !== 'dart' || !command.payload.savedTip)
-        throw new Error('Select the original saved dart.');
-      return withSavedDraftSource(
-        row,
-        command.target.pieceId,
-        async (proof, card, readCurrentRow) => {
-          const { compileSavedDartTipReviewV1 } = await import(
-            './draft-cad-saved-dart-tip-review-v1'
-          );
-          return compileSavedDartTipReviewV1(
-            {
-              ...proof,
-              readCurrent: () => {
-                const current = readCurrent();
-                return !disposed && current ? { ...current, card } : null;
-              },
-            },
-            async () => {
-              await readCurrentRow();
-            },
-          );
-        },
-      );
-    },
+    prepareSavedGeometryReview,
+    prepareSavedDartTip: prepareSavedGeometryReview,
     async prepareSavedPairedAllowance(row, readCurrent) {
       const opening = readCurrent();
       const command = opening?.session.history[0]?.commands[0];

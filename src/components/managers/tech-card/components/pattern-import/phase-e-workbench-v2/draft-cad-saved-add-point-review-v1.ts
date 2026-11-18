@@ -329,17 +329,19 @@ export async function compileDraftForOrdinaryReviewV1(
   input: PatternImportDxfPhaseEDraftCadGeometryCompileInputV1,
   prepare?: () => Promise<SavedAddPointReviewOwner>,
   prepareAllowance?: () => Promise<SavedDraftPairedAllowanceAuthorityV1>,
-  prepareDart?: () => Promise<PatternImportDxfPhaseEDraftCadGeometryCompileResultV1>,
+  prepareGeometry?: () => Promise<PatternImportDxfPhaseEDraftCadGeometryCompileResultV1>,
 ): Promise<PatternImportDxfPhaseEDraftCadGeometryCompileResultV1> {
   const commands = input.session.history
     .slice(0, input.session.cursor)
     .flatMap((tx) => tx.commands);
-  if (
-    commands.some((command) => command.tool === 'dart' && command.payload.savedTip) &&
-    prepareDart
-  ) {
+  const savedEdit = commands.find(
+    (command) =>
+      (command.tool === 'dart' && command.payload.savedTip) ||
+      (command.tool === 'spread' && command.payload.mode === 'parallel'),
+  );
+  if (savedEdit && prepareGeometry) {
     try {
-      return await prepareDart();
+      return await prepareGeometry();
     } catch (error) {
       return {
         ok: false,
@@ -347,9 +349,9 @@ export async function compileDraftForOrdinaryReviewV1(
         blockers: [
           {
             code: 'source-binding-mismatch',
-            tool: 'dart',
-            commandId: commands[0]?.commandId ?? null,
-            detail: error instanceof Error ? error.message : 'The saved dart changed.',
+            tool: savedEdit.tool,
+            commandId: savedEdit.commandId,
+            detail: error instanceof Error ? error.message : 'The saved geometry changed.',
           },
         ],
       };

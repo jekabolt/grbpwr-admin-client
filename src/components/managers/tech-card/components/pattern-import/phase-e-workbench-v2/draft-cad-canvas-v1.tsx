@@ -1,3 +1,4 @@
+import { parallelOpeningAxisV1, validParallelDisplacementV1 } from './draft-cad-session-v1';
 import {
   useEffect,
   useMemo,
@@ -98,6 +99,7 @@ export type PatternImportDxfPhaseEDraftCadCanvasPropsV1 = Readonly<{
   activePieceIndex: number;
   activeDraftPieceId?: string | null;
   activeTool: PatternImportDxfPhaseEDraftCadToolV1;
+  allowSavedParallelOpening?: boolean;
   arrangeActive?: boolean;
   panActive?: boolean;
   crossScopeConnectActive?: boolean;
@@ -163,6 +165,7 @@ type BoundaryPickInput = Readonly<{
 }>;
 
 type PointInput = Readonly<{
+  cutDirection?: 'free' | 'vertical' | 'horizontal';
   session: PatternImportDxfPhaseEDraftCadSessionV1;
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
   activePieceIndex: number;
@@ -358,6 +361,43 @@ function nextIds(session: PatternImportDxfPhaseEDraftCadSessionV1, sequence: num
   } as const;
 }
 
+export function recordDraftParallelOpeningV1(
+  session: PatternImportDxfPhaseEDraftCadSessionV1,
+  target: { pieceId: string; pieceLineKey: string },
+  amount: number,
+  sequence: number,
+) {
+  const commands = session.history.slice(0, session.cursor).flatMap((tx) => tx.commands);
+  const cut = commands.length === 1 ? commands[0] : null;
+  if (
+    cut?.tool !== 'cut' ||
+    cut.target.pieceId !== target.pieceId ||
+    cut.target.pieceLineKey !== target.pieceLineKey ||
+    !parallelOpeningAxisV1(cut.payload.pointsMm) ||
+    !validParallelDisplacementV1(amount)
+  )
+    return null;
+  const ids = nextIds(session, sequence);
+  const recorded = recordPatternImportDxfPhaseEDraftCadTransactionV1(session, {
+    transactionId: ids.transactionId,
+    label: 'Parallel spread',
+    commands: [
+      {
+        commandId: ids.commandId,
+        tool: 'spread',
+        target: cut.target,
+        payload: {
+          mode: 'parallel',
+          cutLineEntityId: cut.payload.entityId,
+          entityId: ids.entityId,
+          amountMm: Math.abs(amount),
+          movingSide: amount > 0 ? 'positive' : 'negative',
+        },
+      },
+    ],
+  });
+  return { recorded, sequence: ids.sequence };
+}
 type OutlinePointEditInput = Pick<
   PointInput,
   'session' | 'projection' | 'activePieceIndex' | 'sequence'
@@ -743,7 +783,18 @@ function commandForPoint(
         command: {
           ...common,
           tool: 'cut',
-          payload: { entityId: ids.entityId, pointsMm: [from, input.pointMm], keepSide: 'both' },
+          payload: {
+            entityId: ids.entityId,
+            pointsMm: [
+              from,
+              input.cutDirection === 'vertical'
+                ? { ...input.pointMm, x: from.x }
+                : input.cutDirection === 'horizontal'
+                  ? { ...input.pointMm, y: from.y }
+                  : input.pointMm,
+            ],
+            keepSide: 'both',
+          },
         },
       };
     }
@@ -1506,7 +1557,7 @@ function toolInstruction(tool: PatternImportDxfPhaseEDraftCadToolV1, sizeToken: 
   if (tool === 'fish-eye')
     return 'Click the centre, axis end and intake side to record one fish-eye dart intent.';
   if (tool === 'spread')
-    return 'After a cut, click the pivot and a second point to set the spread across the grade.';
+    return 'For pivot spread, click the pivot and a second point. On a saved piece, a horizontal or vertical Cut also supports a parallel opening across the grade.';
   if (tool === 'gather')
     return 'Select an exact highlighted boundary edge to record a visible default 1.5 gather ratio.';
   if (tool === 'pleat')
@@ -1529,6 +1580,7 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
   activePieceIndex,
   activeDraftPieceId = null,
   activeTool,
+  allowSavedParallelOpening = false,
   arrangeActive = false,
   panActive = false,
   crossScopeConnectActive = false,
@@ -1545,6 +1597,8 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
 }: PatternImportDxfPhaseEDraftCadCanvasPropsV1) {
   const [markKind, setMarkKind] = useState<'drill' | 'cross' | 'text'>('drill');
   const [markText, setMarkText] = useState('');
+  const [cutDirection, setCutDirection] = useState<'free' | 'horizontal' | 'vertical'>('free');
+  const [parallelAmount, setParallelAmount] = useState('');
   const [notchKind, setNotchKind] = useState<'single' | AuthoredNotchShape>('single');
   const [pendingPoints, setPendingPoints] = useState<readonly PtMm[]>([]);
   const [pendingDartBase, setPendingDartBase] =
@@ -1579,6 +1633,37 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
     ? listActiveDraftCadNewPiecesV1(session).find(({ pieceId }) => pieceId === activeDraftPieceId)
     : undefined;
   const target = activeDraftPieceId ? draftPiece : sourcePiece;
+  const commands = session.history.slice(0, session.cursor).flatMap((tx) => tx.commands);
+  const only = commands.length === 1 ? commands[0] : null;
+  const parallelCut =
+    allowSavedParallelOpening &&
+    activeTool === 'spread' &&
+    only?.tool === 'cut' &&
+    only.target.pieceId === target?.pieceId &&
+    only.target.pieceLineKey === target?.pieceLineKey
+      ? only
+      : null;
+  const parallelAxis = parallelCut && parallelOpeningAxisV1(parallelCut.payload.pointsMm);
+  const recordParallel = () => {
+    if (!parallelCut || !parallelAxis) return;
+    const recorded = recordDraftParallelOpeningV1(
+      session,
+      parallelCut.target,
+      Number(parallelAmount),
+      sequence.current,
+    );
+    if (!recorded) return;
+    const result = recorded.recorded;
+    if (!result.ok) {
+      setInputError(result.blocker.detail);
+      return;
+    }
+    sequence.current = recorded.sequence;
+    setParallelAmount('');
+    setInputError(null);
+    onSessionChange(result.session);
+  };
+
   const primitives = preview.primitives.filter(
     (primitive) =>
       primitive.commandId === draftPiece?.commandId ||
@@ -1621,6 +1706,7 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
   useEffect(() => {
     setPendingPoints([]);
     setPendingDartBase(null);
+    setParallelAmount('');
     movePointDrag.current = null;
     setOutlinePointInput(null);
     setDraggedPoint(null);
@@ -1644,6 +1730,7 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
   const renderedPieces = arrangeActive ? projection.pieces : piece ? [piece] : [];
   const drawPoint = (pointMm: PtMm, closePen = false) => {
     const result = recordPatternImportDxfPhaseEDraftCadCanvasPointV1({
+      cutDirection,
       session,
       projection,
       activePieceIndex,
@@ -2221,6 +2308,43 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
                     ? `Select an exact cut edge with space for the notch in size ${projection.sizeToken}.`
                     : toolInstruction(activeTool, projection.sizeToken))}
       </div>
+      {activeTool === 'cut' && interactionEnabled && (
+        <Selector
+          label='Cut direction'
+          compact
+          value={cutDirection}
+          onChange={(v: string) =>
+            setCutDirection(v === 'vertical' || v === 'horizontal' ? v : 'free')
+          }
+          options={[
+            { value: 'free', label: 'Free cut' },
+            { value: 'vertical', label: 'Vertical cut' },
+            { value: 'horizontal', label: 'Horizontal cut' },
+          ]}
+        />
+      )}
+      {parallelAxis && interactionEnabled && (
+        <div className='flex items-end gap-2'>
+          <label className='text-micro'>
+            Parallel opening along {parallelAxis.toUpperCase()} (signed mm)
+            <Input
+              type='number'
+              step='0.000001'
+              aria-description={`Positive moves the higher ${parallelAxis.toUpperCase()} side. Negative moves the lower side.`}
+              value={parallelAmount}
+              onChange={(e: ChangeEvent<HTMLInputElement>) => setParallelAmount(e.target.value)}
+            />
+          </label>
+          <Button
+            type='button'
+            size='xs'
+            disabled={!validParallelDisplacementV1(Number(parallelAmount))}
+            onClick={recordParallel}
+          >
+            Record parallel spread
+          </Button>
+        </div>
+      )}
       {activeTool === 'notch' && interactionEnabled ? (
         <div className='flex items-center gap-2 text-small' role='group' aria-label='Notch type'>
           Notch type

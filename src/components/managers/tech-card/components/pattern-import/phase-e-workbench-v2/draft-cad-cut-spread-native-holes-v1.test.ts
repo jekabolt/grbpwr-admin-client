@@ -291,3 +291,54 @@ it.each(['bulge', 'owner', 'width'] as const)(
     expect(() => dxfFastPath(read, segmentDxf(read))).toThrow(/native DXF cut hole/i);
   },
 );
+
+it('opens the lower half by a signed parallel displacement and rejects a foreign guide and one bad rank atomically', async () => {
+  const { applyDraftParallelSpreadV1 } = await import('./draft-cad-parallel-spread-v1');
+  const { job, size, cut } = await holeFixture();
+  const guide = {
+    ...cut,
+    payload: {
+      ...cut.payload,
+      pointsMm: [
+        { x: -10, y: 50 },
+        { x: 130, y: 50 },
+      ],
+    },
+  };
+  size.grain = { ...size.grain!, a: { x: 5, y: 20 }, b: { x: 100, y: 20 } };
+  // Both original holes and the complete grain lie away from the registered horizontal chord.
+  size.cutLoops![1] = squareHole(80, 65);
+  const spread = {
+    tool: 'spread',
+    commandId: 'opening',
+    target: cut.target,
+    payload: {
+      mode: 'parallel',
+      entityId: 'open',
+      cutLineEntityId: cut.payload.entityId,
+      amountMm: 8,
+      movingSide: 'negative',
+    },
+  } as const;
+  const before = structuredClone(job);
+  const result = applyDraftParallelSpreadV1(job, guide, spread);
+  if (!result.ok) throw Error(result.detail);
+  const after = result.job.pieces[0]!.sizes[0]!;
+  expect(after.bbox).toEqual({ minX: 0, minY: -8, maxX: 120, maxY: 100 });
+  expect(after.areaMm2 - size.areaMm2).toBeCloseTo(960);
+  expect(after.cutLoops).toEqual([squareHole(12, 22), squareHole(80, 65)]);
+  expect(after.grain?.a).toEqual({ x: 5, y: 12 });
+  const wrong = [
+    { ...spread, target: { ...spread.target, pieceLineKey: 'wrong-line' } },
+    { ...spread, payload: { ...spread.payload, cutLineEntityId: 'unknown' } },
+  ];
+  for (const command of wrong)
+    expect(applyDraftParallelSpreadV1(job, guide, command).ok).toBe(false);
+  expect(job).toEqual(before);
+  const other = { ...structuredClone(size), sizeToken: 'L', sizeId: 8, rank: 1 };
+  other.cutLoops![1] = squareHole(80, 45);
+  job.pieces[0]!.sizes.push(other);
+  const snapshot = structuredClone(job);
+  expect(applyDraftParallelSpreadV1(job, guide, spread)).toMatchObject({ ok: false });
+  expect(job).toEqual(snapshot);
+});

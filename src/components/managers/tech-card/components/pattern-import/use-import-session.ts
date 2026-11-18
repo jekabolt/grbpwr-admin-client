@@ -1,3 +1,4 @@
+import { savedReviewLabelV1 } from './phase-e-workbench-v2/draft-cad-saved-dart-tip-file-v1';
 import { isSavedDartTipReviewFileV1 } from './phase-e-workbench-v2/draft-cad-saved-dart-tip-file-v1';
 import {
   directDxfAuthoringOpenFileV1,
@@ -1072,7 +1073,7 @@ export function useImportSession(deps: {
           )
             throw new Error(
               isSavedDartTipReviewFileV1(pinnedSavedFile.current)
-                ? 'Review this saved dart with its original DXF. Close the review to import other files.'
+                ? `Review this ${savedReviewLabelV1(pinnedSavedFile.current)} with its original DXF. Close the review to import other files.`
                 : 'Review this saved copy with its original DXF. Close the review to import other files.',
             );
           takeCard();

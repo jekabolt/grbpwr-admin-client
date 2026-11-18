@@ -344,7 +344,7 @@ function bbox(points: readonly PtMm[]) {
   };
 }
 
-function splitSize(
+export function partitionDraftCutSizeV1(
   size: PieceSizeSpec,
   from: PtMm,
   to: PtMm,
@@ -609,7 +609,7 @@ export function executePatternImportDxfPhaseEDraftCadCutGeometryV1(
     derivedPiece(source, identities[1], 'B'),
   ];
   for (const size of source.sizes) {
-    const result = splitSize(size, from!, to!);
+    const result = partitionDraftCutSizeV1(size, from!, to!);
     if (!result.ok) return blocked(result.code, result.detail, source.identity);
     derived[0]!.sizes.push(result.sizes[0]);
     derived[1]!.sizes.push(result.sizes[1]);
