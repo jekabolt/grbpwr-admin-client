@@ -1624,3 +1624,11 @@ Run: `global-ladder7-list.txt`, no flags, out `global-lj7-default`; then `LADDER
 Numbers: default vs `global-lj7-judge` — closed 1101 = 1101, 0 outcome diffs. Off vs `global-lj7-base` — closed 1109 = 1109, 0 diffs. The eight opened cells now carry reason and nest in cells.json: Kalla O 0 `judge/trunc`; Venice E 2 and 6 `judge/trunc`; Reims M seed 0 sizes 12 `refill-differs/ok`, 18 `refill-differs/trunc`, 24 `refill-differs/unjudged`, 26 `refill-differs/ok`, 32 `refill-differs/unjudged`.
 Verdict: the fallbacks are out because they closed no hole. The pass stays on. Leah check is after the merge into `fix-pattern-pdf-open-lines`.
 Leah (`m0-leah` vs `.runs/base-leah`, merged tree, judge on): closed 110 = 110, 0 outcome diffs. The judge opened no Leah cell. Landed-borrow, committed on this branch before the merge, moved none either.
+
+### M0 corpus baseline and DXF readback (18 Nov 2026)
+
+Hypothesis: the post-merge baseline can serve as a per-piece comparison for M1. Repeated piece labels and the writer's R12 cut-line encoding must survive the measurement.
+Change: distinguish repeated labels by seed in the cell diff, nest check and picture selector. Read R12 POLYLINE / VERTEX cut lines in dxf-check alongside LWPOLYLINE. No importer change for this measurement.
+Run: c-m0-m and c-m0-h (40 PDFs each, two workers, matching bundled importer). The two modes of the nest-check fixture passed 27/27 each. Eight cut-line checks covered valid, open, degenerate and crossing rings in both encodings.
+Numbers: set40 closed 3727/4725, open 998; holdout40 closed 2594/3032, open 438. set40 wrote 2 files, 73 blocks; holdout40 wrote 7 files, 663 blocks. Every written block had a closed, nondegenerate layer-1 cut line without a detected crossing. The wizard reached apply on 0/40 and 4/40 respectively. These are different measures: the harness also saves provisional DXF from a stopped run.
+Verdict: use these per-cell results for M1. On set40 the drop from 4752 expected cells to 4725 is entirely MDF476: three size-range labels “L - 2XL” previously appeared as seeds with nine sizes apiece. In Kalla, ignoring seed loses one of two “G - ARMHOLE OUTER FACING” families (10 and 11). An intact written perimeter alone does not verify source-line coverage or that the block belongs to its intended size.
