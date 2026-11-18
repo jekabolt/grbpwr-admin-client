@@ -250,7 +250,9 @@ async function mount(steps) {
 const PHRASE = /not named/g;
 /** Тексты пунктов ВСЕХ поповеров «! N warnings» на экране (каждый открывается и закрывается). */
 async function warningItems() {
-  const triggers = page.locator('button[aria-haspopup="dialog"][aria-label^="! "]');
+  const triggers = page
+    .getByRole('button', { name: /^! / })
+    .and(page.locator('[aria-haspopup="dialog"]'));
   const out = [];
   for (let i = 0; i < (await triggers.count()); i++) {
     await triggers.nth(i).click();
