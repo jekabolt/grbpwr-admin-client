@@ -33,6 +33,7 @@ import {
   publishPatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV1,
   type PatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV1,
 } from './golden-card-production-v2-snapshot-feed-v1';
+import { isExactNSeamDocumentLockCurrent } from './exact-n-seam-production-session-store-v2';
 import { createPatternImportDxfPhaseETopologyAnnotationApplicationTransactionV5 } from './topology-annotation-application-transaction-v5';
 import { createPatternImportDxfPhaseEWrappedTopologyAnnotationSaveV1 } from './wrapped-topology-annotation-save-v1';
 
@@ -191,6 +192,11 @@ export function createPatternImportDxfProductCompositeSidecarApplicationTransact
         if (!resolved.ok)
           return confirmBlocked('exact-n-selection-owner-unavailable', resolved.blockers[0].detail);
         const { current } = session;
+        if (!isExactNSeamDocumentLockCurrent(current.row.techCardId, current.row.cardLockVersion))
+          return confirmBlocked(
+            'exact-n-document-retired',
+            'The Assembly Order changed. Reopen the current saved operation.',
+          );
         const readback = await readCurrentCompositeV4(
           {
             techCardId: current.row.techCardId,
@@ -269,6 +275,7 @@ export function createPatternImportDxfProductCompositeSidecarApplicationTransact
             persisted.blockers[0]?.code ?? 'composite-v4-transaction-blocked',
             persisted.blockers[0]?.detail ?? 'Composite V4 transaction failed closed.',
           );
+        if (signal.aborted) return confirmBlocked('cancelled', 'Confirmation was cancelled.');
         if (!publishPatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV1(persisted, feed))
           return confirmBlocked(
             'golden-v2-feed-publication-blocked',

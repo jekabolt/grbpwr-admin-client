@@ -4,7 +4,13 @@ import type {
   GetTechCardSavedAssemblySnapshotResponse,
   TechCardPatternSemanticSidecar,
 } from 'api/proto-http/admin';
+import {
+  mapFormToTechCardInsert,
+  mapTechCardToForm,
+} from 'components/managers/tech-card/components/schema';
+import { updateTechCardDocument } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { readPatternImportDxfProductCompositeComponentBytesV3 } from 'lib/cloth/domain/pattern-import-dxf-product-composite-sidecar-v3';
+import { capturePatternImportDxfProductCurrentSavedReplayV1 } from 'lib/cloth/domain/pattern-import-dxf-product-commit-replay-v1';
 import { PATTERN_IMPORT_DXF_PRODUCT_SEMANTIC_SIDECAR_MEDIA_TYPE_V1 } from 'lib/cloth/domain/pattern-import-dxf-product-semantic-sidecar-v1';
 import { buildPatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import { selectPatternImportDxfProductDraftPhaseDSizeV1 } from 'lib/cloth/domain/pattern-import-dxf-product-draft-phase-d-selection-v1';
@@ -19,10 +25,16 @@ import { createRoot } from 'react-dom/client';
 import { beforeAll, expect, it, vi } from 'vitest';
 import { rowFromHand } from '../../assembly-seams/seam-actions';
 import { useSeamsStore } from '../../assembly-seams/seams-store';
-import { PatternImportDxfPhaseEAssemblyOrderEntryMountV1 } from '../phase-e-workbench/assembly-order-entry';
+import {
+  buildPatternImportDxfPhaseEAssemblyOrderSourceV1,
+  PatternImportDxfPhaseEAssemblyOrderEntryMountV1,
+} from '../phase-e-workbench/assembly-order-entry';
+import { adaptPatternImportDxfPhaseEWorkbenchExistingAssemblyV1 } from '../phase-e-workbench-existing-assembly-adapter-v1';
 import { buildPatternImportDxfPhaseEExactAnchorEdgeV1 } from './cad-table-zero-connect-exact-anchor-geometry-v1';
 import { bytesOf, semanticDocument } from './composite-placement-read-v1.test-fixture';
 import { createPatternImportDxfProductCompositeSidecarProductionTransactionV4 } from './composite-sidecar-production-transaction-v4';
+import { readPatternImportDxfProductExactNSeamRestorePatchV2 } from './composite-sidecar-restore-authority-v4';
+import type { PatternImportDxfProductCompositeSidecarTransactionResultV4 } from './composite-sidecar-transaction-v4';
 import {
   decodePatternImportDxfProductCompositeSidecarV4,
   PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V4,
@@ -34,6 +46,18 @@ import {
   readPatternImportDxfProductExactNSeamProductionSessionV2,
   subscribePatternImportDxfProductExactNSeamProductionSessionV2,
 } from './exact-n-seam-production-session-v2';
+import {
+  clearPatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV1,
+  publishPatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV1,
+  readPatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV1,
+  subscribePatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV1,
+  type PatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV1,
+} from './golden-card-production-v2-snapshot-feed-v1';
+import {
+  PATTERN_IMPORT_DXF_PHASE_E_GOLDEN_CARD_RECONSTRUCTION_SNAPSHOT_V1,
+  type PatternImportDxfPhaseEGoldenCardReconstructionSnapshotV1,
+} from './golden-card-reconstruction-v1';
+import { buildPatternImportDxfPhaseEStitchVisualV1 } from './stitch-visual-v1';
 import { readCompleteSavedAssemblySourceV1 } from './saved-assembly-complete-source-rpc-v1';
 import { createPatternImportDxfPhaseESavedAssemblySnapshotProductionRpcV1 } from './saved-assembly-snapshot-production-rpc-v1';
 import {
@@ -60,6 +84,7 @@ const ports = vi.hoisted(() => ({
   GetTechCardSavedAssemblySnapshot: vi.fn<AdminService['GetTechCardSavedAssemblySnapshot']>(),
   GetTechCardPatternSemanticSidecar: vi.fn<AdminService['GetTechCardPatternSemanticSidecar']>(),
   PutTechCardPatternSemanticSidecar: vi.fn<AdminService['PutTechCardPatternSemanticSidecar']>(),
+  UpdateTechCard: vi.fn<AdminService['UpdateTechCard']>(),
 }));
 vi.mock('api/api', () => ({
   abortableAdminService: () => ports,
@@ -73,7 +98,10 @@ const ui = vi.hoisted(() => ({
   renderWorkbench: vi.fn(),
   prepare: vi.fn(),
 }));
-vi.mock('components/managers/tech-cards/components/useTechCardQuery', () => ({
+vi.mock('components/managers/tech-cards/components/useTechCardQuery', async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import('components/managers/tech-cards/components/useTechCardQuery')
+  >()),
   useTechCard: () => ({ data: ui.card }),
 }));
 vi.mock('components/managers/model/components/use-size-systems', () => ({
@@ -82,7 +110,12 @@ vi.mock('components/managers/model/components/use-size-systems', () => ({
 }));
 vi.mock('react-hook-form', async (importOriginal) => ({
   ...(await importOriginal<typeof import('react-hook-form')>()),
-  useWatch: ({ name }: { name: string }) => (name === 'operations' ? ui.operations : undefined),
+  useWatch: ({ name }: { name: string }) =>
+    name === 'operations'
+      ? ui.operations
+      : name === 'bomItems'
+        ? ui.card?.techCard?.bomItems
+        : undefined,
 }));
 vi.mock('./cad-table-zero-operation-saved-preparation-v1', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./cad-table-zero-operation-saved-preparation-v1')>()),
@@ -199,7 +232,12 @@ async function completeSourceReply(
   seed: SavedThreePanelFixtureV1,
   ownedSeams: WireSeam[],
   seamKeys?: string[],
-  settings?: { ratio?: string; sidecar?: TechCardPatternSemanticSidecar },
+  settings?: {
+    ratio?: string;
+    sidecar?: TechCardPatternSemanticSidecar;
+    threadKey?: string;
+    revision?: string;
+  },
 ) {
   const { revision, ...row } = seed.row;
   const identity = { ...row, savedRowRevision: revision, patternVersion: 2 };
@@ -208,16 +246,18 @@ async function completeSourceReply(
     {
       ...seed.operations[0]!,
       operationNumber,
+      operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
       seamKeys: seamKeys ?? ownedSeams.map(({ seamKey }) => seamKey!),
       ...(settings?.ratio === undefined
         ? {}
         : { stitching: { fullnessRatio: { value: settings.ratio } } }),
+      ...(settings?.threadKey ? { bomLineKeys: [settings.threadKey] } : {}),
     },
   ];
   const aliases = seed.card.existingAliases;
   const encodedSeams: WireSeam[] = JSON.parse(JSON.stringify(ownedSeams));
   const canonicalJson = canonicalize({
-    serverAssemblyRevision,
+    serverAssemblyRevision: settings?.revision ?? serverAssemblyRevision,
     rows: [identity],
     operations,
     ownedSeams: encodedSeams,
@@ -229,7 +269,7 @@ async function completeSourceReply(
   );
   return {
     row: downloadable,
-    serverAssemblyRevision,
+    serverAssemblyRevision: settings?.revision ?? serverAssemblyRevision,
     operations,
     ...(settings?.sidecar ? { semanticSidecar: settings.sidecar } : {}),
     completeSourceV1: {
@@ -492,6 +532,8 @@ it('confirms already-saved exact three-seam AO through the existing V4 CAS and r
   ];
   let selectedSeams = originalSeams;
   let ratio: string | undefined;
+  let currentThreadKey = 'thread-before';
+  let currentSeed = seed;
   const semantic = bytesOf(semanticDocument(row, 2));
   const verifiedSemanticSha256 = await digestFullAssemblyFixture(semantic);
   let attachment: TechCardPatternSemanticSidecar | undefined = {
@@ -509,9 +551,13 @@ it('confirms already-saved exact three-seam AO through the existing V4 CAS and r
   } as TechCardPatternSemanticSidecar;
   const priorSemantic = attachment;
   ports.GetTechCardSavedAssemblySnapshot.mockImplementation(async (request) => {
-    const reply = await completeSourceReply(seed, selectedSeams, undefined, {
+    const reply = await completeSourceReply(currentSeed, selectedSeams, undefined, {
       ratio,
       sidecar: attachment,
+      threadKey: currentThreadKey,
+      ...(currentSeed.row.cardLockVersion === row.cardLockVersion
+        ? {}
+        : { revision: `asm:v1:${'9'.repeat(32)}:22` }),
     });
     if (request.profile === 'TECH_CARD_SAVED_ASSEMBLY_SNAPSHOT_PROFILE_COMPLETE_SOURCE_V1') {
       expect(request.expectedServerAssemblyRevision).toBe(reply.serverAssemblyRevision);
@@ -690,7 +736,19 @@ it('confirms already-saved exact three-seam AO through the existing V4 CAS and r
   selectedSeams = originalSeams;
   attachment = priorSemantic;
   ports.PutTechCardPatternSemanticSidecar.mockClear();
-  await verifyNativeWorkbenchMount(originalSeams);
+  await verifyNativeWorkbenchMount(originalSeams, (threadKey) => {
+    currentThreadKey = threadKey;
+    currentSeed = {
+      ...seed,
+      row: {
+        ...seed.row,
+        revision: seed.row.revision + 1,
+        cardLockVersion: seed.row.cardLockVersion + 1,
+      },
+    };
+    attachment = undefined;
+    return currentSeed;
+  });
 });
 
 function savedExactAction(node: ReactNode): (() => void) | null {
@@ -728,9 +786,78 @@ async function waitForWorkbench(assert: () => void) {
   throw failure;
 }
 
-async function verifyNativeWorkbenchMount(seams: WireSeam[]) {
+function feedFromNativeTransaction(
+  transaction: Extract<PatternImportDxfProductCompositeSidecarTransactionResultV4, { ok: true }>,
+  card: common_TechCard,
+): PatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV1 {
+  const patch = readPatternImportDxfProductExactNSeamRestorePatchV2(transaction.owner)!;
+  const form = mapTechCardToForm(card);
+  const operation = form.operations![0]!;
+  const operationRef = patch.bindings.selectedOperation.authoringOperationId;
+  const seamKeys = patch.bindings.selectedOperation.seamIds;
+  const cardRef = 'fixture:three-native-seams';
+  const snapshot: PatternImportDxfPhaseEGoldenCardReconstructionSnapshotV1 = {
+    schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_GOLDEN_CARD_RECONSTRUCTION_SNAPSHOT_V1,
+    cardRef,
+    catalog: authored.catalog,
+    connections: patch.seams.map(({ seamId, sides }) => ({
+      connectionRef: seamId,
+      operationRef,
+      mapping: 'equal',
+      lengthRatio: 1,
+      sides,
+    })),
+    operations: [
+      {
+        operationRef,
+        assembly: { id: operationRef, stage: 0, order: 0, kind: 'stitch', seamIds: [...seamKeys] },
+        card: {
+          authoringOperationId: operationRef,
+          number: operationNumber,
+          work: operation.work!,
+          phaseEKind: 'stitch',
+          inputKeys: [...operation.inputKeys!],
+          outputUnitKey: operation.outputUnitKey ?? '',
+          outputUnitName: operation.outputUnitName ?? '',
+          seamKeys: [...seamKeys],
+        },
+        stitch: buildPatternImportDxfPhaseEStitchVisualV1({
+          operation,
+          bomItems: form.bomItems ?? [],
+        }),
+      },
+    ],
+    materials: [],
+    bomRefs: [
+      {
+        lineKey: 'thread-before',
+        section: 'TECH_CARD_BOM_SECTION_THREAD',
+        kind: 'TECH_CARD_BOM_KIND_TOPSTITCH_THREAD',
+        materialAssignmentRef: null,
+      },
+    ],
+    colorways: [],
+  };
+  expect(snapshot.operations[0]?.stitch?.thread.bomLineKey).toBe('thread-before');
+  return {
+    techCardId: patch.bindings.row.techCardId,
+    cardRef,
+    exactOperationProjections: [{ operationNumber, snapshot }],
+    authoritativeBaseline: snapshot,
+    observedOperationFamilies: ['stitch'],
+    tableReconstruction: snapshot,
+    postSaveReload: snapshot,
+  };
+}
+
+async function verifyNativeWorkbenchMount(
+  seams: WireSeam[],
+  commitThread: (threadLineKey: string) => SavedThreePanelFixtureV1,
+) {
   const { row } = seed;
-  const response = await completeSourceReply(seed, seams);
+  const response = await completeSourceReply(seed, seams, undefined, {
+    threadKey: 'thread-before',
+  });
   ui.operations = response.operations ?? [];
   ui.card = {
     id: row.techCardId,
@@ -746,6 +873,20 @@ async function verifyNativeWorkbenchMount(seams: WireSeam[]) {
           name: 'main',
           purpose: 'main',
           section: 'TECH_CARD_BOM_SECTION_FABRIC',
+        },
+        {
+          lineKey: 'thread-before',
+          name: 'Thread A',
+          section: 'TECH_CARD_BOM_SECTION_THREAD',
+          kind: 'TECH_CARD_BOM_KIND_TOPSTITCH_THREAD',
+          unit: 'm',
+        },
+        {
+          lineKey: 'thread-after',
+          name: 'Thread B',
+          section: 'TECH_CARD_BOM_SECTION_THREAD',
+          kind: 'TECH_CARD_BOM_KIND_TOPSTITCH_THREAD',
+          unit: 'm',
         },
       ],
       patterns: [
@@ -770,8 +911,9 @@ async function verifyNativeWorkbenchMount(seams: WireSeam[]) {
       },
     },
   } as unknown as common_TechCard;
+  let activeSeed = seed;
   ui.prepare.mockImplementation(async () => {
-    const preparation = await nativeAuthoring(seed);
+    const preparation = await nativeAuthoring(activeSeed);
     return {
       ok: true,
       scopeKey: row.scopeKey,
@@ -810,7 +952,19 @@ async function verifyNativeWorkbenchMount(seams: WireSeam[]) {
   const subscribe = (listener: () => void) =>
     subscribePatternImportDxfProductExactNSeamProductionSessionV2(row.techCardId, listener);
   const read = () => readPatternImportDxfProductExactNSeamProductionSessionV2(row.techCardId);
-  const application = createPatternImportDxfProductCompositeSidecarProductionTransactionV4();
+  const applicationOwner = createPatternImportDxfProductCompositeSidecarProductionTransactionV4();
+  const executions: PatternImportDxfProductCompositeSidecarTransactionResultV4[] = [];
+  const application: typeof applicationOwner = {
+    ...applicationOwner,
+    transaction: {
+      ...applicationOwner.transaction,
+      execute: async (request, signal) => {
+        const result = await applicationOwner.transaction.execute(request, signal);
+        executions.push(result);
+        return result;
+      },
+    },
+  };
   function Harness() {
     const exactNSession = useSyncExternalStore(subscribe, read, read);
     return createElement(PatternImportDxfPhaseEAssemblyOrderEntryMountV1, {
@@ -878,6 +1032,155 @@ async function verifyNativeWorkbenchMount(seams: WireSeam[]) {
     await act(async () => root.render(createElement(Harness)));
     await waitForMountedExactN();
     expect(ports.PutTechCardPatternSemanticSidecar).toHaveBeenCalledTimes(1);
+
+    const beforeEdit = current()!.exactNSession!;
+    const transaction = executions[0];
+    if (!transaction?.ok) throw new Error('The mounted save must return a genuine V4 transaction.');
+    const beforeCard = ui.card;
+    const feed = feedFromNativeTransaction(transaction, beforeCard);
+    expect(
+      publishPatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV1(transaction, feed),
+    ).toBe(true);
+    const feedState = () =>
+      readPatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV1(row.techCardId);
+    expect(feedState()).toMatchObject({ techCardId: row.techCardId });
+    const observed = vi.fn(feedState);
+    const stop = subscribePatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV1(
+      row.techCardId,
+      observed,
+    );
+    const delayed = Promise.withResolvers<void>();
+    const oldPublication = delayed.promise.then(() =>
+      publishPatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV1(transaction, feed),
+    );
+    try {
+      const edited = mapTechCardToForm(beforeCard);
+      edited.operations![0]!.bomLineKeys = ['thread-after'];
+      const body = mapFormToTechCardInsert(edited, beforeCard.techCard);
+      const operation = body.operations![0]!;
+      expect(body.operations).toHaveLength(1);
+      expect(operation.operationNumber).toBe(operationNumber);
+      expect(operation.seamKeys).toEqual(['upper', 'middle', 'lower']);
+      expect(operation.bomLineKeys).toEqual(['thread-after']);
+      const save = () =>
+        updateTechCardDocument({
+          id: row.techCardId,
+          techCard: body,
+          expectedLockVersion: row.cardLockVersion,
+          snapshotReason: '',
+          saveSessionId: undefined,
+          guardedPieceRename: undefined,
+        });
+      ports.UpdateTechCard.mockRejectedValueOnce(
+        Object.assign(new Error('Stale edit.'), { status: 409 }),
+      );
+      await expect(save()).rejects.toMatchObject({ status: 409 });
+      expect(feedState()).not.toBeNull();
+      expect(observed).not.toHaveBeenCalled();
+      expect(read()).toBe(beforeEdit);
+
+      ports.UpdateTechCard.mockImplementationOnce(async (request) => {
+        expect(request.techCard!.operations).toEqual([operation]);
+        activeSeed = commitThread(operation.bomLineKeys![0]!);
+        return { lockVersion: activeSeed.row.cardLockVersion };
+      });
+      await act(async () => {
+        await save();
+        // The query cache still holds the previous DTO until the ordinary readback arrives.
+        expect(ui.card).toBe(beforeCard);
+        expect(read()).toBeNull();
+        expect(feedState()).toBeNull();
+        delayed.resolve();
+        expect(await oldPublication).toBe(false);
+      });
+      expect(observed).toHaveBeenCalledTimes(1);
+      expect(observed.mock.results[0]?.value).toBeNull();
+      const reads = ports.GetTechCardPatternSemanticSidecar.mock.calls.length;
+      expect(await application.confirmRestoredSelection(beforeEdit, feed, signal)).toMatchObject({
+        ok: false,
+        blocker: { code: 'exact-n-document-retired' },
+      });
+      expect(ports.GetTechCardPatternSemanticSidecar).toHaveBeenCalledTimes(reads);
+
+      ui.card = {
+        ...beforeCard,
+        lockVersion: activeSeed.row.cardLockVersion,
+        techCard: {
+          ...beforeCard.techCard!,
+          operations: [operation],
+          patterns: beforeCard.techCard!.patterns!.map((pattern) => ({
+            ...pattern,
+            savedRowRevision: activeSeed.row.revision,
+          })),
+        },
+      };
+      ui.operations = mapTechCardToForm(ui.card).operations ?? [];
+      expect(activeSeed.row).toEqual({
+        ...row,
+        cardLockVersion: row.cardLockVersion + 1,
+        revision: row.revision + 1,
+      });
+      const freshSource = await readCompleteSavedAssemblySourceV1(
+        ports,
+        activeSeed.row,
+        { expectedServerAssemblyRevision: `asm:v1:${'9'.repeat(32)}:22` },
+        signal,
+      );
+      expect(freshSource.operations).toMatchObject([
+        {
+          operationNumber,
+          seamKeys: ['upper', 'middle', 'lower'],
+          bomLineKeys: ['thread-after'],
+        },
+      ]);
+      expect(freshSource.ownedSeams.map(({ seamKey }) => seamKey)).toEqual([
+        'upper',
+        'middle',
+        'lower',
+      ]);
+      expect(freshSource.priorCarrier).toBeNull();
+      const freshReplay = await loadSaved(activeSeed);
+      expect(capturePatternImportDxfProductCurrentSavedReplayV1(freshReplay, 7)).toMatchObject({
+        savedRowRevision: activeSeed.row.revision,
+        evidence: {
+          techCardId: row.techCardId,
+          patternLineKey: row.patternLineKey,
+          previousLockVersion: activeSeed.row.cardLockVersion,
+          productExportSha256: row.sha256,
+        },
+      });
+      const v1Source = buildPatternImportDxfPhaseEAssemblyOrderSourceV1(
+        freshSource.operations,
+        freshSource.ownedSeams.map((wire) => fromWire(wire)!),
+        0,
+      );
+      expect(v1Source?.selectedSeamKey).toBe('');
+      expect(
+        adaptPatternImportDxfPhaseEWorkbenchExistingAssemblyV1(
+          v1Source!.assembly,
+          operationNumber,
+          'upper',
+        ),
+      ).toMatchObject({
+        ok: false,
+        blockers: [{ code: 'selected-operation-seam-unsupported' }],
+      });
+      await act(async () => root.render(createElement(Harness)));
+      await waitForWorkbench(() => {
+        const view = current();
+        expect(view?.exactNSession).toBeNull();
+        expect(view?.stitchVisual?.thread.bomLineKey).toBe('thread-after');
+        expect(actionText(view?.savedNativeExactNActions)).toContain('Attach verified semantic V1');
+        expect(savedExactAction(view?.savedNativeExactNActions)).toBeNull();
+      });
+      expect(feedState()).toBeNull();
+      expect(ports.PutTechCardPatternSemanticSidecar).toHaveBeenCalledTimes(1);
+    } finally {
+      delayed.resolve();
+      await oldPublication;
+      stop();
+      clearPatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV1(row.techCardId);
+    }
   } finally {
     await act(async () => root.unmount());
     clearPatternImportDxfProductExactNSeamProductionSessionV2(row.techCardId);
