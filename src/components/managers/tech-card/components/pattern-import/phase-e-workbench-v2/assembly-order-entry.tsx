@@ -1305,6 +1305,7 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
   readSavedTopologyAnnotations,
   exactNApplicationOwner,
   savedNativeExactNActions,
+  savedCrossMaterialActions,
   autoOpen = false,
   onOpenChange,
   frozen = false,
@@ -1349,6 +1350,7 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
   exactNApplicationOwner?: PatternImportDxfProductCompositeSidecarApplicationTransactionV4;
   /** Caller's review and explicit first save for the already linked native seams. */
   savedNativeExactNActions?: ReactNode;
+  savedCrossMaterialActions?: ReactNode;
   /** The visible production Assembly Table prepares this single owner without an extra open door. */
   autoOpen?: boolean;
   /** Lets OperationsField move its selected editor between inline and CAD without a duplicate. */
@@ -2393,6 +2395,7 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
       data-phase-e-multiseam-assembly-order-entry=''
       data-selected-operation-number={source.selectedOperationNumber}
     >
+      {savedCrossMaterialActions}
       {savedNativeExactNActions}
       {!savedNativeExactNActions && !canOpen && availabilityBlocker ? (
         <Blockers

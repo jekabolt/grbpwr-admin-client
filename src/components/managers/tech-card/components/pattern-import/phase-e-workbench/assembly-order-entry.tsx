@@ -18,6 +18,12 @@ import {
   useSeamsStore,
 } from 'components/managers/tech-card/components/assembly-seams/seams-store';
 import type { StoredSeam } from 'lib/seams';
+import {
+  pieceRefKey,
+  rollGoodsScopes,
+} from 'components/managers/tech-card/components/piece-block-refs';
+import { bindingScopes } from 'components/managers/tech-card/components/bom-purpose';
+import { savedWorkbenchBindingScopeKeyV1 } from '../phase-e-workbench-v2/saved-workbench-scope-v1';
 import type { PatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import type { PatternImportDxfProductPhaseEAuthoringChoicesV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-producer-v1';
 import type { PatternImportDxfProductVerifiedSavedReplayV1 } from 'lib/cloth/domain/pattern-import-dxf-product-commit-replay-v1';
@@ -28,6 +34,8 @@ import {
 } from 'lib/pattern-import/types';
 import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -1574,6 +1582,10 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryV1({
   );
 }
 
+const SavedCompleteAssemblyNativeReviewActionV8 = lazy(
+  () => import('../phase-e-workbench-v2/saved-complete-assembly-native-review-action-v8'),
+);
+
 /** Real Assembly Order mount. No fresh session is invented after a saved-card reload. */
 export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
   techCardId,
@@ -2582,6 +2594,70 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
     if (entryRoute !== 'v2' && !workbenchRequested) onOpenChange?.(false);
   }, [entryRoute, onOpenChange, workbenchRequested]);
   if (!source || !selected) return null;
+  const persisted = savedCard.data;
+  const [physicalKey, poseKey] = selectedSeamKeys;
+  const physical = server.find((seam) => seam.seamKey === physicalKey);
+  const recordedPose = poses.find((pose) => pose.seamKey === poseKey);
+  const storedOperation = persisted?.techCard?.operations?.find(
+    (operation) => operation.operationNumber === selectedOperationNumber,
+  );
+  let savedCrossMaterialActions: ReactNode = null;
+  if (
+    workbenchRequested &&
+    persisted?.techCard &&
+    persisted.id === techCardId &&
+    seamWriterCardId === techCardId &&
+    seamWriterLockVersion === persisted.lockVersion &&
+    selectedSeamKeys.length === 2 &&
+    storedOperation?.seamKeys?.length === 2 &&
+    storedOperation.seamKeys[0] === physicalKey &&
+    storedOperation.seamKeys[1] === poseKey &&
+    physicalKey &&
+    poseKey &&
+    physical?.kind === 'edge' &&
+    physical.status === 'confirmed' &&
+    physical.direction !== 'unknown' &&
+    !physical.stale &&
+    recordedPose?.status === 'confirmed' &&
+    !recordedPose.stale &&
+    physical.sideA.length === 1 &&
+    physical.sideB.length === 1
+  ) {
+    const aliases = persisted.techCard.pieceDxfAliases?.items ?? [];
+    const bindings = bindingScopes(rollGoodsScopes(persisted.techCard.bomItems ?? []), aliases);
+    const hasAlias = (piece: string, scope: string) =>
+      aliases.some(
+        (alias) =>
+          Boolean(alias.blockName?.trim()) &&
+          pieceRefKey(alias.pieceLineKey ?? '') === pieceRefKey(piece) &&
+          savedWorkbenchBindingScopeKeyV1(alias.fabricPurpose, alias.bomLineKey, bindings) ===
+            scope,
+      );
+    if (
+      hasAlias(physical.sideA[0]!.piece, 'main') &&
+      hasAlias(physical.sideB[0]!.piece, 'pocketing')
+    )
+      savedCrossMaterialActions = (
+        <Suspense fallback={null}>
+          <SavedCompleteAssemblyNativeReviewActionV8
+            key={[
+              persisted.id,
+              persisted.lockVersion,
+              selectedOperationNumber,
+              physicalKey,
+              poseKey,
+            ].join(':')}
+            techCard={persisted}
+            operationNumber={selectedOperationNumber}
+            seamKeys={selectedSeamKeys}
+            authority={savedAllScopeAuthority}
+            orderSizeIds={orderSizeIds}
+            sizeNameById={sizeNameById}
+            disabled={frozen || Boolean(pending[physicalKey] || posePending[poseKey])}
+          />
+        </Suspense>
+      );
+  }
   if (savedBrowseFallback) {
     const savedEmptyOperation =
       exactSavedEmptyOperation &&
@@ -2617,7 +2693,8 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
         defaultOperationsMode='docked'
         operationsPanel={
           <>
-            {!savedEmptyOperation && !savedLinkedN1 ? (
+            {savedCrossMaterialActions}
+            {!savedCrossMaterialActions && !savedEmptyOperation && !savedLinkedN1 ? (
               <CalloutBox
                 tone='note'
                 className='mb-2'
@@ -2698,6 +2775,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
         readSavedTopologyAnnotations={readSavedTopologyAnnotations}
         exactNApplicationOwner={exactNApplicationOwner}
         savedNativeExactNActions={savedNativeExactNActions}
+        savedCrossMaterialActions={savedCrossMaterialActions}
         operationRouteBlocker={
           selectedSeamKeys.length > 2 && !exactNBoundarySession
             ? {
