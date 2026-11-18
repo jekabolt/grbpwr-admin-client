@@ -2,6 +2,7 @@ import type { common_TechCardSizePattern } from 'api/proto-http/admin';
 import { isGenerated } from 'lib/fusing-dxf/regenerate';
 import { blankFuse, writeFuseFields } from 'lib/fusing-dxf/types';
 import type { UseFormGetValues, UseFormSetValue } from 'react-hook-form';
+import { parseDecimalNumber } from 'utils/decimal';
 import { ulid } from 'utils/ulid';
 import { wireInt } from './wire-int';
 
@@ -274,12 +275,24 @@ const blankPackagingItem = (key: string): FormPackagingItem => ({
   mediaIds: [],
 });
 
+// The wire clears fabric-piece placement to zero whenever a label sits elsewhere.
+const clearedLabelGeometry = new Set([
+  'pieceWidthMm',
+  'pieceHeightMm',
+  'pieceSeamMm',
+  'labelXMm',
+  'labelYMm',
+]);
+
 const hasFacts = (row: Record<string, unknown>): boolean =>
   Object.entries(row).some(([k, v]) => {
-    if (k === 'key') return false;
-    if (k === 'qtyPerGarment') return (v as number | undefined) != null && v !== 1;
+    if (k === 'key' || k === 'lineKey') return false;
+    if (k === 'qtyPerGarment' || k === 'pages') return v != null && v !== 1;
     if (Array.isArray(v)) return v.length > 0;
-    if (typeof v === 'string') return v.trim() !== '';
+    if (typeof v === 'string') {
+      if (clearedLabelGeometry.has(k) && parseDecimalNumber(v) === 0) return false;
+      return v.trim() !== '';
+    }
     if (typeof v === 'number') return v !== 0;
     return false;
   });
