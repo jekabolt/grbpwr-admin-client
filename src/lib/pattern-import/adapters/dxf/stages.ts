@@ -8,7 +8,6 @@
 // `presegmented`, the worker runs `dxfFastPath` instead of assemble → chains → pieces.
 
 import { AUTHORED_TEXT_LAYER } from '../../manifest/authored-text';
-import { authoredInternalVertices } from '../../manifest/authored-internal';
 import { nativeCutHolesOf } from './native-cut-holes';
 import type {
   AllowanceDecision,
@@ -427,32 +426,6 @@ function candidateOf(
       confidence: 1,
     } satisfies DrillFeature);
   const cutHoles = nativeCutHolesOf(read, p, rank, outerIsSeam, rulGraded, pathById, features);
-  const page = read.doc.pages[0];
-  const authored = read.meta.authoredInternalByBlock?.get(p.block);
-  const authoredLabels = new Map<number, NonNullable<InternalFeature['label']>>();
-  if (authored?.length) {
-    const { a, b, c, d, e, f } = group.transform;
-    if (read.meta.units.mmPerUnit !== 1 || a !== 1 || b !== 0 || c !== 0 || d !== 1)
-      throw new Error(`Typed CAD lines in ${p.block} require their original millimetre frame.`);
-    const internalPaths = group.paths.flatMap((id) => {
-      const path = pathById.get(id);
-      return path && page.styles[path.style]?.layer === '8' ? [path] : [];
-    });
-    for (const { index, label, closed, vertices } of authored) {
-      const path = internalPaths[index];
-      const coords = path ? authoredInternalVertices(path.pts, { x: e, y: f }) : [];
-      if (
-        !path ||
-        path.src.block !== p.block ||
-        path.closed !== closed ||
-        p.roles[path.id] !== 'internal' ||
-        coords.length !== vertices.length ||
-        coords.some((value, i) => value !== vertices[i])
-      )
-        throw new Error(`The saved layer-8 path for ${label} in ${p.block} changed.`);
-      authoredLabels.set(path.id, label);
-    }
-  }
   for (const [ids, role] of Object.entries(p.roles)) {
     const id = Number(ids);
     const path = pathById.get(id);
@@ -462,7 +435,7 @@ function candidateOf(
         kind: 'internal',
         pts: path.pts,
         closed: path.closed,
-        label: role === 'hole' ? 'hole' : authoredLabels.get(id),
+        label: role === 'hole' ? 'hole' : p.authoredInternalLabels?.get(id),
         origin: 'detected',
         ranges: [range(id)],
         confidence: 1,

@@ -3,11 +3,13 @@
 // 10-CLO-DXF-FORMAT §2 (dialect, cut-line mode, grain arrow, POINT notches, notch twins, labels,
 // sizes, pairs, ungraded layer 1).
 
+import { authoredInternalVertices } from '../../manifest/authored-internal';
 import { AUTHORED_TEXT_LAYER } from '../../manifest/authored-text';
 import { readAuthoredTextMarks } from './authored-text';
 import { contourSigProblem } from '../../manifest/contour-sig';
 import type {
   AllowanceDecision,
+  AuthoredInternalLabel,
   AuthoredPointMark,
   IRPath,
   IRText,
@@ -596,6 +598,30 @@ function blockPiece(
   const kindOf = (p: IRPath) => layerKind(layerOfPath(p));
   const roles: Record<PathId, PathRole> = {};
   const by = (k: LayerKind) => paths.filter((p) => kindOf(p) === k);
+  const authored = group.block ? read.meta.authoredInternalByBlock?.get(group.block) : undefined;
+  const authoredInternalLabels = new Map<PathId, AuthoredInternalLabel>();
+  if (authored) {
+    const { a, b, c, d, e, f } = group.transform;
+    if (read.meta.units.mmPerUnit !== 1 || a !== 1 || b !== 0 || c !== 0 || d !== 1)
+      throw new Error(`Typed CAD lines in ${group.block} require their original millimetre frame.`);
+    const layerEight = paths.filter((path) => layerOfPath(path) === '8');
+    for (const { index, label, closed, vertices } of authored) {
+      const path = layerEight[index];
+      const coords = path ? authoredInternalVertices(path.pts, { x: e, y: f }) : [];
+      if (
+        !path ||
+        path.src.block !== group.block ||
+        !['POLYLINE', 'LWPOLYLINE'].includes(read.meta.pathEntity[path.id]) ||
+        path.closed !== closed ||
+        coords.length !== vertices.length ||
+        coords.some((value, i) => value !== vertices[i])
+      )
+        throw new Error(`The saved layer-8 path for ${label} in ${group.block} changed.`);
+      // Authored marks have a checked native role before the generic seam and drill heuristics.
+      authoredInternalLabels.set(path.id, label);
+      roles[path.id] = 'internal';
+    }
+  }
   const pointMarks: AuthoredPointMark[] = [];
   for (const path of by('authored-point')) {
     const point = read.meta.points[path.id];
@@ -724,7 +750,7 @@ function blockPiece(
     const ds = sampleDistances(seam, cut);
     cutEqualsSeam = Math.max(...ds) < 0.05;
   }
-  const internalPaths = by('internal');
+  const internalPaths = by('internal').filter(({ id }) => !authoredInternalLabels.has(id));
   if (cut && cutEqualsSeam) {
     const big = (c: DxfContour) =>
       c.areaMm2 >= 0.5 * cut.areaMm2 &&
@@ -927,6 +953,7 @@ function blockPiece(
     notchStats: { raw: raw.length, exactDuplicates: 0, twins: 0, derived: 0 },
     drills,
     roles,
+    ...(authoredInternalLabels.size ? { authoredInternalLabels } : {}),
     texts: texts.map(({ id }) => id),
     ...(textMarks.length ? { textMarks } : {}),
     ...(pointMarks.length ? { pointMarks } : {}),

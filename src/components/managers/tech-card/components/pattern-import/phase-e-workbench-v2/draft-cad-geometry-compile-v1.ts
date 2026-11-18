@@ -1,5 +1,6 @@
 import { closestOnPolyline, pointInPolygon } from 'lib/pattern-import/semantics/geom';
 import { normalizeAuthoredText } from 'lib/pattern-import/manifest/authored-text';
+import { segIntersect } from 'lib/pattern-import/pieces/geom';
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 import type { DxfProductPhaseDSizeSelectionResultV1 } from 'lib/pattern-import/dxf-product-phase-d-size-selection-v1';
 import { readManifest } from 'lib/pattern-import/manifest';
@@ -8,6 +9,7 @@ import {
   type ConversionManifest,
   type InternalFeature,
   type NotchFeature,
+  type PieceSizeSpec,
   type PtMm,
   type WriteJob,
 } from 'lib/pattern-import/types';
@@ -170,6 +172,7 @@ const INTERNAL_TOOLS = new Set<PatternImportDxfPhaseEDraftCadToolV1>([
   'french-curve',
   'guideline',
   'dart',
+  'fish-eye',
 ]);
 const PRODUCTIVE_TOOLS = new Set<PatternImportDxfPhaseEDraftCadToolV1>(
   PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_PRODUCTIVE_TOOLS_V1,
@@ -349,7 +352,55 @@ function internalFeature(
       label: 'draft-cad:dart',
       ...featureBase(),
     };
+  if (command.tool === 'fish-eye' && primitive.kind === 'path' && primitive.closed)
+    return {
+      kind: 'internal',
+      pts: primitive.pointsMm.map(({ x, y }) => ({ x, y })),
+      closed: true,
+      label: 'draft-cad:fish-eye',
+      ...featureBase(),
+    };
   return null;
+}
+
+function dartInsideCut(dart: InternalFeature, size: PieceSizeSpec): boolean {
+  const toleranceMm = 0.001;
+  const { pts, closed } = dart;
+  const distance = (a: PtMm, b: PtMm) => Math.hypot(a.x - b.x, a.y - b.y);
+  const holes = size.cutLoops ?? [];
+  const basePoint = (index: number) => !closed && (index === 0 || index === pts.length - 1);
+  const insideRing = (point: PtMm, ring: PtMm[]) =>
+    pointInPolygon(point, ring) || closestOnPolyline(point, ring, true).d <= toleranceMm;
+  if (
+    !pts.every((point, index) => {
+      const inCut = basePoint(index)
+        ? insideRing(point, size.cut)
+        : pointInPolygon(point, size.cut) &&
+          closestOnPolyline(point, size.cut, true).d > toleranceMm;
+      return inCut && holes.every((hole) => !insideRing(point, hole));
+    })
+  )
+    return false;
+
+  const segmentCount = closed ? pts.length : pts.length - 1;
+  for (let index = 0; index < segmentCount; index++) {
+    const next = (index + 1) % pts.length;
+    const a = pts[index]!;
+    const b = pts[next]!;
+    if (distance(a, b) <= toleranceMm) return false;
+    const crosses = (ring: PtMm[], allowBase: boolean) =>
+      ring.some((c, i) => {
+        const edge = segIntersect(a, b, c, ring[(i + 1) % ring.length]!);
+        if (!edge) return false;
+        return (
+          !allowBase ||
+          (!(basePoint(index) && distance(a, edge.p) <= toleranceMm) &&
+            !(basePoint(next) && distance(b, edge.p) <= toleranceMm))
+        );
+      });
+    if (crosses(size.cut, true) || holes.some((hole) => crosses(hole, false))) return false;
+  }
+  return true;
 }
 
 function notchFeature(
@@ -819,6 +870,15 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
     const internal = internalFeature(command, primitive);
     let output: PatternImportDxfPhaseEDraftCadCompiledFeatureV1['output'];
     if (internal) {
+      if (
+        (command.tool === 'dart' || command.tool === 'fish-eye') &&
+        !dartInsideCut(internal, size)
+      )
+        return blocked(
+          'preview-blocked',
+          'Keep the complete dart inside the selected cut and outside its holes.',
+          command,
+        );
       size.internal.push(internal);
       output = 'internal';
     } else if (

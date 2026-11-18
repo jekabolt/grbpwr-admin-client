@@ -2666,6 +2666,8 @@ export type AuthoredInternalLabel =
   | 'draft-cad:pattern-line'
   | 'draft-cad:french-curve'
   | 'draft-cad:guideline'
+  | 'draft-cad:dart'
+  | 'draft-cad:fish-eye'
   | 'draft-cad:cross';
 
 export type ManifestAuthoredInternalPath = {

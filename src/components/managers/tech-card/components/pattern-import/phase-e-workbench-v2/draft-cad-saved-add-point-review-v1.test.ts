@@ -1305,6 +1305,131 @@ it.each(['internal-line', 'pattern-line', 'french-curve', 'guideline', 'cross'] 
   },
 );
 
+it('preserves the two dart types in both DXF dialects, including a small fish-eye', async () => {
+  const f = await fixture(true);
+  vi.stubGlobal('Worker', InProcessTransport);
+  const worker = new ImportWorkerClient();
+  try {
+    const { compilePatternImportDxfPhaseEDraftCadGeometryV1 } = await import(
+      './draft-cad-geometry-compile-v1'
+    );
+    const { projection, selection } = f.compileInput;
+    const target = projection.pieces[0]!;
+    const contour = target.contours.find(({ role }) => role === 'cut-boundary')!;
+    const vertices = contour.vertices;
+    const center = {
+      x: vertices.reduce((sum, vertex) => sum + vertex.pointMm.x, 0) / vertices.length,
+      y: vertices.reduce((sum, vertex) => sum + vertex.pointMm.y, 0) / vertices.length,
+    };
+    const fishEye = {
+      commandId: 'fish-eye-a',
+      tool: 'fish-eye',
+      target,
+      payload: { entityId: 'fish-eye-a', centerMm: center, axisMm: 4, intakeMm: 8, rotationDeg: 0 },
+    } as const;
+    const dart = {
+      commandId: 'dart-a',
+      tool: 'dart',
+      target,
+      payload: {
+        entityId: 'dart-a',
+        base: {
+          contourId: contour.contourId,
+          boundaryVertexIds: [vertices[0]!.vertexId, vertices[1]!.vertexId],
+          progress: 0.5,
+        },
+        apexMm: center,
+        intakeMm: 12,
+      },
+    } as const;
+    const record = (commands: readonly PatternImportDxfPhaseEDraftCadCommandV1[]) =>
+      recordPatternImportDxfPhaseEDraftCadTransactionV1(f.initial, {
+        transactionId: 'typed-darts',
+        label: 'Add darts',
+        commands,
+      });
+    const recorded = record([dart, fishEye]);
+    if (!recorded.ok) throw Error(JSON.stringify(recorded.blocker));
+    const compileSource = createPatternImportDxfPhaseEDraftCadCompileSourceV1(
+      f.source.native.draft,
+    );
+    if (!compileSource) throw Error('Fixture lacks a current writer source.');
+    const compile = (session: typeof recorded.session) =>
+      compilePatternImportDxfPhaseEDraftCadGeometryV1({
+        session,
+        projection,
+        selection,
+        compileSource,
+      });
+    const compiled = compile(recorded.session);
+    if (!compiled.ok) throw Error(JSON.stringify(compiled.blockers));
+    const expected = [
+      { label: 'draft-cad:dart', closed: false, count: 3 },
+      { label: 'draft-cad:fish-eye', closed: true, count: 4 },
+    ];
+    const findSize = (job: typeof compiled.artifact.compiledJob) =>
+      job.pieces.find(({ identity }) => identity === target.pieceId)!.sizes[0]!;
+    const original = findSize(compiled.artifact.compiledJob);
+    const checkDarts = (size: typeof original) => {
+      expect(size.drills).toHaveLength(original.drills.length);
+      expect(size.cutLoops).toEqual(original.cutLoops);
+      expect(
+        size.internal
+          .filter(({ label }) => label === 'draft-cad:dart' || label === 'draft-cad:fish-eye')
+          .map(({ label, closed, pts }) => ({ label, closed, count: pts.length })),
+      ).toEqual(expected);
+    };
+    for (const dialect of ['r12', 'r2000'] as const) {
+      const written = writeDxfDetailed({ ...compiled.artifact.compiledJob, dialect });
+      const metadata = written.manifest.blocks.find(({ identity }) => identity === target.pieceId)!;
+      expect(
+        metadata.authoredInternal?.map(({ label, closed, vertices }) => ({
+          label,
+          closed,
+          count: vertices.length / 2,
+        })),
+      ).toEqual(expected);
+      const file = new File([written.dxfText], 'native-darts.dxf', { type: 'image/vnd.dxf' });
+      const reviewed = await draftThroughWizardStages(file, f.current.card, worker);
+      const scope = reviewed.scopes[0]!;
+      expect(scope.manifest.gate?.passed).toBe(true);
+      checkDarts(findSize(scope.writerReplay!.job));
+      const bytes = new TextEncoder().encode(scope.dxfText);
+      const row = {
+        ...f.current.row,
+        revision: f.current.row.revision + 1,
+        cardLockVersion: f.current.row.cardLockVersion + 1,
+        sizeBytes: bytes.length,
+        sha256: await digestFullAssemblyFixture(bytes),
+      };
+      const card = structuredClone(f.current.card);
+      card.existingPatterns![0]!.manifest = scope.manifest;
+      const reopened = await createSavedThreePanelSourceV1(
+        { ...(await createSavedThreePanelFixtureV1(2)), bytes, row, card },
+        true,
+      );
+      try {
+        expect(reopened.native.row).toEqual(row);
+        checkDarts(findSize(reopened.native.draft.scopes[0]!.writerReplay!.job));
+      } finally {
+        reopened.dispose();
+      }
+    }
+    const outside = record([{ ...fishEye, payload: { ...fishEye.payload, axisMm: 1_000 } }]);
+    if (!outside.ok) throw Error(JSON.stringify(outside.blocker));
+    expect(compile(outside.session)).toMatchObject({
+      ok: false,
+      blockers: [
+        { detail: 'Keep the complete dart inside the selected cut and outside its holes.' },
+      ],
+    });
+  } finally {
+    worker.dispose();
+    vi.unstubAllGlobals();
+    f.source.dispose();
+  }
+});
+
 it('reopens both construction points through the normal DXF writer and fresh saved read', async () => {
   const f = await fixture(true);
   vi.stubGlobal('Worker', InProcessTransport);

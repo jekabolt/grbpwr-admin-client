@@ -5,6 +5,8 @@ const LABELS = new Set<string>([
   'draft-cad:pattern-line',
   'draft-cad:french-curve',
   'draft-cad:guideline',
+  'draft-cad:dart',
+  'draft-cad:fish-eye',
   'draft-cad:cross',
 ]);
 
@@ -43,6 +45,8 @@ export function parseManifestAuthoredInternal(
       vertices.length < (closed ? 6 : 4) ||
       vertices.length > 8_000 ||
       vertices.length % 2 !== 0 ||
+      (label === 'draft-cad:dart' && (closed || vertices.length !== 6)) ||
+      (label === 'draft-cad:fish-eye' && (!closed || vertices.length !== 8)) ||
       !vertices.every((coordinate) => Number.isSafeInteger(coordinate))
     )
       return null;

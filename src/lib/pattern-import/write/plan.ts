@@ -434,9 +434,12 @@ export function planBlocks(
       const sNotches = slits.length ? [...s.notches, ...slits] : s.notches;
       if (!seam) warnings.push(`${who}: no seam line — layer 14 omitted (the gate will block)`);
       const internal = s.internal.map((f) => ({
-        pts: f.closed
-          ? simplify(f.pts, true, WRITE_SIMPLIFY_MM)
-          : densifyOpen2(simplify(f.pts, false, WRITE_SIMPLIFY_MM)),
+        pts:
+          f.label === 'draft-cad:dart' || f.label === 'draft-cad:fish-eye'
+            ? f.pts
+            : f.closed
+              ? simplify(f.pts, true, WRITE_SIMPLIFY_MM)
+              : densifyOpen2(simplify(f.pts, false, WRITE_SIMPLIFY_MM)),
         closed: f.closed,
         ...(isAuthoredInternalLabel(f.label) ? { authoredLabel: f.label } : {}),
       }));

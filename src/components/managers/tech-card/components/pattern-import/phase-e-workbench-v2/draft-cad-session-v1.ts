@@ -53,6 +53,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_PRODUCTIVE_TOOLS_V1 = Object.f
   'add-point',
   'edge-length',
   'dart',
+  'fish-eye',
   'cut',
   'spread',
   'mark',

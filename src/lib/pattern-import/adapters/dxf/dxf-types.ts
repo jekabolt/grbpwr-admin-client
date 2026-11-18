@@ -4,6 +4,7 @@
 import type {
   Affine,
   AllowanceDecision,
+  AuthoredInternalLabel,
   AuthoredPointMark,
   AuthoredTextMark,
   BoxMm,
@@ -296,6 +297,7 @@ export type DxfBlockPiece = {
   /** `sizeMm`: the drawn mark across (a square's side, a circle's diameter); 0 for a bare point. */
   drills: { at: PtMm; path: PathId; form: 'square' | 'circle' | 'point'; sizeMm: number }[];
   roles: Record<PathId, PathRole>;
+  authoredInternalLabels?: ReadonlyMap<PathId, AuthoredInternalLabel>;
   texts: TextId[];
   textMarks?: AuthoredTextMark[];
   pointMarks?: AuthoredPointMark[];

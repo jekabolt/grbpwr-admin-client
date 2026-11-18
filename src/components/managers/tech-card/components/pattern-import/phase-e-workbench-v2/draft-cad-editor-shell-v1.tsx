@@ -42,7 +42,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_TOOL_GROUPS_V1 = Object.freeze
   Object.freeze({
     id: 'shape',
     label: 'Shape',
-    tools: Object.freeze(['dart', 'cut', 'spread'] as const),
+    tools: Object.freeze(['dart', 'fish-eye', 'cut', 'spread'] as const),
   }),
   Object.freeze({
     id: 'details',

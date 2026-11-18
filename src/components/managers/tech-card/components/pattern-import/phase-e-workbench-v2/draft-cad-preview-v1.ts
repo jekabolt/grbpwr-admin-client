@@ -587,26 +587,28 @@ export function buildPatternImportDxfPhaseEDraftCadPreviewV1(
           );
           break;
         }
+        const { axisMm, intakeMm, rotationDeg } = command.payload;
+        const radians = (rotationDeg * Math.PI) / 180;
+        const ux = Math.cos(radians);
+        const uy = Math.sin(radians);
+        const half = intakeMm / 2;
+        const pointsMm = [
+          { x: centerMm.x + ux * axisMm, y: centerMm.y + uy * axisMm },
+          { x: centerMm.x - uy * half, y: centerMm.y + ux * half },
+          { x: centerMm.x - ux * axisMm, y: centerMm.y - uy * axisMm },
+          { x: centerMm.x + uy * half, y: centerMm.y - ux * half },
+        ];
         primitives.push(
           deepFreeze({
             ...base,
-            kind: 'ellipse' as const,
-            centerMm,
-            radiusXmm: command.payload.axisMm,
-            radiusYmm: command.payload.intakeMm / 2,
-            rotationDeg: command.payload.rotationDeg,
+            kind: 'path' as const,
+            pointsMm,
+            closed: true,
+            role: 'internal' as const,
+            stroke: 'dashed' as const,
           }),
         );
-        bounds = extendPoints(bounds, [
-          {
-            x: centerMm.x - command.payload.axisMm,
-            y: centerMm.y - command.payload.axisMm,
-          },
-          {
-            x: centerMm.x + command.payload.axisMm,
-            y: centerMm.y + command.payload.axisMm,
-          },
-        ]);
+        bounds = extendPoints(bounds, pointsMm);
         break;
       }
       case 'spread': {
