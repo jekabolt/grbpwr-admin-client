@@ -29,10 +29,19 @@ import type {
 } from 'lib/pattern-import/types';
 
 import { continuityVerdicts, isAnchor } from '../fill';
-import { bboxOf, pointInPoly, signedArea, simplify } from '../geom';
+import { bboxOf, dist, pointInPoly, signedArea, simplify } from '../geom';
 import type { WallModel } from '../walls';
 import { outlineOf, predictPair } from './checks';
 import { GFIT_TOL_P0, GFIT_TOL_PDF, type GfitFamily, type GfitSizeIn } from './fit';
+import {
+  canonRing,
+  linesToRing,
+  NEST_WALK,
+  NestLineIndex,
+  nestWalk,
+  ringDistance,
+  type NestSizeIn,
+} from './nest-walk';
 import { GFIT_REPAIR, repairSize, type GfitWall } from './repair';
 import { silentRead } from './silent-inputs';
 
@@ -129,6 +138,11 @@ export const GRADE_DRAW = {
 
 export function gradeDrawOff(): boolean {
   return typeof process !== 'undefined' && process.env?.GRADE_DRAW_OFF === '1';
+}
+
+/** The nest walk closes the leaks the repair refused; `GFIT_NEST_WALK=0` turns it off. */
+export function nestWalkOn(): boolean {
+  return !(typeof process !== 'undefined' && process.env?.GFIT_NEST_WALK === '0');
 }
 
 export type RepairWallIn = { chain: ChainId; pts: readonly PtMm[]; closed?: boolean };
@@ -468,7 +482,8 @@ export function repairPass(
           `GRADEP2 seed ${c.seed} r${r} ${kind} REPAIRED cover ${rep.cover.toFixed(3)} holes ${rep.holes.map((h) => h.lenMm.toFixed(1)).join('/')}`,
         );
       if (kind === 'leak') orig.set(`${c.seed}:${r}`, c);
-      list[i] = cand;
+      // the walk's refusal stays the recorded reason the walk did not build it
+      list[i] = c.nest ? { ...cand, nest: c.nest } : cand;
       diag.repaired.push({ seed: c.seed, rank: r, kind });
       return [];
     }
@@ -540,7 +555,8 @@ export function repairPass(
       console.log(
         `GRADEP2 fam ${seed}: ${list.map((x) => `${x.rank}${x.outcome[0]}${isAnchor(x) ? '*' : gradeAnchor(x) ? '+' : ''}${x.rankFrom && x.rankFrom !== 'class' ? `(${x.rankFrom})` : ''}${x.derived?.length ? `[${x.derived.map((d) => `${d.kind}`).join(',')}]` : ''}`).join(' ')}`,
       );
-  // (A) leaks between two anchors
+  // (A) leaks between two anchors — repairSize first; the nest walk only fills what it leaves
+  // open (owner, 18 Nov 2026)
   for (const [seed, list] of cands) {
     if (skip.has(seed)) continue;
     for (let i = 0; i < list.length; i++)
@@ -581,7 +597,11 @@ export function repairPass(
       // a repair the family's full grade check still holds: not proven — back to the leak it was
       const o = orig.get(`${v.seed}:${v.rank}`);
       if (o) {
-        list[i] = o;
+        const walkE = list[i].repair?.walk?.etalon;
+        list[i] =
+          walkE != null
+            ? { ...o, nest: { etalon: walkE, state: 'refused', why: 'walk:g26-held' } }
+            : o;
         orig.delete(`${v.seed}:${v.rank}`);
         diag.repaired = diag.repaired.filter((x) => !(x.seed === v.seed && x.rank === v.rank));
         refuse('leak:held-after-repair');
@@ -598,7 +618,8 @@ export function repairPass(
     for (let i = 0; i < list.length; i++) {
       const c = list[i];
       const o = orig.get(`${seed}:${c.rank}`);
-      if (c.rankFrom !== 'repair' || c.repair?.kind !== 'leak' || !o) continue;
+      // a walked size rests on the etalon, not on the anchors' model
+      if (c.rankFrom !== 'repair' || c.repair?.kind !== 'leak' || c.repair.walk || !o) continue;
       if (!c.repair.from.some((r) => hs.has(r))) continue;
       list[i] = o;
       orig.delete(`${seed}:${c.rank}`);
@@ -607,6 +628,8 @@ export function repairPass(
       tryRepair(list, i, 'leak', hs);
     }
   }
+  // (W) nest walk: confirm/disagree closed sizes; close remaining leaks (owner, 18 Nov 2026)
+  if (nestWalkOn()) nestWalkPass(cands, ctx, skip, diag, orig);
   diag.ms = Date.now() - t0;
   if (DEBUG || TIME)
     console.log(
@@ -614,3 +637,275 @@ export function repairPass(
     );
   return diag;
 }
+
+/**
+ * The nest walk (gfit/nest-walk.ts), the main build (owner, 17 Nov 2026): per family, every size
+ * the file draws is scored for the etalon and every size is built from it by the walk. A closed
+ * size keeps its own outline when the walk's lies within `NEST_WALK.confirmP95Mm` of it, else it
+ * is flagged 'disagree' (a closure on another size's line). A leak gets the walk's outline when its
+ * ring holds, its stretches off the lines ('grade-draw', flagged) stay within
+ * `GFIT_REPAIR.drawMaxShare` of its perimeter and, blind to its own lines, the walk still lands on
+ * them. A leak it refuses keeps `nest.why` and goes on to repairSize. Returns the seeds it found an
+ * etalon for.
+ */
+/**
+ * NEST_WALK_DUMP=<dir> (Node only): writes the walk's exact input per family as
+ * `<dir>/seed<seed>.json` ({ sizes, own[i] = lines of sizes[i], common }), the format
+ * `nest-walk-check.ts --dump` and `nest-walk-cover.ts --dump` replay. No-op in the browser.
+ */
+function dumpWalkInput(
+  seed: number,
+  sizes: NestSizeIn[],
+  own: (rank: number) => unknown[],
+  common: unknown[],
+): void {
+  if (typeof process === 'undefined' || !process.env?.NEST_WALK_DUMP) return;
+  const get = (process as { getBuiltinModule?: (id: string) => unknown }).getBuiltinModule;
+  const fs = get?.('node:fs') as
+    | { mkdirSync(p: string, o: object): void; writeFileSync(p: string, d: string): void }
+    | undefined;
+  if (!fs) return;
+  const dir = process.env.NEST_WALK_DUMP;
+  fs.mkdirSync(dir, { recursive: true });
+  const body = { sizes, own: sizes.map((s) => own(s.rank)), common };
+  fs.writeFileSync(`${dir}/seed${seed}.json`, JSON.stringify(body));
+}
+
+function nestWalkPass(
+  cands: Map<number, PieceCandidate[]>,
+  ctx: RepairCtx,
+  skip: ReadonlySet<number>,
+  diag: RepairDiag,
+  orig: Map<string, PieceCandidate>,
+): Set<number> {
+  const walked = new Set<number>();
+  const count = (why: string) => (diag.refused[why] = (diag.refused[why] ?? 0) + 1);
+  const commonPts = ctx.common.map((w) => w.pts);
+  for (const [seed, list] of cands) {
+    if (skip.has(seed) || !list.length) continue;
+    const open = list.filter((c) => c.outcome === 'leak').map((c) => c.rank);
+    const sizes: NestSizeIn[] = list.map((c) => ({
+      rank: c.rank,
+      outer: c.outcome === 'closed' && c.outer.length > 2 ? c.outer : null,
+      ...(c.rankFrom ? { from: c.rankFrom } : {}),
+      ...(c.derived ? { derived: c.derived.map((d) => ({ kind: d.kind, pts: d.pts })) } : {}),
+    }));
+    const w = nestWalk({
+      sizes,
+      own: (r) => ctx.own(r).map((x) => x.pts),
+      common: commonPts,
+    });
+    dumpWalkInput(seed, sizes, (r) => ctx.own(r).map((x) => x.pts), commonPts);
+    if (w.etalon == null) {
+      const why = `walk:no-etalon:${w.why ?? '-'}`;
+      diag.refused[why] = (diag.refused[why] ?? 0) + open.length;
+      if (DEBUG) console.log(`GRADEP2 walk seed ${seed}: ${why}`);
+      continue;
+    }
+    const E = w.etalon;
+    walked.add(seed);
+    const closed = list.filter((c) => c.outcome === 'closed').map((c) => c.rank);
+    // closed sizes: the walk confirms the read outline or flags it
+    for (let i = 0; i < list.length; i++) {
+      const c = list[i];
+      if (c.outcome !== 'closed') continue;
+      if (c.rank === E) {
+        list[i] = { ...c, nest: { etalon: E, state: 'etalon' } };
+        continue;
+      }
+      const b = w.sizes.get(c.rank);
+      if (!b || b.outer.length < 3 || b.refused) {
+        const why = `walk:${b?.refused ?? 'not-built'}`;
+        list[i] = { ...c, nest: { etalon: E, state: 'unchecked', why } };
+        count(`walk-check:${why}`);
+        continue;
+      }
+      const d = ringDistance(b.outer, canonRing(c.outer).pts);
+      if (d.p95 <= NEST_WALK.confirmP95Mm) {
+        list[i] = { ...c, nest: { etalon: E, state: 'confirmed', p95Mm: round2(d.p95) } };
+        continue;
+      }
+      let landmark = '';
+      let best = Infinity;
+      w.landmarks.forEach((l, j) => {
+        const p = w.tracks?.[j]?.pos[c.rank];
+        if (!p) return;
+        const dd = dist(p, d.at);
+        if (dd < best) [best, landmark] = [dd, `#${j} ${l.kind} e${l.edge}`];
+      });
+      list[i] = {
+        ...c,
+        nest: {
+          etalon: E,
+          state: 'disagree',
+          p95Mm: round2(d.p95),
+          maxMm: round2(d.max),
+          at: d.at,
+          ...(landmark ? { landmark } : {}),
+        },
+      };
+      count('walk-check:disagree');
+      if (DEBUG)
+        console.log(
+          `GRADEP2 walk seed ${seed} r${c.rank} disagrees with the nest: p95 ${d.p95.toFixed(2)} max ${d.max.toFixed(2)} at ${d.at.x.toFixed(0)},${d.at.y.toFixed(0)} ${landmark}`,
+        );
+    }
+    for (const r of open) {
+      const i = list.findIndex((c) => c.rank === r);
+      const b = w.sizes.get(r);
+      const refuse = (why: string, err?: { p95: number; max: number }) => {
+        count(why);
+        list[i] = {
+          ...list[i],
+          nest: {
+            etalon: E,
+            state: 'refused',
+            why,
+            ...(err ? { p95Mm: round2(err.p95), maxMm: round2(err.max) } : {}),
+          },
+        };
+      };
+      diag.tried++;
+      if (!b || b.outer.length < 3) {
+        refuse('walk:not-built');
+        continue;
+      }
+      if (b.refused) {
+        refuse(`walk:${b.refused}`);
+        continue;
+      }
+      const ring0 = signedArea(b.outer) < 0 ? b.outer.slice().reverse() : b.outer;
+      const outer = simplify([...ring0, ring0[0]], 0.02).slice(0, -1);
+      let per = 0;
+      for (let k = 0; k < outer.length; k++) {
+        const p = outer[k];
+        const q = outer[(k + 1) % outer.length];
+        per += Math.hypot(q.x - p.x, q.y - p.y);
+      }
+      if (b.derivedMm > GFIT_REPAIR.drawMaxShare * per) {
+        refuse('walk:derived-share');
+        continue;
+      }
+      // the walk must predict the size, not trace it: blind to its own lines it still lands on them
+      const blind = nestWalk({
+        sizes,
+        own: (k) => ctx.own(k).map((x) => x.pts),
+        common: commonPts,
+        etalon: w.etalon,
+        hide: new Set([r]),
+        only: new Set([r]),
+      }).sizes.get(r);
+      const fit =
+        blind && blind.outer.length > 2
+          ? linesToRing(
+              ctx.own(r).map((x) => x.pts),
+              blind.outer,
+              NEST_WALK.blindNearMm,
+            )
+          : null;
+      if (!fit || !fit.n || fit.p95 > NEST_WALK.blindP95Mm || fit.max > NEST_WALK.blindMaxMm) {
+        refuse('walk:blind', fit ?? undefined);
+        if (DEBUG)
+          console.log(
+            `GRADEP2 walk seed ${seed} r${r} refused blind: ${fit ? `p95 ${fit.p95.toFixed(2)} max ${fit.max.toFixed(2)} n${fit.n}` : 'not built'}`,
+          );
+        continue;
+      }
+      const below = closed.filter((k) => k < r).pop();
+      const above = closed.find((k) => k > r);
+      const areaOf = (k: number | undefined) =>
+        k == null ? NaN : Math.abs(signedArea(list[list.findIndex((c) => c.rank === k)].outer));
+      const area = Math.abs(signedArea(outer));
+      if (area <= areaOf(below) || area >= areaOf(above)) {
+        refuse('walk:area-order');
+        continue;
+      }
+      // the chains the outline runs on (≥ 3 mm of it within 0.5 mm): its walls
+      const kept = [...ctx.own(r), ...ctx.common].filter(
+        (x) => x.pts.length >= 2 && x.pts.some((p, k) => k > 0 && dist(p, x.pts[k - 1]) > 0),
+      );
+      const idx = new NestLineIndex(
+        kept.map((x) => x.pts),
+        4,
+      );
+      const onMm = new Map<number, number>();
+      for (let k = 0; k < outer.length; k++) {
+        const p = outer[k];
+        const q = outer[(k + 1) % outer.length];
+        const L = Math.hypot(q.x - p.x, q.y - p.y);
+        const n = Math.max(1, Math.ceil(L / 0.5));
+        for (let s = 0; s < n; s++) {
+          const t = s / n;
+          const h = idx.nearest({ x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t }, 0.5);
+          if (h) {
+            const li = idx.pts[h.j].line;
+            onMm.set(li, (onMm.get(li) ?? 0) + L / n);
+          }
+        }
+      }
+      const walls = [
+        ...new Set([...onMm].filter(([, mm]) => mm >= 3).map(([li]) => kept[li].chain)),
+      ];
+      const bbox = bboxOf(outer);
+      const wallSet = new Set(walls);
+      const inside: ChainId[] = [];
+      for (const ch of ctx.set.chains) {
+        if (wallSet.has(ch.id) || ch.pts.length < 2) continue;
+        const cb = bboxOf(ch.pts);
+        if (
+          cb.minX < bbox.minX ||
+          cb.maxX > bbox.maxX ||
+          cb.minY < bbox.minY ||
+          cb.maxY > bbox.maxY
+        )
+          continue;
+        const step = Math.max(1, Math.floor(ch.pts.length / 8));
+        let ok = true;
+        for (let j = 0; j < ch.pts.length && ok; j += step) ok = pointInPoly(ch.pts[j], outer);
+        if (ok && pointInPoly(ch.pts[ch.pts.length - 1], outer)) inside.push(ch.id);
+      }
+      const from: [number, number] = [below ?? above ?? w.etalon, above ?? below ?? w.etalon];
+      const derivedMm = Math.round(b.derivedMm * 10) / 10;
+      const record: RepairRecord = {
+        kind: 'leak',
+        from,
+        cover: Math.round((1 - b.derivedMm / per) * 1000) / 1000,
+        holes: b.derived.length,
+        holesMm: derivedMm,
+        score: 0,
+        devMm: 0,
+        ...(b.derived.length ? { drawnMm: derivedMm } : {}),
+        ...(below == null || above == null ? { extrapolated: true as const } : {}),
+        walk: { etalon: w.etalon },
+      };
+      orig.set(`${seed}:${r}`, list[i]);
+      list[i] = {
+        seed,
+        rank: r,
+        outer,
+        walls,
+        inside,
+        textsInside: ctx.texts.filter((t) => pointInPoly(t.at, outer)).map((t) => t.id),
+        outcome: 'closed',
+        areaMm2: Math.abs(signedArea(outer)),
+        bbox,
+        sourceCoverage: record.cover,
+        p95Mm: 0,
+        rankFrom: 'repair',
+        repair: record,
+        nest: { etalon: E, state: 'built', p95Mm: round2(fit.p95), maxMm: round2(fit.max) },
+        ...(b.derived.length
+          ? { derived: b.derived.map((d) => ({ kind: 'grade-draw' as const, pts: d.pts })) }
+          : {}),
+      };
+      diag.repaired.push({ seed, rank: r, kind: 'leak' });
+      if (DEBUG)
+        console.log(
+          `GRADEP2 walk seed ${seed} r${r} from etalon ${w.etalon}: derived ${derivedMm} mm (${((b.derivedMm / per) * 100).toFixed(1)} %)`,
+        );
+    }
+  }
+  return walked;
+}
+
+const round2 = (x: number) => Math.round(x * 100) / 100;

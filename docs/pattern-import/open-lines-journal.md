@@ -1133,3 +1133,113 @@ Change: `GRADE_P2_LOOSE` skips loose walls on an extrapolation or a `GFIT_LOCAL`
 Run: `npx vitest run src/lib/pattern-import`. No archive run.
 Numbers: none.
 Verdict: PARKED. C2 cannot change anything where s ≤ 3 mm and adds at most 0.2s − 0.6 above that, so a small set40 delta is expected, not a bug. How many sizes R2.1 costs is `looseSkipped` on the next owner-gated run.
+
+### Nest walk from one etalon size (`pieces/gfit/nest-walk.ts`) — PARKED, acceptance (a) fails on every Leah piece (17 Nov 2026)
+
+Hypothesis: one clean, fully-own size (the etalon) plus a walk of its landmarks outward through the size nest, onto own/common lines only, rebuilds every size; the holes are interpolated between measured neighbours.
+Change: new `src/lib/pattern-import/pieces/gfit/nest-walk.ts` (etalon pick, landmarks, walk, outline), `nest-walk.test.ts` (7 synthetic tests, green), offline check `scripts/pattern-import/nest-walk-check.ts`. Pipeline hook: see the "Wired after all" bullet below. Debug: `NEST_WALK_DEBUG=1` prints `NW corner` / `NW side`. Scratch tools in `/private/tmp/nw/` (`dbg.ts` SVG of one size, `floor.ts`, `report.txt`).
+Run: `npx vite-node scripts/pattern-import/nest-walk-check.ts /private/tmp/patimport-runs/leah-pen/2-A4-MDF-349-The-Leah-Shift-Dress-00-32-` (single file, `SHOT_ROWS=1` shot). `npx vitest run src/lib/pattern-import/pieces/gfit/nest-walk.test.ts`.
+Numbers (Leah, (a) leave-one-out p95-of-p95 / max mm; worst landmark):
+
+| piece               | etalon | (a) p95 / max | worst at        | (b)  | (c)               |
+| ------------------- | ------ | ------------- | --------------- | ---- | ----------------- |
+| E skirt front       | 8      | 152 / 152     | 32, #308 arc    | FAIL | pass              |
+| A top back          | 20     | 27.2 / 59.8   | 00, #33 arc     | FAIL | pass              |
+| D skirt back        | 12     | 8.29 / 14.6   | 00, #99 arc     | —    | pass              |
+| F front neck facing | 12     | 5.16 / 16.8   | 16, #54 corner  | FAIL | pass              |
+| C sleeves           | 16     | 2.66 / 12.8   | 00, #255 arc    | FAIL | pass              |
+| G back neck facing  | 0      | 2.05 / 3.28   | 20, #111 corner | FAIL | FAIL (10, 12, 24) |
+| B top front         | 16     | 1.63 / 8.98   | 12, #149 arc    | FAIL | pass              |
+
+Open cells built: 13 of 17 get a ring; 7 of those are refused self-crossing; derived share 2–73 % (F/G facings 30–73 %).
+
+- Interpolation floor, measured as distance to the hidden size's own outline (`/private/tmp/nw/floor3.ts` … `floor9.ts`): Leah's steps are even on average (chord fraction 0.50 for every size) but change by size range per landmark (D, one landmark: 6.3 mm for 0–8, 9.5 for 10–14, 12.7 for 16–24, 14.5 for 26–32). The even split misses by half the jump at a range boundary: p95 E 3.16, G 1.97, B 1.36, A 1.16, D 1.02, F 0.76, C 0.68 mm. The walk's own measured points sit on their outlines (p95 0.22–0.25 mm), so this is the interpolation, not the walk.
+- Owner, 17 Nov: interpolate along the neighbours' step pattern, keep the 0.5 / 1.5 mm bar. `regrade()` in `nest-walk.ts`: for a skipped r with r−2, r−1, r+1, r+2 measured, the chord T = s*r + s*{r+1} is 2·s*{r−1}, 2·s*{r+2} or s*{r−1} + s*{r+2}; the case that fits within `breakFitMm` 0.5 and beats the next by `breakMarginMm` 0.6 wins, else the even split. Arcs are graded on the normal only (they slide along the line); corners as vectors. Floor after: E 0.24, D 0.24, F 0.73, C 0.76, G 0.85, A 0.95, B 1.03. Oracle (best of the four predictions, picked after the fact): A 0.49, B 0.52, C 0.46, F 0.61, G 0.54 — so on A/B/C/F/G the steps are irregular size to size (C ±0.5 mm sawtooth, B 1–2 mm) and no neighbour-step rule reaches 0.5 there. Taken from: tried without the normal projection (C, B worse), without the fit gate (C 0.68 → 1.2), and with a vote over ±W landmarks on the edge (no change).
+- With `regrade` in the walk (`only` now runs two sizes past the target so r+2 exists): D leave-one-out size 8 1.56 → 0.25 p95; C open size 18 (b) 0.51 (0.47 with arcs-only). Per-piece (a) unchanged — it is set by walk failures at the card ends (00, 28–32) and D 20, not by interpolation. New unit test: a missing size at a range break (1.77 mm without `regrade`, < 0.3 with).
+- References are dirty: 36 of 74 Leah "common" chains are also ranked to one size; unranked common chains are sometimes one size's line (D c3194 = size 18 hem); some closed cells run on other sizes' lines (B 00 shoulder on c299/c3085/c304 instead of c292). Leave-one-out skips cells with own+pure-common share < 98 %.
+- E: per-size lines are labelled common, so the own-preferred snap rides the wrong size at 28–32 (152 mm).
+- Wired after all: `repair-hook.ts` `nestWalkPass` runs at the end of `repairPass` on the leaks the repair left (on by default, `GFIT_NEST_WALK=0` off; always on in the browser). Written as a closed cell, `rankFrom: 'repair'`, `repair.walk.etalon`, derived stretches as flagged `'grade-draw'` edges, refused over 15 % derived. Leah single run (`dxf-shot.mjs --files leah.txt`): closed 3 more cells (A 24, B 24, G 12), no closed cell changed.
+- Those 3 cells were wrong: the walk with own lines visible traces them, so the outline looks fine; blind to them it misses by p95 2.46 / 1.78 / 2.75 mm (max ≥ 3, the search radius), and G 12 is smaller than G 10. Gate added before writing: the cell is rebuilt with its own lines hidden and must land on them within `NEST_WALK.blindP95Mm` 0.5 / `blindMaxMm` 1.5 (`linesToRing`, 3 mm), and its area must lie between its closed neighbours' (`walk:blind`, `walk:area-order`). Leah after the gate: all 3 refused, the import is the same as with `GFIT_NEST_WALK=0`. UI check on SS26-050 (card S–XL): the card takes file sizes 00–4 only, which had no open cell, so nothing differs on screen either way. Note: the fill does not know the card, so "the etalon is a card size only" is not enforced in the pipeline yet (`outOfCard` is never set) — Leah's etalons 8–20 are outside an S–XL card.
+- Owner correction (17 Nov): the walk is the MAIN build, not a fallback. `nestWalkPass` now runs first in `repairPass`, on every seed: etalon over every file size, every size built; a closed size is 'confirmed' (walk within `NEST_WALK.confirmP95Mm` 0.5 of its own outline, kept) or 'disagree' (kept, flagged on `PieceCandidate.nest` + a piece note in semantics/build.ts with the landmark nearest the worst point); a leak gets the walk's outline under the gates above. repairSize runs only on seeds with no etalon (and stays as G26's neighbour path); a walk-built size G26 holds is undone (`walk:g26-held`). The card mapping is applied after, as before (semantics only exports card sizes). `cells.json` carries `nest`. `repair-flags.test.ts` pins `GFIT_NEST_WALK=0` (it tests repairSize).
+- Leah single run (`/private/tmp/nw/shot-main`), per piece — etalon · confirmed / disagree / unchecked (built ring refused) · open with walk off → on:
+  E 8 · 2 / 4 / 9 · 1 → 2 (12 `walk:blind` — repairSize had closed it, 26 self-crossing);
+  A 20 · 0 / 3 / 11 · 3 → 3 (18, 26 self-crossing, 24 blind 2.46);
+  C 16 · 11 / 2 / 3 · 1 → 1 (18 self-crossing);
+  D 12 · 6 / 7 / 4 · 0 → 0;
+  B 16 · 0 / 4 / 11 · 2 → 2 (18 self-crossing, 24 blind 1.78);
+  F 12 · 6 / 4 / 3 · 3 → 4 (22, 26, 30 derived-share — repairSize had closed 30, 24 self-crossing);
+  G 0 · 2 / 4 / 5 · 6 → 6 (12 blind 2.75, rest self-crossing). Open 16 → 18, built 0.
+- Read: the walk's full-nest ring self-crosses on most sizes (A, B 11 of 17), so it cannot check them, and its disagreements match the leave-one-out failures (D 00 26 mm, E 22–24 51–58 mm, B/A 28–32) — walk errors, not wrong closures; they cannot be told apart until the walk holds at the card ends. Owner's E 16–20 example: 16, 18 unchecked (self-crossing), so not caught.
+- Owner decision (17 Nov, second): the walk may only ADD closures — repairSize tries every leak the walk refused (`nest.why` kept); a walk-built size G26 holds is undone and handed to repairSize. 'disagree' stays in `cells.json` only (piece note removed). Leah single run: open 16 → 16, E 12 and F 30 closed by repairSize after `walk:blind` / `walk:derived-share`.
+- Self-crossing, hypothesis "independent per-landmark snapping breaks the ring order". `NestSizeOut.src` (per point: span j, path/guide, line). Dumped on the pipeline's own inputs (`ctx.own`/`ctx.common` differ from `rows.json`: offline A 18 and B 18 do not cross at all). `/private/tmp/nw/xing.ts` (SVG), `xall.ts` (every size). A 18: corner #359 'replaced' (settled from its edges' arcs) sits 1 mm short of where the hem's own line ends; the hem span runs past it and the ring touches back — CONFIRMED. B 18: guide span #322 → #323, each 0.5 mm sample snapped to the nearest line, hops between two lines 0.3–0.7 mm apart — CONFIRMED (sample-wise). G 10: all 3 (8 on pipeline inputs) crossings lie on the size's own drawn chains c3058 / c2997, which cross themselves (seg i × seg i+2: a dash run joined out of order) — REFUTED, the walk traces the drawing. Every self-crossing size on Leah (56): corner not measured 26, guide snap 36 (hops lines 22, one line 14), path along a line past its neighbour 15, paths on two lines 8, the drawn line itself 7 (one size can have several).
+- Drawn-line self-crossings (owner, 17 Nov): `cutLoops` on the edge path — loop ≤ `loopKeepMm` 10 kept as read geometry, > 10 the edge is a gap (derived). ringCheck still refuses a crossed built ring. The 7 sizes of the previous dump, re-read after edge correspondence on the pipeline inputs (`/private/tmp/nw/dump`), with chain ids matched to `rows.json`:
+
+  | piece        | size               | at (mm)                                          | loop mm          | action          | chains at crossing                 |
+  | ------------ | ------------------ | ------------------------------------------------ | ---------------- | --------------- | ---------------------------------- |
+  | A top back   | 10                 | 187.22,1222.84 … 80.39,1167.00 (6 pts)           | 4.0–4.5          | cut             | c2981                              |
+  | A top back   | 26                 | 26.08,1056.61                                    | 0.2              | cut             | c562 + common400                   |
+  | A top back   | 26                 | 204.89,1221.21 … 63.32,1147.53 (13 pts)          | 3.0–4.0          | cut             | c2983                              |
+  | B top front  | 10                 | 619.59,731.89                                    | 0.2              | cut             | own1 (unmatched) + c2930           |
+  | B top front  | 26                 | 808.58,1198.36 … 732.43,1274.50 (12 pts)         | 3.0–3.8          | cut             | c3090                              |
+  | B top front  | 0                  | 894.98,1072.31                                   | 0.4              | cut             | common526 + c384 + common358       |
+  | C sleeves    | 0                  | 143.37,472.10                                    | 1.1              | cut             | c2947                              |
+  | C sleeves    | 20                 | 87.75,472.25                                     | 0.4              | cut             | c1511 + common455                  |
+  | F front neck | 14/16/18/20        | 731.58,322.59                                    | 0.4              | cut             | c1814 + c1764                      |
+  | F front neck | 22/24              | 724.82,320.59                                    | 0.5              | cut             | c1754 + c1763                      |
+  | F front neck | 26                 | 646.63,128.33 / 634.05,120.07                    | 4.0 / 3.0        | cut             | c3043                              |
+  | G back neck  | 10 (pre-edge dump) | 1306.54,316.63 / 1311.40,309.33 / 1326.47,279.30 | 6.9 / 11.8 / 9.4 | cut / gap / cut | dump own[14] (= c2997 by geom)     |
+  | G back neck  | 10 (pre-edge dump) | 1273.53,159.93 … 1273.59,233.84 (5 pts)          | 6.8–13.7         | cut/gap         | dump own[18] (= c3058) ± common384 |
+
+  After edge correspondence G's built sizes report 0 drawn-line loops (those edges went to gap or a different line). No loop > 10 mm survived into a kept path. Upstream: c2981, c2983, c3090, c3043, c2997, c3058 look like dash runs joined out of order (seg i × seg i+2).
+
+- Edge correspondence (owner point 3): search corners / darts / notches only; edge = `traceEdge` along own/common; arcs by arc-length fraction; no path → interpolate neighbours' same edge else deform etalon (derived). `searched` stub flipped on. Synthetic test threshold 0.2 → 0.25 (resampling). Offline gate after point 3 on pipeline dumps vs `report2.json` baseline: **STOP** — built-ring self-crossing still 12 sizes (A 4; C 4,18,28,30,32; B 00,30; F 00,0,4,18); leave-one-out p95 worse on almost every closed size (E 4 0.35→25, A 00 27→78, C 00 2.2→17, D 4 0.21→20, B 12 1.0→16.5, …). Remaining crossings are not drawn-line loops: corner/arc of adjacent edges meet at u≈0/1 on the simplified ring, or an extrapolated arc path zig-zags (C 30). Point 4 (anchors) not started.
+  - Point 4 (anchors): closed sizes → corners from `nestCorners` + `matchCorners` to the etalon (ring-order rotation); open/hidden → lerp by `parseSizeToken` step between nearest anchors; one size past the last anchors extrapolated, further refused. Edges: `traceEdge` when the line exists, else blend the bracketing anchors' same edge (bulge about this size's chord — regrade on corners still moves the outline); deform the etalon only with one side. `NestSizeIn.step` added. On E every closed size matches 4 corners (anchors); 12 and 26 stay open. Offline gate (`/private/tmp/nw/gate4.json`): **STOP** — E hidden 4–20 still has sizes above 1 mm (6: 1.02, 14: 4.24, 20: 12.71). E 4: 0.22 and E 16: 0.16 are fixed (built≠etalon: built-vs-etalon p95 82 mm, built-vs-real 0.16). SVG `/private/tmp/nw/E16-anchor.svg`. Self-crossing 2–15 per piece. E 14/20 are not the old etalon-stick; matching or the blend across the open 12 (for 14) / a bad neighbour is likelier.
+Verdict: PARKED at the stop after point 4. Anchors fix E 4/16; E 14/20 and self-crossings remain. Owner decisions (17 Nov): derived stretches are written flagged, no operator confirmation; a cell with derived > 15 % of its perimeter is refused; the etalon is a card size only. Next: the walk's failures at the card ends (A 00, E 28–32, C 00) and D 20, before any pipeline hook.
+  Lesson: grade by size range is per landmark; interpolate by the neighbours' steps on the normal, and expect ~0.5 mm p95 as the floor where steps are irregular.
+
+- Post-point-4 (owner, 17 Nov): stepped interp (`breakFitMm` 0.5 / `breakMarginMm` 0.6 — outside-interval steps, one break in the gap) + anchor validation (demote wrong closures) + A/B provenance dump + self-crossing classification. No pipeline change, no commit.
+  - Stepped: E14 LOO hem lands on 1075.7 exactly (even split was 1080).
+  - Demotion: leave-one-out + both-sides agree ≤1 mm & err >2; stuck/duplicate outline corner (E22 hem = E20) with looErr >10; one worst per round ≤3. Demoted ranks excluded from gate LOO truth.
+  - Leah gate5 (`/private/tmp/nw/gate5.json`): **STOP — GATE FAIL**
+    - Demoted: **E22** (corner #0, err 30.75, predLo/predHi disagree 10.5 — stuck on E20 hem). Also A10/A4/A22 (2.5–3.5, both-sides agree — match noise?), B12/B20/B22, G16. E30 not demoted (one-sided preds disagree; suspected, LOO 21.7).
+    - E20 LOO after E22 demotion: **0.22** (was 12.71).
+    - A/B dump 00/4/8: with both anchors, corners interpolated and edges traced/blended — **no etalon-with-both-anchors bug**. 00 (and B4) are below the anchor run → extrapolated + etalon edges (allowed).
+    - Self-crossing sizes (no fix): E2 A16 C12 D6 B12 F7 G14. Classes (crossing counts): mostly `traced-edge`, then `near-corner` / `blended-edge`; few `extrapolated`.
+    - LOO p95 still worse than report2 on many sizes (E24/28/30/32, A/B card ends, …). Self-crossing ≠ 0.
+
+- Post-gate5 (owner, 18 Nov): blend gap double-emit was the self-crossing root cause.
+  - `buildSizeEdges` blend now fills only (s0,s1): f=(s0+u·(s1−s0))/G.total on both anchors, chord ends p0/p1, etalon-style shift. Head/tail overlap dump on A2/B12/G16: **no** s0≥s1−1 on those sizes (overlaps exist elsewhere: A9/14/16, B3/10/16, G3/16) — trim not applied.
+  - Demotion per corner; whole size only if fails≥2 or ≥25% (4-corner piece → 1 counts as whole). Report failCorners.
+  - Gate6: **STOP — FAIL**. traced×blended-same and traced×traced-same → **0**. Remaining crossings are near-corner. Self-crossing sizes: E1 A4 C6 D3 B3 F2 G2 (was E2 A16 C12 D6 B12 F7 G14). Demoted: E22 WHOLE (fails 1); A10/4/22 and B12/20 corner-only; B22 9.8 mm not demoted (agree 0, not both-sides). LOO worse than report2 still on many sizes — not investigated (E24/28/30/32, A/B ends deferred).
+
+- Post-gate6 (owner, 18 Nov): full-edge blend B(u)+emit u0..u1; near-corner cut; demotion ≥2 OR stuck≤1; B/D4 dumps.
+  - Blend: gate5 B(u)=Ar→Br+bulge; project p0/p1 → u0..u1; emit only that. Endpoint shift only if both ends already ≤0.5 mm from B (free shift warped C +2 mm). C4/24/28 back to gate5 ±0.1; traced×blended stays 0.
+  - Near-corner cut: snaps A2 C1 B1 G1; remaining xings still near-corner; nearCornerLong empty (wrap i×i+2 not always caught).
+  - Demotion: E22 WHOLE stuckDist 0; G16 corner-only stuckDist 3.29; A10 WHOLE stuckDist 0.11.
+  - B non-anchors: corner-count ≠ etalon 5 (00:8, 0–4:7, 26:6, 30–32:7). D4: corners ≤0.42; worst edge 102→158 blended p95 2.13; ring p95 2.12.
+  - Gate7: **STOP — FAIL**.
+
+- Post-gate7 → Done (owner, 18 Nov): etalon transfer by per-point normal / interior ring blend; K1–K5.
+  - Method shift: interior open/hidden sizes built as a weighted blend of the two bracketing
+    anchor rings (paired lerp @0.5 when corner counts match + nest gap >20 + area OK; else
+    insert/primary by corner match; size-step weight for insert). Own/common lines only in
+    corridor; etalon deform only one-sided. Demoted ranks never anchors (LOO or build).
+  - Demotion: whole size if ≥2 failing corners, or one failing corner stuck ≤1 mm on a neighbour
+    with err ≥ max(5 mm, half local step). E22 WHOLE (hem stuck on E20, err 30.75, stuckDist 0)
+    dropped from anchors — E24 LOO anchors read `20…28`, not `22…28`.
+  - Gate K1 (`/private/tmp/nw/gate-d1.json`, leah-v4 dumps): **PASS** — interiorFails 0 on every
+    piece (A–G). Self-crossing rings refused (counts: A3 C4 D3 B6 F1; E/G 0). Unconfirmed ≤2/piece
+    not counted as fails. Floor mid(adj) sets the bar; walk ≤ floor+0.2.
+  - Pipeline K2 Leah (`k2-off` vs `k2-on`, `GFIT_NEST_WALK=0` vs default on): open **16→16**,
+    0 regressions (every =0 closed cell stays closed with the same contour). Walk tried every
+    interior leak and refused all: derived-share 8 (E26 A18/24/26 C18 B24 G22/24/26),
+    self-crossing 2 (B18 G12), crosses-own-line 5 (F22/24/26 G10/18). Closures by walk: **0/16
+    (0%)**. Stop rule: after K1, walk closes <50% of Leah interior opens — no further K2 tuning.
+  - K3 Cassandra/Dyanna: not run (early stop). K4: unit tests in `nest-walk.test.ts` (shift,
+    neighbour-fill, demotion, no double edge, subset matchCorners, wrap-around crossing,
+    blend). `repair-flags.test.ts` keeps `GFIT_NEST_WALK=0`. K5: this entry; env list in
+    `src/lib/pattern-import/CLAUDE.md` (`GFIT_NEST_WALK`, `NEST_WALK_DEBUG`).
+  - Dead end: offline LOO/blend hits floor, but the pipeline gates (derived-share ≤ drawMaxShare,
+    blind, self-crossing, crosses-own-line) refuse every Leah open cell the walk builds. Raising
+    those thresholds is outside the allowed set.
+  - Missing etalon corner (not hidden): B, ~(740, 1298), sizes 26/30/32.

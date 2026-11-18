@@ -1199,6 +1199,23 @@ export type PieceCandidate = {
    */
   repair?: RepairRecord;
   /**
+   * The nest walk (gfit/nest-walk.ts), per size of a family it found an etalon for (owner, 17 Nov
+   * 2026: the walk is the main build). 'etalon'; 'confirmed' — the own outline lies within
+   * `NEST_WALK.confirmP95Mm` of the walk's; 'disagree' — it does not (kept, flagged: a closure on
+   * another size's line), with the error and the landmark nearest the worst point; 'built' — no
+   * own outline, the walk's is written; 'refused' — left open, `why` = walk:*; 'unchecked' —
+   * closed, the walk did not build it (`why`).
+   */
+  nest?: {
+    etalon: number;
+    state: 'etalon' | 'confirmed' | 'disagree' | 'built' | 'refused' | 'unchecked';
+    p95Mm?: number;
+    maxMm?: number;
+    at?: PtMm;
+    landmark?: string;
+    why?: string;
+  };
+  /**
    * GRADE P2: a size the repair refused (a leak, or a size G26 holds on another size's line) —
    * where the grade model of the anchors `from` puts it (`pred`, sheet mm, simplified; `extrapolated`
    * when both anchors lie on one side) and why the drawing does not prove it there (E1–E4). For the
@@ -1329,6 +1346,11 @@ export type RepairRecord = {
   spreadMm?: number;
   /** kind 'neighbour': the outline it had closed to (simplified 0.3 mm) — for the audit picture. */
   was?: PtMm[];
+  /**
+   * Built by the nest walk (gfit/nest-walk.ts) from the etalon rank: its landmarks carried through
+   * the nest onto this size's own / common lines; every stretch off them is a 'grade-draw' edge.
+   */
+  walk?: { etalon: number };
   /** GFIT_LOCAL: judged by the local pair of an inconsistent family (gfit repair.ts `local`). */
   local?: {
     r1: number;

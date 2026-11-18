@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { Chain, ChainSet, LineClass, PieceCandidate, PtMm } from 'lib/pattern-import/types';
 
@@ -37,8 +37,13 @@ const FLAGS = [
   'GRADE_P2_LOOSE',
   'GRADE_DRAW_OFF',
 ];
+// these pin repairSize's flags; the nest walk would take the families first
+beforeEach(() => {
+  process.env.GFIT_NEST_WALK = '0';
+});
 afterEach(() => {
   for (const f of FLAGS) delete process.env[f];
+  delete process.env.GFIT_NEST_WALK;
   setRepairProbeSink(null);
 });
 

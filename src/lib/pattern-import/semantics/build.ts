@@ -2045,11 +2045,16 @@ export function buildPieceSpecsDetailed(
       if (c.rankFrom === 'repair' && c.repair) {
         const tok = tokOfRank;
         const rp = c.repair;
-        pieceNotes.push(
-          `size ${card.token} repaired from the grade of ${tok(rp.from[0])} and ${tok(rp.from[1])} on its own lines (${Math.round(rp.cover * 100)} %)${
-            rp.kind === 'neighbour' ? " — it had closed on another size's line" : ''
-          }${rp.holes ? ` — ${rp.holesMm} mm in ${rp.holes} hole${rp.holes > 1 ? 's' : ''} not drawn, filled from the grade (D5)` : ''}`,
-        );
+        if (rp.walk)
+          pieceNotes.push(
+            `size ${card.token} built by the nest walk from size ${tok(rp.walk.etalon)}${rp.drawnMm ? ` — ${rp.drawnMm} mm not drawn, carried from the nest (flagged)` : ''}`,
+          );
+        else
+          pieceNotes.push(
+            `size ${card.token} repaired from the grade of ${tok(rp.from[0])} and ${tok(rp.from[1])} on its own lines (${Math.round(rp.cover * 100)} %)${
+              rp.kind === 'neighbour' ? " — it had closed on another size's line" : ''
+            }${rp.holes ? ` — ${rp.holesMm} mm in ${rp.holes} hole${rp.holes > 1 ? 's' : ''} not drawn, filled from the grade (D5)` : ''}`,
+          );
       }
       if (derived) derivedFrom.set(spec, derived);
       wallMaps.push({
