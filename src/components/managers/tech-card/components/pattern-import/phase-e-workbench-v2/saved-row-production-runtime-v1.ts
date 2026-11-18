@@ -18,6 +18,7 @@ import {
 } from './saved-assembly-snapshot-production-rpc-v1';
 import { createPatternImportDxfPhaseESavedDxfReprocessHostV1 } from './saved-dxf-reprocess-host-v1';
 import { createPatternImportDxfPhaseESavedRowPreparationOwnerV1 } from './saved-row-preparation-owner-v1';
+import type { SavedDraftPairedAllowanceAuthorityV1 } from './draft-cad-paired-allowance-authority-v1';
 
 export const PATTERN_IMPORT_DXF_PHASE_E_SAVED_ROW_PRODUCTION_RUNTIME_V1 =
   'pattern-import-dxf-phase-e-saved-row-production-runtime/1' as const;
@@ -77,6 +78,10 @@ export type PatternImportDxfPhaseESavedRowProductionRuntimeV1 = Readonly<{
     row: DxfProductSavedRowIdentityV1,
     readCurrent: () => Omit<SavedAddPointCurrentV1, 'card'> | null,
   ) => Promise<SavedAddPointReviewOwner>;
+  prepareSavedPairedAllowance?: (
+    row: DxfProductSavedRowIdentityV1,
+    readCurrent: () => Omit<SavedAddPointCurrentV1, 'card'> | null,
+  ) => Promise<SavedDraftPairedAllowanceAuthorityV1>;
   prepareSavedPieceCopyReview?: (
     row: DxfProductSavedRowIdentityV1,
     readCurrent: () => Omit<SavedCopyCurrentV1, 'card'> | null,
@@ -293,6 +298,38 @@ export function createPatternImportDxfPhaseESavedRowRuntimeV1(
             readCurrent: () => {
               const current = readCurrent();
               return !disposed && current ? { ...current, card } : null;
+            },
+            verifyCurrentRow: async () => {
+              await readCurrentRow();
+            },
+          });
+        },
+      );
+    },
+    async prepareSavedPairedAllowance(row, readCurrent) {
+      const opening = readCurrent();
+      const command = opening?.session.history[0]?.commands[0];
+      if (
+        !opening ||
+        opening.session.cursor !== 1 ||
+        opening.session.history[0]?.commands.length !== 1 ||
+        command?.tool !== 'edge-length'
+      )
+        throw new Error('The current saved Draft must contain one edge length edit.');
+      return withSavedDraftSource(
+        row,
+        command.target.pieceId,
+        async (proof, card, readCurrentRow) => {
+          const { prepareSavedDraftPairedAllowanceAuthorityV1 } = await import(
+            './draft-cad-paired-allowance-authority-v1'
+          );
+          return prepareSavedDraftPairedAllowanceAuthorityV1({
+            ...proof,
+            readCurrent: () => {
+              const current = readCurrent();
+              return !disposed && current?.session === opening.session
+                ? { ...current, card }
+                : null;
             },
             verifyCurrentRow: async () => {
               await readCurrentRow();

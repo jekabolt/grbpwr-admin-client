@@ -8,8 +8,13 @@ import {
   signedArea,
 } from 'lib/pattern-import/semantics/geom';
 import { segIntersect } from 'lib/pattern-import/pieces/geom';
+import { MITER_LIMIT, offsetContour, OFFSET_SCALE } from 'lib/pattern-import/semantics/offset';
 import type { PieceSizeSpec, PtMm } from 'lib/pattern-import/types';
 
+import {
+  sameDraftAllowanceRingV1,
+  type SavedDraftPairedAllowanceProofV1,
+} from './draft-cad-paired-allowance-authority-v1';
 import type { PatternImportDxfPhaseEDraftCadCommandV1 } from './draft-cad-session-v1';
 
 type Command = Extract<PatternImportDxfPhaseEDraftCadCommandV1, { tool: 'edge-length' }>;
@@ -18,13 +23,28 @@ type VertexEdit = Extract<
   { tool: 'move-point' | 'delete-point' }
 >;
 type SelectedSizePhaseD = Extract<DxfProductPhaseDSizeSelectionResultV1, { ok: true }>['phaseD'];
-type Result = { ok: true; size: PieceSizeSpec } | { ok: false; detail: string };
+type Result =
+  | { ok: true; size: PieceSizeSpec; pairedAllowance?: true }
+  | { ok: false; detail: string; requiresPairedAllowance?: true };
 
 const EPS = 1e-7;
 
 const samePoint = (a: PtMm, b: PtMm) => Math.hypot(a.x - b.x, a.y - b.y) <= EPS;
 const ring = (points: readonly PtMm[]) =>
   points.length > 1 && samePoint(points[0]!, points.at(-1)!) ? points.slice(0, -1) : points;
+
+function strictlyConvex(points: readonly PtMm[]) {
+  const winding = Math.sign(signedArea(points));
+  return (
+    points.length >= 3 &&
+    winding !== 0 &&
+    points.every((b, i) => {
+      const a = points[(i + points.length - 1) % points.length]!;
+      const c = points[(i + 1) % points.length]!;
+      return winding * ((b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x)) > EPS;
+    })
+  );
+}
 
 export function resizeDraftStraightEdgeV1(
   from: PtMm,
@@ -50,8 +70,9 @@ export function resizeDraftCadSelectedSizeEdgeV1(
   command: Command,
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1,
   phaseD: SelectedSizePhaseD,
+  pairedAllowance?: SavedDraftPairedAllowanceProofV1 | null,
 ): Result {
-  return editExactOutlineVertex(source, command, projection, phaseD);
+  return editExactOutlineVertex(source, command, projection, phaseD, pairedAllowance);
 }
 
 export function editDraftCadSelectedSizeVertexV1(
@@ -68,6 +89,7 @@ function editExactOutlineVertex(
   command: Command | VertexEdit,
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1,
   phaseD: SelectedSizePhaseD,
+  pairedAllowance?: SavedDraftPairedAllowanceProofV1 | null,
 ): Result {
   const { sizeToken } = command.payload;
   const contourId =
@@ -125,11 +147,46 @@ function editExactOutlineVertex(
   const vertices = ring(primary);
   const seam = source.seam ? ring(source.seam) : null;
   const cut = ring(source.cut);
-  if (seam && (seam.length !== cut.length || seam.some((point, i) => !samePoint(point, cut[i]!))))
-    return {
-      ok: false,
-      detail: 'Separate cut and sewing contours require a paired allowance edit.',
-    };
+  const separate =
+    seam && (seam.length !== cut.length || seam.some((point, i) => !samePoint(point, cut[i]!)));
+  let allowanceWidthMm: number | null = null;
+  if (separate) {
+    const supportedCut =
+      command.tool === 'edge-length' &&
+      contour.role === 'cut-boundary' &&
+      !source.fold &&
+      !source.notches.length &&
+      !source.cutLoops?.length &&
+      !source.internal.length &&
+      strictlyConvex(cut) &&
+      seam?.length === cut.length &&
+      strictlyConvex(seam);
+    if (!supportedCut)
+      return {
+        ok: false,
+        detail: 'This saved cut and sewing pair requires its retained allowance editor.',
+      };
+    if (!pairedAllowance)
+      return {
+        ok: false,
+        requiresPairedAllowance: true,
+        detail: 'Verify both saved native outlines before editing this allowance.',
+      };
+    if (
+      pairedAllowance.commandId !== command.commandId ||
+      pairedAllowance.contourId !== contourId ||
+      pairedAllowance.pieceId !== command.target.pieceId ||
+      pairedAllowance.pieceLineKey !== command.target.pieceLineKey ||
+      pairedAllowance.sizeToken !== sizeToken ||
+      !sameDraftAllowanceRingV1(cut, pairedAllowance.cut) ||
+      !sameDraftAllowanceRingV1(seam!, pairedAllowance.seam)
+    )
+      return {
+        ok: false,
+        detail: 'The writer outlines differ from the verified native allowance pair.',
+      };
+    allowanceWidthMm = pairedAllowance.widthMm;
+  }
   const holes = (source.cutLoops ?? []).map(ring);
   if (
     holes.some(
@@ -240,15 +297,49 @@ function editExactOutlineVertex(
   if (holes.some((hole) => !ringStrictlyInside(hole, nextRing)))
     return { ok: false, detail: 'The resized outline would cross or touch a retained cut hole.' };
 
+  let nextSeam: readonly PtMm[] = nextRing;
+  if (allowanceWidthMm !== null) {
+    const bounded = (value: number) =>
+      Number.isSafeInteger(
+        Math.round((Math.abs(value) + MITER_LIMIT * allowanceWidthMm) * OFFSET_SCALE),
+      );
+    if (!strictlyConvex(nextRing) || !nextRing.every(({ x, y }) => bounded(x) && bounded(y)))
+      return {
+        ok: false,
+        detail: 'The resized cut no longer has the verified allowance topology.',
+      };
+    const offset = offsetContour(nextRing, -allowanceWidthMm);
+    if (
+      !offset.report.ok ||
+      offset.pts.length !== seam!.length ||
+      !strictlyConvex(offset.pts) ||
+      !ringStrictlyInside(offset.pts, nextRing)
+    )
+      return { ok: false, detail: 'The new length would change the paired allowance topology.' };
+    const leavesCut = (point: PtMm) =>
+      pointInPolygon(point, cut) && !pointInPolygon(point, nextRing);
+    if (
+      source.drills.some(({ at }) => leavesCut(at)) ||
+      (source.grain && [source.grain.a, source.grain.b].some(leavesCut))
+    )
+      return {
+        ok: false,
+        detail: 'The resized cut would leave a retained drill or grain mark outside.',
+      };
+    nextSeam =
+      Math.sign(signedArea(seam!)) === Math.sign(signedArea(offset.pts))
+        ? offset.pts
+        : offset.pts.slice().reverse();
+  }
   const size = structuredClone(source);
-  const copyLoop = (previous: readonly PtMm[]) => {
-    const updated = nextRing.map((point) => ({ ...point }));
-    if (previous.length > vertices.length) updated.push({ ...updated[0]! });
+  const copyLoop = (previous: readonly PtMm[], next: readonly PtMm[]) => {
+    const updated = next.map((point) => ({ ...point }));
+    if (previous.length > ring(previous).length) updated.push({ ...updated[0]! });
     return updated;
   };
-  size.cut = copyLoop(source.cut);
-  if (source.seam) size.seam = copyLoop(source.seam);
+  size.cut = copyLoop(source.cut, nextRing);
+  if (source.seam) size.seam = copyLoop(source.seam, nextSeam);
   size.bbox = bboxOf(nextRing);
   size.areaMm2 = Math.abs(area) + holes.reduce((total, hole) => total + signedArea(hole), 0);
-  return { ok: true, size };
+  return { ok: true, size, ...(allowanceWidthMm !== null && { pairedAllowance: true as const }) };
 }

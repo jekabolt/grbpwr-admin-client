@@ -8,7 +8,6 @@ import {
 import { markReviewedAddPointFile } from 'lib/pattern-import/worker/reviewed-add-point-main';
 import { readProtectedLineSplit } from 'lib/pattern-import/write/read-protected-line-split';
 import type {
-  CardDraft,
   ManifestProtectedLineSplit,
   ReviewedAddPointOpen,
   ReviewedAddPointAtWrite,
@@ -21,9 +20,6 @@ import {
   type DxfProductSavedNativeCompilerSourceRequestV1,
 } from 'lib/pattern-import/dxf-product-saved-native-reprocess-owner-v1';
 import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
-import { selectPatternImportDxfProductDraftPhaseDSizeV1 } from 'lib/cloth/domain/pattern-import-dxf-product-draft-phase-d-selection-v1';
-import { buildPatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
-import { projectPatternImportDxfProductPhaseEAssemblyV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 import {
   bindDxfProductPhaseDSelectedNativeStraightEdgesV3,
   consumeDxfProductPhaseDNativeStraightEdgesV3,
@@ -42,6 +38,13 @@ import {
   isRecordedDraftCadSessionV1,
   type PatternImportDxfPhaseEDraftCadSessionV1,
 } from './draft-cad-session-v1';
+import {
+  sameSavedDraftRowV1,
+  selectMatchingSavedDraftV1,
+} from './draft-cad-saved-source-selection-v1';
+import type { SavedDraftPairedAllowanceAuthorityV1 } from './draft-cad-paired-allowance-authority-v1';
+
+export { sameSavedDraftRowV1, selectMatchingSavedDraftV1 };
 
 export type SavedAddPointCurrentV1 = Readonly<{
   session: PatternImportDxfPhaseEDraftCadSessionV1;
@@ -75,21 +78,6 @@ const checked = new WeakMap<NativeReviewProof, ReviewState>();
 
 function requireReview(claim: unknown, reason: string): asserts claim {
   if (!claim) throw new Error(`Added vertex review refused: ${reason}.`);
-}
-export function sameSavedDraftRowV1(
-  a: DxfProductSavedRowIdentityV1,
-  b: DxfProductSavedRowIdentityV1,
-) {
-  return (
-    a.techCardId === b.techCardId &&
-    a.scopeKey === b.scopeKey &&
-    a.patternLineKey === b.patternLineKey &&
-    a.revision === b.revision &&
-    a.cardLockVersion === b.cardLockVersion &&
-    a.sha256 === b.sha256 &&
-    a.url === b.url &&
-    a.sizeBytes === b.sizeBytes
-  );
 }
 
 /** Saved review producer. `readCurrent` belongs to the card host and must read its current row and Draft snapshot. */
@@ -336,42 +324,45 @@ export async function prepareSavedAddPointReviewV1(input: {
   return owner;
 }
 
-export async function selectMatchingSavedDraftV1(
-  draft: CardDraft,
-  scopeKey: string,
-  sizeToken: string,
-  session: PatternImportDxfPhaseEDraftCadSessionV1,
-) {
-  const chosen = await selectPatternImportDxfProductDraftPhaseDSizeV1(draft, scopeKey, sizeToken);
-  if (!chosen.ok) return null;
-  const selection = chosen.selection;
-  if (
-    selection.selection.selectedGeometrySha256 !== session.source.phaseD.selectedGeometrySha256 ||
-    selection.selection.canonicalSha256 !== session.source.catalog.sizeSelectionCanonicalSha256 ||
-    selection.phaseD.sourceSha256 !== session.source.phaseD.sourceSha256
-  )
-    return null;
-  const catalog = await buildPatternImportDxfProductPhaseEAuthoringCatalogV1(
-    draft,
-    scopeKey,
-    sizeToken,
-  );
-  if (!catalog.ok || catalog.catalog.canonicalSha256 !== session.source.catalog.canonicalSha256)
-    return null;
-  const projected = projectPatternImportDxfProductPhaseEAssemblyV1(catalog.catalog, selection);
-  return projected.ok ? { selection, projection: projected.projection } : null;
-}
-
 /** The mounted Draft Compile action takes the protected route for every active Add point. */
 export async function compileDraftForOrdinaryReviewV1(
   input: PatternImportDxfPhaseEDraftCadGeometryCompileInputV1,
   prepare?: () => Promise<SavedAddPointReviewOwner>,
+  prepareAllowance?: () => Promise<SavedDraftPairedAllowanceAuthorityV1>,
 ): Promise<PatternImportDxfPhaseEDraftCadGeometryCompileResultV1> {
   const commands = input.session.history
     .slice(0, input.session.cursor)
     .flatMap((tx) => tx.commands);
   const point = commands.find((command) => command.tool === 'add-point');
-  if (!point) return compilePatternImportDxfPhaseEDraftCadGeometryV1(input);
+  if (!point) {
+    const ordinary = compilePatternImportDxfPhaseEDraftCadGeometryV1(input);
+    if (
+      ordinary.ok ||
+      ordinary.blockers[0]?.code !== 'paired-allowance-authority-required' ||
+      !prepareAllowance ||
+      commands.length !== 1 ||
+      input.session.cursor !== 1
+    )
+      return ordinary;
+    try {
+      return compilePatternImportDxfPhaseEDraftCadGeometryV1(input, await prepareAllowance());
+    } catch (error) {
+      return {
+        ok: false,
+        artifact: null,
+        blockers: [
+          {
+            ...ordinary.blockers[0],
+            code: 'edge-length-geometry-blocked',
+            detail:
+              error instanceof Error
+                ? error.message
+                : 'The current saved allowance could not be verified.',
+          },
+        ],
+      };
+    }
+  }
   try {
     requireReview(
       prepare && commands.length === 1 && input.session.cursor === 1,

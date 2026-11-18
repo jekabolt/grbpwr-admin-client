@@ -7,6 +7,7 @@ import {
   compileDraftForOrdinaryReviewV1,
   type SavedAddPointReviewOwner,
 } from './draft-cad-saved-add-point-review-v1';
+import type { SavedDraftPairedAllowanceAuthorityV1 } from './draft-cad-paired-allowance-authority-v1';
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 import type { DxfProductPhaseDSizeSelectionResultV1 } from 'lib/pattern-import/dxf-product-phase-d-size-selection-v1';
 import {
@@ -167,6 +168,7 @@ export type PatternImportDxfPhaseEDraftCadWorkspacePropsV1 = Readonly<{
   confirmedImportGeneration?: number;
   prepareSavedPieceCopyReview?: PrepareSavedCopyReviewV1;
   prepareSavedAddPointReview?: () => Promise<SavedAddPointReviewOwner>;
+  prepareSavedPairedAllowance?: () => Promise<SavedDraftPairedAllowanceAuthorityV1>;
   onSelectMaterialScope?: (scopeKey: string) => void;
   workspaceContextControl?: ReactNode;
   arrangementScope?: PatternImportDxfPhaseEDraftCadArrangementScopeV1 | null;
@@ -203,6 +205,7 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
   activeMaterialScopeKey,
   confirmedImportGeneration = 0,
   prepareSavedAddPointReview,
+  prepareSavedPairedAllowance,
   prepareSavedPieceCopyReview,
   onSelectMaterialScope,
   workspaceContextControl,
@@ -488,7 +491,11 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
     setPendingCompiledReimport(null);
     setCompiledReimportResult(null);
     const input = { session, projection, selection, compileSource };
-    const result = await compileDraftForOrdinaryReviewV1(input, prepareSavedAddPointReview);
+    const result = await compileDraftForOrdinaryReviewV1(
+      input,
+      prepareSavedAddPointReview,
+      prepareSavedPairedAllowance,
+    );
     if (compiledReimportEpoch.current !== epoch) return;
     setCompileState(executePatternImportDxfPhaseEDraftCadCompileUiActionV1(input, () => result));
     if (!result.ok) return;

@@ -5,7 +5,9 @@ import { parseDxf } from 'lib/nesting/dxf/parse';
 import { entityToChain } from 'lib/nesting/dxf/entities';
 import { projectPatternImportDxfProductPhaseEAssemblyV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 import { applyAffine, signedArea } from 'lib/pattern-import/semantics/geom';
-import type { PtMm } from 'lib/pattern-import/types';
+import { offsetContour } from 'lib/pattern-import/semantics/offset';
+import { DXF_PRODUCT_SAVED_NATIVE_COMPILER_SOURCE_REQUEST_V1 } from 'lib/pattern-import/dxf-product-saved-native-reprocess-owner-v1';
+import type { CardDraft, PtMm } from 'lib/pattern-import/types';
 import { writeDxfDetailed } from 'lib/pattern-import/write';
 import { expect, it } from 'vitest';
 
@@ -19,18 +21,29 @@ import {
   recordPatternImportDxfPhaseEDraftCadMovePointV1,
 } from './draft-cad-canvas-v1';
 import { createPatternImportDxfPhaseEDraftCadCompileSourceV1 } from './draft-cad-compile-source-v1';
+import {
+  prepareSavedDraftPairedAllowanceAuthorityV1,
+  readSavedDraftPairedAllowanceAuthorityV1,
+} from './draft-cad-paired-allowance-authority-v1';
+import {
+  createSavedThreePanelFixtureV1,
+  createSavedThreePanelSourceV1,
+  digestFullAssemblyFixture,
+} from './saved-full-assembly-compile-session-v1.test-fixture';
 import { compilePatternImportDxfPhaseEDraftCadGeometryV1 } from './draft-cad-geometry-compile-v1';
 import {
   editDraftCadSelectedSizeVertexV1,
   resizeDraftCadSelectedSizeEdgeV1,
+  resizeDraftStraightEdgeV1,
 } from './draft-cad-edge-length-geometry-v1';
 import {
   redoPatternImportDxfPhaseEDraftCadSessionV1,
   undoPatternImportDxfPhaseEDraftCadSessionV1,
 } from './draft-cad-session-v1';
 
-async function setup() {
-  const { draft } = await createPatternImportDxfProductSavedRuntimeSeedV1Fixture();
+async function setup(savedDraft?: CardDraft) {
+  const draft =
+    savedDraft ?? (await createPatternImportDxfProductSavedRuntimeSeedV1Fixture()).draft;
   const selected = await selectPatternImportDxfProductDraftPhaseDSizeV1(draft, 'main', 'M');
   const catalog = await buildPatternImportDxfProductPhaseEAuthoringCatalogV1(draft, 'main', 'M');
   if (!selected.ok || !catalog.ok) throw new Error('The saved pattern fixture is unavailable.');
@@ -56,6 +69,191 @@ async function setup() {
   if (!edge) throw new Error('The fixture has no exact editable edge.');
   return { session: bound.session, projection, selection, compileSource, draft, edge };
 }
+
+async function savedAllowanceFixture() {
+  const seed = await createSavedThreePanelFixtureV1(2);
+  const piece = seed.job.pieces.find(({ identity }) => identity === 'FRONT')!;
+  const size = piece.sizes[0]!;
+  const width = 8;
+  const offset = offsetContour(size.cut, -width);
+  expect(offset.report.ok).toBe(true);
+  size.seam = offset.pts;
+  piece.allowance = { ...piece.allowance, meaning: 'both', allowanceMm: width };
+  const written = writeDxfDetailed(seed.job, {
+    now: () => new Date(seed.written.manifest.createdAt),
+  });
+  seed.bytes = new TextEncoder().encode(written.dxfText);
+  seed.row = {
+    ...seed.row,
+    sizeBytes: seed.bytes.byteLength,
+    sha256: await digestFullAssemblyFixture(seed.bytes),
+  };
+  seed.card.existingPatterns![0]!.manifest = written.manifest;
+  return seed;
+}
+
+it.each(['start', 'end'] as const)(
+  'roundtrips both authenticated saved native outlines with fixed %s',
+  async (fixed) => {
+    const seed = await savedAllowanceFixture();
+    const source = await createSavedThreePanelSourceV1(seed, true);
+    try {
+      const { session, projection, selection, compileSource } = await setup(source.native.draft);
+      const activePieceIndex = projection.pieces.findIndex(({ pieceId }) => pieceId === 'FRONT');
+      const [edge] = buildPatternImportDxfPhaseEDraftCadCanvasDartBasesV1(
+        session,
+        projection,
+        activePieceIndex,
+      );
+      const resized = recordPatternImportDxfPhaseEDraftCadCanvasBoundaryPickV1({
+        session,
+        projection,
+        activeTool: 'edge-length',
+        activePieceIndex,
+        baseKey: edge!.key,
+        sequence: 0,
+        resize: { fixed, lengthMm: 90 },
+      });
+      expect(resized.recorded).toBe(true);
+      const current = {
+        session: resized.session,
+        row: seed.row,
+        card: seed.card,
+        generation: 0,
+        sizeToken: 'M',
+      };
+      let active = true;
+      const prepareInput: Parameters<typeof prepareSavedDraftPairedAllowanceAuthorityV1>[0] = {
+        sourceOwner: source.native.sourceOwner,
+        sourceRequest: {
+          schemaVersion: DXF_PRODUCT_SAVED_NATIVE_COMPILER_SOURCE_REQUEST_V1,
+          sourceFileId: source.native.sourceFileId,
+          sourceSha256: seed.row.sha256,
+          techCardId: seed.row.techCardId,
+          scopeKey: seed.row.scopeKey,
+          patternLineKey: seed.row.patternLineKey,
+          cardLockVersion: seed.row.cardLockVersion,
+          draft: source.native.draft,
+        },
+        savedBytes: seed.bytes.buffer as ArrayBuffer,
+        readCurrent: () => (active ? current : null),
+        verifyCurrentRow: async () => {},
+      };
+      const aliases = current.card.existingAliases!;
+      await expect(
+        prepareSavedDraftPairedAllowanceAuthorityV1({
+          ...prepareInput,
+          readCurrent: () => ({
+            ...current,
+            card: {
+              ...current.card,
+              existingAliases: [...aliases, ...aliases],
+            },
+          }),
+        }),
+      ).rejects.toThrow('saved row, piece line, or Draft changed');
+      const proof = await prepareSavedDraftPairedAllowanceAuthorityV1(prepareInput);
+      expect(readSavedDraftPairedAllowanceAuthorityV1(proof, resized.session)).toMatchObject({
+        pieceId: 'FRONT',
+        widthMm: 8,
+      });
+      expect(readSavedDraftPairedAllowanceAuthorityV1({ ...proof }, resized.session)).toBeNull();
+      expect(readSavedDraftPairedAllowanceAuthorityV1(proof, session)).toBeNull();
+      const compileInput = { session: resized.session, projection, selection, compileSource };
+      expect(compilePatternImportDxfPhaseEDraftCadGeometryV1(compileInput)).toMatchObject({
+        ok: false,
+        blockers: [{ code: 'paired-allowance-authority-required' }],
+      });
+      expect(
+        compilePatternImportDxfPhaseEDraftCadGeometryV1(compileInput, { ...proof }),
+      ).toMatchObject({
+        ok: false,
+        blockers: [{ code: 'source-binding-mismatch' }],
+      });
+      const changedWidth = structuredClone(compileSource);
+      const changedPiece = changedWidth.scopes[0]!.writerReplay!.job.pieces.find(
+        ({ identity }) => identity === 'FRONT',
+      )!;
+      changedPiece.allowance.allowanceMm = 10;
+      expect(
+        compilePatternImportDxfPhaseEDraftCadGeometryV1(
+          {
+            ...compileInput,
+            compileSource: changedWidth,
+          },
+          proof,
+        ),
+      ).toMatchObject({ ok: false, blockers: [{ code: 'edge-length-geometry-blocked' }] });
+      const compiled = compilePatternImportDxfPhaseEDraftCadGeometryV1(compileInput, proof);
+      if (!compiled.ok) throw Error(JSON.stringify(compiled.blockers));
+      const { artifact } = compiled;
+      const written = writeDxfDetailed(artifact.compiledJob);
+      const block = artifact.manifest.blocks.find(({ identity }) => identity === 'FRONT')!;
+      const transform = written.transforms[block.block]!;
+      const bytes = new TextEncoder().encode(artifact.dxfText);
+      const parsed = parseDxf(bytes.buffer, 'mm');
+      const outline = (name: string) =>
+        parsed.dxf.blocks[block.block]!.entities.filter(
+          ({ layer, type }) => layer === name && (type === 'POLYLINE' || type === 'LWPOLYLINE'),
+        ).flatMap((entity) => {
+          const line = entityToChain(entity, 1, 0.001);
+          return line ? [line.pts] : [];
+        });
+      const cut = outline('1'),
+        seam = outline('14');
+      expect(cut).toHaveLength(1);
+      expect(seam).toHaveLength(1);
+      const expected = resizeDraftStraightEdgeV1(edge!.fromMm, edge!.toMm, fixed, 90)!;
+      const [a, b] = expected.map((point) => applyAffine(transform, point));
+      const dx = b!.x - a!.x,
+        dy = b!.y - a!.y;
+      const length = Math.hypot(dx, dy);
+      const same = (lhs: PtMm, rhs: PtMm) => Math.hypot(lhs.x - rhs.x, lhs.y - rhs.y) <= 0.000002;
+      expect(
+        cut[0]!.some((from, i) => {
+          const to = cut[0]![(i + 1) % cut[0]!.length]!;
+          return (same(from, a!) && same(to, b!)) || (same(from, b!) && same(to, a!));
+        }),
+      ).toBe(true);
+      expect(length).toBeCloseTo(90, 6);
+      expect(expected[fixed === 'start' ? 0 : 1]).toBe(
+        fixed === 'start' ? edge!.fromMm : edge!.toMm,
+      );
+      const distances = seam[0]!.map(
+        ({ x, y }) => Math.abs(dx * (y - a!.y) - dy * (x - a!.x)) / length,
+      );
+      expect(distances.filter((distance) => Math.abs(distance - 8) <= 0.001)).toHaveLength(2);
+      const row = {
+        ...seed.row,
+        revision: seed.row.revision + 1,
+        cardLockVersion: seed.row.cardLockVersion + 1,
+        sizeBytes: bytes.byteLength,
+        sha256: await digestFullAssemblyFixture(bytes),
+      };
+      const card = structuredClone(seed.card);
+      card.existingPatterns![0]!.manifest = artifact.manifest;
+      const fresh = await createSavedThreePanelSourceV1({ ...seed, bytes, row, card }, true);
+      try {
+        expect(fresh.native.row).toEqual(row);
+        expect(fresh.native.nativeSewingReplay?.replayReady).toBe(true);
+        const reopened = fresh.native.draft.scopes[0]!.writerReplay!.job.pieces.find(
+          ({ identity }) => identity === 'FRONT',
+        )!;
+        expect(reopened.allowance.allowanceMm).toBe(8);
+      } finally {
+        fresh.dispose();
+      }
+      active = false;
+      expect(readSavedDraftPairedAllowanceAuthorityV1(proof, resized.session)).toBeNull();
+      expect(compilePatternImportDxfPhaseEDraftCadGeometryV1(compileInput, proof)).toMatchObject({
+        ok: false,
+        blockers: [{ code: 'source-binding-mismatch' }],
+      });
+    } finally {
+      source.dispose();
+    }
+  },
+);
 
 it.each(['start', 'end'] as const)(
   'sets the exact native edge length with its %s endpoint fixed and retains the other pieces',

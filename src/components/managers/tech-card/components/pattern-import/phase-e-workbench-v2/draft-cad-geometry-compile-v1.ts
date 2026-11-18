@@ -15,6 +15,12 @@ import {
   type WriteJob,
 } from 'lib/pattern-import/types';
 import { writeDxfDetailed } from 'lib/pattern-import/write';
+import {
+  readSavedDraftPairedAllowanceAuthorityV1,
+  sameDraftAllowanceRingV1,
+  type SavedDraftPairedAllowanceAuthorityV1,
+  type SavedDraftPairedAllowanceProofV1,
+} from './draft-cad-paired-allowance-authority-v1';
 
 import {
   buildPatternImportDxfPhaseEDraftCadPreviewV1,
@@ -58,6 +64,7 @@ export type PatternImportDxfPhaseEDraftCadGeometryCompileBlockerCodeV1 =
   | 'writer-size-unavailable'
   | 'preview-blocked'
   | 'edge-length-geometry-blocked'
+  | 'paired-allowance-authority-required'
   | 'move-point-geometry-blocked'
   | 'delete-point-geometry-blocked'
   | 'add-point-geometry-blocked'
@@ -173,6 +180,21 @@ export type PatternImportDxfPhaseEDraftCadGeometryCompileInputV1 = Readonly<{
   selection: SelectedPhaseD;
   compileSource: PatternImportDxfPhaseEDraftCadCompileSourceV1;
 }>;
+
+const pairedAllowanceReviews = new WeakMap<
+  PatternImportDxfPhaseEDraftCadGeometryCompileArtifactV1,
+  () => boolean
+>();
+
+export function requiresCurrentPairedAllowanceReviewV1(
+  artifact: PatternImportDxfPhaseEDraftCadGeometryCompileArtifactV1,
+): boolean {
+  const current = pairedAllowanceReviews.get(artifact);
+  if (!current) return false;
+  if (!current())
+    throw new Error('The saved allowance Draft changed. Compile the current edit again.');
+  return true;
+}
 
 const INTERNAL_TOOLS = new Set<PatternImportDxfPhaseEDraftCadToolV1>([
   'internal-line',
@@ -465,6 +487,7 @@ function exactSameMembers(left: readonly string[], right: readonly string[]): bo
  */
 function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
   input: PatternImportDxfPhaseEDraftCadGeometryCompileInputV1,
+  pairedAllowance?: SavedDraftPairedAllowanceProofV1 | null,
 ): PatternImportDxfPhaseEDraftCadGeometryCompileResultV1 {
   let detached: PatternImportDxfPhaseEDraftCadGeometryCompileInputV1;
   try {
@@ -622,6 +645,7 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
   let job = structuredClone(replay.job);
   const createdTopologyIds = new Set(sourceIds);
   const compiledFeatures: PatternImportDxfPhaseEDraftCadCompiledFeatureV1[] = [];
+  let pairedWrite: { commandId: string; cut: readonly PtMm[]; seam: readonly PtMm[] } | null = null;
   const createdPieceLineKeys = new Map<string, string>();
   for (const command of compileCommands) {
     const catalogTargets = session.source.catalog.pieces.filter(
@@ -841,9 +865,35 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
     ) {
       const edited =
         command.tool === 'edge-length'
-          ? resizeDraftCadSelectedSizeEdgeV1(size, command, projection, selection.phaseD)
+          ? resizeDraftCadSelectedSizeEdgeV1(
+              size,
+              command,
+              projection,
+              selection.phaseD,
+              pairedAllowance,
+            )
           : editDraftCadSelectedSizeVertexV1(size, command, projection, selection.phaseD);
-      if (!edited.ok) return blocked(`${command.tool}-geometry-blocked`, edited.detail, command);
+      if (!edited.ok)
+        return blocked(
+          edited.requiresPairedAllowance
+            ? 'paired-allowance-authority-required'
+            : `${command.tool}-geometry-blocked`,
+          edited.detail,
+          command,
+        );
+      if (edited.pairedAllowance && edited.size.seam) {
+        if (!pairedAllowance || writerPieces[0]!.allowance.allowanceMm !== pairedAllowance.widthMm)
+          return blocked(
+            'edge-length-geometry-blocked',
+            'The writer width differs from the verified native allowance.',
+            command,
+          );
+        pairedWrite = {
+          commandId: command.commandId,
+          cut: edited.size.cut,
+          seam: edited.size.seam,
+        };
+      }
       Object.assign(size, edited.size);
       compiledFeatures.push({
         commandId: command.commandId,
@@ -1069,6 +1119,11 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
     });
   }
 
+  if (pairedAllowance && !pairedWrite)
+    return blocked(
+      'source-binding-mismatch',
+      'The verified allowance edit no longer matches the writer.',
+    );
   let written: ReturnType<typeof writeDxfDetailed>;
   try {
     written = writeDxfDetailed(job, { now: () => new Date(replay.createdAt) });
@@ -1080,7 +1135,13 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
   }
 
   for (const command of compileCommands) {
-    if (command.tool !== 'move-point' && command.tool !== 'delete-point') continue;
+    if (
+      command.tool !== 'edge-length' &&
+      command.tool !== 'move-point' &&
+      command.tool !== 'delete-point'
+    )
+      continue;
+    if (command.tool === 'edge-length' && pairedWrite?.commandId !== command.commandId) continue;
     const matches = written.plan.blocks.filter(
       ({ identity, labelSize }) =>
         identity === command.target.pieceId && labelSize === command.payload.sizeToken,
@@ -1092,6 +1153,26 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
         'The edited outline lost its exact writer block.',
         command,
       );
+    if (command.tool === 'edge-length') {
+      if (
+        !pairedWrite ||
+        !block.seam ||
+        !sameDraftAllowanceRingV1(
+          block.cut,
+          pairedWrite.cut.map((point) => applyAffine(block.transform, point)),
+        ) ||
+        !sameDraftAllowanceRingV1(
+          block.seam,
+          pairedWrite.seam.map((point) => applyAffine(block.transform, point)),
+        )
+      )
+        return blocked(
+          'edge-length-geometry-blocked',
+          'The DXF writer would change the verified cut or sewing outline.',
+          command,
+        );
+      continue;
+    }
     const holds = (x: PtMm, y: PtMm) => Math.hypot(x.x - y.x, x.y - y.y) <= 1e-7;
     const rings = block.seam ? [block.cut, block.seam] : [block.cut];
     if (command.tool === 'move-point') {
@@ -1234,9 +1315,22 @@ export function draftCadCompiledArtifactV1(
 
 export function compilePatternImportDxfPhaseEDraftCadGeometryV1(
   input: PatternImportDxfPhaseEDraftCadGeometryCompileInputV1,
+  authority?: SavedDraftPairedAllowanceAuthorityV1,
 ): PatternImportDxfPhaseEDraftCadGeometryCompileResultV1 {
   try {
-    return compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(input);
+    const proof = authority
+      ? readSavedDraftPairedAllowanceAuthorityV1(authority, input.session)
+      : null;
+    if (authority && !proof)
+      return blocked(
+        'source-binding-mismatch',
+        'The saved allowance authority no longer belongs to this Draft.',
+      );
+    const result = compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(input, proof);
+    if (proof && !proof.current())
+      return blocked('source-binding-mismatch', 'The saved allowance changed while compiling.');
+    if (proof && result.ok) pairedAllowanceReviews.set(result.artifact, proof.current);
+    return result;
   } catch {
     return blocked('invalid-input', 'Draft CAD compile input failed closed during validation.');
   }

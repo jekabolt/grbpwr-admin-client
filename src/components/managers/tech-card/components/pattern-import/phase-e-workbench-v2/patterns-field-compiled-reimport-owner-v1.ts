@@ -3,7 +3,10 @@ import {
   type CopyReview,
 } from './draft-cad-unlinked-piece-copy-review-v1';
 import { takeCompiledSavedAddPointFileV1 } from './draft-cad-saved-add-point-review-v1';
-import type { PatternImportDxfPhaseEDraftCadGeometryCompileArtifactV1 } from './draft-cad-geometry-compile-v1';
+import {
+  requiresCurrentPairedAllowanceReviewV1,
+  type PatternImportDxfPhaseEDraftCadGeometryCompileArtifactV1,
+} from './draft-cad-geometry-compile-v1';
 import {
   createPatternImportDxfPhaseECadCommandCompiledReimportOwnerV1,
   registerPatternImportDxfPhaseECadCommandCompiledReimportOwnerV1,
@@ -51,8 +54,11 @@ export function registerPatternImportDxfPhaseEPatternsFieldCompiledReimportOwner
     reviewAlreadyOpen: input.reviewAlreadyOpen,
     openExistingImportReview: (artifact) => {
       const addPoint = artifact.compiledFeatures.some((feature) => feature.tool === 'add-point');
+      const pairedAllowance = requiresCurrentPairedAllowanceReviewV1(artifact);
       const manualApply =
-        addPoint || artifact.compiledFeatures.some(({ output }) => output === 'piece-create');
+        addPoint ||
+        pairedAllowance ||
+        artifact.compiledFeatures.some(({ output }) => output === 'piece-create');
       const file = addPoint
         ? takeCompiledSavedAddPointFileV1(artifact)
         : new File([artifact.dxfText], compiledFileName(artifact), { type: 'image/vnd.dxf' });
