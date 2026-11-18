@@ -79,6 +79,24 @@ describe('physical host production receivers', () => {
     expect(panel.text).not.toContain('overflow-y-auto');
   });
 
+  it('keeps the last complete-layout frame visible when contact diagnostics are long', () => {
+    const controls = source('./saved-complete-assembly-native-preview-controls-v8.tsx');
+    const [details, ...otherDetails] = elements(controls.tree, 'details');
+
+    expect(otherDetails).toHaveLength(0);
+    expect(details).toBeDefined();
+    expect(jsxAttribute(controls.tree, details!, 'open')).toBeUndefined();
+    expect(details!.parent.getText(controls.tree)).toContain('wholeProgress.stopped.detail');
+    expect(details!.parent.getText(controls.tree)).toContain('max-h-32 overflow-auto');
+
+    const refusal = elements(controls.tree, 'Text').find((element) =>
+      element.parent.getText(controls.tree).includes('refused. Showing the last accepted'),
+    );
+    expect(refusal).toBeDefined();
+    expect(jsxAttribute(controls.tree, refusal!, 'role')?.getText(controls.tree)).toBe("'alert'");
+    expect(refusal!.parent.getText(controls.tree)).not.toContain('wholeProgress.stopped.detail');
+  });
+
   it('keeps first authoring focused on exact edges, profile and placements', () => {
     const authoring = source('./cad-workbench-first-physical-authoring-v1.tsx');
 

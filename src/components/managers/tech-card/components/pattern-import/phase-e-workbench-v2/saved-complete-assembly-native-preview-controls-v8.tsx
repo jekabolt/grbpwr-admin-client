@@ -416,10 +416,22 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
             {wholeProgress.maximumGapMm.toFixed(2)} mm
           </Text>
           {wholeProgress.stopped && (
-            <Text component='p' size='micro' role='alert'>
-              Operation {wholeProgress.stopped.operationNumber} refused. Showing the last accepted
-              frame. {wholeProgress.stopped.detail}
-            </Text>
+            <>
+              <Text component='p' size='micro' role='alert'>
+                Operation {wholeProgress.stopped.operationNumber} refused. Showing the last accepted
+                frame.
+              </Text>
+              <details>
+                <summary className='cursor-pointer text-micro'>Technical details</summary>
+                <Text
+                  component='p'
+                  size='micro'
+                  className='max-h-32 overflow-auto whitespace-pre-wrap break-all'
+                >
+                  {wholeProgress.stopped.detail}
+                </Text>
+              </details>
+            </>
           )}
         </div>
       )}
