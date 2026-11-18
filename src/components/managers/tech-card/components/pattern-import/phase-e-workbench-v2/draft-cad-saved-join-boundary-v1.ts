@@ -12,7 +12,11 @@ import { transformSizeSpec } from 'lib/pattern-import/semantics/pairs';
 import type { PieceSpec, PtMm } from 'lib/pattern-import/types';
 import type { CardContext } from '../client';
 import { readSavedNativeCutEdgesV1 } from './draft-cad-parallel-spread-source-v1';
-import { sameSavedDraftRowV1 } from './draft-cad-saved-source-selection-v1';
+import type { PatternImportDxfPhaseEDraftCadSessionV1 } from './draft-cad-session-v1';
+import {
+  selectMatchingSavedDraftV1,
+  sameSavedDraftRowV1,
+} from './draft-cad-saved-source-selection-v1';
 
 type PickedEdge = {
   pieceId: string;
@@ -21,7 +25,7 @@ type PickedEdge = {
   startVertexId: string;
   endVertexId: string;
 };
-type JoinSelection = {
+export type JoinSelection = {
   row: DxfProductSavedRowIdentityV1;
   sizeToken: string;
   fixed: PickedEdge;
@@ -30,6 +34,13 @@ type JoinSelection = {
   newIdentity: string;
 };
 
+export type RegisteredJoinSelection = Omit<
+  JoinSelection,
+  'fixed' | 'moving' | 'translateMovingMm'
+> & {
+  fixed: Pick<PickedEdge, 'pieceId' | 'pieceLineKey'>;
+  moving: Pick<PickedEdge, 'pieceId' | 'pieceLineKey'>;
+};
 function check(value: unknown, detail: string): asserts value {
   if (!value) throw new Error(detail);
 }
@@ -52,7 +63,7 @@ function rectangle(ring: PtMm[]) {
 
 const lineKey = (value: string) => value.trim().toLowerCase();
 
-function checkCurrent(card: CardContext, intent: JoinSelection) {
+function checkCurrent(card: CardContext, intent: JoinSelection | RegisteredJoinSelection) {
   const { fixed, moving, row, newIdentity } = intent;
   check(
     card.techCardId === row.techCardId &&
@@ -120,16 +131,17 @@ function checkCurrent(card: CardContext, intent: JoinSelection) {
 
 /** Read-only geometry preparation. Applying this replacement additionally requires a two-line retirement contract. */
 export async function prepareSavedJoinBoundaryV1(input: {
+  session?: PatternImportDxfPhaseEDraftCadSessionV1;
   sourceOwner: unknown;
   sourceRequest: DxfProductSavedNativeCompilerSourceRequestV1;
-  selection: JoinSelection;
+  selection: JoinSelection | RegisteredJoinSelection;
   readCurrent: () => { card: CardContext; row: DxfProductSavedRowIdentityV1 };
 }) {
-  const intent = structuredClone(input.selection);
+  const selected = structuredClone(input.selection);
   const current = () => {
     const live = input.readCurrent();
-    check(sameSavedDraftRowV1(live.row, intent.row), 'The saved row changed during Join.');
-    checkCurrent(live.card, intent);
+    check(sameSavedDraftRowV1(live.row, selected.row), 'The saved row changed during Join.');
+    checkCurrent(live.card, selected);
     return live.card;
   };
   current();
@@ -141,23 +153,87 @@ export async function prepareSavedJoinBoundaryV1(input: {
     native.ok &&
       !native.value.reconstruction &&
       !native.value.nativeRead.scope &&
-      sameSavedDraftRowV1(native.value.row, intent.row),
+      sameSavedDraftRowV1(native.value.row, selected.row),
     'Join requires the complete exact saved source.',
   );
   // The published card draft is editable. The source capability proves the original read,
   // not later mutations of the public replay job (e.g. removal of a drill).
   const stable = await validateAndRedactSavedDxfDraftV1(
     structuredClone(native.value.draft),
-    intent.row,
+    selected.row,
     native.value.sourceFileId,
     globalThis.crypto,
   );
   check(stable.ok, 'The writer replay no longer reproduces the exact saved bytes.');
+  if (input.session) {
+    const session = input.session;
+    check(
+      session.source.phaseD.sourceFileId === native.value.sourceFileId &&
+        session.source.phaseD.sourceSha256 === selected.row.sha256,
+      'The open Draft source does not match this saved file.',
+    );
+    const views = [stable.draft],
+      sewing = native.value.nativeSewingReplay;
+    if (sewing?.replayReady)
+      views.push({
+        ...stable.draft,
+        dxfProvenance: sewing.pipeline,
+        dxfPhaseDReplay: sewing.replay,
+      });
+    let matched = false;
+    for (const view of views) {
+      if (
+        await selectMatchingSavedDraftV1(view, selected.row.scopeKey, selected.sizeToken, session)
+      ) {
+        matched = true;
+        break;
+      }
+    }
+    check(matched, 'The open Draft rank or piece catalog changed.');
+  }
   const source = { ...native.value, draft: stable.draft };
   const registered = await readSavedNativeCutEdgesV1(source, [
-    intent.fixed.pieceId,
-    intent.moving.pieceId,
+    selected.fixed.pieceId,
+    selected.moving.pieceId,
   ]);
+  function boundary(index: number, side: 'fixed' | 'moving') {
+    const rank = registered[index]?.edges[0];
+    const choice = selected[side];
+    const candidates = rank?.descriptors.filter(
+      (e) =>
+        e.startMm[0] === e.endMm[0] &&
+        (side === 'fixed' ? e.startMm[1] < e.endMm[1] : e.startMm[1] > e.endMm[1]),
+    );
+    check(
+      candidates?.length === 1,
+      'Select the full right boundary of the fixed piece and the full left boundary of the moving piece.',
+    );
+    const e = candidates[0]!;
+    return {
+      pick: {
+        ...choice,
+        sourceCurveId: e.sourceCurveId,
+        startVertexId: e.startVertexId,
+        endVertexId: e.endVertexId,
+      },
+      edge: e,
+    };
+  }
+  let intent: JoinSelection;
+  if ('translateMovingMm' in selected) intent = selected;
+  else {
+    const a = boundary(0, 'fixed'),
+      b = boundary(1, 'moving');
+    intent = {
+      ...selected,
+      fixed: a.pick,
+      moving: b.pick,
+      translateMovingMm: {
+        x: a.edge.startMm[0] - b.edge.endMm[0],
+        y: a.edge.startMm[1] - b.edge.endMm[1],
+      },
+    };
+  }
   const card = current();
   function resolve(p: PickedEdge, { piece, scope, edges }: (typeof registered)[number]) {
     const rank = edges[0],
@@ -182,7 +258,10 @@ export async function prepareSavedJoinBoundaryV1(input: {
             !sc.isInterlining,
         ) &&
         piece.fabrics.includes(job.scope.fabricPurpose) &&
-        piece.fabrics.every((f) => f === job.scope.fabricPurpose || f === job.scope.bomLineKey) &&
+        piece.fabrics.every(
+          (f) =>
+            f === job.scope.scopeKey || f === job.scope.fabricPurpose || f === job.scope.bomLineKey,
+        ) &&
         !piece.fused &&
         !piece.ungraded &&
         piece.piecesPerGarment === 1 &&

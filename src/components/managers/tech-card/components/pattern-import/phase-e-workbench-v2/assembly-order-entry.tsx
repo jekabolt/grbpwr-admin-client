@@ -2076,6 +2076,18 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
           );
         }
       : undefined;
+  const prepareSavedJoin = useCallback<import('./draft-cad-saved-join-control').PrepareJoin>(
+    async (picks, isCurrent) => {
+      const start = activeSavedDraftRef.current,
+        captured = draftCadSessionRef.current;
+      if (!start?.runtime.prepareSavedJoin || !captured)
+        throw new Error('The current saved Draft is unavailable.');
+      return start.runtime.prepareSavedJoin(start.row, picks, () =>
+        isCurrent() ? readSavedDraft(start.runtime, captured) : null,
+      );
+    },
+    [readSavedDraft],
+  );
   const prepareSavedPieceCopyReview = useCallback<PrepareSavedCopyReviewV1>(
     async (readSelection, mode) => {
       const start = activeSavedDraftRef.current,
@@ -2723,6 +2735,11 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
                           prepareSavedAddPointReview={prepareSavedAddPointReview}
                           prepareSavedGeometryReview={prepareSavedGeometryReview}
                           prepareSavedPairedAllowance={prepareSavedPairedAllowance}
+                          prepareSavedJoin={
+                            activeSavedDraftRef.current?.runtime.prepareSavedJoin
+                              ? prepareSavedJoin
+                              : undefined
+                          }
                           prepareSavedPieceCopyReview={
                             activeSavedDraftRef.current?.runtime.prepareSavedPieceCopyReview
                               ? prepareSavedPieceCopyReview

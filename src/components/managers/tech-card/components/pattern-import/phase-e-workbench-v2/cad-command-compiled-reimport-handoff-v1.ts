@@ -47,6 +47,11 @@ export type PatternImportDxfPhaseECadCommandCompiledReimportHandoffResultV1 =
 
 export type PatternImportDxfPhaseECadCommandCompiledReimportOwnerV1 = Readonly<{
   techCardId: number;
+  openSavedJoin?: (
+    review: import('./draft-cad-saved-join-review').JoinReview,
+    isCurrent: () => boolean,
+    ownerCurrent: () => boolean,
+  ) => Promise<void>;
   openSavedCopy?: (review: CopyReview) => void;
   request: (
     request: PatternImportDxfPhaseECadCommandCompiledReimportHandoffRequestV1,
@@ -275,4 +280,14 @@ export async function openSavedCopyInPatternsReviewV1(
   if (!isCurrent() || owners.get(review.cardId) !== owner)
     throw new Error('The copy selection or card changed during review.');
   owner.openSavedCopy(review);
+}
+
+export async function openSavedJoinInPatterns(
+  review: import('./draft-cad-saved-join-review').JoinReview,
+  isCurrent: () => boolean,
+) {
+  const owner = owners.get(review.cardId);
+  if (!owner?.openSavedJoin) throw new Error('The Patterns review is unavailable.');
+  const ownerCurrent = () => owners.get(review.cardId) === owner;
+  await owner.openSavedJoin(review, () => ownerCurrent() && isCurrent(), ownerCurrent);
 }

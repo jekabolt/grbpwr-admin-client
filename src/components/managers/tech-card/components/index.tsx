@@ -81,6 +81,11 @@ import {
   writeGuardedSavedPieceRename,
   type GuardedSavedPieceRename,
 } from './guarded-piece-rename';
+import {
+  GuardedPieceJoinContext,
+  writeGuardedSavedPieceJoin,
+  type SaveJoin,
+} from './guarded-piece-join';
 import { LabelsBlock, PackagingBlock } from './labels-blocks';
 import { StyleProjects } from './style-projects';
 import { TechCardTasksPanel } from './tech-card-tasks-panel';
@@ -391,6 +396,7 @@ function FormWithAutosave({
   undoHistory,
   historyCapture,
   guardedPieceRename,
+  guardedPieceJoin,
   children,
 }: {
   form: UseFormReturn<TechCardFormData>;
@@ -399,6 +405,7 @@ function FormWithAutosave({
   gestures: GestureProps;
   undoHistory: UndoHistoryApi;
   historyCapture: UndoHistoryCaptureProps;
+  guardedPieceJoin: SaveJoin | null;
   guardedPieceRename: React.ContextType<typeof GuardedPieceRenameContext>;
   children: React.ReactNode;
 }) {
@@ -445,7 +452,9 @@ function FormWithAutosave({
             onPointerUpCapture={historyCapture.onPointerUpCapture}
           >
             <GuardedPieceRenameContext.Provider value={guardedPieceRename}>
-              {children}
+              <GuardedPieceJoinContext.Provider value={guardedPieceJoin}>
+                {children}
+              </GuardedPieceJoinContext.Provider>
             </GuardedPieceRenameContext.Provider>
           </div>
         </UndoHistoryProvider>
@@ -1245,7 +1254,7 @@ export function TechCardForm({
   };
   // A write chain of this page is on the wire: its own reads settle `base`; a background read waits.
   const writing = useRef(0);
-  const guardedRenameInFlight = useRef(false);
+  const guardedPatternWriteInFlight = useRef(false);
   // m1: a read this page needed after its own write did not come back — the next body write reads first.
   const needsRead = useRef(false);
   // The version this page's own staged rebuild (the fusing DXF) left when it actually wrote the card
@@ -1667,7 +1676,7 @@ export function TechCardForm({
     data: TechCardFormData,
     opts: { mode: SaveMode; autoStage?: boolean; keepPurpose?: string } = { mode: 'explicit' },
   ): Promise<WriteResult> {
-    if (guardedRenameInFlight.current)
+    if (guardedPatternWriteInFlight.current)
       return {
         bodySaved: false,
         ok: false,
@@ -3255,60 +3264,111 @@ export function TechCardForm({
     }
   };
 
-  async function saveGuardedPieceRename(intent: GuardedSavedPieceRename) {
+  async function withCurrentPatternSave(
+    cardId: number | undefined,
+    lock: number | undefined,
+    perform: (
+      read: () => Promise<common_TechCard>,
+      checkWrite: () => void,
+    ) => Promise<common_TechCard>,
+  ) {
     if (
-      !numId ||
-      numId !== intent.row.techCardId ||
+      !cardId ||
+      numId !== cardId ||
       !canWrite(SECTION.techCards) ||
       frozen ||
       writing.current ||
       conflictOpen.current ||
       lockOverride.current != null ||
       needsRead.current ||
-      claimVersion() !== intent.row.cardLockVersion ||
+      claimVersion() !== lock ||
       bodyWorkOf(form) ||
       staging.peek().length
-    ) {
-      throw new Error('The card must be current and free of unsaved edits before renaming a piece.');
-    }
+    )
+      throw new Error(
+        'Save pending edits and reopen the current pattern before applying this change.',
+      );
     const release = autosave.holdWrites();
-    guardedRenameInFlight.current = true;
+    guardedPatternWriteInFlight.current = true;
     writing.current += 1;
     try {
-      const fresh = await writeGuardedSavedPieceRename(intent, {
-        read: async () => {
-          const response = await adminService.GetTechCard({ id: numId, vatCountryCode: undefined });
-          if (!response.techCard) throw new Error('The saved card could not be read.');
-          return response.techCard;
+      const fresh = await perform(
+        async () => {
+          const { techCard } = await adminService.GetTechCard({
+            id: cardId,
+            vatCountryCode: undefined,
+          });
+          if (!techCard) throw new Error('The saved card could not be read.');
+          return techCard;
         },
-        update: async (guardedPieceRename) => {
-          if (bodyWorkOf(form) || staging.peek().length || writing.current !== 1)
-            throw new Error('The card has unsaved edits. Save them before renaming.');
+        () => {
+          if (
+            bodyWorkOf(form) ||
+            staging.peek().length ||
+            writing.current !== 1 ||
+            claimVersion() !== lock ||
+            conflictOpen.current ||
+            lockOverride.current != null
+          )
+            throw new Error('The card changed. Reopen the current pattern.');
           needsRead.current = true;
-          try {
-            const response = await updateTechCard.mutateAsync({
-              id: numId,
-              expectedLockVersion: intent.row.cardLockVersion,
-              guardedPieceRename,
-            });
-            return response.lockVersion;
-          } catch (error) {
-            throw new Error(techCardErrorMessage(error, 'The saved piece rename was refused.'));
-          }
         },
-      });
+      );
       ownBodyVersion.current = fresh.lockVersion ?? null;
       reconcileRead(fresh);
       ownBodyVersion.current = null;
       needsRead.current = false;
-      queryClient.setQueryData(techCardKeys.detail(numId), fresh);
+      queryClient.setQueryData(techCardKeys.detail(cardId), fresh);
     } finally {
-      guardedRenameInFlight.current = false;
+      guardedPatternWriteInFlight.current = false;
       writing.current -= 1;
       release();
       if (writing.current === 0) queueMicrotask(reconcileLatest);
     }
   }
+  async function saveGuardedPieceRename(intent: GuardedSavedPieceRename) {
+    await withCurrentPatternSave(
+      intent.row.techCardId,
+      intent.row.cardLockVersion,
+      (read, checkWrite) =>
+        writeGuardedSavedPieceRename(intent, {
+          read,
+          update: async (guardedPieceRename) => {
+            checkWrite();
+            try {
+              return (
+                await updateTechCard.mutateAsync({
+                  id: intent.row.techCardId,
+                  expectedLockVersion: intent.row.cardLockVersion,
+                  guardedPieceRename,
+                })
+              ).lockVersion;
+            } catch (error) {
+              throw new Error(techCardErrorMessage(error, 'The saved piece rename was refused.'));
+            }
+          },
+        }),
+    );
+  }
+  const saveGuardedPieceJoin: SaveJoin = async (command, requireCurrent) => {
+    const row = command.expectedRow;
+    await withCurrentPatternSave(row?.techCardId, row?.cardLockVersion, (read, checkWrite) =>
+      writeGuardedSavedPieceJoin(command, {
+        read,
+        update: async (guardedPieceJoin) => {
+          requireCurrent();
+          checkWrite();
+          return (
+            await updateTechCard.mutateAsync({
+              id: row!.techCardId!,
+              expectedLockVersion: row!.cardLockVersion!,
+              guardedPieceJoin,
+            })
+          ).lockVersion;
+        },
+      }),
+    );
+  };
 
   // ═══ THE SEAM WRITE'S DOOR (C7) ═══════════════════════════════════════════════════════════════════
   // A seam gesture writes rows AND step links in one ChangeTechCardSeams under this card's
@@ -3627,6 +3687,9 @@ export function TechCardForm({
       gestures={autosave.gestureProps}
       undoHistory={undoHistory.api}
       historyCapture={undoHistory.captureProps}
+      guardedPieceJoin={
+        isEditMode && canWrite(SECTION.techCards) && !frozen ? saveGuardedPieceJoin : null
+      }
       guardedPieceRename={
         isEditMode && canWrite(SECTION.techCards) && !frozen ? saveGuardedPieceRename : null
       }

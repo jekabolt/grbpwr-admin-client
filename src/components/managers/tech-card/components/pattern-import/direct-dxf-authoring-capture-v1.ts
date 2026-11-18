@@ -1,3 +1,7 @@
+import {
+  isSavedJoinFile,
+  bindJoinWizardScope,
+} from './phase-e-workbench-v2/draft-cad-saved-join-file';
 import { savedReviewLabelV1 } from './phase-e-workbench-v2/draft-cad-saved-dart-tip-file-v1';
 import {
   isSavedDartTipReviewFileV1,
@@ -74,6 +78,8 @@ export function buildOrdinaryWizardReviewV1(
     reviewedCopyScopes.set(accepted.draft.scopes[0]!, files[0]!);
   if (files.length === 1 && accepted.draft.scopes.length === 1)
     bindSavedDartTipWizardScopeV1(files[0]!, accepted.draft.scopes[0]!);
+  if (files.length === 1 && accepted.draft.scopes.length === 1)
+    bindJoinWizardScope(files[0]!, accepted.draft.scopes[0]!);
   return accepted;
 }
 
@@ -94,7 +100,8 @@ export async function applyDirectDxfReviewedDraftV1(
     pinnedSavedFile &&
     (files.length !== 1 ||
       files[0] !== pinnedSavedFile ||
-      (!unlinkedPieceCopyFiles.has(pinnedSavedFile) &&
+      (!isSavedJoinFile(pinnedSavedFile) &&
+        !unlinkedPieceCopyFiles.has(pinnedSavedFile) &&
         !isSavedDartTipReviewFileV1(pinnedSavedFile)))
   )
     throw new Error(
@@ -102,6 +109,21 @@ export async function applyDirectDxfReviewedDraftV1(
         ? `The original ${savedReviewLabelV1(pinnedSavedFile)} review File is no longer available.`
         : 'The original unlinked copy File or its review is no longer available.',
     );
+  if (files.some(isSavedJoinFile)) {
+    if (
+      files.length !== 1 ||
+      pinnedSavedFile !== files[0] ||
+      autopilotToken != null ||
+      !isCurrent()
+    )
+      throw new Error('Confirm the original Join with the Apply button.');
+    const { acknowledgeSavedJoin } = await import(
+      './phase-e-workbench-v2/draft-cad-saved-join-review'
+    );
+    const join = await acknowledgeSavedJoin(draft, files[0]!);
+    if (!isCurrent()) throw new Error('The Join review changed before Apply.');
+    return apply({ join });
+  }
   await verifySavedDartTipApplyV1(draft, files, autopilotToken != null, isCurrent);
   if (draft.scopes.some((scope) => scope.writerReplay?.retainedLineSplit)) {
     if (autopilotToken != null)

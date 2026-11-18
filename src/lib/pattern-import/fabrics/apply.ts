@@ -86,6 +86,11 @@ export type FormWrite = { path: string; value: unknown };
 export type ApplyProgressEvent = { scopeKey: string; state: 'uploading' | 'uploaded' | 'failed' };
 
 export type ApplyDeps = {
+  saveJoinedPattern?: (
+    binding: ApplyCommitScopeBinding,
+    upload: ApplyUploaded,
+    previousLock: number | undefined,
+  ) => Promise<void>;
   /** `adminService.UploadPattern` behind the same rules as pattern-upload-button.tsx. */
   upload: (file: {
     filename: string;
@@ -696,7 +701,11 @@ export async function applyDraft(
   // 1. uploads — all of them, or the form is not touched
   for (const s of draft.scopes) {
     const scopeKey = s.target.scopeKey;
-    if (!replacement && onCard(draft, deps.read(), scopeKey, deps.scopeOf)) {
+    if (
+      !deps.saveJoinedPattern &&
+      !replacement &&
+      onCard(draft, deps.read(), scopeKey, deps.scopeOf)
+    ) {
       reused.push(scopeKey);
       onProgress?.({ scopeKey, state: 'uploaded' });
       continue;
@@ -776,15 +785,6 @@ export async function applyDraft(
   // No await occurs between this read and the writes/save request below. It is the editing base the
   // host is about to claim, not a lock value reconstructed from the later response.
   const previousLockVersion = deps.readPreviousLockVersion?.();
-  for (const w of plan.writes) deps.write(w.path, w.value);
-  if (plan.replaced.length) deps.onReplaced?.(plan.replaced);
-  const retry = !plan.writes.length && !!deps.unsaved?.get();
-  if (plan.writes.length) deps.unsaved?.set(true);
-
-  // 3. the card's own save (the only transaction) — this try's rows, or an earlier try's rows the
-  //    save refused; success only on what the save answered
-  const urls = [...uploaded.map((u) => u.url), ...plan.replaced.map((r) => r.newUrl)];
-  const { rebuilding, landed: rowsLanded } = deps;
   const commitFields = (persisted: boolean) => {
     if (!persisted) return {};
     const blockers = [...plan.commitBindingBlockers];
@@ -804,6 +804,44 @@ export async function applyDraft(
       },
     };
   };
+  if (deps.saveJoinedPattern) {
+    if (
+      plan.created !== 1 ||
+      plan.reusedPieces !== 0 ||
+      plan.replaced.length !== 1 ||
+      uploaded.length !== 1 ||
+      !plan.commitBindings[0] ||
+      plan.commitBindings.length !== 1 ||
+      plan.commitBindingBlockers.length ||
+      !Number.isSafeInteger(previousLockVersion)
+    )
+      return {
+        ok: false,
+        failedScope: uploaded[0]?.scopeKey ?? '',
+        message: 'The saved Join has no exact reviewed row and piece binding.',
+        uploaded,
+      };
+    try {
+      await deps.saveJoinedPattern(plan.commitBindings[0], uploaded[0]!, previousLockVersion);
+      return { ok: true, uploaded, reused, writes: 1, save: 'ok', ...commitFields(true) };
+    } catch (error) {
+      return {
+        ok: false,
+        failedScope: uploaded[0]!.scopeKey,
+        message: error instanceof Error ? error.message : 'The saved Join could not be confirmed.',
+        uploaded,
+      };
+    }
+  }
+  for (const w of plan.writes) deps.write(w.path, w.value);
+  if (plan.replaced.length) deps.onReplaced?.(plan.replaced);
+  const retry = !plan.writes.length && !!deps.unsaved?.get();
+  if (plan.writes.length) deps.unsaved?.set(true);
+
+  // 3. the card's own save (the only transaction) — this try's rows, or an earlier try's rows the
+  //    save refused; success only on what the save answered
+  const urls = [...uploaded.map((u) => u.url), ...plan.replaced.map((r) => r.newUrl)];
+  const { rebuilding, landed: rowsLanded } = deps;
   const save =
     (plan.writes.length || retry) && deps.save
       ? await saveOrLanded(

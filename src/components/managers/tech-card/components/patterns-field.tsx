@@ -1,3 +1,5 @@
+import { cancelSavedJoinFile } from './pattern-import/phase-e-workbench-v2/draft-cad-saved-join-file';
+import { useGuardedPieceJoin } from './guarded-piece-join';
 import {
   cancelSavedDartTipReviewV1,
   isSavedDartTipReviewFileV1,
@@ -695,6 +697,7 @@ export function PatternsField({
   // Server-known size range: a form-added size cannot take a marker until the card saves.
   savedSizeIds?: number[];
 }) {
+  const saveJoin = useGuardedPieceJoin();
   const { control, setValue, getValues, register, setFocus } = useFormContext<TechCardFormData>();
   const writeDirty = (path: string, value: unknown) =>
     setValue(path as Parameters<typeof setValue>[0], value as never, { shouldDirty: true });
@@ -983,7 +986,10 @@ export function PatternsField({
   const closePatternImportReview = () => {
     cancelSavedDartTipReviewV1(importingRef.current?.files[0]);
     const file = importingRef.current?.savedCopyFile;
-    if (file) cancelSavedCopyReviewFileV1(file);
+    if (file) {
+      cancelSavedJoinFile(file);
+      cancelSavedCopyReviewFileV1(file);
+    }
     importingRef.current = null;
     setImporting(null);
   };
@@ -994,7 +1000,10 @@ export function PatternsField({
   useEffect(
     () => () => {
       cancelSavedDartTipReviewV1(activeDartFile);
-      if (activeCopyFile) cancelSavedCopyReviewFileV1(activeCopyFile);
+      if (activeCopyFile) {
+        cancelSavedJoinFile(activeCopyFile);
+        cancelSavedCopyReviewFileV1(activeCopyFile);
+      }
     },
     [activeCopyFile, activeDartFile],
   );
@@ -5062,6 +5071,7 @@ export function PatternsField({
           // F7: upload every file, then ONE batch into this form, then the card's own save.
           applyDraft={followUpApply(
             createCardApply({
+              saveJoin,
               readPreviousLockVersion: () => autosave.getBaseLockVersion(),
               afterConfirmedPatternImportSave: async (draft, result) => {
                 const lifecycle = patternSessionLifecycle.current;

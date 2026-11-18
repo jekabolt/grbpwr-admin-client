@@ -12069,9 +12069,9 @@ export type UpdateTechCardRequest = {
   // Name-only Workbench edit. Send without tech_card so an older server cannot execute a
   // full document rewrite after ignoring this field.
   guardedPieceRename: GuardedZeroOperationPieceRename | undefined;
+  guardedPieceJoin: GuardedNativePieceJoin | undefined;
 };
 
-// Pins a display name change to a current zero-operation card and exact saved DXF row.
 export type GuardedZeroOperationPieceRename = {
   pieceLineKey: string | undefined;
   expectedName: string | undefined;
@@ -12080,6 +12080,49 @@ export type GuardedZeroOperationPieceRename = {
   patternLineKey: string | undefined;
   expectedSavedRowRevision: number | undefined;
   expectedDxfSha256: string | undefined;
+};
+
+// Pins a display name change to a current zero-operation card and exact saved DXF row.
+// Explicit, single-size saved native boundary Join. The server constructs the document delta.
+export type GuardedNativePieceJoin = {
+  expectedRow: TechCardSavedPatternRowIdentity | undefined;
+  expectedAssemblyRevision: string | undefined;
+  expectedCompleteSourceSha256: string | undefined;
+  fixed: GuardedNativePieceJoin_Boundary | undefined;
+  moving: GuardedNativePieceJoin_Boundary | undefined;
+  resultLineKey: string | undefined;
+  resultIdentity: string | undefined;
+  fabricPurpose: string | undefined;
+  bomLineKey: string | undefined;
+  sizeId: number | undefined;
+  sizeToken: string | undefined;
+  translateXMillionthsMm: number | undefined;
+  translateYMillionthsMm: number | undefined;
+  reviewedUrl: string | undefined;
+  reviewedSizeBytes: number | undefined;
+  reviewedSha256: string | undefined;
+  reviewedFilename: string | undefined;
+};
+
+export type TechCardSavedPatternRowIdentity = {
+  techCardId: number | undefined;
+  scopeKey: string | undefined;
+  patternLineKey: string | undefined;
+  savedRowRevision: number | undefined;
+  cardLockVersion: number | undefined;
+  url: string | undefined;
+  sizeBytes: number | undefined;
+  sha256: string | undefined;
+  patternVersion: number | undefined;
+  downloadUrl: string | undefined;
+};
+
+export type GuardedNativePieceJoin_Boundary = {
+  pieceLineKey: string | undefined;
+  pieceIdentity: string | undefined;
+  curveId: string | undefined;
+  startVertexId: string | undefined;
+  endVertexId: string | undefined;
 };
 
 export type UpdateTechCardResponse = {
@@ -14917,19 +14960,6 @@ export type GetTechCardPatternSemanticSidecarResponse = {
   semanticSidecar: TechCardPatternSemanticSidecar | undefined;
 };
 
-export type TechCardSavedPatternRowIdentity = {
-  techCardId: number | undefined;
-  scopeKey: string | undefined;
-  patternLineKey: string | undefined;
-  savedRowRevision: number | undefined;
-  cardLockVersion: number | undefined;
-  url: string | undefined;
-  sizeBytes: number | undefined;
-  sha256: string | undefined;
-  patternVersion: number | undefined;
-  downloadUrl: string | undefined;
-};
-
 export type GetTechCardSavedAssemblySnapshotRequest = {
   techCardId: number | undefined;
   patternLineKey: string | undefined;
@@ -14981,6 +15011,7 @@ export type GetTechCardSavedAssemblySnapshotResponse = {
   serverAssemblyRevision: string | undefined;
   assemblyTopologySha256: string | undefined;
   topologyCanonicalJson: string | undefined;
+  // Existing anchor carrier read in the same database snapshot. Its own CAS governs carrier bytes.
   semanticSidecar?: TechCardPatternSemanticSidecar;
   // Present only for COMPLETE_SOURCE_V1, which leaves the selected-operation fields unset.
   completeSourceV1?: TechCardSavedAssemblyCompleteSourceV1;

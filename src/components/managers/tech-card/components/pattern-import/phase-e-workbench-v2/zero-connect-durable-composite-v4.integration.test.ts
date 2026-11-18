@@ -749,6 +749,7 @@ describe('zero-connect durable N=1 genuine production chain', () => {
           snapshotReason: 'dxf-reupload',
           saveSessionId: undefined,
           guardedPieceRename: undefined,
+          guardedPieceJoin: undefined,
         });
         return 'ok';
       } catch {

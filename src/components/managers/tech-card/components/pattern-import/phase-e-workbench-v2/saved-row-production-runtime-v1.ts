@@ -94,6 +94,11 @@ export type PatternImportDxfPhaseESavedRowProductionRuntimeV1 = Readonly<{
     row: DxfProductSavedRowIdentityV1,
     readCurrent: () => Omit<SavedAddPointCurrentV1, 'card'> | null,
   ) => Promise<SavedDraftPairedAllowanceAuthorityV1>;
+  prepareSavedJoin?: (
+    row: DxfProductSavedRowIdentityV1,
+    picks: import('./draft-cad-saved-join-review').JoinPicks,
+    readCurrent: () => Omit<SavedAddPointCurrentV1, 'card'> | null,
+  ) => Promise<import('./draft-cad-saved-join-review').JoinReview>;
   prepareSavedPieceCopyReview?: (
     row: DxfProductSavedRowIdentityV1,
     readCurrent: () => Omit<SavedCopyCurrentV1, 'card'> | null,
@@ -386,6 +391,40 @@ export function createPatternImportDxfPhaseESavedRowRuntimeV1(
           });
         },
       );
+    },
+    async prepareSavedJoin(row, picks, readCurrent) {
+      const opening = readCurrent();
+      if (!opening || opening.session.cursor !== 0)
+        throw new Error('Select two pieces in the unmodified saved Draft.');
+      const check = () => {
+        const now = readCurrent();
+        if (
+          !now ||
+          now.session !== opening.session ||
+          now.generation !== opening.generation ||
+          now.sizeToken !== opening.sizeToken
+        )
+          throw new Error('The selected Draft or rank changed.');
+      };
+      return withSavedDraftSource(row, picks.fixed.pieceId, async (proof, card, readRow) => {
+        const { prepareSavedJoinReview } = await import('./draft-cad-saved-join-review');
+        const result = await prepareSavedJoinReview(
+          {
+            ...proof,
+            session: opening.session,
+            selection: { ...picks, row, sizeToken: opening.sizeToken },
+            readCurrent: () => {
+              check();
+              return { card, row };
+            },
+          },
+          opening.generation,
+          check,
+        );
+        await readRow();
+        check();
+        return result;
+      });
     },
     async prepareSavedPieceCopyReview(row, readCurrent, mode) {
       const opening = readCurrent();

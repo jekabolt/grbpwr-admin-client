@@ -1244,6 +1244,7 @@ async function verifyNativeWorkbenchMount(
           snapshotReason: '',
           saveSessionId: undefined,
           guardedPieceRename: undefined,
+          guardedPieceJoin: undefined,
         });
       ports.UpdateTechCard.mockRejectedValueOnce(
         Object.assign(new Error('Stale edit.'), { status: 409 }),
@@ -1760,6 +1761,7 @@ it('rebinds one already-saved native seam after an ordinary thread edit and relo
         snapshotReason: '',
         saveSessionId: undefined,
         guardedPieceRename: undefined,
+        guardedPieceJoin: undefined,
       });
       expect(readSession()).toBeNull();
       displayCurrentCard();

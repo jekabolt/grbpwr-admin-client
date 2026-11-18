@@ -171,5 +171,9 @@ export type ApplyProgress = { scopeKey: string; state: 'uploading' | 'uploaded' 
 export type ApplyDraftFn = (
   draft: CardDraft,
   onProgress?: (p: ApplyProgress) => void,
-  options?: Readonly<{ replaceMatchingFile?: true; newPieceIntent?: ApplyNewPieceIntent }>,
+  options?: Readonly<{
+    replaceMatchingFile?: true;
+    newPieceIntent?: ApplyNewPieceIntent;
+    join?: import('./phase-e-workbench-v2/draft-cad-saved-join-review').JoinApply;
+  }>,
 ) => Promise<ApplyResult>;

@@ -1,3 +1,4 @@
+import { readSavedJoinFile } from './phase-e-workbench-v2/draft-cad-saved-join-file';
 import { savedReviewLabelV1 } from './phase-e-workbench-v2/draft-cad-saved-dart-tip-file-v1';
 import { isSavedDartTipReviewFileV1 } from './phase-e-workbench-v2/draft-cad-saved-dart-tip-file-v1';
 import {
@@ -1495,7 +1496,7 @@ export function useImportSession(deps: {
                   ]
                 : [],
             ),
-            dialect: 'r12',
+            dialect: readSavedJoinFile(pinnedSavedFile.current)?.dialect ?? 'r12',
             // RULHOOK: 'rul' also packs base DXF + .rul (an unknown base is dropped, its reason
             // on `writeStorage.ignored`); absent / 'blocks' = today's write
             ...writeStorageInput(writeStorageFor(iRef.current.writeStorage, writtenTokens(sizes))),

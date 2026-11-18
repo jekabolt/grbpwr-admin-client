@@ -55,6 +55,7 @@ function toBase64(text: string): string {
 }
 
 export function createCardApply(deps: {
+  saveJoin?: import('../guarded-piece-join').SaveJoin | null;
   read: () => LiveCard;
   write: (path: string, value: unknown) => void;
   storageSizeId: number;
@@ -86,6 +87,14 @@ export function createCardApply(deps: {
   onPatternSemanticAttachmentHostError?: (error: unknown) => void;
 }): ApplyDraftFn {
   return async (draft, onProgress, options) => {
+    const join = options?.join;
+    if (join && !deps.saveJoin)
+      return {
+        ok: false,
+        failedScope: draft.scopes[0]?.target.scopeKey ?? '',
+        message: 'The saved card Join writer is unavailable.',
+        uploaded: [],
+      };
     const result = await applyDraft(
       draft,
       {
@@ -105,6 +114,16 @@ export function createCardApply(deps: {
             throw new Error(patternUploadErrorMessage(e));
           }
         },
+        ...(join
+          ? {
+              saveJoinedPattern: async (binding, uploaded, lock) => {
+                const { commitSavedJoin } = await import(
+                  './phase-e-workbench-v2/draft-cad-saved-join-review'
+                );
+                await commitSavedJoin(join, binding, uploaded, lock, deps.saveJoin!);
+              },
+            }
+          : {}),
         read: deps.read,
         write: deps.write,
         storageSizeId: deps.storageSizeId,

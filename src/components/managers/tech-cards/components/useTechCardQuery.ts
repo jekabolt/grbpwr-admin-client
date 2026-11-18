@@ -5,6 +5,7 @@ import {
   common_SkuSeason,
   common_TechCardInsert,
   common_TechCardStage,
+  type GuardedNativePieceJoin,
   type GuardedZeroOperationPieceRename,
   type UpdateTechCardRequest,
 } from 'api/proto-http/admin';
@@ -411,7 +412,7 @@ export async function updateTechCardDocument(request: UpdateTechCardRequest) {
   // The ordinary document writer replaces pattern-row revisions and removes their sidecars. Use
   // the lock of the accepted write, before any fresh query or semantic-session reconstruction.
   if (
-    request.techCard &&
+    (request.techCard || request.guardedPieceJoin) &&
     id !== undefined &&
     expectedLockVersion !== undefined &&
     saved.lockVersion === expectedLockVersion + 1
@@ -430,18 +431,28 @@ export function useUpdateTechCard() {
       snapshotReason = '',
       saveSessionId,
       guardedPieceRename,
+      guardedPieceJoin,
     }: { id: number; expectedLockVersion: number } & (
       | {
           techCard: common_TechCardInsert;
           snapshotReason?: string;
           saveSessionId: string;
           guardedPieceRename?: never;
+          guardedPieceJoin?: never;
         }
       | {
           techCard?: never;
           snapshotReason?: never;
           saveSessionId?: never;
           guardedPieceRename: GuardedZeroOperationPieceRename;
+          guardedPieceJoin?: never;
+        }
+      | {
+          techCard?: never;
+          snapshotReason?: never;
+          saveSessionId?: never;
+          guardedPieceRename?: never;
+          guardedPieceJoin: GuardedNativePieceJoin;
         }
     )) =>
       updateTechCardDocument({
@@ -451,6 +462,7 @@ export function useUpdateTechCard() {
         snapshotReason,
         saveSessionId,
         guardedPieceRename,
+        guardedPieceJoin,
       }),
     onSuccess: (_data, variables) => {
       // Operations or patterns may have moved: the card's hints map catches up by itself (§5a).

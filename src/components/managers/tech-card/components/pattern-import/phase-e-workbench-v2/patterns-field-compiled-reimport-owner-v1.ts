@@ -86,6 +86,31 @@ export function registerPatternImportDxfPhaseEPatternsFieldCompiledReimportOwner
   });
   return registerPatternImportDxfPhaseECadCommandCompiledReimportOwnerV1({
     ...owner,
+    async openSavedJoin(review, isCurrent, ownerCurrent) {
+      const valid = () =>
+        isCurrent() &&
+        review.cardId === input.techCardId &&
+        review.generation === input.readConfirmedImportGeneration() &&
+        input.scopeAvailable(review.scopeKey) &&
+        !input.reviewAlreadyOpen();
+      if (!valid()) throw new Error('The saved Join or Patterns review changed.');
+      const { takeSavedJoinFile } = await import('./draft-cad-saved-join-review');
+      const file = await takeSavedJoinFile(
+        review,
+        valid,
+        () =>
+          ownerCurrent() &&
+          input.reviewAlreadyOpen() &&
+          input.scopeAvailable(review.scopeKey) &&
+          input.readConfirmedImportGeneration() === review.generation,
+      );
+      input.openExistingImportReview({
+        scopeKey: review.scopeKey,
+        files: [file],
+        requireManualApply: true,
+        savedCopyFile: file,
+      });
+    },
     openSavedCopy(review: CopyReview) {
       if (
         review.cardId !== input.techCardId ||

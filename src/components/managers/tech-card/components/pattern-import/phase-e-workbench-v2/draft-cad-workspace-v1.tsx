@@ -1,3 +1,4 @@
+import { SavedJoinControl, type PrepareJoin } from './draft-cad-saved-join-control';
 import { SavedDartTipControlV1 } from './draft-cad-saved-dart-tip-control-v1';
 import {
   recordSavedDartTipV1,
@@ -173,6 +174,7 @@ export type PatternImportDxfPhaseEDraftCadWorkspacePropsV1 = Readonly<{
   activeMaterialScopeKey?: string;
   /** Confirmed import generation visible when this compile starts; zero for saved-only sources. */
   confirmedImportGeneration?: number;
+  prepareSavedJoin?: PrepareJoin;
   prepareSavedPieceCopyReview?: PrepareSavedCopyReviewV1;
   prepareSavedAddPointReview?: () => Promise<SavedAddPointReviewOwner>;
   prepareSavedDartTip?: () => ReturnType<
@@ -221,6 +223,7 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
   prepareSavedPairedAllowance,
   prepareSavedDartTip,
   prepareSavedGeometryReview = prepareSavedDartTip,
+  prepareSavedJoin,
   prepareSavedPieceCopyReview,
   onSelectMaterialScope,
   workspaceContextControl,
@@ -327,6 +330,10 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
     arrangeActive && session.cursor === 0 && selectedPieceIds.length === 1
       ? projection.pieces.find((p) => p.pieceId === selectedPieceIds[0])
       : null;
+  const joinPieces = selectedPieceIds.flatMap((id) => {
+    const p = projection.pieces.find((p) => p.pieceId === id);
+    return p?.pieceLineKey ? [{ pieceId: p.pieceId, pieceLineKey: p.pieceLineKey }] : [];
+  });
   const dartInput = { session, projection, selection, compileSource };
   const savedEditPiece =
     prepareSavedGeometryReview && compiledReimportCapability.available ? selectedForCopy : null;
@@ -741,6 +748,18 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
                 }}
               />
             )}
+            {arrangeActive &&
+              prepareSavedJoin &&
+              session.cursor === 0 &&
+              compiledReimportCapability.available &&
+              joinPieces.length === 2 &&
+              selectedPieceIds.length === 2 && (
+                <SavedJoinControl
+                  key={JSON.stringify([materialScopeKey, confirmedImportGeneration, joinPieces])}
+                  pieces={joinPieces}
+                  prepare={prepareSavedJoin}
+                />
+              )}
             {arrangeActive &&
               selectedPieceIds.length === 1 &&
               (['duplicate', 'mirror-across-grain'] as const).map((mode) => (
