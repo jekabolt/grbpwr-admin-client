@@ -215,6 +215,8 @@ function rotateSize(size: PieceSizeSpec, pivot: PtMm, radians: number): PieceSiz
   }));
   if (size.textMarks?.length)
     output.textMarks = size.textMarks.map((mark) => ({ ...mark, at: point(mark.at) }));
+  if (size.pointMarks?.length)
+    output.pointMarks = size.pointMarks.map((mark) => ({ ...mark, at: point(mark.at) }));
   output.internal = size.internal.map((feature) => ({
     ...structuredClone(feature),
     pts: feature.pts.map(point),

@@ -6,8 +6,17 @@
 import { AUTHORED_TEXT_LAYER } from '../../manifest/authored-text';
 import { readAuthoredTextMarks } from './authored-text';
 import { contourSigProblem } from '../../manifest/contour-sig';
-import type { AllowanceDecision, IRPath, IRText, PathId, PtMm, Style } from '../../types';
+import type {
+  AllowanceDecision,
+  AuthoredPointMark,
+  IRPath,
+  IRText,
+  PathId,
+  PtMm,
+  Style,
+} from '../../types';
 import { PATIMPORT } from '../../types';
+import { authoredPointKind } from '../../manifest/authored-point';
 import type {
   CutMode,
   DxfBlockPiece,
@@ -41,12 +50,14 @@ type LayerKind =
   | 'drill'
   | 'seam'
   | 'annotation'
+  | 'authored-point'
   | 'qv'
   | 'ref'
   | 'unknown';
 
 /** AAMA/ASTM D6673 layer numbers (+ CLO's 19 annotation) and common names in foreign files. */
 export function layerKind(layer: string | null): LayerKind {
+  if (authoredPointKind(layer)) return 'authored-point';
   const l = (layer ?? '').trim();
   const aama: Record<string, LayerKind> = {
     '1': 'cut',
@@ -585,6 +596,27 @@ function blockPiece(
   const kindOf = (p: IRPath) => layerKind(layerOfPath(p));
   const roles: Record<PathId, PathRole> = {};
   const by = (k: LayerKind) => paths.filter((p) => kindOf(p) === k);
+  const pointMarks: AuthoredPointMark[] = [];
+  for (const path of by('authored-point')) {
+    const point = read.meta.points[path.id];
+    const kind = authoredPointKind(layerOfPath(path));
+    if (
+      group.kind !== 'insert' ||
+      path.src.block !== group.block ||
+      read.meta.pathEntity[path.id] !== 'POINT' ||
+      !kind ||
+      !point ||
+      point.z !== 0 ||
+      point.thickness !== 0 ||
+      point.angleDeg !== null ||
+      path.closed ||
+      path.pts.length !== 1
+    )
+      throw new Error(
+        `The CAD point in ${group.block || 'the drawing'} is not a planar block POINT.`,
+      );
+    pointMarks.push({ at: { ...point.at }, kind });
+  }
 
   // cut
   let cutLayerPaths = by('cut');
@@ -897,6 +929,7 @@ function blockPiece(
     roles,
     texts: texts.map(({ id }) => id),
     ...(textMarks.length ? { textMarks } : {}),
+    ...(pointMarks.length ? { pointMarks } : {}),
     gradePoints: { turn, curve },
     pointNumbers,
     annotations,

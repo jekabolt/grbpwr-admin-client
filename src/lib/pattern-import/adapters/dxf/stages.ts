@@ -509,6 +509,7 @@ function candidateOf(
       outerIsSeam: outerIsSeam && !!p.seam,
       ...(p.zeroAllowanceSeam ? { zeroAllowanceSeam: true as const } : {}),
       ...(p.textMarks?.length ? { textMarks: p.textMarks } : {}),
+      ...(p.pointMarks?.length ? { pointMarks: p.pointMarks } : {}),
       ...(p.seamPair ? { seamPairMm: p.seamPair.offsetMm } : {}),
       ...(p.instances ? { instances: p.instances } : {}),
       // D3: the block's QUANTITY label is the CAD's word on the count (semantics reads it)

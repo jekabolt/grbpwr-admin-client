@@ -1409,7 +1409,7 @@ function toolInstruction(tool: PatternImportDxfPhaseEDraftCadToolV1, sizeToken: 
   if (tool === 'circle') return 'Click a centre and then its radius to record one circle intent.';
   if (tool === 'mark') return `Click the piece to place a drill mark in size ${sizeToken}.`;
   if (tool === 'point-only' || tool === 'draft-point')
-    return 'Click the exact sheet to record one local Draft intent.';
+    return `Click inside the selected piece to place a construction point in size ${sizeToken}.`;
   return `${tool} input is unavailable until a verified pattern geometry kernel is integrated. No command will be recorded.`;
 }
 

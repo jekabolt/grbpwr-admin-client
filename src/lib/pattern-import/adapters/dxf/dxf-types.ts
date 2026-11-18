@@ -4,6 +4,7 @@
 import type {
   Affine,
   AllowanceDecision,
+  AuthoredPointMark,
   AuthoredTextMark,
   BoxMm,
   Feature,
@@ -297,6 +298,7 @@ export type DxfBlockPiece = {
   roles: Record<PathId, PathRole>;
   texts: TextId[];
   textMarks?: AuthoredTextMark[];
+  pointMarks?: AuthoredPointMark[];
   gradePoints: { turn: number; curve: number };
   pointNumbers: number;
   annotations: TextId[];
@@ -384,6 +386,7 @@ export type DxfPieceCandidate = PieceCandidate & {
     outerIsSeam: boolean;
     zeroAllowanceSeam?: true;
     textMarks?: AuthoredTextMark[];
+    pointMarks?: AuthoredPointMark[];
     /** The block's `seamPair` allowance, mm (the uniform same-look loop inside the outline). */
     seamPairMm?: number;
     /** F14 R5: the block is inserted this many times (identical copies) = its cut quantity. */

@@ -358,7 +358,7 @@ function splitSize(
   const split = splitPolygon(size.cut, from, to);
   if (!split.ok) return split;
   const [left, right] = split.polygons;
-  const { textMarks, ...base } = size;
+  const { pointMarks, textMarks, ...base } = size;
   const output = [
     {
       ...structuredClone(base),
@@ -368,6 +368,7 @@ function splitSize(
       drills: [],
       internal: [],
       ...(textMarks?.length ? { textMarks: [] } : {}),
+      ...(pointMarks?.length ? { pointMarks: [] } : {}),
       grain: null,
       fold: null,
       offset: null,
@@ -383,6 +384,7 @@ function splitSize(
       drills: [],
       internal: [],
       ...(textMarks?.length ? { textMarks: [] } : {}),
+      ...(pointMarks?.length ? { pointMarks: [] } : {}),
       grain: null,
       fold: null,
       offset: null,
@@ -420,6 +422,16 @@ function splitSize(
         detail: `A text anchor in size ${size.sizeToken} lies on the cut chord.`,
       };
     output[side].textMarks!.push(structuredClone(mark));
+  }
+  for (const mark of pointMarks ?? []) {
+    const side = featureSide([mark.at], split.polygons);
+    if (side === null)
+      return {
+        ok: false,
+        code: 'feature-partition-ambiguous',
+        detail: `A construction point in size ${size.sizeToken} lies on the cut chord.`,
+      };
+    output[side].pointMarks!.push(structuredClone(mark));
   }
   for (const internal of size.internal) {
     const side = featureSide(internal.pts, split.polygons);

@@ -1305,6 +1305,150 @@ it.each(['internal-line', 'pattern-line', 'french-curve', 'guideline', 'cross'] 
   },
 );
 
+it('reopens both construction points through the normal DXF writer and fresh saved read', async () => {
+  const f = await fixture(true);
+  vi.stubGlobal('Worker', InProcessTransport);
+  try {
+    const { recordPatternImportDxfPhaseEDraftCadCanvasPointV1 } = await import(
+      './draft-cad-canvas-v1'
+    );
+    const { compilePatternImportDxfPhaseEDraftCadGeometryV1 } = await import(
+      './draft-cad-geometry-compile-v1'
+    );
+    const { AUTHORED_POINT_LAYERS } = await import('lib/pattern-import/manifest/authored-point');
+    const { parseDxf } = await import('lib/nesting/dxf/parse');
+    const { projection, selection } = f.compileInput;
+    const piece = projection.pieces[0]!;
+    const vertices = piece.contours[0]!.vertices;
+    const center = {
+      x: vertices.reduce((sum, vertex) => sum + vertex.pointMm.x, 0) / vertices.length,
+      y: vertices.reduce((sum, vertex) => sum + vertex.pointMm.y, 0) / vertices.length,
+    };
+    const input = {
+      session: f.initial,
+      projection,
+      activePieceIndex: 0,
+      sequence: 0,
+      pendingPoints: [],
+      pointMm: center,
+    } as const;
+    const firstPoint = recordPatternImportDxfPhaseEDraftCadCanvasPointV1({
+      ...input,
+      activeTool: 'draft-point',
+    });
+    expect(firstPoint.recorded).toBe(true);
+    const secondPoint = recordPatternImportDxfPhaseEDraftCadCanvasPointV1({
+      ...input,
+      activeTool: 'point-only',
+      session: firstPoint.session,
+      sequence: 1,
+      pointMm: { x: center.x + 1, y: center.y + 2 },
+    });
+    expect(secondPoint.recorded).toBe(true);
+    const compileSource = createPatternImportDxfPhaseEDraftCadCompileSourceV1(
+      f.source.native.draft,
+    );
+    if (!compileSource) throw Error('Fixture lacks a current writer source.');
+    const compiled = compilePatternImportDxfPhaseEDraftCadGeometryV1({
+      session: secondPoint.session,
+      projection,
+      selection,
+      compileSource,
+    });
+    if (!compiled.ok) throw Error(JSON.stringify(compiled.blockers));
+    expect(compiled.artifact.compiledFeatures.map(({ output }) => output)).toEqual([
+      'point-mark',
+      'point-mark',
+    ]);
+    const source = compiled.artifact.compiledJob.pieces.find(
+      ({ identity }) => identity === piece.pieceId,
+    )!.sizes[0]!;
+    const before = compiled.artifact.manifest.blocks.find(
+      ({ identity }) => identity === piece.pieceId,
+    )!;
+    const outside = recordPatternImportDxfPhaseEDraftCadCanvasPointV1({
+      ...input,
+      activeTool: 'point-only',
+      pointMm: { x: Math.min(...vertices.map(({ pointMm }) => pointMm.x)) - 1, y: center.y },
+    });
+    expect(
+      compilePatternImportDxfPhaseEDraftCadGeometryV1({
+        session: outside.session,
+        projection,
+        selection,
+        compileSource,
+      }),
+    ).toMatchObject({
+      ok: false,
+      blockers: [{ detail: 'Place the point inside the selected cut.' }],
+    });
+    for (const dialect of ['r12', 'r2000'] as const) {
+      const written = writeDxfDetailed({ ...compiled.artifact.compiledJob, dialect });
+      const native = parseDxf(new TextEncoder().encode(written.dxfText).buffer, 'mm');
+      expect(
+        native.dxf.blocks[before.block]!.entities.filter(({ type }) => type === 'POINT').map(
+          ({ layer }) => layer,
+        ),
+      ).toEqual(expect.arrayContaining(Object.values(AUTHORED_POINT_LAYERS)));
+      const file = new File([written.dxfText], 'main-cad-compiled.dxf', { type: 'image/vnd.dxf' });
+      const reviewed = await draftThroughWizardStages(
+        file,
+        f.current.card,
+        new ImportWorkerClient(),
+      );
+      const scope = reviewed.scopes[0]!;
+      expect(scope.manifest.gate?.passed).toBe(true);
+      const rereadPiece = scope.writerReplay!.job.pieces.find(
+        ({ identity }) => identity === piece.pieceId,
+      )!;
+      expect(rereadPiece.sizes.map(({ sizeToken }) => sizeToken)).toEqual(['M']);
+      expect(rereadPiece.piecesPerGarment).toBe(1);
+      function assertPoints(size: typeof source) {
+        expect(size.drills).toHaveLength(source.drills.length);
+        expect(size.notches).toHaveLength(source.notches.length);
+        expect(size.internal).toHaveLength(source.internal.length);
+        const [start, end] = size.pointMarks!;
+        expect(size.pointMarks?.map(({ kind }) => kind)).toEqual(['draft-point', 'point-only']);
+        expect(Math.hypot(end!.at.x - start!.at.x, end!.at.y - start!.at.y)).toBeCloseTo(
+          Math.sqrt(5),
+          5,
+        );
+      }
+      assertPoints(rereadPiece.sizes[0]!);
+
+      const bytes = new TextEncoder().encode(scope.dxfText);
+      const row = {
+        ...f.current.row,
+        revision: f.current.row.revision + 1,
+        cardLockVersion: f.current.row.cardLockVersion + 1,
+        sizeBytes: bytes.length,
+        sha256: await digestFullAssemblyFixture(bytes),
+      };
+      const card = structuredClone(f.current.card);
+      card.existingPatterns![0]!.manifest = scope.manifest;
+      const restored = await createSavedThreePanelSourceV1(
+        { ...(await createSavedThreePanelFixtureV1(2)), bytes, row, card },
+        true,
+      );
+      try {
+        expect(restored.native.row).toEqual(row);
+        const pieces = restored.native.draft.scopes[0]!.writerReplay!.job.pieces;
+        assertPoints(pieces.find(({ identity }) => identity === piece.pieceId)!.sizes[0]!);
+        expect(
+          pieces
+            .filter(({ identity }) => identity !== piece.pieceId)
+            .every(({ sizes }) => sizes.every(({ pointMarks }) => !pointMarks?.length)),
+        ).toBe(true);
+      } finally {
+        restored.dispose();
+      }
+    }
+  } finally {
+    vi.unstubAllGlobals();
+    f.source.dispose();
+  }
+});
+
 it('reopens a native text mark without turning it into size, fold or quantity metadata', async () => {
   const f = await fixture(true);
   vi.stubGlobal('Worker', InProcessTransport);

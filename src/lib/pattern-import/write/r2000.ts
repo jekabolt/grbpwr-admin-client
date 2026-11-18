@@ -7,6 +7,7 @@ import type { PtMm } from '../types';
 import type { PlannedBlock, PlannedDrill } from './plan';
 import { DRILL_CIRCLE_SEGMENTS, DRILL_SQUARE_MM } from './plan';
 import { type Tag, hex, num, serialize, txt } from './format';
+import { AUTHORED_POINT_LAYERS } from '../manifest/authored-point';
 
 /** CLO's 8 layers (name, ACI colour). */
 export const CLO_LAYERS: readonly [string, number][] = [
@@ -203,9 +204,16 @@ export function writeR2000(blocks: readonly PlannedBlock[]): string {
     E(40, num(0));
   }
   E(0, 'ENDTAB');
-  const layers: readonly [string, number][] = blocks.some((block) => block.size.textMarks?.length)
-    ? [...CLO_LAYERS, [AUTHORED_TEXT_LAYER, 8]]
-    : CLO_LAYERS;
+  const markLayers = new Set<string>();
+  for (const block of blocks) {
+    if (block.size.textMarks?.length) markLayers.add(AUTHORED_TEXT_LAYER);
+    for (const mark of block.size.pointMarks ?? [])
+      markLayers.add(AUTHORED_POINT_LAYERS[mark.kind]);
+  }
+  const layers: readonly [string, number][] = [
+    ...CLO_LAYERS,
+    ...[...markLayers].map((name): [string, number] => [name, 8]),
+  ];
   tableHead('LAYER', 3, layers.length);
   for (const [n, c] of layers) {
     E(0, 'LAYER');
@@ -356,6 +364,12 @@ export function writeR2000(blocks: readonly PlannedBlock[]): string {
     );
     for (const mark of b.size.textMarks ?? [])
       text(o, AUTHORED_TEXT_LAYER, mark.at, AUTHORED_TEXT_HEIGHT_MM, mark.text);
+    for (const { kind, at } of b.size.pointMarks ?? []) {
+      ent('POINT', o, AUTHORED_POINT_LAYERS[kind], 'AcDbPoint');
+      E(10, num(at.x));
+      E(20, num(at.y));
+      E(30, num(0));
+    }
     blockEnd(o, false);
   });
   E(0, 'ENDSEC');

@@ -1671,6 +1671,7 @@ export type ShapeIssue = {
 };
 
 export type AuthoredTextMark = { at: PtMm; text: string };
+export type AuthoredPointMark = { at: PtMm; kind: 'draft-point' | 'point-only' };
 
 export type PieceSizeSpec = {
   rank: number;
@@ -1689,6 +1690,7 @@ export type PieceSizeSpec = {
   drills: DrillFeature[];
   internal: InternalFeature[];
   textMarks?: AuthoredTextMark[];
+  pointMarks?: AuthoredPointMark[];
   fold: FoldFeature | null;
   offset: OffsetReport | null;
   /** Wall chains the cut line came from — coverage/Hausdorff are computed against them. */

@@ -48,6 +48,8 @@ export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_PRODUCTIVE_TOOLS_V1 = Object.f
   'pattern-line',
   'french-curve',
   'guideline',
+  'draft-point',
+  'point-only',
   'add-point',
   'edge-length',
   'dart',
@@ -636,7 +638,7 @@ export function listActiveDraftCadNewPiecesV1(session: PatternImportDxfPhaseEDra
 export function permitsDraftCadLocalPieceEditV1(
   tool: PatternImportDxfPhaseEDraftCadToolV1,
 ): boolean {
-  return tool === 'mark';
+  return tool === 'mark' || tool === 'draft-point' || tool === 'point-only';
 }
 
 export function recordPatternImportDxfPhaseEDraftCadTransactionV1(

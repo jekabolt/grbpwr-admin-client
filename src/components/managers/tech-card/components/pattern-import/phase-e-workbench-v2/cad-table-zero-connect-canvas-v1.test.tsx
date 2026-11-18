@@ -345,6 +345,11 @@ describe('zero-operation CAD table rendering', () => {
     size.fold = { ...evidence, ranges: [], kind: 'fold', a, b };
     size.notches.push({ ...evidence, ranges: [], kind: 'notch', seg: [a, b], at: a, depthMm: 2 });
     size.drills.push({ ...evidence, ranges: [], kind: 'drill', at: a, form: 'point' });
+    size.pointMarks = [
+      { kind: 'draft-point', at: a },
+      { kind: 'point-only', at: b },
+    ];
+    size.textMarks = [{ at: a, text: 'СГИБ' }];
     const pieceFeatures = projectCadTablePieceFeatures(catalog, projection, scopes, 'Main fabric');
     expect(pieceFeatures.size).toBe(2);
     const key = patternImportDxfPhaseECadTablePieceKeyV1(first.pieceId, first.pieceLineKey);
@@ -368,12 +373,21 @@ describe('zero-operation CAD table rendering', () => {
       ['Show fold lines', 'fold'],
       ['Show notches', 'notch'],
       ['Show drill marks', 'drill'],
+      ['Show text marks', 'text-mark'],
       ['Show piece names', 'piece-label'],
       ['Show material names', 'material-label'],
     ]) {
       expect(buttonTag(html, label)).toContain('aria-pressed="true"');
       expect(html).toContain(`data-cad-zero-connect-${mark}=""`);
     }
+    expect(buttonTag(html, 'Show construction points')).toContain('aria-pressed="true"');
+    expect(html).toContain(
+      `data-cad-zero-connect-construction-point="draft-point" cx="${a.x}" cy="${vy(a.y)}"`,
+    );
+    expect(html).toContain(
+      `data-cad-zero-connect-construction-point="point-only" cx="${b.x}" cy="${vy(b.y)}"`,
+    );
+    expect(html).toContain('>СГИБ</text>');
     expect(html).toContain('>Main fabric</tspan>');
     expect(pieceFeatures.get(key)?.pieceLabel).toBe(writerPiece.displayName);
     const translated = {

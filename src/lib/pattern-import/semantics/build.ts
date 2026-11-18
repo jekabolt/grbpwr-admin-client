@@ -181,6 +181,7 @@ type DxfExtra = {
     outerIsSeam?: boolean;
     zeroAllowanceSeam?: true;
     textMarks?: PieceSizeSpec['textMarks'];
+    pointMarks?: PieceSizeSpec['pointMarks'];
     sizeSource?: 'label' | 'block-name' | 'none';
     identitySource?: 'label' | 'block-name';
     generatedFusing?: boolean;
@@ -2114,6 +2115,7 @@ export function buildPieceSpecsDetailed(
         cut,
         ...(cutLoops ? { cutLoops } : {}),
         ...(c.dxf?.textMarks?.length ? { textMarks: c.dxf.textMarks } : {}),
+        ...(c.dxf?.pointMarks?.length ? { pointMarks: c.dxf.pointMarks } : {}),
         seam,
         grain,
         notches: notchesOut,

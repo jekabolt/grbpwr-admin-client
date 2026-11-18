@@ -10,7 +10,10 @@ import type { PatternImportDxfPhaseECadWorkbenchIconV1 } from './cad-workbench-t
 import { patternImportDxfPhaseECadTablePieceKeyV1 } from './cad-table-piece-layout-session-v1';
 
 export type CadTablePieceFeatures = Readonly<
-  Pick<PieceSizeSpec, 'grain' | 'internal' | 'fold' | 'notches' | 'drills'> & {
+  Pick<
+    PieceSizeSpec,
+    'grain' | 'internal' | 'fold' | 'notches' | 'drills' | 'pointMarks' | 'textMarks'
+  > & {
     pieceLabel: string;
     materialLabel: string | null;
     quantity: number;
@@ -25,6 +28,8 @@ export const CAD_TABLE_PIECE_FEATURE_LAYERS = [
   { key: 'fold', label: 'Show fold lines', icon: 'guideline' },
   { key: 'notches', label: 'Show notches', icon: 'notch' },
   { key: 'drills', label: 'Show drill marks', icon: 'mark' },
+  { key: 'pointMarks', label: 'Show construction points', icon: 'draft-point' },
+  { key: 'textMarks', label: 'Show text marks', icon: 'mark' },
   { key: 'pieceLabel', label: 'Show piece names', icon: 'callout' },
   { key: 'materialLabel', label: 'Show material names', icon: 'view-options' },
 ] as const satisfies readonly {
@@ -91,7 +96,7 @@ export function projectCadTablePieceFeatures(
       );
     });
     if (!frameMatches) continue;
-    const { grain, internal, fold, notches, drills } = size;
+    const { grain, internal, fold, notches, drills, pointMarks, textMarks } = size;
     features.set(
       patternImportDxfPhaseECadTablePieceKeyV1(projected.pieceId, projected.pieceLineKey),
       {
@@ -106,6 +111,8 @@ export function projectCadTablePieceFeatures(
         fold,
         notches,
         drills,
+        pointMarks,
+        textMarks,
         pieceLabel: writerPiece.displayName?.trim() || writerPiece.identity,
         materialLabel: materialLabel?.trim() || null,
         quantity: writerPiece.piecesPerGarment,

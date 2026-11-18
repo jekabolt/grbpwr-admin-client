@@ -1,6 +1,7 @@
 import { buildAst, type RawBlock, type RawEntity } from '../adapters/dxf/ast';
 import { tokenize } from '../adapters/dxf/tags';
 import { readManifest } from '../manifest';
+import { authoredPointKind } from '../manifest/authored-point';
 import { PATIMPORT, type ManifestBlock } from '../types';
 
 function requireMatch(ok: unknown, detail: string): asserts ok {
@@ -143,6 +144,7 @@ function grainFrame(block: RawBlock, record: ManifestBlock, reflect: boolean) {
         return [e.type, e.layer, tags, point(e), point(e, 11)];
       }
       if (e.type === 'POINT') {
+        if (authoredPointKind(e.layer)) return [e.type, e.layer, tags, point(e)];
         const marker = block.entities[index - 1];
         requireMatch(
           e.layer === '13' &&

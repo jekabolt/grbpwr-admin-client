@@ -1,4 +1,5 @@
 import { labelAnchor } from 'lib/nesting/render/label-fit';
+import { AUTHORED_TEXT_HEIGHT_MM } from 'lib/pattern-import/manifest/authored-text';
 import type { PtMm } from 'lib/pattern-import/types';
 import { SHEET_INK, ptsAttr, vy } from '../sheet-viewport';
 import type {
@@ -17,7 +18,17 @@ export function CadTablePieceFeatureMarks({
   unit: number;
   materialRings: readonly (readonly PtMm[])[];
 }>) {
-  const { grain, internal, fold, notches, drills, pieceLabel, materialLabel } = features;
+  const {
+    grain,
+    internal,
+    fold,
+    notches,
+    drills,
+    pointMarks,
+    textMarks,
+    pieceLabel,
+    materialLabel,
+  } = features;
   const firstRing = materialRings[0];
   const showName = !hiddenLayers.has('pieceLabel') && !!pieceLabel;
   const showMaterial = !hiddenLayers.has('materialLabel') && !!materialLabel;
@@ -85,6 +96,32 @@ export function CadTablePieceFeatureMarks({
             strokeWidth='1.25'
             vectorEffect='non-scaling-stroke'
           />
+        ))}
+      {!hiddenLayers.has('pointMarks') &&
+        pointMarks?.map(({ kind, at }, index) => (
+          <circle
+            key={index}
+            data-cad-zero-connect-construction-point={kind}
+            cx={at.x}
+            cy={vy(at.y)}
+            r={1.75 * unit}
+            fill={kind === 'draft-point' ? SHEET_INK.blue : 'none'}
+            stroke={SHEET_INK.blue}
+            vectorEffect='non-scaling-stroke'
+          />
+        ))}
+      {!hiddenLayers.has('textMarks') &&
+        textMarks?.map(({ at, text }, index) => (
+          <text
+            key={index}
+            data-cad-zero-connect-text-mark=''
+            x={at.x}
+            y={vy(at.y)}
+            fontSize={AUTHORED_TEXT_HEIGHT_MM}
+            fill={SHEET_INK.ink}
+          >
+            {text}
+          </text>
         ))}
       {anchor ? (
         <text

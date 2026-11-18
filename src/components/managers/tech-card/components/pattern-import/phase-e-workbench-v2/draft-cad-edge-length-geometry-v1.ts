@@ -150,6 +150,8 @@ export function resizeDraftCadSelectedSizeEdgeV1(
 
   if (source.textMarks?.some(({ at }) => !pointInPolygon(at, nextRing)))
     return { ok: false, detail: 'Move the text anchor inside the resized outline.' };
+  if (source.pointMarks?.some(({ at }) => !pointInPolygon(at, nextRing)))
+    return { ok: false, detail: 'Move the construction point inside the resized outline.' };
 
   const size = structuredClone(source);
   const copyLoop = (previous: readonly PtMm[]) => {

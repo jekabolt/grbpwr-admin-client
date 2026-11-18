@@ -78,6 +78,7 @@ export type PatternImportDxfPhaseEDraftCadCompiledFeatureV1 = Readonly<{
   sizeToken: string;
   output:
     | 'internal'
+    | 'point-mark'
     | 'text-mark'
     | 'drill'
     | 'notch'
@@ -231,6 +232,7 @@ function supported(command: PatternImportDxfPhaseEDraftCadCommandV1): boolean {
   if (command.tool === 'circle' || command.tool === 'ellipse')
     return Boolean(command.payload.newPiece);
   if (INTERNAL_TOOLS.has(command.tool)) return true;
+  if (command.tool === 'draft-point' || command.tool === 'point-only') return true;
   if (command.tool === 'add-point') return Boolean(command.payload.edge);
   if (command.tool === 'edge-length') return true;
   if (command.tool === 'cut') return command.payload.keepSide === 'both';
@@ -819,6 +821,19 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
     if (internal) {
       size.internal.push(internal);
       output = 'internal';
+    } else if (
+      (command.tool === 'draft-point' || command.tool === 'point-only') &&
+      primitive.kind === 'point' &&
+      primitive.indicator === (command.tool === 'draft-point' ? 'draft' : 'point-only')
+    ) {
+      const at = primitive.pointMm;
+      if (
+        !pointInPolygon(at, size.cut) ||
+        (size.cutLoops ?? []).some((loop) => pointInPolygon(at, loop))
+      )
+        return blocked('preview-blocked', 'Place the point inside the selected cut.', command);
+      (size.pointMarks ??= []).push({ at: { ...at }, kind: command.tool });
+      output = 'point-mark';
     } else if (
       command.tool === 'mark' &&
       command.payload.kind === 'text' &&
