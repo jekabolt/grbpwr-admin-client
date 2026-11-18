@@ -36,6 +36,8 @@ export type WriteOptions = {
   embed?: EmbedManifestFn | null;
   /** Clock for `createdAt` (tests pin it). */
   now?: () => Date;
+  /** Retain the original grain midpoint when verifying a historical bare R12 fusing row. */
+  legacyFusingGrainAnchor?: true;
 };
 
 export type WriteDetail = WriteResult & {
@@ -47,7 +49,19 @@ export type WriteDetail = WriteResult & {
 };
 
 export function writeDxfDetailed(job: WriteJob, opts: WriteOptions = {}): WriteDetail {
-  return emitPlannedDxf(job, planBlocks(job.pieces, job.scope), opts);
+  if (
+    opts.legacyFusingGrainAnchor &&
+    (job.generator !== 'grbpwr/fusing-dxf' ||
+      job.dialect !== 'r12' ||
+      !job.scope.isInterlining ||
+      opts.embed !== null)
+  )
+    throw new Error('Historical fusing grain is supported only for bare R12 interlining replay.');
+  return emitPlannedDxf(
+    job,
+    planBlocks(job.pieces, job.scope, [], opts.legacyFusingGrainAnchor),
+    opts,
+  );
 }
 
 /** First compile only. The caller owns the current card and selection. No Apply or worker authority is implied. */

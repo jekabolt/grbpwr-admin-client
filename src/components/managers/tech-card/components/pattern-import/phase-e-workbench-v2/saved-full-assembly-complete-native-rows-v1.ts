@@ -144,6 +144,7 @@ export async function prepareSavedFullAssemblyCompleteNativeRowsV1(
                 fusingScopeKey: row.scopeKey,
                 mainBytes,
                 fusingBytes,
+                nativeMain: { draft: main.sourceRequest.draft, sizes: cardProjection.card.sizes },
               },
               signal,
             ),

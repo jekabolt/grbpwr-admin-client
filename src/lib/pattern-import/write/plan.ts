@@ -247,15 +247,20 @@ function deriveSibling(
 
 // ── written primitives ─────────────────────────────────────────────────────────────────────
 
-function grainArrow(g: GrainFeature, cut: readonly PtMm[]): PlannedGrain | null {
+function grainArrow(
+  g: GrainFeature,
+  cut: readonly PtMm[],
+  keepOriginalAnchor: boolean,
+): PlannedGrain | null {
   const L = dist(g.a, g.b);
   if (!(L > 0)) return null;
   const u = { x: (g.b.x - g.a.x) / L, y: (g.b.y - g.a.y) / L };
   const n = { x: -u.y, y: u.x };
   const originalMid = { x: (g.a.x + g.b.x) / 2, y: (g.a.y + g.b.y) / 2 };
-  const fitted = pointOnRings(originalMid, [cut])
-    ? ([g.a, g.b] as const)
-    : fitGrainInside(g.a, g.b, [cut], { minMm: 1 });
+  const fitted =
+    keepOriginalAnchor || pointOnRings(originalMid, [cut])
+      ? ([g.a, g.b] as const)
+      : fitGrainInside(g.a, g.b, [cut], { minMm: 1 });
   if (!fitted) return null;
   const mid = { x: (fitted[0].x + fitted[1].x) / 2, y: (fitted[0].y + fitted[1].y) / 2 };
   const tail = { x: mid.x - (GRAIN_SHAFT_MM / 2) * u.x, y: mid.y - (GRAIN_SHAFT_MM / 2) * u.y };
@@ -351,6 +356,7 @@ export function planBlocks(
   input: PieceSpec[],
   scope: DraftScopeTarget,
   warnings: string[] = [],
+  keepOriginalGrainAnchor = false,
 ): Plan {
   // 1. scope membership
   const inScope: PieceSpec[] = [];
@@ -488,7 +494,7 @@ export function planBlocks(
         foldLines = 1;
       }
       const foldIsMirror = foldLines === 1 && !w.spec.unfoldedFold;
-      const grain = s.grain ? grainArrow(s.grain, cut) : null;
+      const grain = s.grain ? grainArrow(s.grain, cut, keepOriginalGrainAnchor) : null;
       if (!grain) warnings.push(`${who}: no grain line`);
       const notches = sNotches.map((n) => plannedNotch(cut, n, warnings, who));
       const annotation: string[] = [];
