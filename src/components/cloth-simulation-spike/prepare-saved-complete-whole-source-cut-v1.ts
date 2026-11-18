@@ -1,4 +1,5 @@
 import type {
+  SavedCompleteAssemblyNativeStitchAnchorsV1,
   SavedCompleteGarmentLabelAnchorV1,
   SavedCompleteNativeStitchAnchorV1,
 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-complete-assembly-native-stitch-anchors-v1';
@@ -29,11 +30,7 @@ export type SavedCompleteWholeSourceCutV1 = Readonly<{
   savedCarrier: Readonly<{ sidecarSha256: string }> | null;
   sizeId: number;
   sizeToken: string;
-  sourceCuts: readonly Readonly<{
-    pieceLineKey: string;
-    nativePointsMm: readonly Readonly<{ x: number; y: number }>[];
-    grain?: Readonly<{ angleDegrees: number }> | null;
-  }>[];
+  sourceCuts: SavedCompleteAssemblyNativeStitchAnchorsV1['sourceCuts'];
   operations: readonly Readonly<{ operationNumber: number }>[];
   spans: readonly SavedCompleteNativeStitchAnchorV1[];
   labelAnchors: readonly SavedCompleteGarmentLabelAnchorV1[];
@@ -144,7 +141,11 @@ function replayRegisteredMaterialPairs(
   if (!manifest.seams.length && !manifest.labelSeamKeys?.length)
     throw new RangeError('The diagnostic carrier has an empty fabric stitch registration.');
   const stitches = manifest.seams.map((registration) => {
-    const projected = projectSavedNativeStitchRegistrationV1(source.spans, registration);
+    const projected = projectSavedNativeStitchRegistrationV1(
+      source.spans,
+      registration,
+      source.sourceCuts,
+    );
     if (
       source.operations[projected.operationOrder]?.operationNumber !== registration.operationNumber
     )

@@ -2,6 +2,7 @@ import type { RegisteredSourceCutStitchV1 } from 'lib/cloth/compiler/source-cut-
 import type {
   SavedCompleteGarmentLabelAnchorV1,
   SavedCompleteNativeStitchAnchorV1,
+  SavedCompleteAssemblyNativeStitchAnchorsV1,
 } from './saved-complete-assembly-native-stitch-anchors-v1';
 import type { SavedNativeCurveIntervalV1 } from './saved-legacy-native-stitch-run-v8';
 
@@ -9,7 +10,10 @@ type CurveStation = Readonly<{
   intervalOrdinal: number;
   nativeCurveId: string;
   nativeT: number;
+  nativeNotchPathId?: number;
 }>;
+
+type SourceCuts = SavedCompleteAssemblyNativeStitchAnchorsV1['sourceCuts'];
 
 type RegisteredPart = Readonly<{
   partOrdinal: number;
@@ -24,8 +28,12 @@ export type SavedNativeStitchRegistrationV1 = Readonly<{
   sections: readonly Readonly<{ sideA: RegisteredPart; sideB: RegisteredPart }>[];
 }>;
 
-function intervalProgress(station: CurveStation, intervals: readonly SavedNativeCurveIntervalV1[]) {
-  const interval = intervals[station.intervalOrdinal];
+function intervalProgress(
+  station: CurveStation,
+  anchor: SavedCompleteNativeStitchAnchorV1,
+  sourceCuts: SourceCuts,
+) {
+  const interval = anchor.span.intervals[station.intervalOrdinal];
   if (
     !Number.isSafeInteger(station.intervalOrdinal) ||
     !interval ||
@@ -36,6 +44,26 @@ function intervalProgress(station: CurveStation, intervals: readonly SavedNative
   const progress = (station.nativeT - interval.t0) / (interval.t1 - interval.t0);
   if (!(progress >= 0 && progress <= 1))
     throw new RangeError('A registration station is outside the saved native part.');
+  if (station.nativeNotchPathId !== undefined) {
+    const point = pointAt(interval, progress);
+    const cuts = sourceCuts.filter(
+      ({ pieceLineKey, row }) =>
+        pieceLineKey === anchor.pieceLineKey &&
+        row.patternLineKey === anchor.row.patternLineKey &&
+        row.cardLockVersion === anchor.row.cardLockVersion &&
+        row.revision === anchor.row.revision &&
+        row.sha256 === anchor.row.sha256,
+    );
+    const marks = cuts[0]?.nativeNotchPoints?.filter(
+      ({ nativePathId }) => nativePathId === station.nativeNotchPathId,
+    );
+    if (
+      cuts.length !== 1 ||
+      marks?.length !== 1 ||
+      !marks[0].positionMm.every((coordinate, axis) => coordinate === point[axis])
+    )
+      throw new RangeError('A registration notch no longer matches its saved native station.');
+  }
   return progress;
 }
 
@@ -57,14 +85,15 @@ function pointAt({ startMm, endMm }: SavedNativeCurveIntervalV1, progress: numbe
 function materialRun(
   anchor: SavedCompleteNativeStitchAnchorV1,
   { direction, range }: RegisteredPart,
+  sourceCuts: SourceCuts = [],
 ) {
   const intervals = anchor.span.intervals;
   if (!intervals.length || (direction !== 'native-forward' && direction !== 'native-reversed'))
     throw new RangeError('A registration must identify a directed, nonempty saved part.');
   const fromOrdinal = range?.from.intervalOrdinal ?? 0;
   const toOrdinal = range?.to.intervalOrdinal ?? intervals.length - 1;
-  const fromProgress = range ? intervalProgress(range.from, intervals) : 0;
-  const toProgress = range ? intervalProgress(range.to, intervals) : 1;
+  const fromProgress = range ? intervalProgress(range.from, anchor, sourceCuts) : 0;
+  const toProgress = range ? intervalProgress(range.to, anchor, sourceCuts) : 1;
   const from = walkPosition(fromOrdinal, fromProgress);
   const to = walkPosition(toOrdinal, toProgress);
   if (comparePosition(from, to) >= 0)
@@ -87,6 +116,7 @@ function materialRun(
 export function projectSavedNativeStitchRegistrationV1(
   spans: readonly SavedCompleteNativeStitchAnchorV1[],
   { operationNumber, seamKey, sections }: SavedNativeStitchRegistrationV1,
+  sourceCuts: SourceCuts = [],
 ): RegisteredSourceCutStitchV1 {
   const parts = spans.filter(
     (anchor) => anchor.seamKey === seamKey && anchor.operationNumber === operationNumber,
@@ -107,7 +137,7 @@ export function projectSavedNativeStitchRegistrationV1(
     const key = partKey(side, part.partOrdinal);
     const anchor = byPart.get(key);
     if (!anchor) throw new RangeError('A registration references a missing saved seam part.');
-    const { from, to, run } = materialRun(anchor, part);
+    const { from, to, run } = materialRun(anchor, part, sourceCuts);
     const ranges = coverage.get(key);
     if (ranges) ranges.push({ from, to });
     else coverage.set(key, [{ from, to }]);
