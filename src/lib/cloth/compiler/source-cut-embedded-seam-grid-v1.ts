@@ -177,15 +177,29 @@ export async function compileSourceCutEmbeddedSeamGridV1(
   };
   const a = embed(0);
   const b = embed(1);
+  const pairs = a.map((sideA, sourcePairIndex) => ({
+    operationOrder,
+    seamId: witness.seamId,
+    sourcePairIndex,
+    sideA,
+    sideB: b[sourcePairIndex],
+  }));
   return {
     witness,
     triangleTests,
-    pairs: a.map((sideA, sourcePairIndex) => ({
+    pairs,
+    materialPairs: pairs.map(({ operationOrder, seamId, sourcePairIndex }) => ({
       operationOrder,
-      seamId: witness.seamId,
+      seamId,
       sourcePairIndex,
-      sideA,
-      sideB: b[sourcePairIndex],
+      sideA: {
+        pieceId: captured[0]!.carrierPieceId,
+        positionMm: witness.sides[0].samples[sourcePairIndex]!.positionMm,
+      },
+      sideB: {
+        pieceId: captured[1]!.carrierPieceId,
+        positionMm: witness.sides[1].samples[sourcePairIndex]!.positionMm,
+      },
     })),
   };
 }

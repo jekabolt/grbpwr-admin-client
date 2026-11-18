@@ -209,14 +209,7 @@ export async function prepareDirectedSourceCutPreviewV1(
     },
     signal,
   );
-  const pairs = grid.pairs.map(({ operationOrder, seamId, sourcePairIndex }, index) => ({
-    operationOrder,
-    seamId,
-    sourcePairIndex,
-    sideA: { pieceId: input.sides[0].carrierPieceId, positionMm: a.samples[index].positionMm },
-    sideB: { pieceId: input.sides[1].carrierPieceId, positionMm: b.samples[index].positionMm },
-  }));
-  const seams = prepareGarmentStagedSourceCutSeamsV1(material, pairs, {
+  const seams = prepareGarmentStagedSourceCutSeamsV1(material, grid.materialPairs, {
     maxTriangleTests: 2_000_000,
     maxSupportBytes: 96_000,
   });
