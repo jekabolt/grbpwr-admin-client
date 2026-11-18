@@ -23,6 +23,7 @@ export function CadTablePieceFeatureMarks({
     internal,
     fold,
     savedFoldAxes,
+    seamAllowance,
     notches,
     drills,
     pointMarks,
@@ -40,6 +41,17 @@ export function CadTablePieceFeatureMarks({
   const anchor = firstRing && (showName || showMaterial) ? labelAnchor(firstRing) : null;
   return (
     <g fill='none' aria-hidden='true' pointerEvents='none'>
+      {!hiddenLayers.has('seamAllowance') && seamAllowance ? (
+        <path
+          data-cad-zero-connect-seam-allowance=''
+          data-cad-seam-allowance-cut-path={seamAllowance.cutPathId}
+          data-cad-seam-allowance-sewing-path={seamAllowance.sewingPathId}
+          d={`M ${ptsAttr(seamAllowance.cut)} Z M ${ptsAttr(seamAllowance.sewing)} Z`}
+          fill={SHEET_INK.mut}
+          fillOpacity='0.26'
+          fillRule='evenodd'
+        />
+      ) : null}
       {!hiddenLayers.has('grain') && grain ? (
         <line
           data-cad-zero-connect-grainline=''

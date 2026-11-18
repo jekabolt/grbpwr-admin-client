@@ -1042,6 +1042,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
         scopes,
         selectedScope?.label,
         'savedFoldAxes' in prepared ? prepared.savedFoldAxes : undefined,
+        'savedSeamAllowances' in prepared ? prepared.savedSeamAllowances : undefined,
       )
     );
   }, [cardSession, prepared, selectedScope?.label]);

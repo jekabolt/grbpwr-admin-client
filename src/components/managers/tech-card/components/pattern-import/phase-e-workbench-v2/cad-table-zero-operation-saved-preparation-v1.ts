@@ -48,6 +48,7 @@ import {
   type PatternImportDxfPhaseEDraftCadCompileSourceV1,
 } from './draft-cad-compile-source-v1';
 import type { CadTableSavedFoldAxesByPieceV1 } from './cad-table-saved-piece-folds-v1';
+import type { CadTableSavedSeamAllowancesByPieceV1 } from './cad-table-saved-seam-allowances-v1';
 
 export const PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_OPERATION_SAVED_PREPARATION_V1 =
   'pattern-import-dxf-phase-e-cad-table-zero-operation-saved-preparation/1' as const;
@@ -126,6 +127,7 @@ export type PatternImportDxfPhaseECadTableZeroOperationSavedPreparationResultV1 
       projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
       draftCadCompileSource: PatternImportDxfPhaseEDraftCadCompileSourceV1;
       savedFoldAxes?: CadTableSavedFoldAxesByPieceV1;
+      savedSeamAllowances?: CadTableSavedSeamAllowancesByPieceV1;
       authoringAuthority: PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1;
       verifiedNativeReplay?: Extract<DxfProductSavedReprocessResultV1, { ok: true }>;
       blocker: null;
@@ -279,6 +281,18 @@ function blockedPreparation(
   });
 }
 
+function hasPossibleDrawnAllowance(draft: CardDraft): boolean {
+  const paths = draft.dxfPhaseDReplay?.carrier?.source.paths ?? [];
+  const occurrences = new Set<string>();
+  for (const { closed, provenance } of paths) {
+    if (!closed || !provenance.instancePath.length) continue;
+    const key = JSON.stringify(provenance.instancePath);
+    if (occurrences.has(key)) return true;
+    occurrences.add(key);
+  }
+  return false;
+}
+
 export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
   request: Request,
   signal?: AbortSignal,
@@ -351,27 +365,30 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
   const needsFoldGeometry = request.techCard.pieceFolds?.some(
     ({ anchoredSize, stale }) => anchoredSize === request.sizeToken && !stale,
   );
-  let readFoldGeometry: readonly PieceDTO[] | undefined;
-  const withFoldGeometry = (
+  const showAllowance = !request.sourceSurface;
+  let readNativeBlockGeometry: readonly PieceDTO[] | undefined;
+  const withNativeBlockGeometry = (
     host: DxfProductSavedReprocessHostV1,
   ): DxfProductSavedReprocessHostV1 =>
-    !needsFoldGeometry
+    !showAllowance && !needsFoldGeometry
       ? host
       : {
           ...host,
           async reprocess(input, hostSignal, progress) {
-            readFoldGeometry = undefined;
+            readNativeBlockGeometry = undefined;
             // The regular worker takes ownership of input.bytes when opened.
             const bytes = Uint8Array.from(input.bytes);
             try {
               const result = await host.reprocess(input, hostSignal, progress);
+              if (!needsFoldGeometry && !hasPossibleDrawnAllowance(result.draft)) return result;
               try {
                 const { parseSavedNativeStitchRowV1 } = await import(
                   './saved-legacy-native-stitch-run-v8'
                 );
                 hostSignal.throwIfAborted();
                 const parsed = await parseSavedNativeStitchRowV1(bytes, input.syntheticFilename);
-                if (!hostSignal.aborted && !parsed.failedFiles) readFoldGeometry = parsed.pieces;
+                if (!hostSignal.aborted && !parsed.failedFiles)
+                  readNativeBlockGeometry = parsed.pieces;
               } catch {
                 // An unsupported mark or CAD profile cannot block the regular saved pattern table.
               }
@@ -382,7 +399,7 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
           },
         };
   const exactOwner = createDxfProductSavedReprocessOwnerV1(
-    withFoldGeometry(createPatternImportDxfPhaseESavedDxfReprocessHostV1(hostDeps)),
+    withNativeBlockGeometry(createPatternImportDxfPhaseESavedDxfReprocessHostV1(hostDeps)),
   );
   let foreignOwner: ReturnType<typeof createDxfProductSavedForeignReprocessOwnerV1> | null = null;
   const cancel = () => {
@@ -421,7 +438,9 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
       nativeSewingReplay = reprocessed.nativeSewingReplay;
     } else if (reprocessed.blockers[0]?.code === 'foreign-saved-dxf-detected') {
       foreignOwner = createDxfProductSavedForeignReprocessOwnerV1(
-        withFoldGeometry(createPatternImportDxfPhaseEForeignSavedDxfReprocessHostV1(hostDeps)),
+        withNativeBlockGeometry(
+          createPatternImportDxfPhaseEForeignSavedDxfReprocessHostV1(hostDeps),
+        ),
       );
       const foreign = await foreignOwner.run({
         schemaVersion: DXF_PRODUCT_SAVED_FOREIGN_REPROCESS_REQUEST_V1,
@@ -530,7 +549,26 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
         ),
       );
     let savedFoldAxes: CadTableSavedFoldAxesByPieceV1 | undefined;
-    if (readFoldGeometry) {
+    let savedSeamAllowances: CadTableSavedSeamAllowancesByPieceV1 | undefined;
+    const savedSizeTokens = scope.sizes.map(({ sizeToken }) => sizeToken);
+    if (readNativeBlockGeometry && showAllowance) {
+      try {
+        const { projectCadTableSavedSeamAllowancesV1 } = await import(
+          './cad-table-saved-seam-allowances-v1'
+        );
+        savedSeamAllowances = projectCadTableSavedSeamAllowancesV1({
+          projection: projection.projection,
+          selected: selection.selection,
+          sourceSha256: authoritative.row.sha256,
+          scopeKey: authoritative.row.scopeKey,
+          candidates: readNativeBlockGeometry,
+          savedSizeTokens,
+        });
+      } catch {
+        // An unverified allowance cannot change the regular saved pattern table.
+      }
+    }
+    if (readNativeBlockGeometry && needsFoldGeometry) {
       try {
         const current = await request.authority.resolveExactCurrentCard(
           authoritative.row,
@@ -542,8 +580,8 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
         savedFoldAxes = projectCadTableSavedPieceFoldAxesV1(
           current.techCard.pieceFolds ?? [],
           projection.projection,
-          readFoldGeometry,
-          scope.sizes.map(({ sizeToken }) => sizeToken),
+          readNativeBlockGeometry,
+          savedSizeTokens,
         );
       } catch {
         // Fold rows and their drawing must both be current to enrich this projection.
@@ -613,6 +651,7 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
       projection: projection.projection,
       draftCadCompileSource,
       ...(savedFoldAxes?.size ? { savedFoldAxes } : {}),
+      ...(savedSeamAllowances?.size ? { savedSeamAllowances } : {}),
       authoringAuthority,
       ...(request.sourceSurface &&
       isDxfProductSavedReprocessVerifiedV1(reprocessed) &&

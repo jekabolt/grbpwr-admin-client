@@ -46,7 +46,30 @@ function hasSheetOrigin(piece: PieceDTO): piece is PieceDTO & { originX: number;
 }
 
 /** Reuse the assembler's whole-ring correspondence, and require it in the original sheet frame. */
-function exactBlock(
+export function matchesCadTableSavedSourceRingV1(
+  candidate: PieceDTO,
+  native: Parameters<typeof bindSavedLegacyRingV1>[1],
+): boolean {
+  if (
+    !candidate.blockName ||
+    candidate.poly.length !== native.nativePointsMm.length ||
+    !hasSheetOrigin(candidate)
+  )
+    return false;
+  try {
+    const {
+      shift: [x, y],
+    } = bindSavedLegacyRingV1(candidate.poly.map(mm), native);
+    return (
+      Math.hypot(x - 10 * candidate.originX, y - 10 * candidate.originY) <=
+      savedLegacyDxfRoundingMmV1
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function exactCadTableSavedNativeBlockV1(
   candidates: readonly PieceDTO[],
   displayed: PatternImportDxfProductPhaseEAssemblyProjectionV1['pieces'][number],
 ): readonly PieceDTO[] | null {
@@ -60,29 +83,27 @@ function exactBlock(
     nativePointsMm: boundary.vertices.map(({ pointMm }) => pointMm),
     vertexIds: boundary.vertices.map(({ vertexId }) => vertexId),
   };
-  const matches = candidates.filter((candidate) => {
-    if (
-      !candidate.blockName ||
-      candidate.layer !== layer ||
-      candidate.poly.length !== boundary.vertices.length ||
-      !hasSheetOrigin(candidate)
-    )
-      return false;
-    try {
-      const {
-        shift: [x, y],
-      } = bindSavedLegacyRingV1(candidate.poly.map(mm), native);
-      return (
-        Math.hypot(x - 10 * candidate.originX, y - 10 * candidate.originY) <=
-        savedLegacyDxfRoundingMmV1
-      );
-    } catch {
-      return false;
-    }
-  });
+  const matches = candidates.filter(
+    (candidate) => candidate.layer === layer && matchesCadTableSavedSourceRingV1(candidate, native),
+  );
   return matches.length === 1
     ? candidates.filter(({ blockName }) => blockName === matches[0].blockName)
     : null;
+}
+
+export function cadTableSavedRankBlocksV1(
+  candidates: readonly PieceDTO[],
+  sizeToken: string,
+  savedSizeTokens: readonly string[],
+): readonly PieceDTO[] {
+  const selectedRank = bareToken(sizeToken);
+  const sizeTokens = new Set(savedSizeTokens.map(bareToken));
+  if (!selectedRank || !sizeTokens.has(selectedRank)) return [];
+  // Different grades can have an identical cut at the same sheet origin.
+  const sized = splitPiecesBySize(candidates, sizeTokens).groups.filter(
+    ({ size }) => bareToken(size) === selectedRank,
+  );
+  return sized.length === 1 ? sized[0].pieces : [];
 }
 
 /**
@@ -96,22 +117,14 @@ export function projectCadTableSavedPieceFoldAxesV1(
   savedSizeTokens: readonly string[],
 ): CadTableSavedFoldAxesByPieceV1 {
   const axes = new Map<string, readonly CadTableSavedFoldAxisV1[]>();
-  const selectedRank = bareToken(projection.sizeToken);
-  const sizeTokens = new Set(savedSizeTokens.map(bareToken));
-  if (!selectedRank || !sizeTokens.has(selectedRank)) return axes;
-  // Several genuine grades can have an identical cut at the same sheet origin.
-  // The ordinary DXF rank verdict must narrow the candidates before comparing rings.
-  const sized = splitPiecesBySize(candidates, sizeTokens).groups.filter(
-    ({ size }) => bareToken(size) === selectedRank,
-  );
-  if (sized.length !== 1) return axes;
+  const sized = cadTableSavedRankBlocksV1(candidates, projection.sizeToken, savedSizeTokens);
   for (const displayed of projection.pieces) {
     const owned = rows.filter(
       ({ pieceLineKey, anchoredSize, stale }) =>
         pieceLineKey === displayed.pieceLineKey && anchoredSize === projection.sizeToken && !stale,
     );
     if (!owned.length) continue;
-    const block = exactBlock(sized[0].pieces, displayed);
+    const block = exactCadTableSavedNativeBlockV1(sized, displayed);
     if (!block) continue;
     const cuts = block.filter(({ layer }) => layer === '1');
     if (cuts.length !== 1 || block.filter(({ layer }) => layer === '14').length !== 1) continue;

@@ -12,6 +12,10 @@ import type {
   CadTableSavedFoldAxesByPieceV1,
   CadTableSavedFoldAxisV1,
 } from './cad-table-saved-piece-folds-v1';
+import type {
+  CadTableSavedSeamAllowancesByPieceV1,
+  CadTableSavedSeamAllowanceV1,
+} from './cad-table-saved-seam-allowances-v1';
 
 export type CadTablePieceFeatures = Readonly<
   Pick<
@@ -22,6 +26,7 @@ export type CadTablePieceFeatures = Readonly<
     materialLabel: string | null;
     quantity: number;
     savedFoldAxes?: readonly CadTableSavedFoldAxisV1[];
+    seamAllowance?: CadTableSavedSeamAllowanceV1;
   }
 >;
 export type CadTablePieceFeatureLayer = Exclude<
@@ -31,6 +36,7 @@ export type CadTablePieceFeatureLayer = Exclude<
 export type CadTablePieceFeaturesByKey = ReadonlyMap<string, CadTablePieceFeatures>;
 
 export const CAD_TABLE_PIECE_FEATURE_LAYERS = [
+  { key: 'seamAllowance', label: 'Show seam allowance', icon: 'pattern-line' },
   { key: 'grain', label: 'Show grainlines', icon: 'measure-edge' },
   { key: 'internal', label: 'Show internal lines', icon: 'internal-line' },
   { key: 'fold', label: 'Show fold lines', icon: 'guideline' },
@@ -62,6 +68,7 @@ export function projectCadTablePieceFeatures(
   scopes: readonly Readonly<Pick<DraftScope, 'target' | 'writerReplay'>>[],
   materialLabel?: string,
   savedFoldAxes?: CadTableSavedFoldAxesByPieceV1,
+  savedSeamAllowances?: CadTableSavedSeamAllowancesByPieceV1,
 ): CadTablePieceFeaturesByKey {
   const features = new Map<string, CadTablePieceFeatures>();
   const matchingScopes = scopes.filter(({ target }) => target.scopeKey === catalog.scopeKey);
@@ -129,6 +136,7 @@ export function projectCadTablePieceFeatures(
       materialLabel: materialLabel?.trim() || null,
       quantity: writerPiece.piecesPerGarment,
       savedFoldAxes: savedFoldAxes?.get(pieceKey),
+      seamAllowance: savedSeamAllowances?.get(pieceKey),
     });
   }
   return features;
