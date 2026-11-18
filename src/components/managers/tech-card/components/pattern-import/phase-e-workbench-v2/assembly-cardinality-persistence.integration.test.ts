@@ -1,0 +1,491 @@
+import { beforeEach, expect, it, vi } from 'vitest';
+import type { AdminService, TechCardPatternSemanticSidecar } from 'api/proto-http/admin';
+import {
+  PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V3,
+  PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V3,
+  buildPatternImportDxfProductCompositeSidecarV3,
+  encodePatternImportDxfProductCompositeSidecarV3,
+  decodePatternImportDxfProductCompositeSidecarV3,
+  readPatternImportDxfProductCompositeComponentBytesV3,
+} from 'lib/cloth/domain/pattern-import-dxf-product-composite-sidecar-v3';
+import { PATTERN_IMPORT_DXF_PRODUCT_SEMANTIC_SIDECAR_MEDIA_TYPE_V1 } from 'lib/cloth/domain/pattern-import-dxf-product-semantic-sidecar-v1';
+import {
+  PATTERN_IMPORT_DXF_PRODUCT_PHASE_E_EXACT_TOPOLOGY_SERIALIZED_RESTORE_REQUEST_V1,
+  restorePatternImportDxfProductPhaseEExactTopologySerializedPrefillV1,
+} from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-exact-topology-binding-v1';
+import { buildPatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
+import {
+  buildPatternImportDxfProductPhaseEMultiseamChoicesV2,
+  createPatternImportDxfProductPhaseEMultiseamWorkbenchStateV2,
+  proposePatternImportDxfProductPhaseEMultiseamAssemblyV2,
+  type PatternImportDxfProductPhaseEMultiseamWorkbenchStateV2,
+} from 'lib/pattern-import/dxf-product-phase-e-multiseam-workbench-v2';
+import { routePatternImportDxfPhaseEAssemblyOrderEntryV2 } from '../phase-e-workbench/assembly-order-entry';
+import { persistPatternImportDxfPhaseEMultiseamExactChoicesV2 } from './assembly-order-entry';
+import { bytesOf, semanticDocument } from './composite-placement-read-v1.test-fixture';
+import { createPatternImportDxfProductCompositeSidecarProductionTransactionV4 } from './composite-sidecar-production-transaction-v4';
+import { PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_REQUEST_V4 } from './composite-sidecar-persistence-v4';
+import { PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_TRANSACTION_REQUEST_V4 } from './composite-sidecar-transaction-v4';
+import {
+  PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V4,
+  PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V4,
+  buildPatternImportDxfProductCompositeSidecarV4,
+  encodePatternImportDxfProductExactNSeamComponentV4,
+} from './composite-sidecar-v4';
+import { buildPatternImportDxfPhaseEExactNSeamConsistencyCarrierV2 } from './exact-n-seam-consistency-carrier-v2';
+import { PATTERN_IMPORT_DXF_PHASE_E_EXACT_N_SEAM_AUTHORITY_CANDIDATE_V2 } from './exact-n-seam-authority-gap-v2';
+import {
+  PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_DURABLE_RESTORE_REQUEST_V4,
+  restorePatternImportDxfProductCompositeSidecarDurableV4,
+  readPatternImportDxfProductExactNSeamRestorePatchV2,
+} from './composite-sidecar-restore-authority-v4';
+import {
+  PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_DURABLE_RESTORE_REQUEST_V1,
+  createPatternImportDxfPhaseEZeroConnectProductionDurableBridgeV1,
+} from './zero-connect-durable-composite-v4';
+import { createPatternImportDxfPhaseEExactCompositeProductionPersistenceV3 } from './exact-composite-persistence-v3';
+import {
+  createSavedThreePanelFixtureV1,
+  createSavedThreePanelSourceV1,
+  digestFullAssemblyFixture,
+  fullAssemblyFixtureWireV1,
+} from './saved-full-assembly-compile-session-v1.test-fixture';
+import { createPatternImportDxfPhaseESavedAssemblySnapshotProductionRpcV1 } from './saved-assembly-snapshot-production-rpc-v1';
+import {
+  canonicalizePatternImportDxfPhaseESavedAssemblyValueV1,
+  PATTERN_IMPORT_DXF_PHASE_E_SAVED_ROW_SERVER_TOPOLOGY_SHA256_DOMAIN_V1,
+} from './saved-assembly-topology-hash-v1';
+
+const ports = vi.hoisted(() => ({
+  getSnapshot: vi.fn<AdminService['GetTechCardSavedAssemblySnapshot']>(),
+  getSidecar: vi.fn<AdminService['GetTechCardPatternSemanticSidecar']>(),
+  putSidecar: vi.fn<AdminService['PutTechCardPatternSemanticSidecar']>(),
+}));
+
+vi.mock('api/api', () => ({
+  abortableAdminService: () => ({
+    GetTechCardSavedAssemblySnapshot: ports.getSnapshot,
+    GetTechCardPatternSemanticSidecar: ports.getSidecar,
+    PutTechCardPatternSemanticSidecar: ports.putSidecar,
+  }),
+  adminService: {},
+}));
+
+beforeEach(() => vi.clearAllMocks());
+
+async function fixture(seamKeys: string[], mediaType: string) {
+  const seed = await createSavedThreePanelFixtureV1(2);
+  const { row } = seed;
+  const selectedOperationNumber = 10;
+  const wire = await fullAssemblyFixtureWireV1(seed, selectedOperationNumber);
+  Object.assign(wire.operations[0], {
+    seamKeys: [...seamKeys],
+    outputUnitKey: 'joined-shell',
+    outputUnitName: 'Joined shell',
+  });
+  wire.selectedSeams = seamKeys.map((seamKey) => ({
+    ...structuredClone(wire.selectedSeams[0]),
+    seamKey,
+  }));
+  const topology = JSON.parse(Buffer.from(wire.topologyCanonicalJson, 'base64').toString());
+  Object.assign(topology.operations[0], {
+    seamKeys: [...seamKeys],
+    outputUnitKey: 'joined-shell',
+    outputUnitName: 'Joined shell',
+  });
+  topology.seams = seamKeys.map((seamKey) => ({
+    ...structuredClone(topology.seams[0]),
+    seamKey,
+  }));
+  const canonical = canonicalizePatternImportDxfPhaseESavedAssemblyValueV1(topology);
+  wire.topologyCanonicalJson = Buffer.from(canonical).toString('base64');
+  wire.assemblyTopologySha256 = await digestFullAssemblyFixture(
+    new TextEncoder().encode(
+      `${PATTERN_IMPORT_DXF_PHASE_E_SAVED_ROW_SERVER_TOPOLOGY_SHA256_DOMAIN_V1}\0${canonical}`,
+    ),
+  );
+
+  const semanticBytes = bytesOf(semanticDocument(row));
+  let stored = {
+    techCardId: row.techCardId,
+    patternLineKey: row.patternLineKey,
+    cardLockVersion: row.cardLockVersion,
+    savedRowRevision: row.revision,
+    patternVersion: 4,
+    dxfSha256: row.sha256,
+    byteLength: semanticBytes.length,
+    sidecarBytes: Buffer.from(semanticBytes).toString('base64'),
+    sidecarSha256: await digestFullAssemblyFixture(semanticBytes),
+    mediaType: PATTERN_IMPORT_DXF_PRODUCT_SEMANTIC_SIDECAR_MEDIA_TYPE_V1,
+    postSaveReceiptSha256: '3'.repeat(64),
+  } as TechCardPatternSemanticSidecar;
+  ports.getSnapshot.mockImplementation(async (request) => {
+    expect(request).toMatchObject({
+      expectedSavedRowRevision: row.revision,
+      expectedCardLockVersion: row.cardLockVersion,
+      expectedSha256: row.sha256,
+      selectedOperationNumber,
+    });
+    return {
+      ...wire,
+      row: { ...wire.row, patternVersion: stored.patternVersion },
+      semanticSidecar: structuredClone(stored),
+    } as unknown as Awaited<ReturnType<AdminService['GetTechCardSavedAssemblySnapshot']>>;
+  });
+  ports.getSidecar.mockImplementation(async () => ({ semanticSidecar: structuredClone(stored) }));
+  ports.putSidecar.mockImplementation(async (request) => {
+    expect(request).toMatchObject({
+      techCardId: row.techCardId,
+      patternLineKey: row.patternLineKey,
+      expectedPreviousSidecarSha256: stored.sidecarSha256,
+      expectedSavedRowRevision: row.revision,
+      expectedCardLockVersion: row.cardLockVersion,
+      expectedServerAssemblyRevision: wire.serverAssemblyRevision,
+      expectedAssemblyTopologySha256: wire.assemblyTopologySha256,
+      selectedOperationNumber,
+      mediaType,
+    });
+    stored = {
+      ...stored,
+      mediaType: request.mediaType,
+      sidecarSha256: request.sidecarSha256,
+      sidecarBytes: request.sidecarBytes,
+      byteLength: Buffer.from(request.sidecarBytes!, 'base64').length,
+    };
+    return { semanticSidecar: structuredClone(stored) };
+  });
+
+  const source = await createSavedThreePanelSourceV1(seed);
+  try {
+    const catalogResult = await buildPatternImportDxfProductPhaseEAuthoringCatalogV1(
+      source.native.draft,
+      'main',
+      'M',
+    );
+    if (!catalogResult.ok) throw new Error(JSON.stringify(catalogResult.blockers));
+    const signal = new AbortController().signal;
+    const newSnapshotOwner = () =>
+      createPatternImportDxfPhaseESavedAssemblySnapshotProductionRpcV1(selectedOperationNumber);
+    const { authorityAdapter } = newSnapshotOwner();
+    const current = await authorityAdapter.readCurrentAssemblyTopology(
+      { row, selectedOperationNumber },
+      signal,
+    );
+    return {
+      row,
+      catalog: catalogResult.catalog,
+      signal,
+      newSnapshotOwner,
+      authorityAdapter,
+      current,
+      semanticBytes,
+      getStored: () => stored,
+    };
+  } finally {
+    source.dispose();
+  }
+}
+
+it('saves two confirmed exact seams with production V3 and restores their exact V1 topology through a new authority', async () => {
+  const seamKeys = ['left-side-seam', 'right-side-seam'];
+  const {
+    row,
+    catalog,
+    signal,
+    newSnapshotOwner,
+    authorityAdapter,
+    current,
+    semanticBytes,
+    getStored,
+  } = await fixture(seamKeys, PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V3);
+  const { selectedOperationNumber } = current;
+  expect(routePatternImportDxfPhaseEAssemblyOrderEntryV2(seamKeys)).toBe('v2');
+  const proposed = proposePatternImportDxfProductPhaseEMultiseamAssemblyV2(
+    catalog,
+    current.topology,
+  );
+  if (!proposed.ok) throw new Error(JSON.stringify(proposed.blockers));
+  const { proposal } = proposed;
+  const initial = createPatternImportDxfProductPhaseEMultiseamWorkbenchStateV2(
+    catalog,
+    proposal,
+    { documentId: row.patternLineKey, revision: String(row.revision) },
+    1,
+  );
+  const state: PatternImportDxfProductPhaseEMultiseamWorkbenchStateV2 = {
+    ...initial,
+    documentRevisionConfirmed: true,
+    physicalSurface: { mode: 'cut-surface', seamAllowancePhysical: true },
+    physicalSurfaceConfirmed: true,
+    operationStage: 4,
+    operationConfirmed: true,
+    seams: initial.seams.map((seam, index) => {
+      const sides = proposal.seams[index]!.sides.map((side) => {
+        const piece = catalog.pieces.find(({ pieceId }) => pieceId === side.pieceId)!;
+        const contour = piece.contours.find(({ role }) => role === 'cut-boundary')!;
+        const start = index * 2;
+        const pair = contour.boundaryVertices
+          .slice(start, start + 2)
+          .map(({ vertexId }) => vertexId);
+        return {
+          pieceId: side.pieceId,
+          contourId: contour.contourId,
+          boundaryVertexIds: side.requiredDirection === 'reverse' ? pair.reverse() : pair,
+          direction: side.requiredDirection,
+          confirmed: true,
+        };
+      }) as unknown as typeof seam.sides;
+      return {
+        ...seam,
+        confirmed: true,
+        mapping: 'equal' as const,
+        lengthRatio: 1,
+        sides,
+      };
+    }) as unknown as typeof initial.seams,
+    materialSelections: [
+      { ...initial.materialSelections[0], optionId: 'main-fabric', confirmed: true },
+      { ...initial.materialSelections[1], optionId: 'main-fabric', confirmed: true },
+    ],
+    tolerance: { endpointMm: 0, fullLengthMm: 0.001, fullLengthRelative: 0, confirmed: true },
+  };
+  const choices = await buildPatternImportDxfProductPhaseEMultiseamChoicesV2(
+    catalog,
+    proposal,
+    state,
+    [{ id: 'main-fabric', label: 'Main fabric', materialRevision: 'fabric:main:r1' }],
+    crypto,
+  );
+  if (!choices.ok) throw new Error(JSON.stringify(choices.blockers));
+  const saved = await persistPatternImportDxfPhaseEMultiseamExactChoicesV2(
+    {
+      authorityAdapter,
+      exactComposite: createPatternImportDxfPhaseEExactCompositeProductionPersistenceV3(),
+    },
+    { row, selectedOperationNumber, catalog, proposal, choices },
+    signal,
+  );
+  expect(saved, JSON.stringify(saved)).toMatchObject({
+    status: 'verified-exact-topology-persisted',
+    persistence: 'verified',
+  });
+  expect(ports.putSidecar).toHaveBeenCalledTimes(1);
+
+  const fresh = newSnapshotOwner();
+  const read = await fresh.authorityAdapter.readAuthoritativeAssembly(
+    { row, selectedOperationNumber },
+    new AbortController().signal,
+  );
+  expect(read.exactTopology?.carrier.bindings.selectedOperation.seamIds).toEqual(seamKeys);
+  expect(read.exactTopology?.carrier.bindings.row).toEqual(row);
+  expect(read.exactTopology?.carrier.bindings.phaseEAggregatePlanSha256).toBe(
+    choices.choices.aggregatePlanSeal.canonicalSha256,
+  );
+  if (!read.exactTopology) throw new Error('V1 exact topology did not reload.');
+  const freshTopology = await fresh.authorityAdapter.readCurrentAssemblyTopology(
+    { row, selectedOperationNumber },
+    signal,
+  );
+  const freshProposal = proposePatternImportDxfProductPhaseEMultiseamAssemblyV2(
+    catalog,
+    freshTopology.topology,
+  );
+  if (!freshProposal.ok) throw new Error(JSON.stringify(freshProposal.blockers));
+  const restored = await restorePatternImportDxfProductPhaseEExactTopologySerializedPrefillV1({
+    schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_PHASE_E_EXACT_TOPOLOGY_SERIALIZED_RESTORE_REQUEST_V1,
+    carrier: read.exactTopology.carrier,
+    seal: read.exactTopology.seal,
+    catalog,
+    proposal: freshProposal.proposal,
+    current: {
+      row: freshTopology.row,
+      serverAssemblyRevision: freshTopology.serverAssemblyRevision,
+      assemblyTopologySha256: freshTopology.assemblyTopologySha256,
+      selectedOperation: {
+        sourceOperationNumber: freshProposal.proposal.operation.sourceOperationNumber,
+        authoringOperationId: freshProposal.proposal.operation.authoringOperationId,
+        localOperationOrder: freshProposal.proposal.operation.order,
+        seamIds: [...freshProposal.proposal.operation.seamIds],
+      },
+      catalogCanonicalSha256: catalog.canonicalSha256,
+      proposalFingerprint: freshProposal.proposal.deterministicFingerprint,
+      phaseEAggregatePlanSha256: choices.choices.aggregatePlanSeal.canonicalSha256,
+    },
+  });
+  expect(restored, JSON.stringify(restored.blockers)).toMatchObject({
+    ok: true,
+    patch: {
+      seams: choices.choices.seams.map(({ id, sides }) => ({
+        seamId: id,
+        sides: sides.map(({ contourId, boundaryVertexIds, direction }) => ({
+          contourId,
+          boundaryVertexIds,
+          direction,
+        })),
+      })),
+    },
+  });
+  const decoded = await decodePatternImportDxfProductCompositeSidecarV3(
+    Uint8Array.from(Buffer.from(getStored().sidecarBytes!, 'base64')),
+  );
+  if (!decoded.ok) throw new Error(JSON.stringify(decoded.blockers));
+  expect(
+    readPatternImportDxfProductCompositeComponentBytesV3(decoded.owner, 'semantic-product-v1'),
+  ).toEqual(semanticBytes);
+  expect(ports.putSidecar).toHaveBeenCalledTimes(1);
+});
+
+it('the same V4 writer saves three independent exact tuples, but the product N1 restore cannot publish them', async () => {
+  const seamIds = ['first-join', 'second-join', 'third-join'];
+  const {
+    row,
+    catalog,
+    signal,
+    newSnapshotOwner,
+    authorityAdapter,
+    current,
+    semanticBytes,
+    getStored,
+  } = await fixture(seamIds, PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V4);
+  const { selectedOperationNumber, serverAssemblyRevision, assemblyTopologySha256 } = current;
+  expect(routePatternImportDxfPhaseEAssemblyOrderEntryV2(seamIds)).toBe('v2');
+  expect(
+    proposePatternImportDxfProductPhaseEMultiseamAssemblyV2(catalog, current.topology).ok,
+  ).toBe(false);
+
+  const sides = seamIds.flatMap((seamId, index) =>
+    ['line-FRONT', 'line-BACK'].map((pieceLineKey, sideIndex) => {
+      const piece = catalog.pieces.find((entry) => entry.pieceLineKey === pieceLineKey)!;
+      const contour = piece.contours.find(({ role }) => role === 'cut-boundary')!;
+      const ids = contour.boundaryVertices.slice(index, index + 2).map(({ vertexId }) => vertexId);
+      return {
+        seamId,
+        pieceLineKey,
+        pieceId: piece.pieceId,
+        contourId: contour.contourId,
+        sideIndex: sideIndex as 0 | 1,
+        boundaryVertexIds: sideIndex === 0 ? ids : ids.reverse(),
+        direction: sideIndex === 0 ? ('forward' as const) : ('reverse' as const),
+      };
+    }),
+  );
+  const currentAuthority = { row, serverAssemblyRevision, assemblyTopologySha256 };
+  // The fixture supplies the plan independently of the V4 carrier. The product entry has no
+  // N>2 equivalent of this plan handoff, so this exercises the CAS + restore owners only.
+  const authored = {
+    selectedOperation: {
+      sourceOperationNumber: selectedOperationNumber,
+      authoringOperationId: 'fixture:three-exact-joins',
+      localOperationOrder: 0 as const,
+      seamIds,
+    },
+    catalogCanonicalSha256: catalog.canonicalSha256,
+    phaseEAggregatePlanSha256: await digestFullAssemblyFixture(
+      new TextEncoder().encode(
+        canonicalizePatternImportDxfPhaseESavedAssemblyValueV1({ seamIds, sides }),
+      ),
+    ),
+  };
+  const plan = { ...currentAuthority, ...authored };
+  const exact = await buildPatternImportDxfPhaseEExactNSeamConsistencyCarrierV2({
+    schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_EXACT_N_SEAM_AUTHORITY_CANDIDATE_V2,
+    status: 'untrusted-authority-candidate',
+    ...plan,
+    sides,
+  });
+  if (!exact.ok) throw new Error(JSON.stringify(exact.blockers));
+  const exactBytes = await encodePatternImportDxfProductExactNSeamComponentV4({
+    carrier: exact.carrier,
+    seal: exact.seal,
+  });
+  if (!exactBytes.ok) throw new Error(exactBytes.blocker.detail);
+  const nested = await buildPatternImportDxfProductCompositeSidecarV3({
+    schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V3,
+    bindings: currentAuthority,
+    expectedPreviousSidecarSha256: getStored().sidecarSha256!,
+    semanticProductV1Bytes: semanticBytes,
+    placementV2Bytes: null,
+    exactTopologyBytes: null,
+  });
+  if (!nested.ok) throw new Error(JSON.stringify(nested.blockers));
+  const nestedBytes = encodePatternImportDxfProductCompositeSidecarV3(nested.owner);
+  if (!nestedBytes.ok) throw new Error(nestedBytes.code);
+  const composite = await buildPatternImportDxfProductCompositeSidecarV4({
+    schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V4,
+    bindings: currentAuthority,
+    expectedPreviousSidecarSha256: getStored().sidecarSha256!,
+    compositeV3Bytes: nestedBytes.bytes!,
+    exactNSeamConsistencyBytes: exactBytes.bytes,
+  });
+  if (!composite.ok) throw new Error(JSON.stringify(composite.blockers));
+  const application = createPatternImportDxfProductCompositeSidecarProductionTransactionV4();
+  const saved = await application.transaction.execute(
+    {
+      schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_TRANSACTION_REQUEST_V4,
+      current: plan,
+      storage: {
+        schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_REQUEST_V4,
+        currentAuthority,
+        nextOwner: composite.owner,
+      },
+    },
+    signal,
+  );
+  expect(saved, JSON.stringify(saved.blockers)).toMatchObject({
+    ok: true,
+    writeOutcome: 'verified',
+  });
+  expect(ports.putSidecar).toHaveBeenCalledTimes(1);
+
+  const fresh = await newSnapshotOwner().authorityAdapter.readCurrentAssemblyTopology(
+    { row, selectedOperationNumber },
+    new AbortController().signal,
+  );
+  const { semanticSidecar: readback } = await ports.getSidecar({
+    techCardId: row.techCardId,
+    patternLineKey: row.patternLineKey,
+  });
+  if (!readback) throw new Error('Three-seam fixture CAS did not provide fresh bytes.');
+  const restored = await restorePatternImportDxfProductCompositeSidecarDurableV4({
+    schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_DURABLE_RESTORE_REQUEST_V4,
+    current: {
+      row: fresh.row,
+      serverAssemblyRevision: fresh.serverAssemblyRevision,
+      assemblyTopologySha256: fresh.assemblyTopologySha256,
+      ...authored,
+    },
+    readback: {
+      status: 'present',
+      source: 'fresh-current-sidecar-get',
+      mediaType: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V4,
+      bytes: Uint8Array.from(Buffer.from(readback.sidecarBytes!, 'base64')),
+      sha256: readback.sidecarSha256!,
+      byteLength: readback.byteLength!,
+    },
+  });
+  expect(restored, JSON.stringify(restored.blockers)).toMatchObject({
+    ok: true,
+    owner: { seamCount: 3, sidecarSha256: readback.sidecarSha256 },
+  });
+  if (!restored.ok) throw new Error(restored.blockers[0].detail);
+  const patch = readPatternImportDxfProductExactNSeamRestorePatchV2(restored.owner);
+  expect(patch?.seams.map(({ seamId }) => seamId)).toEqual(seamIds);
+  expect(patch?.seams.flatMap(({ sides }) => sides)).toEqual(sides);
+  const productBridge = createPatternImportDxfPhaseEZeroConnectProductionDurableBridgeV1(
+    selectedOperationNumber,
+    application,
+    authorityAdapter,
+  );
+  expect(
+    await productBridge.restore(
+      {
+        schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_DURABLE_RESTORE_REQUEST_V1,
+        row,
+        selectedOperationNumber,
+        catalog,
+      },
+      signal,
+    ),
+  ).toMatchObject({ ok: false, blocker: { code: 'durable-restore-operation-mismatch' } });
+  expect(ports.putSidecar).toHaveBeenCalledTimes(1);
+});
