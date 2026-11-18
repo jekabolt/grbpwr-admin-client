@@ -84,6 +84,7 @@ function CompileAuthoring({ state, disabled }: { state: HostState; disabled: boo
   const bootstrap = authoring.bootstrap;
   const [seams, setSeams] = useState<Record<string, SeamDraft>>({});
   const [profileKey, setProfileKey] = useState('');
+  const [confirmedPressSource, setConfirmedPressSource] = useState<string>();
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -109,6 +110,7 @@ function CompileAuthoring({ state, disabled }: { state: HostState; disabled: boo
       ),
     );
     setProfileKey('');
+    setConfirmedPressSource(undefined);
     setError(null);
   }, [bootstrap]);
 
@@ -160,6 +162,7 @@ function CompileAuthoring({ state, disabled }: { state: HostState; disabled: boo
       setError(null);
       void state.compileFirstAuthoring({
         seamChoices,
+        ...(confirmedPressSource ? { confirmedPressSource } : {}),
         diagnosticProfile: { id: profile.id, revision: profile.revision },
       });
     } catch (nextError) {
@@ -175,6 +178,28 @@ function CompileAuthoring({ state, disabled }: { state: HostState; disabled: boo
         Exact DXF + Assembly Order · confirm every sewing edge, then choose a diagnostic preview.
       </Text>
 
+      {bootstrap.recordedOrder && (
+        <div className='space-y-stack'>
+          {bootstrap.recordedPressNote && <Text>{bootstrap.recordedPressNote}</Text>}
+          <Button
+            type='button'
+            size='xs'
+            variant={confirmedPressSource ? 'main' : 'secondary'}
+            aria-pressed={!!confirmedPressSource}
+            disabled={busy}
+            onClick={() =>
+              setConfirmedPressSource(
+                confirmedPressSource
+                  ? undefined
+                  : bootstrap.recordedOrder![1].canonicalSourceOperation,
+              )
+            }
+          >
+            Keep press #{bootstrap.recordedOrder[1].sourceOperationNumber} in the production order
+            only
+          </Button>
+        </div>
+      )}
       {bootstrap.seams.map(({ seamKey, pieceLineKeys }) => {
         const draft = seams[seamKey];
         return (
@@ -297,7 +322,17 @@ function CompileAuthoring({ state, disabled }: { state: HostState; disabled: boo
           {error}
         </Text>
       ) : null}
-      <Button type='button' size='xs' variant='main' disabled={busy} onClick={submit}>
+      <Button
+        type='button'
+        size='xs'
+        variant='main'
+        disabled={
+          busy ||
+          (!!bootstrap.recordedOrder &&
+            confirmedPressSource !== bootstrap.recordedOrder[1].canonicalSourceOperation)
+        }
+        onClick={submit}
+      >
         {authoring.status === 'compiling' ? 'Compiling…' : 'Compile exact assembly'}
       </Button>
     </div>

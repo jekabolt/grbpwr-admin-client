@@ -1,3 +1,4 @@
+import { projectSavedFullAssemblyAoOnlySnapshotV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-full-assembly-physical-component-v1';
 import type { DxfGarmentObservedBoundaryEdgeV1 } from './dxf-garment-observed-unsewn-edges-v1';
 import type { DxfGarmentObservedPreviewSeamSideV1 } from './dxf-garment-observed-strain-heatmap-preview-v1';
 import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
@@ -611,12 +612,7 @@ export function createSavedGenericObservedPhysicalHostV1(
       current();
       return {
         value,
-        assemblySnapshot: {
-          row: assemblySnapshot.row,
-          serverAssemblyRevision: assemblySnapshot.serverAssemblyRevision,
-          operations: assemblySnapshot.operations,
-          seams: assemblySnapshot.seams,
-        },
+        assemblySnapshot: projectSavedFullAssemblyAoOnlySnapshotV1(assemblySnapshot),
       };
     } finally {
       disposeSavedFullAssemblySnapshotV1(receipt);

@@ -383,6 +383,7 @@ function restoredIntent(d: Durable): SavedFullAssemblyCompileIntentV1 {
     physicalSurface: { mode: 'sewing-surface' as const, seamAllowancePhysical: false as const },
     pieces: d.graph.pieces,
     operations: d.graph.operations,
+    ...(d.graph.productionOrder ? { productionOrder: d.graph.productionOrder } : {}),
     seams: d.graph.seams,
     compile: d.graph.compile,
   });

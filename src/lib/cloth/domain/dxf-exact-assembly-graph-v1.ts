@@ -1,3 +1,9 @@
+import {
+  RECORDED_TERMINAL_PRESS_PROFILE,
+  readRecordedAssemblyOrder,
+  equalRecordedAssemblyOrder,
+  type RecordedAssemblyOrder,
+} from './dxf-recorded-terminal-press-v1';
 import type { DxfProductSavedRowIdentityV1 } from '../../pattern-import/dxf-product-saved-reprocess-owner-v1';
 import {
   buildDxfAssemblyHandoffV1,
@@ -29,6 +35,7 @@ export const DXF_EXACT_ASSEMBLY_GRAPH_CLAIMS_V1 = Object.freeze({
 
 /** A detached AO read projection is data, never a bearer capability. */
 export type DxfExactAssemblyGraphAoSnapshotV1 = Readonly<{
+  operationsPayloadCanonicalJson?: string;
   row: DxfProductSavedRowIdentityV1;
   serverAssemblyRevision: string;
   operations: readonly Readonly<{
@@ -50,7 +57,8 @@ export type DxfExactAssemblyGraphAoSnapshotV1 = Readonly<{
 
 export type DxfExactAssemblyGraphV1 = Readonly<{
   schemaVersion: typeof DXF_EXACT_ASSEMBLY_GRAPH_V1;
-  profile: 'single-saved-row-size-adjacent-native-stitch';
+  profile: 'single-saved-row-size-adjacent-native-stitch' | typeof RECORDED_TERMINAL_PRESS_PROFILE;
+  productionOrder?: RecordedAssemblyOrder;
   row: DxfProductSavedRowIdentityV1;
   serverAssemblyRevision: string;
   source: Readonly<{
@@ -249,10 +257,12 @@ function row(value: unknown): void {
 }
 
 function validate(graph: DxfExactAssemblyGraphV1, ao: DxfExactAssemblyGraphAoSnapshotV1): void {
+  const recorded = graph.profile === RECORDED_TERMINAL_PRESS_PROFILE;
   record(
     graph,
     [
       'schemaVersion',
+      ...(recorded ? ['productionOrder'] : []),
       'profile',
       'row',
       'serverAssemblyRevision',
@@ -266,7 +276,7 @@ function validate(graph: DxfExactAssemblyGraphV1, ao: DxfExactAssemblyGraphAoSna
   );
   if (
     graph.schemaVersion !== DXF_EXACT_ASSEMBLY_GRAPH_V1 ||
-    graph.profile !== 'single-saved-row-size-adjacent-native-stitch'
+    (!recorded && graph.profile !== 'single-saved-row-size-adjacent-native-stitch')
   )
     fail('unsupported-profile', 'The explicit single-row adjacent-edge profile is required.');
   row(graph.row);
@@ -322,6 +332,20 @@ function validate(graph: DxfExactAssemblyGraphV1, ao: DxfExactAssemblyGraphAoSna
   list(graph.seams, 1, 400, 'seams');
   list(ao.operations, 1, 4096, 'AO operations');
   list(ao.seams, 1, 400, 'AO seams');
+  if (
+    recorded &&
+    (graph.source.handoffSource.exporterId !== 'grbpwr.saved-native-drawn-sewing' ||
+      graph.pieces.length !== 2 ||
+      graph.seams.length !== 1 ||
+      !equalRecordedAssemblyOrder(
+        graph.productionOrder,
+        readRecordedAssemblyOrder(ao.operations, ao.operationsPayloadCanonicalJson),
+      ))
+  )
+    fail(
+      'unsupported-operation',
+      'The recorded terminal press must match the complete ordered saved operation, with no physical targets.',
+    );
   const numbers = new Set<number>();
   const backendSeams = new Set<string>();
   for (const op of ao.operations) {
@@ -329,6 +353,8 @@ function validate(graph: DxfExactAssemblyGraphV1, ao: DxfExactAssemblyGraphAoSna
     if (numbers.has(op.operationNumber))
       fail('duplicate-operation', 'AO operation numbers are not unique.');
     numbers.add(op.operationNumber);
+    if (recorded && op.operationNumber === graph.productionOrder![1].sourceOperationNumber)
+      continue;
     if (!stitchWorks.has(op.work))
       fail(
         'unsupported-operation',
@@ -346,7 +372,7 @@ function validate(graph: DxfExactAssemblyGraphV1, ao: DxfExactAssemblyGraphAoSna
       backendSeams.add(key);
     }
   }
-  const active = ao.operations;
+  const active = recorded ? [ao.operations[0]!] : ao.operations;
   if (
     active.length !== graph.operations.length ||
     backendSeams.size !== graph.seams.length ||

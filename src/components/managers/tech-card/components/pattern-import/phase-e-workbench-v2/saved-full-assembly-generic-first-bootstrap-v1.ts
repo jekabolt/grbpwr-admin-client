@@ -1,3 +1,7 @@
+import {
+  readRecordedAssemblyOrder,
+  type RecordedAssemblyOrder,
+} from 'lib/cloth/domain/dxf-recorded-terminal-press-v1';
 import { buildPatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import { readPatternImportDxfProductCompositeComponentBytesV3 } from 'lib/cloth/domain/pattern-import-dxf-product-composite-sidecar-v3';
 import {
@@ -70,6 +74,8 @@ export function savedFullAssemblyFirstContourRoleV1(
 }
 
 export type SavedFullAssemblyGenericFirstBootstrapV1 = Readonly<{
+  recordedOrder?: RecordedAssemblyOrder;
+  recordedPressNote?: string;
   schemaVersion: typeof SAVED_FULL_ASSEMBLY_GENERIC_FIRST_BOOTSTRAP_V1;
   sourceSurface: SavedFullAssemblyFirstSourceSurfaceV1;
   row: DxfProductSavedRowIdentityV1;
@@ -97,6 +103,7 @@ export type SavedFullAssemblyGenericFirstBootstrapV1 = Readonly<{
 }>;
 
 export type SavedFullAssemblyGenericFirstCompileChoicesV1 = Readonly<{
+  confirmedPressSource?: string;
   seamChoices: readonly Readonly<{
     sourceSeamKey: string;
     sides: readonly [
@@ -561,6 +568,10 @@ export const prepareSavedFullAssemblyGenericFirstBootstrapV1 = Object.freeze(
       const confirmed = projectSavedFullAssemblySnapshotV1(receipt);
       if (snapshotIdentity(snapshot) !== snapshotIdentity(confirmed))
         fail('saved-source-drift', 'Saved V6/AO evidence changed during native preparation.');
+      const recordedOrder =
+        sourceSurface === 'native-drawn-sewing'
+          ? readRecordedAssemblyOrder(snapshot.operations, snapshot.operationsPayloadCanonicalJson)
+          : null;
       return Object.freeze({
         schemaVersion: SAVED_FULL_ASSEMBLY_GENERIC_FIRST_BOOTSTRAP_V1,
         sourceSurface,
@@ -577,6 +588,13 @@ export const prepareSavedFullAssemblyGenericFirstBootstrapV1 = Object.freeze(
         documentAuthority: document.authority,
         pieces: exactPieces(catalogResult.catalog, replay.draft, selectedSize),
         operations: snapshot.operations,
+        ...(recordedOrder
+          ? {
+              recordedOrder,
+              recordedPressNote: JSON.parse(recordedOrder[1].canonicalSourceOperation)
+                .note as string,
+            }
+          : {}),
         seams: snapshot.seams,
         existingExactSeamChoices: existingExactSeamChoices(
           decodedV6,
@@ -603,6 +621,11 @@ export function buildSavedFullAssemblyGenericFirstCompileRequestV1(
   bootstrap: SavedFullAssemblyGenericFirstBootstrapV1,
   choices: SavedFullAssemblyGenericFirstCompileChoicesV1,
 ): SavedFullAssemblyCompileRequestV1 {
+  if (bootstrap.recordedOrder?.[1].canonicalSourceOperation !== choices.confirmedPressSource)
+    fail(
+      'invalid-authoring-choices',
+      'Confirm the exact recorded terminal press in the production order.',
+    );
   const activeOperations = bootstrap.operations.filter(({ seamKeys }) => seamKeys.length > 0);
   if (choices.seamChoices.length !== bootstrap.seams.length)
     fail(
@@ -683,6 +706,7 @@ export function buildSavedFullAssemblyGenericFirstCompileRequestV1(
       }),
       pieces: Object.freeze(pieces),
       operations: Object.freeze(operations),
+      ...(bootstrap.recordedOrder ? { productionOrder: bootstrap.recordedOrder } : {}),
       seams: Object.freeze(seams),
       compile: Object.freeze({
         targetEdgeMm: profile.targetEdgeMm,

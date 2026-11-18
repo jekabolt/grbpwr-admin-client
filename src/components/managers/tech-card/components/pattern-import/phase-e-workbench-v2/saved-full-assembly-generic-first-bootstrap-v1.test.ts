@@ -1,3 +1,6 @@
+import savedPressOperations from 'lib/cloth/domain/test-fixtures/recorded-terminal-press-operations.json';
+import { readRecordedAssemblyOrder } from 'lib/cloth/domain/dxf-recorded-terminal-press-v1';
+import { canonicalizePatternImportDxfPhaseESavedAssemblyValueV1 as canonical } from './saved-assembly-topology-hash-v1';
 import { describe, expect, it } from 'vitest';
 import type { DxfProductSavedNativeCompilerSourceOwnerV1 } from 'lib/pattern-import/dxf-product-saved-native-reprocess-owner-v1';
 
@@ -350,5 +353,27 @@ describe('saved full assembly first physical bootstrap', () => {
     );
     expect(request.intent.seams[0]!.sides[0].contourId).toBe('front-shell/drawn-seam');
     expect(request.sourceRequest.draft).toBe(bootstrap.sourceRequest.draft);
+
+    const wire = [
+      { ...savedPressOperations[0], ...native.operations[0] },
+      { ...savedPressOperations[1], operationNumber: 30 },
+    ];
+    const recordedOrder = readRecordedAssemblyOrder(wire, canonical(wire))!;
+    const withPress = { ...sewingCatalog, operations: wire, recordedOrder };
+    expect(() =>
+      buildSavedFullAssemblyGenericFirstCompileRequestV1(withPress, nativeChoices),
+    ).toThrow(/Confirm/);
+    expect(() =>
+      buildSavedFullAssemblyGenericFirstCompileRequestV1(withPress, {
+        ...nativeChoices,
+        confirmedPressSource: 'stale',
+      }),
+    ).toThrow(/Confirm/);
+    expect(
+      buildSavedFullAssemblyGenericFirstCompileRequestV1(withPress, {
+        ...nativeChoices,
+        confirmedPressSource: recordedOrder[1].canonicalSourceOperation,
+      }).intent.productionOrder,
+    ).toEqual(recordedOrder);
   });
 });

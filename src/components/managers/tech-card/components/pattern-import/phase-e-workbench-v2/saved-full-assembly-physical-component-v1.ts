@@ -1,3 +1,4 @@
+import { readRecordedAssemblyOrder } from 'lib/cloth/domain/dxf-recorded-terminal-press-v1';
 import {
   decodeDxfGarmentPhysicalInitializationV1,
   fingerprintDxfExactAssemblyGraphV1,
@@ -461,6 +462,9 @@ export function projectSavedFullAssemblyAoOnlySnapshotV1(
     row: structuredClone(snapshot.row),
     serverAssemblyRevision: snapshot.serverAssemblyRevision,
     operations: structuredClone(snapshot.operations),
+    ...(readRecordedAssemblyOrder(snapshot.operations, snapshot.operationsPayloadCanonicalJson)
+      ? { operationsPayloadCanonicalJson: snapshot.operationsPayloadCanonicalJson }
+      : {}),
     seams: structuredClone(snapshot.seams),
   };
 }

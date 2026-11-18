@@ -334,7 +334,11 @@ export async function createSavedThreePanelSourceV1(
     },
   };
 }
-export async function fullAssemblyFixtureWireV1(seed: SavedThreePanelFixtureV1, selected: number) {
+export async function fullAssemblyFixtureWireV1(
+  seed: SavedThreePanelFixtureV1,
+  selected: number,
+  sourceOperations = seed.operations,
+) {
   const op = seed.operations.find((o) => o.operationNumber === selected)!;
   const pair = selected === 10 ? ['FRONT', 'BACK'] : ['BACK', 'SIDE'];
   const anchor = (id: string) => ({
@@ -368,11 +372,11 @@ export async function fullAssemblyFixtureWireV1(seed: SavedThreePanelFixtureV1, 
     samples: v.samples.map((p) => [p.u, p.v]),
   });
   const payload = {
-    operations: seed.operations.map((o) => ({
+    operations: sourceOperations.map((o) => ({
       authoringOperationId: null,
       number: o.operationNumber,
       work: o.work,
-      phaseEKind: 'stitch',
+      phaseEKind: o.work === 'press_flat' ? null : 'stitch',
       inputKeys: o.inputKeys,
       outputUnitKey: o.outputUnitKey,
       outputUnitName: o.outputUnitName,
@@ -395,7 +399,7 @@ export async function fullAssemblyFixtureWireV1(seed: SavedThreePanelFixtureV1, 
   return {
     row: { ...seed.row, savedRowRevision: seed.row.revision, downloadUrl: seed.row.url },
     selectedOperationNumber: selected,
-    operations: structuredClone(seed.operations),
+    operations: structuredClone(sourceOperations),
     selectedSeams,
     serverAssemblyRevision: fullAssemblyFixtureRevision,
     topologyCanonicalJson: Buffer.from(json).toString('base64'),

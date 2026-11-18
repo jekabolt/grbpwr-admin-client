@@ -1,3 +1,4 @@
+import { RECORDED_TERMINAL_PRESS_PROFILE } from 'lib/cloth/domain/dxf-recorded-terminal-press-v1';
 import {
   consumeDxfProductSavedNativeCompilerSourceV1,
   type DxfProductSavedNativeCompilerSourceOwnerV1,
@@ -59,7 +60,10 @@ import {
 export const SAVED_FULL_ASSEMBLY_COMPILE_SESSION_V1 =
   'saved-full-assembly-compile-session/1' as const;
 export type SavedFullAssemblyCompileIntentV1 = Readonly<
-  Pick<DxfExactAssemblyGraphV1, 'pieces' | 'operations' | 'seams' | 'compile'> & {
+  Pick<
+    DxfExactAssemblyGraphV1,
+    'pieces' | 'operations' | 'seams' | 'compile' | 'productionOrder'
+  > & {
     documentId: string;
     revision: string;
     sizeToken: string;
@@ -527,6 +531,7 @@ export function createSavedFullAssemblyCompileSessionV1(): SavedFullAssemblyComp
         } as unknown as SavedFullAssemblyCompileRequestV1;
         fields(request.expected, ['row', 'serverAssemblyRevision', 'fullAssemblySnapshotSha256']);
         fields(request.intent, [
+          ...(Object.hasOwn(request.intent, 'productionOrder') ? ['productionOrder'] : []),
           'documentId',
           'revision',
           'sizeToken',
@@ -901,7 +906,10 @@ export function createSavedFullAssemblyCompileSessionV1(): SavedFullAssemblyComp
         if (!sewing.ok) fail('sewing-handoff-blocked', sewing.errors.join('; '));
         const graph: DxfExactAssemblyGraphV1 = {
           schemaVersion: DXF_EXACT_ASSEMBLY_GRAPH_V1,
-          profile: 'single-saved-row-size-adjacent-native-stitch',
+          profile: intent.productionOrder
+            ? RECORDED_TERMINAL_PRESS_PROFILE
+            : 'single-saved-row-size-adjacent-native-stitch',
+          ...(intent.productionOrder ? { productionOrder: intent.productionOrder } : {}),
           row: source.row,
           serverAssemblyRevision: before.serverAssemblyRevision,
           source: {
@@ -926,6 +934,9 @@ export function createSavedFullAssemblyCompileSessionV1(): SavedFullAssemblyComp
                 row: before.row,
                 serverAssemblyRevision: before.serverAssemblyRevision,
                 operations: before.operations,
+                ...(intent.productionOrder
+                  ? { operationsPayloadCanonicalJson: before.operationsPayloadCanonicalJson }
+                  : {}),
                 seams: before.seams,
               },
               sourceHandoff: sewing.value,
