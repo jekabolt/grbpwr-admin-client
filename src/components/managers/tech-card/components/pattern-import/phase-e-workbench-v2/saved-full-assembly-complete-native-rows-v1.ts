@@ -190,6 +190,7 @@ export async function prepareSavedFullAssemblyCompleteNativeRowsV1(
     signal,
   );
   signal.throwIfAborted();
+  const originalSewingPaths = Object.freeze(nativeBoundaries.flatMap(({ sewing }) => sewing));
   return Object.freeze({
     sourceSha256: source.sourceSha256,
     serverAssemblyRevision: source.serverAssemblyRevision,
@@ -198,10 +199,11 @@ export async function prepareSavedFullAssemblyCompleteNativeRowsV1(
     ),
     fusingLayers: Object.freeze(fusingLayers),
     originalCutPaths: Object.freeze(nativeBoundaries.flatMap(({ cuts }) => cuts)),
-    originalSewingPaths: Object.freeze(nativeBoundaries.flatMap(({ sewing }) => sewing)),
+    originalSewingPaths,
     operationAnchors: bindSavedAssemblyOperationAnchorsV1(
       source,
       new Set(fusingLayers.map(({ fusingRow }) => fusingRow.scopeKey)),
+      originalSewingPaths,
     ),
   });
 }

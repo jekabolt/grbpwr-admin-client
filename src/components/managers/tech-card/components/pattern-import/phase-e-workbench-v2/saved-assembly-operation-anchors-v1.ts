@@ -1,5 +1,7 @@
 import type { TechCardSeam, TechCardSeamAnchor } from 'api/proto-http/common';
+import type { SavedAssemblyNativeSewingPathV1 } from './saved-full-assembly-native-boundaries-v1';
 import {
+  completeSavedAssemblyRowIdentityV1,
   isVerifiedCompleteSavedAssemblySourceV1,
   type CompleteSavedAssemblySourceV1,
 } from './saved-assembly-complete-source-rpc-v1';
@@ -15,7 +17,11 @@ export type SavedAssemblyPhysicalAnchorV1 = Readonly<{
   pieceLineKey: string;
   anchor: TechCardSeamAnchor;
   source:
-    | Readonly<{ kind: 'dxf'; aliases: readonly ScopedAlias[] }>
+    | Readonly<{
+        kind: 'dxf';
+        aliases: readonly ScopedAlias[];
+        nativeSewingPath?: SavedAssemblyNativeSewingPathV1 | null;
+      }>
     | Readonly<{ kind: 'garment-label'; label: Label }>;
 }>;
 
@@ -43,6 +49,7 @@ const physicalKinds = new Set([
 export function bindSavedAssemblyOperationAnchorsV1(
   source: CompleteSavedAssemblySourceV1,
   generatedCutScopes: ReadonlySet<string> = new Set(),
+  nativeSewingPaths: readonly SavedAssemblyNativeSewingPathV1[] = [],
 ) {
   if (!isVerifiedCompleteSavedAssemblySourceV1(source))
     throw new TypeError('Operation anchors require a verified complete saved Assembly source.');
@@ -67,6 +74,24 @@ export function bindSavedAssemblyOperationAnchorsV1(
     const list = aliases.get(alias.pieceLineKey);
     if (list) list.push(alias);
     else aliases.set(alias.pieceLineKey, [alias]);
+  }
+  const nativeByAlias = new Map<string, SavedAssemblyNativeSewingPathV1[]>();
+  const rowByScope = new Map(source.rows.map((row) => [row.scopeKey, row]));
+  const aliasKey = (scopeKey: string, pieceLineKey: string, blockName: string) =>
+    JSON.stringify([scopeKey, pieceLineKey, blockName]);
+  for (const path of nativeSewingPaths) {
+    const row = rowByScope.get(path.row.scopeKey);
+    if (
+      !row ||
+      Object.entries(completeSavedAssemblyRowIdentityV1(row)).some(
+        ([key, value]) => path.row[key as keyof typeof path.row] !== value,
+      )
+    )
+      throw new TypeError('A native sewing path does not match the sealed Assembly row.');
+    const key = aliasKey(path.row.scopeKey, path.pieceLineKey, path.blockName);
+    const stored = nativeByAlias.get(key);
+    if (stored) stored.push(path);
+    else nativeByAlias.set(key, [path]);
   }
   const owned = new Set<string>();
   const operationNumbers = new Set<number>();
@@ -112,6 +137,11 @@ export function bindSavedAssemblyOperationAnchorsV1(
           const pieceAliases = pieceLineKey ? aliases.get(pieceLineKey) : undefined;
           if (!pieceLineKey || Boolean(label) === Boolean(pieceAliases))
             throw new TypeError('A physical anchor must have one saved geometry owner.');
+          const nativeCandidates = pieceAliases?.flatMap(({ scopeKey, blockName }) =>
+            scopeKey && blockName
+              ? nativeByAlias.get(aliasKey(scopeKey, pieceLineKey, blockName)) ?? []
+              : [],
+          );
           return Object.freeze({
             operationNumber,
             seamKey,
@@ -124,6 +154,12 @@ export function bindSavedAssemblyOperationAnchorsV1(
               : Object.freeze({
                   kind: 'dxf' as const,
                   aliases: Object.freeze(pieceAliases!.slice()),
+                  ...(nativeSewingPaths.length
+                    ? {
+                        nativeSewingPath:
+                          nativeCandidates?.length === 1 ? nativeCandidates[0]! : null,
+                      }
+                    : {}),
                 }),
           });
         }),

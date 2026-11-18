@@ -114,6 +114,7 @@ export function bindSavedFullAssemblyNativeSewingPathsV1(
         throw new Error(`No independent original sewing path is bound to ${cut.blockName}.`);
       return Object.freeze({
         row: cut.row,
+        sourceFileId: carrier.sourceFileId,
         sizeToken: cut.sizeToken,
         pieceId: cut.pieceId,
         pieceLineKey: cut.pieceLineKey,
@@ -128,3 +129,7 @@ export function bindSavedFullAssemblyNativeSewingPathsV1(
     }),
   );
 }
+
+export type SavedAssemblyNativeSewingPathV1 = ReturnType<
+  typeof bindSavedFullAssemblyNativeSewingPathsV1
+>[number];
