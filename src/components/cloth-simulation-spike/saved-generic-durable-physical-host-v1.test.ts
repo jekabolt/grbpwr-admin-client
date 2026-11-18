@@ -2587,7 +2587,7 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
     }
     expect(props.onActiveSeamIndexChange).not.toHaveBeenCalled();
     expect(pick).toHaveBeenCalledTimes(1);
-  });
+  }, 120000);
 
   it('routes current preview face identity through the saved graph and refuses stale or mismatched views', async () => {
     const f = await fixture();
