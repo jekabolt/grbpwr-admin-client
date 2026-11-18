@@ -56,8 +56,14 @@ export const digestFullAssemblyFixture = async (bytes: Uint8Array) =>
   Buffer.from(await crypto.subtle.digest('SHA-256', Uint8Array.from(bytes).buffer)).toString('hex');
 export async function createSavedThreePanelFixtureV1(
   pieceCount: 2 | 3 = 3,
-  options: { wizardExport?: boolean; ambiguousShortEdge?: boolean } = {},
+  options: {
+    wizardExport?: boolean;
+    ambiguousShortEdge?: boolean;
+    techCardId?: number;
+    patternLineKey?: string;
+  } = {},
 ) {
+  const techCardId = options.techCardId ?? 156;
   const original = await createThreePanelDxfMaterialCompileFixtureV1();
   const ids = IDS.slice(0, pieceCount);
   const pieces: PieceSpec[] = ids.map((identity, index) => {
@@ -129,7 +135,7 @@ export async function createSavedThreePanelFixtureV1(
     };
   });
   const job: WriteJob = {
-    techCardId: 156,
+    techCardId,
     scope: {
       scopeKey: 'main',
       fabricPurpose: 'main',
@@ -191,9 +197,9 @@ export async function createSavedThreePanelFixtureV1(
   }
   const bytes = new TextEncoder().encode(written.dxfText);
   const row: DxfProductSavedRowIdentityV1 = {
-    techCardId: 156,
+    techCardId,
     scopeKey: 'main',
-    patternLineKey: 'pattern-main-three-panel',
+    patternLineKey: options.patternLineKey ?? 'pattern-main-three-panel',
     revision: 4,
     cardLockVersion: 8,
     url: 'https://saved-full-assembly.invalid/three.dxf',
@@ -201,7 +207,7 @@ export async function createSavedThreePanelFixtureV1(
     sha256: await digestFullAssemblyFixture(bytes),
   };
   const card: CardContext = {
-    techCardId: 156,
+    techCardId,
     sizes: job.sizes.map(({ sizeId, token, name, rank }) => ({
       sizeId,
       token,

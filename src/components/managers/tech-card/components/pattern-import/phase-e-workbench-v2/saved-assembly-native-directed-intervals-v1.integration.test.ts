@@ -29,6 +29,36 @@ import {
   buildPatternImportDxfPhaseEAssemblyOrderSourceV1,
   PatternImportDxfPhaseEAssemblyOrderEntryMountV1,
 } from '../phase-e-workbench/assembly-order-entry';
+import { DirectClient } from '../ordinary-dxf-wizard.test-fixture';
+import { derivePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1 } from './cad-table-connect-edge-segments-v1';
+import { finalizePatternImportDxfPhaseEExistingLinkedN1V1 } from './cad-table-existing-linked-n1-finalize-v1';
+import type {
+  PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1,
+  PatternImportDxfPhaseEZeroConnectAuthoringHandoffRequestV1,
+} from './cad-table-zero-connect-authoring-handoff-v1';
+import {
+  createPatternImportDxfPhaseECadTableZeroConnectControllerStateV1,
+  selectPatternImportDxfPhaseECadTableZeroConnectControllerEdgeV1,
+  startPatternImportDxfPhaseECadTableZeroConnectControllerV1,
+} from './cad-table-zero-connect-controller-v1';
+import {
+  capturePatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1,
+  preparePatternImportDxfPhaseEZeroConnectExistingLinkedN1RebindV1,
+  resolvePatternImportDxfPhaseELinkedN1MetadataResumeDirectionV1,
+  revalidatePatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1,
+  verifyPatternImportDxfPhaseEZeroConnectExistingLinkedN1ReadbackV1,
+} from './cad-table-zero-connect-existing-linked-operation-rebind-v1';
+import {
+  PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_POST_SAVE_OWNER_V1,
+  refreshPatternImportDxfPhaseEZeroConnectSeamLinkAuthorityV1,
+} from './cad-table-zero-connect-post-save-owner-v1';
+import { capturePatternImportDxfPhaseECadTableZeroOperationSavedRebindExpectationV1 } from './cad-table-zero-operation-authority-rebind-v1';
+import { createPatternImportDxfPhaseECadTableZeroOperationGenerationOwnerV1 } from './cad-table-zero-operation-generation-owner-v1';
+import {
+  createPatternImportDxfPhaseECadTableZeroOperationAuthoringRefreshV1,
+  PatternImportDxfPhaseECadTableZeroOperationProductionMountV1,
+} from './cad-table-zero-operation-production-mount-v1';
+import { createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1 } from './zero-operation-saved-card-authority-v1';
 import { adaptPatternImportDxfPhaseEWorkbenchExistingAssemblyV1 } from '../phase-e-workbench-existing-assembly-adapter-v1';
 import { buildPatternImportDxfPhaseEExactAnchorEdgeV1 } from './cad-table-zero-connect-exact-anchor-geometry-v1';
 import { bytesOf, semanticDocument } from './composite-placement-read-v1.test-fixture';
@@ -78,9 +108,11 @@ import { createSavedNativeSewingAuthoringViewV1 } from './saved-native-sewing-au
 import {
   createPatternImportDxfPhaseEZeroConnectProductionDurableBridgeV1,
   PATTERN_IMPORT_DXF_PHASE_E_SAVED_NATIVE_EXACT_N_CONFIRM_V1,
+  PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_DURABLE_RESTORE_REQUEST_V1,
 } from './zero-connect-durable-composite-v4';
 
 const ports = vi.hoisted(() => ({
+  GetTechCard: vi.fn<AdminService['GetTechCard']>(),
   GetTechCardSavedAssemblySnapshot: vi.fn<AdminService['GetTechCardSavedAssemblySnapshot']>(),
   GetTechCardPatternSemanticSidecar: vi.fn<AdminService['GetTechCardPatternSemanticSidecar']>(),
   PutTechCardPatternSemanticSidecar: vi.fn<AdminService['PutTechCardPatternSemanticSidecar']>(),
@@ -93,9 +125,10 @@ vi.mock('api/api', () => ({
 const ui = vi.hoisted(() => ({
   card: null as common_TechCard | null,
   operations: [] as unknown[],
-  sizeNames: new Map([[7, 'Medium']]),
+  sizeNames: new Map([[7, 'M']]),
   orderSizeIds: (ids: number[]) => ids,
   renderWorkbench: vi.fn(),
+  renderNativeN1: vi.fn(),
   prepare: vi.fn(),
 }));
 vi.mock('components/managers/tech-cards/components/useTechCardQuery', async (importOriginal) => ({
@@ -131,6 +164,27 @@ vi.mock('./assembly-order-entry', async (importOriginal) => ({
     return null;
   },
 }));
+
+vi.mock('./cad-table-zero-operation-production-mount-v1', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./cad-table-zero-operation-production-mount-v1')>()),
+  PatternImportDxfPhaseECadTableZeroOperationProductionMountV1: (props: unknown) => {
+    ui.renderNativeN1(props);
+    return null;
+  },
+}));
+vi.mock('./saved-dxf-reprocess-host-v1', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./saved-dxf-reprocess-host-v1')>();
+  return {
+    ...actual,
+    createPatternImportDxfPhaseESavedDxfReprocessHostV1: (
+      deps: Parameters<typeof actual.createPatternImportDxfPhaseESavedDxfReprocessHostV1>[0],
+    ) =>
+      actual.createPatternImportDxfPhaseESavedDxfReprocessHostV1({
+        ...deps,
+        createClient: deps.createClient ?? (() => new DirectClient()),
+      }),
+  };
+});
 
 const operationNumber = 10;
 const sizeToken = 'M';
@@ -280,6 +334,62 @@ async function completeSourceReply(
       sourceSha256,
       canonicalJson: Buffer.from(canonicalJson).toString('base64'),
     },
+  } as unknown as GetTechCardSavedAssemblySnapshotResponse;
+}
+
+async function selectedTopologyReply(
+  reply: GetTechCardSavedAssemblySnapshotResponse,
+  selectedSeams: WireSeam[],
+) {
+  const operation = reply.operations![0]!;
+  const canonical = canonicalize({
+    selectedOperationNumber: operationNumber,
+    operations: [
+      {
+        authoringOperationId: null,
+        number: operationNumber,
+        work: operation.work,
+        phaseEKind: 'stitch',
+        inputKeys: operation.inputKeys,
+        outputUnitKey: operation.outputUnitKey,
+        outputUnitName: operation.outputUnitName,
+        seamKeys: operation.seamKeys,
+      },
+    ],
+    seams: selectedSeams.map((wire) => {
+      const row = fromWire(wire)!;
+      const project = (anchor: NonNullable<WireSeam['sideA']>['parts']) =>
+        anchor!.map((part) => ({
+          pieceLineKey: part.pieceLineKey,
+          edgeHint: part.edgeHint,
+          range: [part.rangeFrom, part.rangeTo],
+          lenMm: part.lenMm,
+          contourSig: part.contourSig,
+          samples: part.samples!.map(({ u, v }) => [u, v]),
+        }));
+      return {
+        seamKey: row.seamKey,
+        confirmed: true,
+        stale: false,
+        kind: row.kind,
+        direction: row.direction,
+        source: row.source,
+        anchoredSize: row.anchoredSize,
+        sideA: project(wire.sideA!.parts),
+        sideB: project(wire.sideB!.parts),
+      };
+    }),
+  });
+  return {
+    ...reply,
+    selectedOperationNumber: operationNumber,
+    selectedSeams,
+    topologyCanonicalJson: Buffer.from(canonical).toString('base64'),
+    assemblyTopologySha256: await digestFullAssemblyFixture(
+      new TextEncoder().encode(
+        `${PATTERN_IMPORT_DXF_PHASE_E_SAVED_ROW_SERVER_TOPOLOGY_SHA256_DOMAIN_V1}\0${canonical}`,
+      ),
+    ),
   } as unknown as GetTechCardSavedAssemblySnapshotResponse;
 }
 
@@ -563,56 +673,7 @@ it('confirms already-saved exact three-seam AO through the existing V4 CAS and r
       expect(request.expectedServerAssemblyRevision).toBe(reply.serverAssemblyRevision);
       return reply;
     }
-    const operation = reply.operations![0]!;
-    const canonical = canonicalize({
-      selectedOperationNumber: operationNumber,
-      operations: [
-        {
-          authoringOperationId: null,
-          number: operationNumber,
-          work: operation.work,
-          phaseEKind: 'stitch',
-          inputKeys: operation.inputKeys,
-          outputUnitKey: operation.outputUnitKey,
-          outputUnitName: operation.outputUnitName,
-          seamKeys: operation.seamKeys,
-        },
-      ],
-      seams: selectedSeams.map((wire) => {
-        const row = fromWire(wire)!;
-        const project = (anchor: NonNullable<WireSeam['sideA']>['parts']) =>
-          anchor!.map((part) => ({
-            pieceLineKey: part.pieceLineKey,
-            edgeHint: part.edgeHint,
-            range: [part.rangeFrom, part.rangeTo],
-            lenMm: part.lenMm,
-            contourSig: part.contourSig,
-            samples: part.samples!.map(({ u, v }) => [u, v]),
-          }));
-        return {
-          seamKey: row.seamKey,
-          confirmed: true,
-          stale: false,
-          kind: row.kind,
-          direction: row.direction,
-          source: row.source,
-          anchoredSize: row.anchoredSize,
-          sideA: project(wire.sideA!.parts),
-          sideB: project(wire.sideB!.parts),
-        };
-      }),
-    });
-    return {
-      ...reply,
-      selectedOperationNumber: operationNumber,
-      selectedSeams,
-      topologyCanonicalJson: Buffer.from(canonical).toString('base64'),
-      assemblyTopologySha256: await digestFullAssemblyFixture(
-        new TextEncoder().encode(
-          `${PATTERN_IMPORT_DXF_PHASE_E_SAVED_ROW_SERVER_TOPOLOGY_SHA256_DOMAIN_V1}\0${canonical}`,
-        ),
-      ),
-    } as unknown as GetTechCardSavedAssemblySnapshotResponse;
+    return selectedTopologyReply(reply, selectedSeams);
   });
   ports.GetTechCardPatternSemanticSidecar.mockImplementation(async () => ({
     semanticSidecar: structuredClone(attachment),
@@ -850,22 +911,19 @@ function feedFromNativeTransaction(
   };
 }
 
-async function verifyNativeWorkbenchMount(
+function cardForSavedNativeFixture(
+  seed: SavedThreePanelFixtureV1,
   seams: WireSeam[],
-  commitThread: (threadLineKey: string) => SavedThreePanelFixtureV1,
-) {
+  operations: NonNullable<GetTechCardSavedAssemblySnapshotResponse['operations']>,
+): common_TechCard {
   const { row } = seed;
-  const response = await completeSourceReply(seed, seams, undefined, {
-    threadKey: 'thread-before',
-  });
-  ui.operations = response.operations ?? [];
-  ui.card = {
+  return {
     id: row.techCardId,
     lockVersion: row.cardLockVersion,
     seams,
     techCard: {
       sizeIds: [7],
-      operations: ui.operations,
+      operations,
       pieces: seed.card.existingPieces,
       bomItems: [
         {
@@ -896,6 +954,8 @@ async function verifyNativeWorkbenchMount(
           name: 'main',
           filename: 'three.dxf',
           url: row.url,
+          downloadUrl: row.url,
+          sizeId: 7,
           sizeBytes: row.sizeBytes,
           sha256: row.sha256,
           version: 2,
@@ -911,6 +971,39 @@ async function verifyNativeWorkbenchMount(
       },
     },
   } as unknown as common_TechCard;
+}
+
+function installWorkbenchCpuRoot() {
+  const listeners = { addEventListener: () => undefined, removeEventListener: () => undefined };
+  const view = {
+    document: { activeElement: null },
+    HTMLIFrameElement: class {},
+    location: { origin: 'https://saved-full-assembly.invalid' },
+    ...listeners,
+  };
+  vi.stubGlobal('window', view);
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  return () =>
+    createRoot({
+      nodeType: 1,
+      nodeName: 'DIV',
+      tagName: 'DIV',
+      namespaceURI: 'http://www.w3.org/1999/xhtml',
+      ownerDocument: { nodeType: 9, defaultView: view, ...listeners },
+      ...listeners,
+    } as unknown as HTMLElement);
+}
+
+async function verifyNativeWorkbenchMount(
+  seams: WireSeam[],
+  commitThread: (threadLineKey: string) => SavedThreePanelFixtureV1,
+) {
+  const { row } = seed;
+  const response = await completeSourceReply(seed, seams, undefined, {
+    threadKey: 'thread-before',
+  });
+  ui.card = cardForSavedNativeFixture(seed, seams, response.operations ?? []);
+  ui.operations = ui.card.techCard!.operations!;
   let activeSeed = seed;
   ui.prepare.mockImplementation(async () => {
     const preparation = await nativeAuthoring(activeSeed);
@@ -931,24 +1024,7 @@ async function verifyNativeWorkbenchMount(
     serverVersion: row.cardLockVersion,
     server: seams.map((wire) => fromWire(wire)!),
   });
-  const listeners = { addEventListener: () => undefined, removeEventListener: () => undefined };
-  const view = {
-    document: { activeElement: null },
-    HTMLIFrameElement: class {},
-    location: { origin: 'https://saved-full-assembly.invalid' },
-    ...listeners,
-  };
-  vi.stubGlobal('window', view);
-  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-  const createCpuRoot = () =>
-    createRoot({
-      nodeType: 1,
-      nodeName: 'DIV',
-      tagName: 'DIV',
-      namespaceURI: 'http://www.w3.org/1999/xhtml',
-      ownerDocument: { nodeType: 9, defaultView: view, ...listeners },
-      ...listeners,
-    } as unknown as HTMLElement);
+  const createCpuRoot = installWorkbenchCpuRoot();
   const subscribe = (listener: () => void) =>
     subscribePatternImportDxfProductExactNSeamProductionSessionV2(row.techCardId, listener);
   const read = () => readPatternImportDxfProductExactNSeamProductionSessionV2(row.techCardId);
@@ -1188,3 +1264,484 @@ async function verifyNativeWorkbenchMount(
     vi.unstubAllGlobals();
   }
 }
+
+it('rebinds one already-saved native seam after an ordinary thread edit and reloads the fresh V4', async () => {
+  const n1Seed = await createSavedThreePanelFixtureV1(2, {
+    techCardId: 157,
+    patternLineKey: '01M6ERWDX90SM4KQB2QZGAFYAX',
+  });
+  const { row } = n1Seed;
+  const seamKey = 'native-n1';
+  const native = await nativeAuthoring(n1Seed);
+  const { wire, vertexIds } = native.writeRow(seamKey, 0, false);
+  const seams = [wire];
+  const original = await completeSourceReply(n1Seed, seams, undefined, {
+    threadKey: 'thread-before',
+  });
+  let card = cardForSavedNativeFixture(n1Seed, seams, original.operations!);
+  let currentSeed = n1Seed;
+  let currentRevision = serverAssemblyRevision;
+  let threadKey = 'thread-before';
+  let stored: TechCardPatternSemanticSidecar | undefined;
+  const readStored = () => stored;
+  let sidecarReadOverride: TechCardPatternSemanticSidecar | undefined;
+  let guardedSnapshotReads = 0;
+  const puts = ports.PutTechCardPatternSemanticSidecar;
+  ports.UpdateTechCard.mockReset();
+  puts.mockReset();
+  ports.GetTechCard.mockImplementation(async () => ({
+    techCard: structuredClone(card),
+    patternViewerToken: '',
+  }));
+  ports.GetTechCardSavedAssemblySnapshot.mockImplementation(async (request) => {
+    const current = currentSeed.row;
+    expect(request).toMatchObject({
+      techCardId: current.techCardId,
+      patternLineKey: current.patternLineKey,
+      expectedCardLockVersion: current.cardLockVersion,
+      expectedSavedRowRevision: current.revision,
+      expectedSha256: current.sha256,
+    });
+    guardedSnapshotReads += 1;
+    const reply = await completeSourceReply(currentSeed, seams, undefined, {
+      threadKey,
+      revision: currentRevision,
+      sidecar: stored,
+    });
+    return request.profile === 'TECH_CARD_SAVED_ASSEMBLY_SNAPSHOT_PROFILE_COMPLETE_SOURCE_V1'
+      ? reply
+      : selectedTopologyReply(reply, seams);
+  });
+  ports.GetTechCardPatternSemanticSidecar.mockImplementation(async () => ({
+    semanticSidecar: structuredClone(sidecarReadOverride ?? stored),
+  }));
+  const capturedV1: TechCardPatternSemanticSidecar[] = [];
+  puts.mockImplementation(async (request) => {
+    const current = currentSeed.row;
+    expect(request).toMatchObject({
+      techCardId: current.techCardId,
+      patternLineKey: current.patternLineKey,
+      expectedCardLockVersion: current.cardLockVersion,
+      expectedSavedRowRevision: current.revision,
+      expectedPatternVersion: 2,
+      expectedDxfSha256: current.sha256,
+      expectedPreviousSidecarSha256: stored?.sidecarSha256 ?? '',
+    });
+    const bytes = Uint8Array.from(Buffer.from(request.sidecarBytes!, 'base64'));
+    expect(await digestFullAssemblyFixture(bytes)).toBe(request.sidecarSha256);
+    const saved: TechCardPatternSemanticSidecar = {
+      techCardId: request.techCardId,
+      patternLineKey: request.patternLineKey,
+      cardLockVersion: request.expectedCardLockVersion,
+      savedRowRevision: request.expectedSavedRowRevision,
+      patternVersion: request.expectedPatternVersion,
+      dxfSha256: request.expectedDxfSha256,
+      postSaveReceiptSha256: request.expectedPostSaveReceiptSha256,
+      mediaType: request.mediaType,
+      byteLength: bytes.byteLength,
+      sidecarBytes: request.sidecarBytes,
+      sidecarSha256: request.sidecarSha256,
+      createdAt: undefined,
+      createdBy: undefined,
+    };
+    stored = saved;
+    if (request.mediaType === PATTERN_IMPORT_DXF_PRODUCT_SEMANTIC_SIDECAR_MEDIA_TYPE_V1) {
+      expect(request.expectedPreviousSidecarSha256).toBe('');
+      capturedV1.push(saved);
+    } else {
+      expect(request).toMatchObject({
+        mediaType: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V4,
+        expectedPreviousSidecarSha256: capturedV1.at(-1)!.sidecarSha256,
+        selectedOperationNumber: operationNumber,
+        expectedServerAssemblyRevision: currentRevision,
+      });
+      const envelope = await decodePatternImportDxfProductCompositeSidecarV4(bytes);
+      if (!envelope.ok) throw new Error(JSON.stringify(envelope.blockers));
+      expect(
+        readPatternImportDxfProductCompositeComponentBytesV3(
+          envelope.nestedCompositeV3.owner,
+          'semantic-product-v1',
+        ),
+      ).toEqual(Uint8Array.from(Buffer.from(capturedV1.at(-1)!.sidecarBytes!, 'base64')));
+    }
+    return { semanticSidecar: structuredClone(stored) };
+  });
+
+  const { preparePatternImportDxfPhaseECadTableZeroOperationSavedV1: prepare } =
+    await vi.importActual<typeof import('./cad-table-zero-operation-saved-preparation-v1')>(
+      './cad-table-zero-operation-saved-preparation-v1',
+    );
+  ui.prepare.mockImplementation(prepare);
+  const priorSeamState = useSeamsStore.getState();
+  const displayCurrentCard = () => {
+    ui.card = structuredClone(card);
+    ui.operations = mapTechCardToForm(ui.card).operations ?? [];
+    useSeamsStore.setState({
+      cardId: row.techCardId,
+      serverVersion: card.lockVersion,
+      server: seams.map((seam) => fromWire(seam)!),
+    });
+  };
+  displayCurrentCard();
+  const rootFactory = installWorkbenchCpuRoot();
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url) => {
+      expect(String(url)).toBe(row.url);
+      return new Response(Uint8Array.from(n1Seed.bytes), { status: 200 });
+    }),
+  );
+  const settings = {
+    orderSizeIds: ui.orderSizeIds,
+    sizeNameById: ui.sizeNames,
+  };
+  const nativeSurface = 'explicit-native-drawn-sewing';
+  const authority = createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1(settings);
+  const generation = createPatternImportDxfPhaseECadTableZeroOperationGenerationOwnerV1();
+  const application = createPatternImportDxfProductCompositeSidecarProductionTransactionV4();
+  const bridge = createPatternImportDxfPhaseEZeroConnectProductionDurableBridgeV1(
+    operationNumber,
+    application,
+    createPatternImportDxfPhaseESavedAssemblySnapshotProductionRpcV1(operationNumber)
+      .authorityAdapter,
+  );
+  const currentInputs = () => {
+    const seamState = useSeamsStore.getState();
+    return {
+      techCardId: row.techCardId,
+      selectedIndex: 0,
+      liveOperations: ui.operations as NonNullable<
+        ReturnType<typeof mapTechCardToForm>['operations']
+      >,
+      savedCard: ui.card,
+      currentRows: seamState.server,
+      seamWriterCardId: seamState.cardId ?? undefined,
+      seamWriterLockVersion: seamState.serverVersion,
+    };
+  };
+  let requested: PatternImportDxfPhaseEZeroConnectAuthoringHandoffRequestV1 | undefined;
+  const handoff: PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1 = {
+    status: 'available',
+    ingest(request) {
+      requested = request;
+      return {
+        ok: true,
+        inserted: 0,
+        historyKey: 'mounted-existing-n1',
+        sessionRevision: request.session.revision,
+        blocker: null,
+      };
+    },
+  };
+  const subscribe = (listener: () => void) =>
+    subscribePatternImportDxfProductExactNSeamProductionSessionV2(row.techCardId, listener);
+  const readSession = () =>
+    readPatternImportDxfProductExactNSeamProductionSessionV2(row.techCardId);
+  function Harness() {
+    const exactNSession = useSyncExternalStore(subscribe, readSession, readSession);
+    return createElement(PatternImportDxfPhaseEAssemblyOrderEntryMountV1, {
+      techCardId: row.techCardId,
+      selectedIndex: 0,
+      autoOpen: true,
+      exactNSession,
+      exactNApplicationOwner: application,
+      zeroConnectAuthoringHandoff: handoff,
+    });
+  }
+  const waitForUnboundMount = () =>
+    waitForWorkbench(() => {
+      expect(ui.renderNativeN1.mock.lastCall?.[0]).toMatchObject({
+        techCardId: row.techCardId,
+        sourceSurface: nativeSurface,
+        selection: { operationNumber },
+        zeroConnectAuthoringHandoff: handoff,
+      });
+      expect(readSession()).toBeNull();
+    });
+  async function pickNativeEdges(key: string) {
+    const start = () =>
+      prepare(
+        {
+          ...settings,
+          techCard: ui.card,
+          scopeKey: row.scopeKey,
+          sizeToken,
+          sourceSurface: nativeSurface,
+          authority,
+          generation: generation.beginSaved(key),
+        },
+        signal,
+      );
+    let prepared!: Awaited<ReturnType<typeof start>>;
+    await act(async () => {
+      prepared = await start();
+    });
+    if (!prepared.ok) throw new Error(JSON.stringify(prepared.blocker));
+    const authoringAuthorityRefresh =
+      createPatternImportDxfPhaseECadTableZeroOperationAuthoringRefreshV1({
+        ...settings,
+        prepared,
+        expectation:
+          capturePatternImportDxfPhaseECadTableZeroOperationSavedRebindExpectationV1(prepared),
+        savedAuthority: authority,
+        preparationKey: key,
+        sourceSurface: nativeSurface,
+        prepareSaved: prepare,
+      });
+    expect(authoringAuthorityRefresh).not.toBeNull();
+    const binding = {
+      catalog: prepared.catalog,
+      projection: prepared.projection,
+      authoringAuthority: prepared.authoringAuthority,
+      authoringAuthorityRefresh,
+    };
+    const segments = derivePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1(prepared.projection);
+    let controller = startPatternImportDxfPhaseECadTableZeroConnectControllerV1(
+      createPatternImportDxfPhaseECadTableZeroConnectControllerStateV1(),
+      binding,
+    );
+    requested = undefined;
+    const mounted = ui.renderNativeN1.mock.lastCall?.[0] as Parameters<
+      typeof PatternImportDxfPhaseECadTableZeroOperationProductionMountV1
+    >[0];
+    for (const [index, piece] of ['line-FRONT', 'line-BACK'].entries()) {
+      const segment = segments.find(
+        ({ contourRole, pieceLineKey, boundaryVertexIds }) =>
+          contourRole === 'sewing-boundary' &&
+          pieceLineKey === piece &&
+          boundaryVertexIds[0] === vertexIds[index]![0] &&
+          boundaryVertexIds[1] === vertexIds[index]![1],
+      );
+      if (!segment) throw new Error('The exact saved native interval no longer exists.');
+      controller = selectPatternImportDxfPhaseECadTableZeroConnectControllerEdgeV1(
+        controller,
+        binding,
+        segment,
+        'forward',
+        mounted.zeroConnectAuthoringHandoff,
+      );
+    }
+    expect(controller.handoffResult, JSON.stringify(controller)).toMatchObject({ ok: true });
+    if (!requested) throw new Error('The mounted Workbench did not hand off the exact gesture.');
+    return requested as PatternImportDxfPhaseEZeroConnectAuthoringHandoffRequestV1;
+  }
+  const geometryContext = { nameOf: (pieceLineKey: string) => pieceLineKey, grainDeg: null };
+  async function confirmCurrentSeam(
+    request: PatternImportDxfPhaseEZeroConnectAuthoringHandoffRequestV1,
+  ) {
+    const captured = capturePatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1({
+      ...currentInputs(),
+      request,
+    });
+    if (!captured.ok) throw new Error(JSON.stringify(captured.blocker));
+    const direction = resolvePatternImportDxfPhaseELinkedN1MetadataResumeDirectionV1(
+      captured.pending,
+      ui.card,
+      geometryContext,
+    );
+    expect(direction).toBe('same');
+    if (!direction) throw new Error('The exact current saved seam does not admit metadata resume.');
+    const pending = Object.freeze({ ...captured.pending, metadataResumeDirection: direction });
+    const refreshed = await refreshPatternImportDxfPhaseEZeroConnectSeamLinkAuthorityV1(
+      {
+        ...request,
+        schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_POST_SAVE_OWNER_V1,
+        direction,
+      },
+      signal,
+      'current',
+    );
+    if (!refreshed.ok) throw new Error(JSON.stringify(refreshed.blocker));
+    const prepared = preparePatternImportDxfPhaseEZeroConnectExistingLinkedN1RebindV1(
+      pending,
+      direction,
+      geometryContext,
+    );
+    if (!prepared.ok) throw new Error(JSON.stringify(prepared.blocker));
+    const { techCard: freshCard } = await ports.GetTechCard({
+      id: row.techCardId,
+      vatCountryCode: undefined,
+    });
+    const readback = verifyPatternImportDxfPhaseEZeroConnectExistingLinkedN1ReadbackV1({
+      mode: 'resume-metadata',
+      pending,
+      expectedSeam: prepared.receipt.storedSeam,
+      freshCard,
+    });
+    if (!readback.ok) throw new Error(JSON.stringify(readback.blocker));
+    const result = await finalizePatternImportDxfPhaseEExistingLinkedN1V1({
+      pending,
+      profile: { id: 'browser-medium-isotropic-diagnostic', revision: '1' },
+      direction,
+      readback,
+      freshCard: freshCard!,
+      metadataResumeAuthority: refreshed.authority,
+      isCurrent: () =>
+        revalidatePatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1(
+          pending,
+          currentInputs(),
+        ).ok,
+      signal,
+      persist: bridge.persist,
+    });
+    expect(result, JSON.stringify(result)).toEqual({ ok: true });
+  }
+
+  let root = rootFactory();
+  const clearSession = () =>
+    clearPatternImportDxfProductExactNSeamProductionSessionV2(row.techCardId);
+  type WorkbenchProps = Parameters<
+    typeof import('./assembly-order-entry').PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2
+  >[0];
+  const restoreMounted = (thread: string) =>
+    waitForWorkbench(() => {
+      const session = readSession();
+      const mounted = ui.renderWorkbench.mock.lastCall?.[0] as WorkbenchProps | undefined;
+      expect(session?.current.row).toEqual(currentSeed.row);
+      expect(session?.current.selectedOperation.seamIds).toEqual([seamKey]);
+      expect(mounted?.exactNSession).toBe(session);
+      expect(mounted?.stitchVisual?.thread.bomLineKey).toBe(thread);
+      const resolved = resolvePatternImportDxfProductExactNSeamProductionMountV2(session!, 0);
+      if (!resolved.ok) throw new Error(JSON.stringify(resolved.blockers));
+      expect(
+        resolved.model.state.seams.map(({ seamId, sides }) => ({
+          seamId,
+          vertices: sides.map(({ boundaryVertexIds }) => boundaryVertexIds),
+        })),
+      ).toEqual([{ seamId: seamKey, vertices: vertexIds }]);
+    });
+  const remount = async () => {
+    await act(async () => root.unmount());
+    clearSession();
+    ui.renderNativeN1.mockClear();
+    ui.renderWorkbench.mockClear();
+    root = rootFactory();
+    await act(async () => root.render(createElement(Harness)));
+  };
+
+  clearSession();
+  try {
+    await act(async () => root.render(createElement(Harness)));
+    await waitForUnboundMount();
+    const oldRequest = await pickNativeEdges('native-n1-before-edit');
+    expect(puts).not.toHaveBeenCalled();
+    await act(async () => confirmCurrentSeam(oldRequest));
+    await remount();
+    await restoreMounted('thread-before');
+    const oldCarrier = readStored();
+    if (!oldCarrier) throw new Error('The original current V4 was not persisted.');
+    expect(oldCarrier.mediaType).toBe(PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V4);
+    expect(puts).toHaveBeenCalledTimes(2);
+
+    const form = mapTechCardToForm(card);
+    form.operations![0]!.bomLineKeys = ['thread-after'];
+    const changed = mapFormToTechCardInsert(form, card.techCard);
+    ports.UpdateTechCard.mockImplementationOnce(async (request) => {
+      expect(request).toMatchObject({
+        expectedLockVersion: row.cardLockVersion,
+        techCard: {
+          operations: [{ operationNumber, seamKeys: [seamKey], bomLineKeys: ['thread-after'] }],
+        },
+      });
+      threadKey = 'thread-after';
+      currentRevision = `asm:v1:${'9'.repeat(32)}:22`;
+      currentSeed = {
+        ...n1Seed,
+        row: { ...row, cardLockVersion: row.cardLockVersion + 1, revision: row.revision + 1 },
+      };
+      const reply = await completeSourceReply(currentSeed, seams, undefined, { threadKey });
+      card = cardForSavedNativeFixture(currentSeed, seams, reply.operations!);
+      stored = undefined;
+      return { lockVersion: currentSeed.row.cardLockVersion };
+    });
+    await act(async () => {
+      await updateTechCardDocument({
+        id: row.techCardId,
+        techCard: changed,
+        expectedLockVersion: row.cardLockVersion,
+        snapshotReason: '',
+        saveSessionId: undefined,
+        guardedPieceRename: undefined,
+      });
+      expect(readSession()).toBeNull();
+      displayCurrentCard();
+      root.render(createElement(Harness));
+    });
+
+    const complete = await readCompleteSavedAssemblySourceV1(
+      ports,
+      currentSeed.row,
+      { expectedServerAssemblyRevision: currentRevision },
+      signal,
+    );
+    expect(complete.operations).toMatchObject([
+      { operationNumber, bomLineKeys: ['thread-after'], seamKeys: [seamKey] },
+    ]);
+    expect(complete.ownedSeams.map((seam) => seam.seamKey)).toEqual([seamKey]);
+    expect(complete.priorCarrier).toBeNull();
+    expect(currentSeed.row.sha256).toBe(row.sha256);
+    expect(
+      capturePatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1({
+        ...currentInputs(),
+        request: oldRequest,
+      }),
+    ).toMatchObject({ ok: false, blocker: { code: 'existing-linked-n1-source-size-invalid' } });
+    expect(puts).toHaveBeenCalledTimes(2);
+
+    await remount();
+    await waitForUnboundMount();
+    const freshRequest = await pickNativeEdges('native-n1-after-edit');
+    expect(freshRequest.authoringAuthority.row).toEqual(currentSeed.row);
+    expect(freshRequest.catalog.sourceFileId).toBe(oldRequest.catalog.sourceFileId);
+    // Even authentic old V1/V4 bytes are invalid under the new card lock and row revision.
+    for (const stale of [capturedV1[0]!, oldCarrier]) {
+      sidecarReadOverride = stale;
+      expect(
+        await bridge.restore(
+          {
+            schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_DURABLE_RESTORE_REQUEST_V1,
+            row: currentSeed.row,
+            selectedOperationNumber: operationNumber,
+            catalog: freshRequest.catalog,
+          },
+          signal,
+        ),
+      ).toMatchObject({
+        ok: false,
+        blocker: {
+          code: 'durable-restore-failed',
+          detail: 'Current semantic sidecar does not match the fresh saved-DXF row.',
+        },
+      });
+    }
+    sidecarReadOverride = undefined;
+    expect(readSession()).toBeNull();
+    expect(puts).toHaveBeenCalledTimes(2);
+    await act(async () => confirmCurrentSeam(freshRequest));
+    expect(puts).toHaveBeenCalledTimes(4);
+    expect(capturedV1).toHaveLength(2);
+    expect(capturedV1[1]!.sidecarSha256).not.toBe(capturedV1[0]!.sidecarSha256);
+    const nextV1 = JSON.parse(Buffer.from(capturedV1[1]!.sidecarBytes!, 'base64').toString());
+    expect(nextV1.persistence.card).toEqual({
+      techCardId: row.techCardId,
+      lockBasis: 'current-saved-row',
+      capturedLockVersion: currentSeed.row.cardLockVersion,
+      observedLockVersion: currentSeed.row.cardLockVersion,
+    });
+    expect(nextV1.product.exportSha256).toBe(row.sha256);
+    expect(readStored()?.sidecarSha256).not.toBe(oldCarrier.sidecarSha256);
+    expect(ports.UpdateTechCard).toHaveBeenCalledTimes(1);
+    const readsBeforeReload = guardedSnapshotReads;
+    await remount();
+    await restoreMounted('thread-after');
+    expect(guardedSnapshotReads).toBeGreaterThan(readsBeforeReload);
+    expect(puts).toHaveBeenCalledTimes(4);
+    expect(card.seams).toEqual(seams);
+  } finally {
+    await act(async () => root.unmount());
+    generation.dispose();
+    clearSession();
+    useSeamsStore.setState(priorSeamState);
+    vi.unstubAllGlobals();
+  }
+}, 20_000);
