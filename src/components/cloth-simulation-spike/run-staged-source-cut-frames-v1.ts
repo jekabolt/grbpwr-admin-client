@@ -3,6 +3,7 @@
 import { DEFAULT_MEASUREMENT_PARTITIONED_SURFACE_CONTACT_BUDGET_V1 } from 'lib/cloth/body/measurement-surface-self-intersection-v1';
 import { captureActualBodyTriangleGeometryV1 } from 'lib/cloth/body/actual-body-triangle-aabb-tree-v1';
 import {
+  MAXIMUM_LAYERED_CUT_RETREAT_WITNESSES_V1,
   MAXIMUM_LOCAL_CUT_RETREAT_WITNESSES_V1,
   MAXIMUM_LOCAL_CUT_WITNESSES_V1,
   retreatSourceCutWitnessMotionV1,
@@ -533,6 +534,9 @@ async function executeWindow(program: Program, input: FrameInput, signal?: Abort
             maxPairVisits: 4_000_000,
           }
         : undefined;
+    const retreatWitnessLimit = layeredCutBudget
+      ? MAXIMUM_LAYERED_CUT_RETREAT_WITNESSES_V1
+      : MAXIMUM_LOCAL_CUT_RETREAT_WITNESSES_V1;
     const checkContact = (positions: Float32Array) => {
       const clearance = body.validateFrame(garment, positions);
       const self = garment.validateSelfIntersection(positions, layeredCutBudget);
@@ -583,6 +587,14 @@ async function executeWindow(program: Program, input: FrameInput, signal?: Abort
         bodyPairsWithoutClearance: clearance.surface.unprovenPairCount,
         clothIntersections: self.intersectionCount,
         localBodyCutFaces,
+        ...(layeredCutBudget &&
+          program.enableLocalClothContactResponse &&
+          self.intersectionCount > MAXIMUM_LOCAL_CUT_RETREAT_WITNESSES_V1 &&
+          self.intersectionCount <= retreatWitnessLimit && {
+            layeredClothPairs: self.intersections.map(
+              ({ triangleA, triangleB }) => [triangleA, triangleB] as const,
+            ),
+          }),
         ...(contactWitnesses ? { contactWitnesses } : {}),
       };
     };
@@ -601,26 +613,33 @@ async function executeWindow(program: Program, input: FrameInput, signal?: Abort
     ) {
       let contact = initial;
       let heldParticles = new Set<number>();
-      for (let pass = 0; pass < 2; pass++) {
+      const maximumPasses =
+        layeredCutBudget && initial.clothIntersections > MAXIMUM_LOCAL_CUT_RETREAT_WITNESSES_V1
+          ? 4
+          : 2;
+      for (let pass = 0; pass < maximumPasses; pass++) {
         if (
           !contact.contactWitnesses ||
-          contact.clothIntersections > MAXIMUM_LOCAL_CUT_RETREAT_WITNESSES_V1 ||
+          contact.clothIntersections > retreatWitnessLimit ||
           ((contact.bodyIntersections || contact.bodyPairsWithoutClearance) &&
             !contact.localBodyCutFaces.length)
         )
           break;
         current();
         const witnesses = [
-          ...contact.contactWitnesses.cloth.map(({ triangles }) => triangles),
+          ...(contact.layeredClothPairs ??
+            contact.contactWitnesses.cloth.map(({ triangles }) => triangles)),
           ...contact.localBodyCutFaces.map((face) => [face] as const),
         ];
-        if (!witnesses.length || witnesses.length > MAXIMUM_LOCAL_CUT_RETREAT_WITNESSES_V1) break;
+        if (!witnesses.length || witnesses.length > retreatWitnessLimit) break;
         const next = retreatSourceCutWitnessMotionV1(
           garment,
           base,
           motion,
           witnesses,
           heldParticles,
+          // A dense contact patch must not freeze the entire garment.
+          layeredCutBudget ? Math.floor(base.length / 32) : undefined,
         );
         if (!next) break;
         heldParticles = next.heldParticles;

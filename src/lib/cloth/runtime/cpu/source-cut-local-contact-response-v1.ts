@@ -12,6 +12,7 @@ type Motion = {
 const axes = [0, 1, 2] as const;
 export const MAXIMUM_LOCAL_CUT_WITNESSES_V1 = 8;
 export const MAXIMUM_LOCAL_CUT_RETREAT_WITNESSES_V1 = 32;
+export const MAXIMUM_LAYERED_CUT_RETREAT_WITNESSES_V1 = 512;
 const MINIMUM_LOCAL_GAP_M = 0.000025;
 
 function subtract(a: Vec3, b: Vec3): Vec3 {
@@ -141,8 +142,13 @@ export function retreatSourceCutWitnessMotionV1(
   proposal: Motion,
   witnesses: readonly (readonly [number] | readonly [number, number])[],
   heldParticles: ReadonlySet<number>,
+  layeredHeldParticleLimit?: number,
 ) {
-  if (witnesses.length > MAXIMUM_LOCAL_CUT_RETREAT_WITNESSES_V1)
+  const maximumWitnesses =
+    layeredHeldParticleLimit === undefined
+      ? MAXIMUM_LOCAL_CUT_RETREAT_WITNESSES_V1
+      : MAXIMUM_LAYERED_CUT_RETREAT_WITNESSES_V1;
+  if (witnesses.length > maximumWitnesses)
     throw new RangeError('Too many cut witnesses for local motion retreat.');
   const offsets = new Set(heldParticles);
   for (const faces of witnesses) {
@@ -154,6 +160,8 @@ export function retreatSourceCutWitnessMotionV1(
       }
     }
   }
+  if (layeredHeldParticleLimit !== undefined && offsets.size > layeredHeldParticleLimit)
+    return undefined;
   if (offsets.size === heldParticles.size) return undefined;
   const positions = proposal.positionsMInvMass.slice();
   const previous = proposal.previousPositionsMInvMass.slice();
