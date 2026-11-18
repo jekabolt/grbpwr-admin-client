@@ -34,10 +34,8 @@
 //   ЦБ — ЗАПИСЬ, ОТВЕЧАЮЩАЯ СВЕРХ ДВУХ ОСЕЙ, бьёт арность: шаг с названным швом этикетки и ДВУМЯ
 //        входами получает «пришить этикетку», а не «join». Разводит их не второй список
 //        дискриминаторов, а сам резолв, спрошенный дважды;
-//   ЦК — КАТАЛОГ НЕ ПРИЕХАЛ: на снимке бандла ярусы те же и предложений столько же. Это ответ на
-//        вопрос §11 плана — заполняет ли `bundleItem` поле `machines` у работ режима `fixed`.
-//        Заполняет: без этого выборка по машинке вернула бы пусто и панель показала бы пустые
-//        кнопки вместо честного «каталог не приехал»;
+//   ЦК — при отказе каталога ярусы те же. Снимок включает работы 0437 и сохраняет порядок
+//        каталога среди работ, для которых записанная машинка допустима.
 //   ЦМЕНЬШЕ — ЗАПИСЬ СКАЗАЛА МЕНЬШЕ, А НЕ БОЛЬШЕ (дефект 1 ревью шва R7). Шаг без глагола и
 //        машинный шаг без машинки получали ЯРУС КАТАЛОГА — тот самый, чья фраза утверждает «запись
 //        говорит больше, чем каталог умеет назвать», то есть на этих двух формах ОБРАТНОЕ ИСТИНЕ.
@@ -59,6 +57,7 @@
 //                                                                 спрашивается у двоекодья
 //   node scripts/operation-ratify-probe.mjs --mutate-gap-dump      оба молчания записи снова валятся
 //                                                                 в ярус каталога
+//   node scripts/operation-ratify-probe.mjs --mutate-default-machine  скрыты работы, где машинка допустима, но не задана по умолчанию
 //   node scripts/operation-ratify-probe.mjs --mutate-note-twice    заметка шага вернулась в факты
 //                                                                 записи (и печатается дважды)
 //
@@ -137,6 +136,7 @@ const MUTATE_PRESS_PICKER = process.argv.includes('--mutate-press-picker');
 const MUTATE_PRINTED_OWN = process.argv.includes('--mutate-printed-own');
 const MUTATE_GAP_DUMP = process.argv.includes('--mutate-gap-dump');
 const MUTATE_NOTE_TWICE = process.argv.includes('--mutate-note-twice');
+const MUTATE_DEFAULT_MACHINE = process.argv.includes('--mutate-default-machine');
 
 const KNOWN_MUTATIONS = new Set([
   '--mutate-tier-a-arity',
@@ -146,6 +146,7 @@ const KNOWN_MUTATIONS = new Set([
   '--mutate-printed-own',
   '--mutate-gap-dump',
   '--mutate-note-twice',
+  '--mutate-default-machine',
 ]);
 const stray = process.argv
   .slice(2)
@@ -184,6 +185,8 @@ const PREFIX_BROKEN = `  if (kind?.id === DUMP_KIND_ID) {
 
 const WARN_FIX = `  if (item.token === SLIT_OVERCAST_WORK) out.warn = SLIT_WARN;`;
 const WARN_BROKEN = `  if (item.token === SLIT_OVERCAST_WORK) out.warn = '';`;
+const MACHINE_MATCH_FIX = '  return catalog.items.filter((w) => !w.retired && w.machines.includes(token));';
+const MACHINE_MATCH_BROKEN = '  return catalog.items.filter((w) => !w.retired && w.defaultMachine === token);';
 
 const PRESS_FIX = `  if (kind?.stateOnly) return silent('press-action-missing');`;
 const PRESS_BROKEN = `  if (kind?.stateOnly)
@@ -244,6 +247,8 @@ if (MUTATE_PRINTED_OWN) plugins.push(patcher([PRINTED_FIX, PRINTED_BROKEN]));
 if (MUTATE_GAP_DUMP)
   plugins.push(patcher([GAP_VERB_FIX, GAP_VERB_BROKEN], [GAP_MACHINE_FIX, GAP_MACHINE_BROKEN]));
 if (MUTATE_NOTE_TWICE) plugins.push(patcher([NOTE_FIX, NOTE_BROKEN]));
+if (MUTATE_DEFAULT_MACHINE)
+  plugins.push(patcher([MACHINE_MATCH_FIX, MACHINE_MATCH_BROKEN]));
 
 const outfile = resolve(REPO, `scripts/.operation-ratify-${process.pid}.mjs`);
 await esbuild({
@@ -729,7 +734,7 @@ head('ЦБ · назван шов этикетки — работа назван
 // ВОПРОС §11 ПЛАНА: заполняет ли снимок бандла поле `machines` у работ режима `fixed`. Если нет —
 // выборка по машинке при отказе каталога вернула бы пусто, и панель показала бы не «каталог не
 // приехал», а ровные пустые ярусы, неотличимые от честной дыры.
-head('ЦК · снимок бандла: ярусы те же, предложений столько же');
+head('ЦК · снимок бандла: те же ярусы и полный порядок работ для записанной машинки');
 {
   const off = ratifyCard(STEPS, BUNDLED_WORK_CATALOG);
   const offAt = (name) => off[STEPS.findIndex((s) => s.name.startsWith(name))];
@@ -740,15 +745,21 @@ head('ЦК · снимок бандла: ярусы те же, предложе�
     'F8: и ярлык свалки в снимке тот же, что в каталоге',
     offAt('F8').proposals[0].label,
   );
+  // The seed snapshot includes 0437's exact machine alternatives, including non-default ones.
+  const overlock = offAt('F6').proposals.map((p) => p.token);
   ck(
-    offAt('F6').proposals.length === 1 && offAt('F6').proposals[0].token === 'overlock_serge',
-    'F6: у работы режима fixed есть машинка — выборка её находит',
-    offAt('F6').proposals.map((p) => p.token).join(' | '),
+    overlock.join('|') === [
+      'overlock_serge', 'rib_binding', 'set_cuff', 'set_sleeve', 'attach_hood', 'attach_rib',
+      'stay_tape_shoulder',
+    ].join('|'),
+    'F6: оверлок находит обычную обмётку и работы 0437 в порядке каталога',
+    overlock.join(' | '),
   );
+  const zigzag = offAt('F7').proposals.map((p) => p.token);
   ck(
-    offAt('F7').proposals.map((p) => p.token).join('|') === 'zigzag|slit_overcast',
-    'F7: обе работы зигзага доехали (одна выведена, вторая — дельта 0331)',
-    offAt('F7').proposals.map((p) => p.token).join(' | '),
+    zigzag.join('|') === 'zigzag|slit_overcast|applique|attach_patch',
+    'F7: зигзаг находит прорезь, аппликацию и нашивку в порядке каталога',
+    zigzag.join(' | '),
   );
   ck(offAt('F2').proposals.length === 0, 'F2: ВТО без приёма молчит и без каталога');
   ck(offAt('F5').proposals.length === 0, 'F5: дыра каталога остаётся дырой');
