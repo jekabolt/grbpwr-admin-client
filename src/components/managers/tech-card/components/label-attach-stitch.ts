@@ -1,13 +1,13 @@
 // HOW A LABEL IS ATTACHED IS ASKED ONCE (J1, owner 13.11): «сделать в лейбле настройку пришива чтоб
 // она подхватывала оттуда в операцию». The label row's ATTACHMENT is the fact; the «attach label» step
 // (work `attach_label`) shows it and no longer asks. The step's stored `label_attach_stitch` stays —
-// the server prices the step by it — and is filled from the linked label on every save.
+// the server prices the step by it — and follows the label when its attachment or the link changes.
 //
 // A step with no label linked keeps what it stored (old steps carry a stitch and no link; the value
 // is not wiped). Two linked labels: the first sewn one in the step's link order decides the stored
 // value; the screen shows each label's own fact.
 
-import type { common_TechCardLabelAttachStitch } from 'api/proto-http/admin';
+import type { common_TechCardInsert, common_TechCardLabelAttachStitch } from 'api/proto-http/admin';
 
 export const ATTACH_LABEL_WORK = 'attach_label';
 export const LABEL_STITCH_UNKNOWN: common_TechCardLabelAttachStitch =
@@ -50,6 +50,15 @@ export function stitchForAttachment(
 
 export type StitchLabel = { lineKey?: string; attachment?: string; foldAxis?: string };
 
+type LabelStitchStep = Readonly<{
+  operationNumber?: number;
+  work?: string;
+  labelAttachStitch?: string;
+  labelKeys?: readonly string[];
+}>;
+
+type SavedLabelStitchSource = Pick<common_TechCardInsert, 'garmentLabels' | 'operations'>;
+
 /** The labels a step links (`labelKeys` = the labels' own line keys), in the step's link order. */
 export function linkedLabels<L extends StitchLabel>(
   labelKeys: readonly string[] | undefined,
@@ -64,17 +73,42 @@ export function linkedLabels<L extends StitchLabel>(
   return out;
 }
 
-/**
- * What an «attach label» step stores as its stitch on save. Any other step keeps its own value
- * untouched; so does a label step that links no label, or only labels with no attachment yet.
- */
+/** Applies the linked label's attachment when the operator changes its inputs. */
 export function stepLabelStitch(
-  step: { work?: string; labelAttachStitch?: string; labelKeys?: readonly string[] },
+  step: LabelStitchStep,
   labels: readonly StitchLabel[] | undefined,
+  original?: SavedLabelStitchSource,
 ): string {
   const stored = step.labelAttachStitch || LABEL_STITCH_UNKNOWN;
   if ((step.work ?? '').trim() !== ATTACH_LABEL_WORK) return stored;
   const linked = linkedLabels(step.labelKeys, labels);
+  // Unrelated saves preserve the stitch on existing steps, even when an imported label and its
+  // operation disagree. New steps and changes to the linked attachment still follow the label.
+  const priorSteps = original?.operations?.filter(
+    ({ operationNumber }) => step.operationNumber && operationNumber === step.operationNumber,
+  );
+  const prior = priorSteps?.length === 1 ? priorSteps[0] : undefined;
+  const keys = (step.labelKeys ?? []).map((key) => key.trim());
+  const priorKeys = (prior?.labelKeys ?? []).map((key) => key.trim());
+  if (
+    prior?.work?.trim() === ATTACH_LABEL_WORK &&
+    keys.length === priorKeys.length &&
+    keys.every((key, index) => key === priorKeys[index])
+  ) {
+    const priorLinked = linkedLabels(priorKeys, original?.garmentLabels);
+    if (
+      linked.length === priorLinked.length &&
+      linked.every(({ lineKey, attachment, foldAxis }, index) => {
+        const previous = priorLinked[index];
+        return (
+          lineKey?.trim() === previous.lineKey?.trim() &&
+          (attachment ?? '').trim() === (previous.attachment ?? '').trim() &&
+          (foldAxis === 'width') === (previous.foldAxis === 'width')
+        );
+      })
+    )
+      return stored;
+  }
   // A label that says nothing yet (blank attachment) is not a fact: the stored stitch stays.
   if (linked.every((l) => !(l.attachment ?? '').trim())) return stored;
   for (const l of linked) {

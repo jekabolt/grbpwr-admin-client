@@ -4189,10 +4189,11 @@ export function mapFormToTechCardInsert(
         // молча при первом же сохранении шага, у которого класс шва поменяли.
         bindingStyle: (o.bindingStyle ||
           'TECH_CARD_BINDING_STYLE_UNKNOWN') as common_TechCardBindingStyle,
-        // J1: an «attach label» step takes its stitch from the label it links (label-attach-stitch).
+        // J1: link or attachment edits update the step's stitch; unrelated saves preserve it.
         labelAttachStitch: stepLabelStitch(
-          { work: o.work, labelAttachStitch: o.labelAttachStitch, labelKeys: o.labelKeys },
+          o,
           data.garmentLabels,
+          original,
         ) as common_TechCardLabelAttachStitch,
       }));
       const placementLayout = blockOut(() => ({
