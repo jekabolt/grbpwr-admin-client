@@ -1,3 +1,4 @@
+import { resolveStrictSeamUpsertReceipt } from '../../assembly-seams/use-seam-decisions';
 import type { common_TechCard } from 'api/proto-http/admin';
 import { describe, expect, it, vi } from 'vitest';
 import { fromWire, toWire, type StoredPose, type StoredSeam } from 'lib/seams';
@@ -1025,6 +1026,28 @@ describe('existing saved one-physical-seam operation exact rebind', () => {
         freshCard,
       }),
     ).toMatchObject({ ok: true, seamKey: fixture.seam.seamKey, operationNumber: 30 });
+    // Source-fingerprint staleness is a server read verdict. The seam key, anchors and accepted lock can all agree.
+    const staleWire = { ...toWire(persisted), stale: true };
+    const staleEcho = resolveStrictSeamUpsertReceipt(
+      [persisted],
+      [staleWire],
+      accepted.lockVersion,
+    );
+    expect(staleEcho).toMatchObject({ ok: false, outcome: 'acknowledged-unverified' });
+
+    const staleReadback = verifyPatternImportDxfPhaseEZeroConnectExistingLinkedN1ReadbackV1({
+      pending: captured.pending,
+      accepted,
+      expectedSeam: persisted,
+      freshCard: {
+        ...freshCard,
+        seams: [staleWire, toWire(fixture.pose)] as NonNullable<common_TechCard['seams']>,
+      },
+    });
+    expect(staleReadback).toMatchObject({
+      ok: false,
+      blocker: { code: 'existing-linked-n1-readback-mismatch' },
+    });
     freshCard.techCard!.operations![0]!.inputKeys = ['unexpected'];
     expect(
       verifyPatternImportDxfPhaseEZeroConnectExistingLinkedN1ReadbackV1({

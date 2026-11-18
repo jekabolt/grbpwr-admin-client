@@ -11,7 +11,12 @@ import { createPatternsConfirmedSessionLifecycleV1 } from './patterns-confirmed-
 import { readPatternImportDxfPhaseECardSessionV1 } from './phase-e-workbench-card-session-v1';
 import { preparePatternImportDxfPhaseECadTableZeroOperationFreshV1 } from './phase-e-workbench-v2/cad-table-zero-operation-fresh-preparation-v1';
 import { createPatternImportDxfPhaseECadTableZeroOperationGenerationOwnerV1 } from './phase-e-workbench-v2/cad-table-zero-operation-generation-owner-v1';
-import { preparePatternImportDxfPhaseECadTableZeroOperationSavedFailoverV1 } from './phase-e-workbench-v2/cad-table-zero-operation-production-mount-v1';
+import { capturePatternImportDxfPhaseECadTableZeroOperationSavedRebindExpectationV1 } from './phase-e-workbench-v2/cad-table-zero-operation-authority-rebind-v1';
+import { preparePatternImportDxfPhaseECadTableZeroOperationSavedV1 } from './phase-e-workbench-v2/cad-table-zero-operation-saved-preparation-v1';
+import {
+  createPatternImportDxfPhaseECadTableZeroOperationAuthoringRefreshV1,
+  preparePatternImportDxfPhaseECadTableZeroOperationSavedFailoverV1,
+} from './phase-e-workbench-v2/cad-table-zero-operation-production-mount-v1';
 import { createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1 } from './phase-e-workbench-v2/zero-operation-saved-card-authority-v1';
 import { verifyLinkedN1FromGenuineImportFixture } from './phase-e-workbench-v2/cad-table-existing-linked-n1-finalize-v1.test-fixture';
 import { buildPatternImportDxfPhaseESavedCardContextV1 } from './phase-e-workbench-v2/saved-card-production-projection-v1';
@@ -298,6 +303,84 @@ it.each([
         readTechCard: async () => (await service.GetTechCard()).techCard,
       });
       const generationOwner = createPatternImportDxfPhaseECadTableZeroOperationGenerationOwnerV1();
+      if (tokens.length > 1) {
+        const sourceSurface = 'explicit-native-drawn-sewing' as const;
+        const base = await preparePatternImportDxfPhaseECadTableZeroOperationSavedV1({
+          techCard: card,
+          orderSizeIds,
+          sizeNameById,
+          scopeKey: 'main',
+          sizeToken: 'M',
+          sourceSurface,
+          authority: savedAuthority,
+          generation: generationOwner.beginFresh(
+            'ac46-confirmed-seam-source',
+            session!.importGeneration,
+          ),
+        });
+        if (!base.ok) throw new Error(base.blocker.detail);
+        expect(base.authoringAuthority.row.sha256).toBe(savedSha);
+        const expectation =
+          capturePatternImportDxfPhaseECadTableZeroOperationSavedRebindExpectationV1(base);
+        const beforeWrite = (
+          prepareSaved: typeof preparePatternImportDxfPhaseECadTableZeroOperationSavedV1,
+        ) =>
+          createPatternImportDxfPhaseECadTableZeroOperationAuthoringRefreshV1({
+            prepared: base,
+            expectation,
+            savedAuthority,
+            preparationKey: 'ac46-before-existing-writer',
+            orderSizeIds,
+            sizeNameById,
+            sourceSurface,
+            prepareSaved,
+          })!;
+        const sizeSwap = vi.fn<typeof preparePatternImportDxfPhaseECadTableZeroOperationSavedV1>(
+          async (request, signal) => {
+            const other = await preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
+              { ...request, sizeToken: 'L' },
+              signal,
+            );
+            return other;
+          },
+        );
+        const rejectedSize = await beforeWrite(sizeSwap).refresh(
+          new AbortController().signal,
+          'current',
+        );
+        expect(rejectedSize).toMatchObject({ ok: false, authority: null });
+        expect(sizeSwap).toHaveBeenCalledOnce();
+        const other = await sizeSwap.mock.results[0]!.value;
+        if (!other.ok) throw new Error(other.blocker.detail);
+        expect(other.authoringAuthority.row).toEqual(base.authoringAuthority.row);
+        expect(other.catalog.sizeSelectionCanonicalSha256).not.toBe(
+          base.catalog.sizeSelectionCanonicalSha256,
+        );
+        const changed = structuredClone(session!.draft.scopes[0]!.writerReplay!.job);
+        const large = changed.pieces[0]!.sizes.find((s) => s.sizeToken === 'L')!;
+        large.cut = large.cut.map((p) => ({ ...p, x: p.x * 1.1 }));
+        if (large.seam) large.seam = large.seam.map((p) => ({ ...p, x: p.x * 1.1 }));
+        const changedBytes = new TextEncoder().encode(writeDxfDetailed(changed).dxfText);
+        const changedCard = structuredClone(card),
+          changedPattern = changedCard.techCard!.patterns![0]!;
+        changedPattern.sha256 = await digestFullAssemblyFixture(changedBytes);
+        changedPattern.sizeBytes = changedBytes.length;
+        changedPattern.savedRowRevision = Number(changedPattern.savedRowRevision) + 1;
+        changedPattern.version = Number(changedPattern.version) + 1;
+        service.GetTechCard.mockResolvedValueOnce({
+          techCard: changedCard,
+          patternViewerToken: '',
+        });
+        const shouldNotPrepare = vi.fn(preparePatternImportDxfPhaseECadTableZeroOperationSavedV1);
+        const rejectedGeometry = await beforeWrite(shouldNotPrepare).refresh(
+          new AbortController().signal,
+          'current',
+        );
+        expect(rejectedGeometry).toMatchObject({ ok: false, authority: null });
+        expect(shouldNotPrepare).not.toHaveBeenCalled();
+        expect(upload).toHaveBeenCalledTimes(1);
+        expect(service.PutTechCardPatternSemanticSidecar).not.toHaveBeenCalled();
+      }
       const selectGeometry = () =>
         preparePatternImportDxfPhaseECadTableZeroOperationSavedFailoverV1({
           fresh,

@@ -215,6 +215,12 @@ export function resolveStrictSeamUpsertReceipt(
         `The seam write echo contains multiple rows for the submitted pair ${row.seamKey}.`,
         'acknowledged-unverified',
       );
+    if (row.status === 'confirmed' && matches[0]!.stale)
+      return strictUpsertBlocked(
+        'receipt-missing',
+        'The saved source has changed since this seam was anchored.',
+        'acknowledged-unverified',
+      );
     resolved.push(matches[0]);
   }
   return Object.freeze({

@@ -717,7 +717,8 @@ export function verifyPatternImportDxfPhaseEZeroConnectExistingLinkedN1ReadbackV
     operations.length !== target.operationCount ||
     operationTopologyFingerprint(operations) !== target.operationsTopologyFingerprint ||
     !stored ||
-    (resume && (stored.stale || seamFingerprint(stored) !== target.originalSeamFingerprint)) ||
+    stored.stale ||
+    (resume && seamFingerprint(stored) !== target.originalSeamFingerprint) ||
     !storedSemanticsMatch(expectedSeam, stored)
   )
     return blockedReadback(
