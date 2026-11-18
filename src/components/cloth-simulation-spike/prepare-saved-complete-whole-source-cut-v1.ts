@@ -1,3 +1,10 @@
+import type { SavedCompleteNativeStitchAnchorV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-complete-assembly-native-stitch-anchors-v1';
+import {
+  projectSavedNativeStitchRegistrationV1,
+  type SavedNativeStitchRegistrationV1,
+} from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-native-stitch-registration-v1';
+import { canonicalizePatternImportDxfPhaseESavedAssemblyValueV1 as canonical } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-assembly-topology-hash-v1';
+import { compileSourceCutRegisteredStitchPairsV1 } from 'lib/cloth/compiler/source-cut-registered-stitch-pairs-v1';
 import type { SavedWholeAssemblyPlacementLayoutV10 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-whole-assembly-placement-document-v10';
 import { prepareSourceCutSurfaceProjectionV1 } from 'lib/cloth/runtime/cpu/source-cut-surface-projection-v1';
 import {
@@ -25,7 +32,7 @@ export type SavedCompleteWholeSourceCutV1 = Readonly<{
     grain?: Readonly<{ angleDegrees: number }> | null;
   }>[];
   operations: readonly Readonly<{ operationNumber: number }>[];
-  spans: readonly Readonly<{ operationOrder: number; operationNumber: number }>[];
+  spans: readonly SavedCompleteNativeStitchAnchorV1[];
   labelAnchors: readonly Readonly<{
     operationOrder: number;
     operationNumber: number;
@@ -46,6 +53,10 @@ type SealedWholeSourceCutFixtureV1 = Readonly<{
   carrierSha256: string;
   candidateSha256: string;
   coverage?: 'all-native-cuts';
+  exactFabricStitchRegistrations?: Readonly<{
+    sampling: Parameters<typeof compileSourceCutRegisteredStitchPairsV1>[1];
+    seams: readonly SavedNativeStitchRegistrationV1[];
+  }>;
 }>;
 
 export type RestoredWholeSourceCutPlacementV1 = Readonly<{
@@ -124,6 +135,32 @@ function labelCorners(outline: readonly (readonly [number, number])[]) {
   });
 }
 
+function verifyRegisteredMaterialPairs(
+  source: SavedCompleteWholeSourceCutV1,
+  candidatePairs: Candidate['pairs'],
+  manifest: SealedWholeSourceCutFixtureV1['exactFabricStitchRegistrations'],
+  signal?: AbortSignal,
+) {
+  if (!manifest) return;
+  if (!manifest.seams.length)
+    throw new RangeError('The diagnostic carrier has an empty fabric stitch registration.');
+  const stitches = manifest.seams.map((registration) => {
+    const projected = projectSavedNativeStitchRegistrationV1(source.spans, registration);
+    if (
+      source.operations[projected.operationOrder]?.operationNumber !== registration.operationNumber
+    )
+      throw new RangeError('The registered stitch no longer belongs to its saved operation.');
+    // The staged solver labels the ordered stages with the saved operation numbers.
+    return { ...projected, operationOrder: registration.operationNumber };
+  });
+  stitches.sort((a, b) => a.operationOrder - b.operationOrder);
+  const compiled = compileSourceCutRegisteredStitchPairsV1(stitches, manifest.sampling, signal);
+  const keys = new Set(stitches.map(({ seamId }) => seamId));
+  const retained = candidatePairs.filter(({ seamId }) => keys.has(seamId));
+  if (canonical(compiled) !== canonical(retained))
+    throw new RangeError('The diagnostic stations differ from their registered native parts.');
+}
+
 /** Bind the diagnostic pants placement to the exact saved source before using the existing solver. */
 export async function prepareSavedCompleteWholeSourceCutV1(
   input: Readonly<{
@@ -175,6 +212,7 @@ export async function prepareSavedCompleteWholeSourceCutV1(
     throw new RangeError('The sealed diagnostic pants placement has changed.');
   requireCurrent();
   const data = JSON.parse(new TextDecoder().decode(bytes)) as Candidate;
+  verifyRegisteredMaterialPairs(source, data.pairs, fixture.exactFabricStitchRegistrations, signal);
   const cuts = new Map<string, Cut>(
     data.cuts.map(([id, entry]) => [
       id,
