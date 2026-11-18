@@ -16,6 +16,7 @@ import {
   type SavedAddPointReviewOwner,
 } from './draft-cad-saved-add-point-review-v1';
 import type { SavedDraftPairedAllowanceAuthorityV1 } from './draft-cad-paired-allowance-authority-v1';
+import type { SavedRankedPointReviewV1 } from './draft-cad-saved-ranked-point-review-v1';
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 import type { DxfProductPhaseDSizeSelectionResultV1 } from 'lib/pattern-import/dxf-product-phase-d-size-selection-v1';
 import {
@@ -61,6 +62,7 @@ import { stagePatternImportDxfPhaseECadSemanticCompiledArtifactV1 } from './cad-
 import {
   PATTERN_IMPORT_DXF_PHASE_E_CAD_COMMAND_COMPILED_REIMPORT_HANDOFF_V1,
   guardPatternImportDxfPhaseECadCommandCompiledReimportCurrentV1,
+  openSavedRankedPointInPatternsV1,
   readPatternImportDxfPhaseECadCommandCompiledReimportCapabilityV1,
   refusePatternImportDxfPhaseECadCommandCompiledReimportV1,
   requestPatternImportDxfPhaseECadCommandCompiledReimportV1,
@@ -177,6 +179,7 @@ export type PatternImportDxfPhaseEDraftCadWorkspacePropsV1 = Readonly<{
   prepareSavedJoin?: PrepareJoin;
   prepareSavedPieceCopyReview?: PrepareSavedCopyReviewV1;
   prepareSavedAddPointReview?: () => Promise<SavedAddPointReviewOwner>;
+  prepareSavedRankedPointReview?: () => Promise<SavedRankedPointReviewV1 | null>;
   prepareSavedDartTip?: () => ReturnType<
     typeof import('./draft-cad-saved-dart-tip-review-v1').compileSavedDartTipReviewV1
   >;
@@ -220,6 +223,7 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
   activeMaterialScopeKey,
   confirmedImportGeneration = 0,
   prepareSavedAddPointReview,
+  prepareSavedRankedPointReview,
   prepareSavedPairedAllowance,
   prepareSavedDartTip,
   prepareSavedGeometryReview = prepareSavedDartTip,
@@ -518,6 +522,42 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
     setPendingCompiledReimport(null);
     setCompiledReimportResult(null);
     const input = { session, projection, selection, compileSource };
+    if (
+      prepareSavedRankedPointReview &&
+      session.history
+        .slice(0, session.cursor)
+        .some(({ commands }) => commands.some(({ tool }) => tool === 'draft-point'))
+    ) {
+      setCompileState(null);
+      try {
+        const review = await prepareSavedRankedPointReview();
+        if (compiledReimportEpoch.current !== epoch) return;
+        if (review) {
+          openSavedRankedPointInPatternsV1(compileSource.techCardId, review);
+          return;
+        }
+      } catch (error) {
+        if (compiledReimportEpoch.current === epoch)
+          setCompileState(
+            executePatternImportDxfPhaseEDraftCadCompileUiActionV1(input, () => ({
+              ok: false,
+              artifact: null,
+              blockers: [
+                {
+                  code: 'source-binding-mismatch',
+                  commandId: null,
+                  tool: 'draft-point',
+                  detail:
+                    error instanceof Error
+                      ? error.message
+                      : 'The saved size edit could not be reviewed.',
+                },
+              ],
+            })),
+          );
+        return;
+      }
+    }
     const result = await compileDraftForOrdinaryReviewV1(
       input,
       prepareSavedAddPointReview,

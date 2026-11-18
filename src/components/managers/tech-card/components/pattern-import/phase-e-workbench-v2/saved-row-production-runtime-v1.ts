@@ -1,7 +1,9 @@
 import type { NativePieceCopyMode } from 'lib/pattern-import/fabrics/native-piece-copy-review';
 import type { CopyReview, SavedCopyCurrentV1 } from './draft-cad-unlinked-piece-copy-review-v1';
 import { DXF_PRODUCT_SAVED_REPROCESS_REQUEST_V1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
+import { DXF_PRODUCT_SAVED_FOREIGN_REPROCESS_REQUEST_V1 } from 'lib/pattern-import/dxf-product-saved-foreign-reprocess-owner-v1';
 import {
+  createDxfProductSavedForeignNativeReprocessOwnerV1,
   createDxfProductSavedNativeReprocessOwnerV1,
   DXF_PRODUCT_SAVED_NATIVE_COMPILER_SOURCE_REQUEST_V1,
 } from 'lib/pattern-import/dxf-product-saved-native-reprocess-owner-v1';
@@ -19,6 +21,8 @@ import {
 import { createPatternImportDxfPhaseESavedDxfReprocessHostV1 } from './saved-dxf-reprocess-host-v1';
 import { createPatternImportDxfPhaseESavedRowPreparationOwnerV1 } from './saved-row-preparation-owner-v1';
 import type { SavedDraftPairedAllowanceAuthorityV1 } from './draft-cad-paired-allowance-authority-v1';
+import type { SavedRankedPointReviewV1 } from './draft-cad-saved-ranked-point-review-v1';
+import { sameSavedDraftRowV1 } from './draft-cad-saved-source-selection-v1';
 
 export const PATTERN_IMPORT_DXF_PHASE_E_SAVED_ROW_PRODUCTION_RUNTIME_V1 =
   'pattern-import-dxf-phase-e-saved-row-production-runtime/1' as const;
@@ -78,6 +82,10 @@ export type PatternImportDxfPhaseESavedRowProductionRuntimeV1 = Readonly<{
     row: DxfProductSavedRowIdentityV1,
     readCurrent: () => Omit<SavedAddPointCurrentV1, 'card'> | null,
   ) => Promise<SavedAddPointReviewOwner>;
+  prepareSavedRankedPointReview?: (
+    row: DxfProductSavedRowIdentityV1,
+    readCurrent: () => Omit<SavedAddPointCurrentV1, 'card'> | null,
+  ) => Promise<SavedRankedPointReviewV1 | null>;
   prepareSavedDartTip?: (
     row: DxfProductSavedRowIdentityV1,
     readCurrent: () => Omit<SavedAddPointCurrentV1, 'card'> | null,
@@ -186,9 +194,7 @@ export function createPatternImportDxfPhaseESavedRowRuntimeV1(
   const resolveCard = createPatternImportDxfPhaseESavedRowCardProjectionResolverV1(deps.projection);
   const crypto = deps.crypto ?? globalThis.crypto;
   let disposed = false;
-  const liveHosts = new Set<
-    ReturnType<typeof createPatternImportDxfPhaseESavedDxfReprocessHostV1>
-  >();
+  const liveHosts = new Set<{ dispose: () => void }>();
 
   const createSavedReprocessHost = (requiredStablePiece?: string) => {
     if (disposed) throw new Error('Saved-row production runtime is disposed.');
@@ -230,24 +236,61 @@ export function createPatternImportDxfPhaseESavedRowRuntimeV1(
       card: CardContext,
       readCurrentRow: () => Promise<DxfProductSavedRowIdentityV1>,
     ) => Promise<T>,
+    allowForeign = false,
   ): Promise<T> {
     const host = createSavedReprocessHost(stablePiece);
     const signal = new AbortController().signal;
     const sourceBytes: { current: Uint8Array | null } = { current: null };
-    const owner = createDxfProductSavedNativeReprocessOwnerV1({
-      ...host,
-      async readAuthoritativeRow(expected, signal, progress) {
-        const loaded = await host.readAuthoritativeRow(expected, signal, progress);
+    const captureBytes =
+      (read: typeof host.readAuthoritativeRow): typeof host.readAuthoritativeRow =>
+      async (expected, signal, progress) => {
+        const loaded = await read(expected, signal, progress);
+        sourceBytes.current?.fill(0);
         sourceBytes.current = loaded.bytes.slice();
         return loaded;
-      },
+      };
+    const owner = createDxfProductSavedNativeReprocessOwnerV1({
+      ...host,
+      readAuthoritativeRow: captureBytes(host.readAuthoritativeRow),
     });
+    let disposeForeign: (() => void) | undefined;
     try {
       const card = (await resolveCard(row, signal)).card;
-      const read = await owner.run({
+      let read = await owner.run({
         schemaVersion: DXF_PRODUCT_SAVED_REPROCESS_REQUEST_V1,
         row,
       });
+      if (allowForeign && !read.ok && read.blockers[0].code === 'foreign-saved-dxf-detected') {
+        owner.dispose();
+        host.dispose();
+        if (disposed) throw new Error('The saved Draft runtime has closed.');
+        const { createPatternImportDxfPhaseEForeignSavedDxfReprocessHostV1 } = await import(
+          './foreign-saved-dxf-reprocess-host-v1'
+        );
+        if (disposed) throw new Error('The saved Draft runtime has closed.');
+        const foreignHost = createPatternImportDxfPhaseEForeignSavedDxfReprocessHostV1({
+          resolveCard,
+          nativeSewingReplay: true,
+          requiredStablePiece: stablePiece,
+          readAuthoritativeRow: deps.snapshot.bridge.readAuthoritativeRow,
+          ...(deps.fetch ? { fetch: deps.fetch } : {}),
+          ...(crypto ? { crypto } : {}),
+        });
+        liveHosts.add(foreignHost);
+        const foreignOwner = createDxfProductSavedForeignNativeReprocessOwnerV1({
+          ...foreignHost,
+          readAuthoritativeRow: captureBytes(foreignHost.readAuthoritativeRow),
+        });
+        disposeForeign = () => {
+          foreignOwner.dispose();
+          foreignHost.dispose();
+          liveHosts.delete(foreignHost);
+        };
+        read = await foreignOwner.run({
+          schemaVersion: DXF_PRODUCT_SAVED_FOREIGN_REPROCESS_REQUEST_V1,
+          row,
+        });
+      }
       if (!read.ok) throw new Error(read.blockers[0].detail);
       if (!sourceBytes.current) throw new Error('The verified saved DXF bytes are unavailable.');
       return await prepare(
@@ -278,6 +321,7 @@ export function createPatternImportDxfPhaseESavedRowRuntimeV1(
       );
     } finally {
       sourceBytes.current?.fill(0);
+      disposeForeign?.();
       owner.dispose();
       host.dispose();
     }
@@ -328,6 +372,39 @@ export function createPatternImportDxfPhaseESavedRowRuntimeV1(
     schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_SAVED_ROW_PRODUCTION_RUNTIME_V1,
     preparationOwner,
     consumeConfirmedCompilerSource: preparationOwner.consumeConfirmedCompilerSource,
+    async prepareSavedRankedPointReview(row, readCurrent) {
+      const opening = readCurrent();
+      const point = opening?.session.history
+        .slice(0, opening.session.cursor)
+        .flatMap(({ commands }) => commands)
+        .find((command) => command.tool === 'draft-point');
+      if (!opening || !point) return null;
+      if (!sameSavedDraftRowV1(row, opening.row)) throw new Error('The saved Draft row changed.');
+      return withSavedDraftSource(
+        row,
+        point.target.pieceId,
+        async (proof, card, readCurrentRow) => {
+          const { prepareSavedRankedPointReviewV1 } = await import(
+            './draft-cad-saved-ranked-point-review-v1'
+          );
+          return prepareSavedRankedPointReviewV1({
+            ...proof,
+            readCurrent: () => {
+              const current = readCurrent();
+              return !disposed &&
+                current?.session === opening.session &&
+                current.generation === opening.generation &&
+                current.sizeToken === opening.sizeToken &&
+                sameSavedDraftRowV1(row, current.row)
+                ? { ...current, card }
+                : null;
+            },
+            readCurrentRow,
+          });
+        },
+        true,
+      );
+    },
     async prepareSavedAddPointReview(row, readCurrent) {
       const opening = readCurrent(),
         command = opening?.session.history[0]?.commands[0];

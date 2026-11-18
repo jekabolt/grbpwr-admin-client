@@ -519,8 +519,17 @@ type FormPiece = NonNullable<TechCardFormData['pieces']>[number] & {
 };
 type FormAlias = NonNullable<TechCardFormData['pieceDxfAliases']>[number];
 type FormOp = NonNullable<TechCardFormData['operations']>[number];
+type RankedPointReview = ReturnType<
+  typeof import('./pattern-import/phase-e-workbench-v2/draft-cad-saved-ranked-point-review-v1').readSavedRankedPointReviewV1
+>;
 type OccupiedAsk =
-  | { kind: 'files'; scopeKey: string; files: File[]; target: string }
+  | {
+      kind: 'files';
+      scopeKey: string;
+      files: File[];
+      target: string;
+      rankedPoint?: RankedPointReview;
+    }
   | { kind: 'move'; scopeKey: string; rowId: string }
   | { kind: 'purpose'; scopeKey: string; nextPurpose: string };
 type OccupiedVersion = { current?: PatternRow; incomingNames: string[] };
@@ -1017,6 +1026,8 @@ export function PatternsField({
   const [reuploadFeedback, setReuploadFeedback] = useState<Record<string, ReuploadFeedback>>({});
   // Every operation that would put a second active row in a slot stops at the same choice.
   const [occupiedAsk, setOccupiedAsk] = useState<OccupiedAsk | null>(null);
+  const occupiedAskRef = useRef(occupiedAsk);
+  occupiedAskRef.current = occupiedAsk;
   const [interliningAsk, setInterliningAsk] = useState<InterliningUploadAsk | null>(null);
   const occupiedCancelRef = useRef<HTMLButtonElement>(null);
   // Open the pieces viewer of this slot as soon as the form holds these sheet urls.
@@ -1740,7 +1751,12 @@ export function PatternsField({
       readConfirmedImportGeneration: () =>
         readPatternImportDxfPhaseECardSessionV1(techCardId)?.importGeneration ?? 0,
       scopeAvailable: (scopeKey) => Boolean(resolveScope(scopeKey)),
-      reviewAlreadyOpen: () => importingRef.current !== null,
+      reviewAlreadyOpen: () => {
+        const pending = occupiedAskRef.current;
+        return (
+          importingRef.current !== null || (pending?.kind === 'files' && !!pending.rankedPoint)
+        );
+      },
       openExistingImportReview: ({ scopeKey, files, requireManualApply, savedCopyFile }) => {
         const scope = resolveScope(scopeKey);
         if (!scope || importingRef.current)
@@ -1749,6 +1765,21 @@ export function PatternsField({
         importingRef.current = next;
         setPickedKey(scope.key);
         setImporting(next);
+      },
+      openExistingRankedPointReview: (rankedPoint) => {
+        const scope = resolveScope(rankedPoint.row.scopeKey);
+        if (!scope || importingRef.current || occupiedAskRef.current || !rankedPoint.isCurrent())
+          throw new Error('The current saved pattern review is unavailable.');
+        const pending = {
+          kind: 'files' as const,
+          scopeKey: scope.key,
+          files: [rankedPoint.file],
+          target: rankedPoint.row.patternLineKey,
+          rankedPoint,
+        };
+        occupiedAskRef.current = pending;
+        setPickedKey(scope.key);
+        setOccupiedAsk(pending);
       },
     });
   }, [techCardId]);
@@ -2357,6 +2388,7 @@ export function PatternsField({
     scopeKey: string,
     picked: File,
     target?: string,
+    rankedPoint?: RankedPointReview,
   ): Promise<ReuploadOutcome<FormPiece, FormAlias, FormOp>['kind']> {
     const sc = scopeOfKey(scopeKey);
     if (!sc || !slotHasSheet(scopeKey)) return 'first';
@@ -2427,7 +2459,22 @@ export function PatternsField({
     const before = inputsSig(allSeams);
     const pieces = piecesNow();
     let out: ReuploadOutcome<FormPiece, FormAlias, FormOp>;
-    const deps = reuploadDeps(scopeKey, picked.type);
+    const baseDeps = reuploadDeps(scopeKey, picked.type);
+    const deps: typeof baseDeps = rankedPoint
+      ? {
+          ...baseDeps,
+          requireUnchangedCardStructure: true,
+          upload: (file) => {
+            if (
+              !rankedPoint.isCurrent() ||
+              inputsSig() !== before ||
+              scopeSig(scopeKey) !== slotSig
+            )
+              throw new Error('The saved pattern changed. Review the current size again.');
+            return baseDeps.upload(file);
+          },
+        }
+      : baseDeps;
     beginReupload(scopeKey, target);
     bumpUploading(scopeKey, 1);
     try {
@@ -2553,9 +2600,11 @@ export function PatternsField({
       say('not applied', 'error');
       return 'refused';
     }
-    setValue('pieces', out.pieces, { shouldDirty: true });
-    setValue('pieceDxfAliases', out.aliases, { shouldDirty: true });
-    setValue('operations', out.operations, { shouldDirty: true });
+    if (!rankedPoint) {
+      setValue('pieces', out.pieces, { shouldDirty: true });
+      setValue('pieceDxfAliases', out.aliases, { shouldDirty: true });
+      setValue('operations', out.operations, { shouldDirty: true });
+    }
     // Preservation apply keeps operation indexes stable, so issue references stay on their steps.
     const issueNumbers = out.issueNumbers;
     (getValues('issues') ?? []).forEach((iss, ii) => {
@@ -2884,10 +2933,40 @@ export function PatternsField({
     ask: Extract<OccupiedAsk, { kind: 'files' }>,
     choice: OccupiedChoice,
   ) {
+    if (ask.rankedPoint && occupiedAskRef.current !== ask) return;
+    occupiedAskRef.current = null;
     setOccupiedAsk(null);
     const current = slotOccupant(ask.scopeKey, ask.target);
     if (!current || sheetRowId(current) !== ask.target) {
       useSnackBarStore.getState().showMessage('material changed', 'error');
+      return;
+    }
+    if (ask.rankedPoint) {
+      const { rankedPoint } = ask;
+      const matchesSavedRow = () => {
+        const row = slotOccupant(ask.scopeKey, ask.target);
+        return (
+          row?.lineKey === rankedPoint.row.patternLineKey &&
+          row.url === rankedPoint.row.url &&
+          row.sha256 === rankedPoint.row.sha256 &&
+          Number(row.sizeBytes) === rankedPoint.row.sizeBytes
+        );
+      };
+      try {
+        if (choice !== 'replace' || !canUpload || isSubmitting || !matchesSavedRow())
+          throw new Error('The saved pattern changed. Review the current size again.');
+        await rankedPoint.verifyApply(ask.files[0]!);
+        if (!matchesSavedRow() || !rankedPoint.isCurrent())
+          throw new Error('The saved pattern changed. Review the current size again.');
+        await replaceSheet(ask.scopeKey, rankedPoint.file, ask.target, rankedPoint);
+      } catch (error) {
+        useSnackBarStore
+          .getState()
+          .showMessage(
+            error instanceof Error ? error.message : 'The saved size edit could not be applied.',
+            'error',
+          );
+      }
       return;
     }
     if (choice === 'replace' && ask.files.length === 1) {
@@ -5428,6 +5507,7 @@ export function PatternsField({
   }
 
   const occupiedVersion = occupiedAsk ? occupiedVersionDetails(occupiedAsk) : null;
+  const rankedPointReview = occupiedAsk?.kind === 'files' ? occupiedAsk.rankedPoint : undefined;
   const occupiedCurrentRevision = shownRevision(occupiedVersion?.current);
   const occupiedNextRevision = occupiedCurrentRevision == null ? null : occupiedCurrentRevision + 1;
 
@@ -5540,23 +5620,33 @@ export function PatternsField({
         title={
           occupiedNextRevision == null ? 'new version' : `new version · v${occupiedNextRevision}`
         }
-        confirmLabel='new version'
+        confirmLabel={
+          rankedPointReview ? `Apply to size ${rankedPointReview.sizeToken}` : 'new version'
+        }
         width='sm'
         footerActions={
-          <Button
-            variant='secondary'
-            size='sm'
-            onClick={() => {
-              if (occupiedAsk) void chooseOccupied(occupiedAsk, 'merge');
-            }}
-          >
-            {occupiedCurrentRevision == null
-              ? 'merge with current'
-              : `merge with v${occupiedCurrentRevision}`}
-          </Button>
+          rankedPointReview ? undefined : (
+            <Button
+              variant='secondary'
+              size='sm'
+              onClick={() => {
+                if (occupiedAsk) void chooseOccupied(occupiedAsk, 'merge');
+              }}
+            >
+              {occupiedCurrentRevision == null
+                ? 'merge with current'
+                : `merge with v${occupiedCurrentRevision}`}
+            </Button>
+          )
         }
       >
         <div>
+          {rankedPointReview && (
+            <Text component='p' size='micro'>
+              Construction point on {rankedPointReview.blockName} · size{' '}
+              {rankedPointReview.sizeToken}
+            </Text>
+          )}
           <Row
             label={
               <span className='flex min-w-0 items-baseline gap-2.5'>

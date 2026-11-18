@@ -4,6 +4,7 @@ import {
   type CopyReview,
 } from './draft-cad-unlinked-piece-copy-review-v1';
 import { takeCompiledSavedAddPointFileV1 } from './draft-cad-saved-add-point-review-v1';
+import { readSavedRankedPointReviewV1 } from './draft-cad-saved-ranked-point-review-v1';
 import {
   requiresCurrentPairedAllowanceReviewV1,
   type PatternImportDxfPhaseEDraftCadGeometryCompileArtifactV1,
@@ -28,6 +29,7 @@ export type PatternImportDxfPhaseEPatternsFieldCompiledReimportOwnerInputV1 = Re
   openExistingImportReview: (
     review: PatternImportDxfPhaseEPatternsFieldCompiledReimportReviewV1,
   ) => void;
+  openExistingRankedPointReview?: (review: ReturnType<typeof readSavedRankedPointReviewV1>) => void;
 }>;
 
 function compiledFileName(
@@ -127,6 +129,17 @@ export function registerPatternImportDxfPhaseEPatternsFieldCompiledReimportOwner
         requireManualApply: true,
         savedCopyFile: file,
       });
+    },
+    openSavedRankedPoint(review) {
+      const checked = readSavedRankedPointReviewV1(review);
+      if (
+        checked.row.techCardId !== input.techCardId ||
+        !input.scopeAvailable(checked.row.scopeKey) ||
+        input.reviewAlreadyOpen() ||
+        !input.openExistingRankedPointReview
+      )
+        throw new Error('The current saved pattern review is unavailable.');
+      input.openExistingRankedPointReview(checked);
     },
   });
 }

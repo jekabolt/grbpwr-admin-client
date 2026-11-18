@@ -13,6 +13,7 @@ import {
   normalizeAuthoredText,
 } from 'lib/pattern-import/manifest/authored-text';
 import type { AuthoredNotchShape, BoxMm, PtMm } from 'lib/pattern-import/types';
+import { num as dxfCoordinate } from 'lib/pattern-import/write/format';
 import { Button, Input, Selector } from 'ui';
 
 import { SHEET_INK, SheetViewport, ptsAttr, vy } from '../sheet-viewport';
@@ -669,7 +670,13 @@ function commandForPoint(
         command: {
           ...common,
           tool: 'draft-point',
-          payload: { entityId: ids.entityId, pointMm: input.pointMm },
+          payload: {
+            entityId: ids.entityId,
+            pointMm: {
+              x: Number(dxfCoordinate(input.pointMm.x)),
+              y: Number(dxfCoordinate(input.pointMm.y)),
+            },
+          },
         },
       };
     case 'mark': {

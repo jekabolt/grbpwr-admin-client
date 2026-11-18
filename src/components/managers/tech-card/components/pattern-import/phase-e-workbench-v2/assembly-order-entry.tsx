@@ -2066,6 +2066,16 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
           );
         }
       : undefined;
+  const prepareSavedRankedPointReview =
+    activeSavedDraftRef.current && savedSession?.runtime.prepareSavedRankedPointReview
+      ? () => {
+          const runtime = savedSession.runtime,
+            captured = draftCadSession;
+          return runtime.prepareSavedRankedPointReview!(savedSession.row, () =>
+            readSavedDraft(runtime, captured),
+          );
+        }
+      : undefined;
   const prepareSavedPairedAllowance =
     activeSavedDraftRef.current && savedSession?.runtime.prepareSavedPairedAllowance
       ? () => {
@@ -2736,6 +2746,7 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
                           }
                           confirmedImportGeneration={cardSession?.importGeneration ?? 0}
                           prepareSavedAddPointReview={prepareSavedAddPointReview}
+                          prepareSavedRankedPointReview={prepareSavedRankedPointReview}
                           prepareSavedGeometryReview={prepareSavedGeometryReview}
                           prepareSavedPairedAllowance={prepareSavedPairedAllowance}
                           prepareSavedJoin={

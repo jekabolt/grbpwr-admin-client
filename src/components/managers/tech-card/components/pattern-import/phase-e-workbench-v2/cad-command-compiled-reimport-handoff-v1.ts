@@ -1,4 +1,5 @@
 import type { CopyReview } from './draft-cad-unlinked-piece-copy-review-v1';
+import type { SavedRankedPointReviewV1 } from './draft-cad-saved-ranked-point-review-v1';
 import type { PatternImportDxfPhaseEDraftCadGeometryCompileArtifactV1 } from './draft-cad-geometry-compile-v1';
 
 export const PATTERN_IMPORT_DXF_PHASE_E_CAD_COMMAND_COMPILED_REIMPORT_HANDOFF_V1 =
@@ -53,6 +54,7 @@ export type PatternImportDxfPhaseECadCommandCompiledReimportOwnerV1 = Readonly<{
     ownerCurrent: () => boolean,
   ) => Promise<void>;
   openSavedCopy?: (review: CopyReview) => void;
+  openSavedRankedPoint?: (review: SavedRankedPointReviewV1) => void;
   request: (
     request: PatternImportDxfPhaseECadCommandCompiledReimportHandoffRequestV1,
   ) => PatternImportDxfPhaseECadCommandCompiledReimportHandoffResultV1;
@@ -290,4 +292,13 @@ export async function openSavedJoinInPatterns(
   if (!owner?.openSavedJoin) throw new Error('The Patterns review is unavailable.');
   const ownerCurrent = () => owners.get(review.cardId) === owner;
   await owner.openSavedJoin(review, () => ownerCurrent() && isCurrent(), ownerCurrent);
+}
+
+export function openSavedRankedPointInPatternsV1(
+  techCardId: number,
+  review: SavedRankedPointReviewV1,
+) {
+  const owner = owners.get(techCardId);
+  if (!owner?.openSavedRankedPoint) throw new Error('The saved pattern review is unavailable.');
+  owner.openSavedRankedPoint(review);
 }

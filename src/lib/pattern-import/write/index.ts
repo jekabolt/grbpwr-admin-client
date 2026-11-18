@@ -30,6 +30,14 @@ import { writeR2000 } from './r2000';
 
 export { blockNameOf, pieceInScope, UNI_TOKEN } from './plan';
 export type { Plan, PlannedBlock } from './plan';
+export {
+  RetainedRankedDraftPointErrorV1,
+  writeDxfWithRetainedRankedDraftPointV1,
+} from './retained-ranked-draft-point-v1';
+export type {
+  RetainedRankedDraftPointInputV1,
+  RetainedRankedDraftPointResultV1,
+} from './retained-ranked-draft-point-v1';
 
 export type WriteOptions = {
   /** Manifest embedder; null = bare DXF. Default: the shared `manifest/` `embedManifest`. */
