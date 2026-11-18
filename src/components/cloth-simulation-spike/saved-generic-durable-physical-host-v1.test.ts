@@ -1897,6 +1897,7 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
       startFirstAuthoring: async () => {},
       compileFirstAuthoring: async () => {},
       saveFirstAuthoring: save,
+      retryFirstPlacementSave: async () => {},
     };
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     vi.stubGlobal('window', { event: undefined, location: { origin: 'http://fixture.local' } });
@@ -2086,6 +2087,7 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
         startFirstAuthoring: async () => {},
         compileFirstAuthoring: async () => {},
         saveFirstAuthoring: async () => {},
+        retryFirstPlacementSave: async () => {},
       };
       const controls = CadWorkbenchPhysicalHostControlsV1({ state });
       for (const [canvas, identify] of [
