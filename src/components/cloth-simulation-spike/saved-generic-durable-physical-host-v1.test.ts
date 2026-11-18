@@ -76,6 +76,8 @@ import type {
   DxfGarmentObservedPreviewHitV1,
   DxfGarmentObservedPreviewSeamSideV1,
 } from './dxf-garment-observed-strain-heatmap-preview-v1';
+import * as workbenchShell from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/cad-workbench-split-shell-v1';
+import type { PatternImportDxfPhaseEMeasurementUnitV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/measurement-units-v1';
 import { bindCadWorkbenchPhysicalPreviewSelectionV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/cad-workbench-physical-host-v1';
 import { CadWorkbenchPhysicalHostControlsV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/cad-workbench-physical-host-controls-v1';
 import {
@@ -154,7 +156,12 @@ const ports = vi.hoisted(() => ({
   previewSignals: [] as AbortSignal[],
   finalValidationFrame: null as 16 | 32 | null,
   previewPick: null as
-    | ((x: number, y: number, runtimeSeamId?: string) => DxfGarmentObservedPreviewHitV1 | null)
+    | ((
+        x: number,
+        y: number,
+        runtimeSeamId?: string,
+        measureSurface?: boolean,
+      ) => DxfGarmentObservedPreviewHitV1 | null)
     | null,
   previewSelect: null as
     | ((
@@ -287,8 +294,10 @@ vi.mock('./dxf-garment-observed-strain-heatmap-preview-v1', () => ({
         fitAuthority: false,
       },
       lifetime: controller.signal,
-      pick: (x: number, y: number, runtimeSeamId?: string) =>
-        ports.previewPick?.(x, y, runtimeSeamId) ?? null,
+      pick: (x: number, y: number, runtimeSeamId?: string, measureSurface?: boolean) =>
+        (measureSurface
+          ? ports.previewPick?.(x, y, runtimeSeamId, true)
+          : ports.previewPick?.(x, y, runtimeSeamId)) ?? null,
       setSelectedPiece: (
         pieceId: string | null,
         side?: DxfGarmentObservedPreviewSeamSideV1,
@@ -3076,6 +3085,11 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
       vi.unstubAllGlobals();
     });
     let controls: ReactNode;
+    let displayUnit: PatternImportDxfPhaseEMeasurementUnitV1 = 'mm';
+    vi.spyOn(
+      workbenchShell,
+      'usePatternImportDxfPhaseECadWorkbenchMeasurementUnitV1',
+    ).mockImplementation(() => ({ unit: displayUnit, setUnit: vi.fn() }));
     let retainedSnapshot: ReturnType<typeof f.host.getSnapshot> | null = null;
     function Controls() {
       // Run the actual React control hooks in the same CPU-only harness as the saved route test.
@@ -3282,8 +3296,64 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
     ).toBe(false);
     expect(selectOutline).toHaveBeenLastCalledWith(null, undefined, undefined);
 
+    const tapeText = (value: string) =>
+      visitMountedTree(controls, (props) => props.children === value);
+    const tapeSection = () =>
+      visitMountedTree(controls, (props) => props['aria-label'] === '3D distance measurement');
+    const tapeClick = (label: string) =>
+      act(async () => (tapeText(label)?.onClick as () => void)());
+    const tap = (x: number, hit: DxfGarmentObservedPreviewHitV1) =>
+      act(async () => {
+        pick.mockReturnValueOnce(hit);
+        mountedCanvas()?.onPointerDown?.(pointer(x));
+        mountedCanvas()?.onPointerUp?.(pointer(x));
+      });
+    const anchorA = {
+      ...garment,
+      surfacePoint: { vertexIndices: [0, 1, 2], positionM: [0, 0, 0.25] },
+    } as const;
+    const anchorB = {
+      ...garment,
+      triangleIndex: 8,
+      surfacePoint: { vertexIndices: [3, 4, 5], positionM: [0.3, 0, 0.65] },
+    } as const;
+    await tapeClick('Measure 3D');
+    expect(tapeText('Pick two points on the cloth.')).not.toBeNull();
+    await tap(50, body);
+    await tap(50, { ...anchorA, frameReportSha256: '7'.repeat(64) });
+    expect(tapeText('Pick two points on the cloth.')).not.toBeNull();
+    await tap(100, anchorA);
+    expect(pick).toHaveBeenLastCalledWith(100, 200, undefined, true);
+    expect(tapeText('Pick the second point on the cloth.')).not.toBeNull();
+    await tap(110, anchorB);
+    expect(tapeText('Straight-line distance 500.0 mm')).not.toBeNull();
+    expect(focusSelection).toHaveBeenCalledTimes(1);
+    interaction = bindCadWorkbenchPhysicalPreviewSelectionV1(
+      { ...scope, row: { ...row } },
+      savedSeam.operationNumber,
+      focusSelection,
+      null,
+      savedSeam,
+    );
+    for (const [unit, length] of [
+      ['cm', '50.00 cm'],
+      ['in', '19.685 in'],
+    ] as const) {
+      displayUnit = unit;
+      await drawControls();
+      expect(tapeText(`Straight-line distance ${length}`)).not.toBeNull();
+      expect(f.host.getSnapshot().numeric.previewReceipt).toBe(mounted.receipt);
+    }
+    await tapeClick('Clear');
+    expect(tapeText('Pick two points on the cloth.')).not.toBeNull();
+    expect(tapeText('Straight-line distance 19.685 in')).toBeNull();
+    await tap(100, anchorA);
+    await tap(110, anchorB);
+    expect(tapeText('Straight-line distance 19.685 in')).not.toBeNull();
+
     interaction = null;
-    await act(async () => route.render(createElement(Controls)));
+    await drawControls();
+    expect(tapeSection()).toBeNull();
     expect(selectOutline).toHaveBeenLastCalledWith(null, undefined, undefined);
     expect(f.host.getSnapshot()).toBe(admitted);
     expect(f.host.getSnapshot().numeric.previewReceipt).toBe(mounted.receipt);
@@ -3293,6 +3363,18 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
     expect(readCount).toBe(readCountBeforeClick);
     expect(mountedLegend()).not.toBeNull();
     expect(mountedMeasurements()).not.toBeNull();
+
+    interaction = bindCadWorkbenchPhysicalPreviewSelectionV1(
+      scope,
+      savedSeam.operationNumber,
+      focusSelection,
+    );
+    await drawControls();
+    expect(tapeText('Measure 3D')?.['aria-pressed']).toBe(false);
+    await tapeClick('Measure 3D');
+    await tap(100, anchorA);
+    await tap(110, anchorB);
+    expect(tapeText('Straight-line distance 19.685 in')).not.toBeNull();
 
     pick.mockImplementationOnce(() => {
       caller.abort();
@@ -3310,6 +3392,8 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
     });
     expect((await f.host.projectLatestRender()).ok).toBe(true);
     await drawControls();
+    expect(tapeSection()).toBeNull();
+    expect(tapeText('Straight-line distance 19.685 in')).toBeNull();
     expect(mountedLegend()).toBeNull();
     expect(mountedMeasurements()).toBeNull();
     ports.finalValidationFrame = 16;
@@ -3324,12 +3408,26 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
     await drawControls();
     expect(mountedLegend()).not.toBeNull();
     expect(mountedMeasurements()).not.toBeNull();
+    interaction = bindCadWorkbenchPhysicalPreviewSelectionV1(
+      scope,
+      savedSeam.operationNumber,
+      focusSelection,
+    );
+    await drawControls();
+    expect(tapeText('Measure 3D')?.['aria-pressed']).toBe(false);
+    await tapeClick('Measure 3D');
+    await tap(100, {
+      ...anchorA,
+      frameReportSha256: f.host.getSnapshot().numeric.previewReceipt!.frameReportSha256,
+    });
+    expect(tapeText('Pick the second point on the cloth.')).not.toBeNull();
     // The body turn can be revoked independently of a render carrying the last cloth snapshot.
     retainedSnapshot = f.host.getSnapshot();
     const originalBody = f.body.getSnapshot();
     const disposedBeforeBodyChange = ports.previewDisposed;
     await f.body.observe(null);
     await drawControls();
+    expect(tapeSection()).toBeNull();
     expect(mountedLegend()).toBeNull();
     expect(mountedMeasurements()).toBeNull();
     expect(mountedCanvas()?.className).toContain('hidden');

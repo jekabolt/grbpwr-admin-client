@@ -1,9 +1,12 @@
 import { useLayoutEffect, useRef, useState, type PointerEvent } from 'react';
 import { BETA_SKIRT_STRAIN_UTILIZATION_COLOR_LUT_V1 } from 'components/cloth-simulation-spike/beta-skirt-strain-utilization-legend-v1';
+import type { DxfGarmentObservedPreviewSurfacePointV1 } from 'components/cloth-simulation-spike/dxf-garment-observed-strain-heatmap-preview-v1';
 import type { SavedModelDisplayedTriangleBodySessionSnapshotV2 } from 'components/managers/models/components/saved-model-displayed-triangle-body-session-v2';
 import { Button, Text } from 'ui';
 
 import type { CadWorkbenchPhysicalPreviewInteractionV1 } from './cad-workbench-physical-host-v1';
+import { usePatternImportDxfPhaseECadWorkbenchMeasurementUnitV1 } from './cad-workbench-split-shell-v1';
+import { formatPatternImportDxfPhaseEMeasurementValueV1 } from './measurement-units-v1';
 import type { useSavedClothPhysicalHostV1 } from './use-saved-cloth-physical-host-v1';
 import {
   CadWorkbenchFirstPhysicalAuthoringV1,
@@ -100,6 +103,22 @@ function frameMeasurements({
   return measurements;
 }
 
+function measurementScopeKey(scope: CadWorkbenchPhysicalPreviewInteractionV1['scope']): string {
+  const { row, sizeToken, sourceFileId } = scope;
+  return JSON.stringify([
+    row.techCardId,
+    row.scopeKey,
+    row.patternLineKey,
+    row.revision,
+    row.cardLockVersion,
+    row.url,
+    row.sizeBytes,
+    row.sha256,
+    sourceFileId,
+    sizeToken,
+  ]);
+}
+
 /** Compact viewport-only controls. The underlying mannequin remains mounted and visible. */
 export function CadWorkbenchPhysicalHostControlsV1({
   state,
@@ -152,6 +171,37 @@ export function CadWorkbenchPhysicalHostControlsV1({
   const receipt = currentFrame?.receipt ?? null;
   const previewReady = receipt !== null;
   const measurements = currentFrame ? frameMeasurements(currentFrame) : [];
+  const unit = usePatternImportDxfPhaseECadWorkbenchMeasurementUnitV1()?.unit ?? 'mm';
+  const scopeKey = interaction ? measurementScopeKey(interaction.scope) : null;
+  const [measurement, setMeasurement] = useState<{
+    host: NonNullable<HostState['host']>;
+    receipt: NonNullable<typeof receipt>;
+    scopeKey: string;
+    points: readonly DxfGarmentObservedPreviewSurfacePointV1[];
+  } | null>(null);
+  const canMeasure = Boolean(host && receipt && scopeKey && !disabled && !pending);
+  const activeMeasurement =
+    canMeasure &&
+    measurement?.host === host &&
+    measurement.receipt === receipt &&
+    measurement.scopeKey === scopeKey
+      ? measurement
+      : null;
+  useLayoutEffect(() => {
+    setMeasurement(null);
+  }, [host, receipt, scopeKey]);
+  const [firstPoint, secondPoint] = activeMeasurement?.points ?? [];
+  const distance =
+    firstPoint && secondPoint
+      ? formatPatternImportDxfPhaseEMeasurementValueV1(
+          Math.hypot(
+            secondPoint.positionM[0] - firstPoint.positionM[0],
+            secondPoint.positionM[1] - firstPoint.positionM[1],
+            secondPoint.positionM[2] - firstPoint.positionM[2],
+          ) * 1000,
+          unit,
+        ).formatted
+      : null;
   useLayoutEffect(() => {
     const canvas = previewCanvas.current;
     if (!host || !canvas || !previewReady || !receipt) return;
@@ -170,6 +220,7 @@ export function CadWorkbenchPhysicalHostControlsV1({
     host: HostState['host'];
     receipt: typeof receipt;
     interaction: CadWorkbenchPhysicalPreviewInteractionV1;
+    measurement: typeof activeMeasurement;
   } | null>(null);
   const startPick = (event: PointerEvent<HTMLCanvasElement>) => {
     if (
@@ -188,6 +239,7 @@ export function CadWorkbenchPhysicalHostControlsV1({
       host,
       receipt,
       interaction,
+      measurement: activeMeasurement,
     };
     event.currentTarget.setPointerCapture(event.pointerId);
   };
@@ -207,14 +259,33 @@ export function CadWorkbenchPhysicalHostControlsV1({
     const start = physicalPointer.current;
     if (start?.id !== event.pointerId) return;
     cancelPick(event);
-    if (
-      !previewReady ||
-      !host ||
-      start.host !== host ||
-      start.receipt !== receipt ||
-      start.interaction !== interaction
-    )
+    if (!previewReady || !host || !interaction || start.host !== host || start.receipt !== receipt)
       return;
+    const previous = start.measurement;
+    if (previous) {
+      if (previous !== activeMeasurement) return;
+      const hit = host.pickPreview(
+        event.currentTarget,
+        interaction.scope,
+        event.clientX,
+        event.clientY,
+        undefined,
+        true,
+      );
+      if (hit?.kind !== 'garment' || hit.frameReportSha256 !== receipt.frameReportSha256) return;
+      const point = hit.surfacePoint;
+      if (!point?.positionM.every(Number.isFinite)) return;
+      setMeasurement((current) =>
+        current === previous
+          ? {
+              ...previous,
+              points: previous.points.length === 1 ? [...previous.points, point] : [point],
+            }
+          : current,
+      );
+      return;
+    }
+    if (activeMeasurement || start.interaction !== interaction) return;
     const hit = host.pickPreview(
       event.currentTarget,
       interaction.scope,
@@ -347,6 +418,46 @@ export function CadWorkbenchPhysicalHostControlsV1({
               Range {receipt.minimumUtilization.toFixed(3)}–{receipt.maximumUtilization.toFixed(3)}
             </Text>
           </section>
+          {scopeKey && host ? (
+            <section aria-label='3D distance measurement' className='flex flex-col gap-1'>
+              <div className='pointer-events-auto flex w-fit items-center gap-2'>
+                <Button
+                  type='button'
+                  size='xs'
+                  variant='secondary'
+                  aria-pressed={Boolean(activeMeasurement)}
+                  disabled={!canMeasure}
+                  onClick={() => {
+                    if (canMeasure)
+                      setMeasurement(
+                        activeMeasurement ? null : { host, receipt, scopeKey, points: [] },
+                      );
+                  }}
+                >
+                  Measure 3D
+                </Button>
+                {firstPoint && activeMeasurement ? (
+                  <Button
+                    type='button'
+                    size='xs'
+                    variant='secondary'
+                    onClick={() => setMeasurement({ ...activeMeasurement, points: [] })}
+                  >
+                    Clear
+                  </Button>
+                ) : null}
+              </div>
+              {activeMeasurement ? (
+                <Text component='span' size='micro' role='status' className='tabular-nums'>
+                  {distance
+                    ? `Straight-line distance ${distance}`
+                    : firstPoint
+                      ? 'Pick the second point on the cloth.'
+                      : 'Pick two points on the cloth.'}
+                </Text>
+              ) : null}
+            </section>
+          ) : null}
           {measurements.length > 0 ? (
             <section
               aria-label='Current frame measurements'

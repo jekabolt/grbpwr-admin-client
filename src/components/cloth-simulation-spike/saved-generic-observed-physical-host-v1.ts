@@ -1358,9 +1358,10 @@ export function createSavedGenericObservedPhysicalHostV1(
       clientX: number,
       clientY: number,
       runtimeSeamId?: string,
+      measureSurface = false,
     ) {
       return withMountedPreview(canvas, (view) => {
-        const hit = view.pick(clientX, clientY, runtimeSeamId);
+        const hit = view.pick(clientX, clientY, runtimeSeamId, measureSurface);
         return hit && hit.frameReportSha256 === view.receipt.frameReportSha256 ? hit : null;
       });
     },

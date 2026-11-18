@@ -133,6 +133,11 @@ export type DxfGarmentObservedPreviewSeamSideV1 = Readonly<{
   sideIndex: 0 | 1;
 }>;
 
+export type DxfGarmentObservedPreviewSurfacePointV1 = Readonly<{
+  vertexIndices: readonly [number, number, number];
+  positionM: readonly [number, number, number];
+}>;
+
 export type DxfGarmentObservedPreviewHitV1 = Readonly<{
   frameReportSha256: string;
   triangleIndex: number;
@@ -142,6 +147,7 @@ export type DxfGarmentObservedPreviewHitV1 = Readonly<{
         kind: 'garment';
         pieceId: string;
         seamSide?: DxfGarmentObservedPreviewSeamSideV1;
+        surfacePoint?: DxfGarmentObservedPreviewSurfacePointV1;
       }>
     | Readonly<{
         kind: 'body';
@@ -432,6 +438,7 @@ export async function createDxfGarmentObservedStrainHeatmapPreviewV1(
       clientX: number,
       clientY: number,
       runtimeSeamId?: string,
+      measureSurface = false,
     ): DxfGarmentObservedPreviewHitV1 | null => {
       try {
         current();
@@ -456,6 +463,55 @@ export async function createDxfGarmentObservedStrainHeatmapPreviewV1(
               triangleIndex >= triangleOffset && triangleIndex < triangleOffset + triangleCount,
           );
           if (!range) return null;
+          if (measureSurface) {
+            if (input.frameCount !== 32) return null;
+            const offset = triangleIndex * 3;
+            const vertexIndices = [
+              input.garmentTriangles[offset]!,
+              input.garmentTriangles[offset + 1]!,
+              input.garmentTriangles[offset + 2]!,
+            ] as const;
+            if (
+              !vertexIndices.every(
+                (index) =>
+                  Number.isSafeInteger(index) &&
+                  index >= range.vertexOffset &&
+                  index < range.vertexOffset + range.vertexCount &&
+                  index * 3 + 2 < input.finalPositions3M.length,
+              )
+            )
+              return null;
+            const [a, b, c] = vertexIndices.map((index) =>
+              new THREE.Vector3().fromArray(input.finalPositions3M, index * 3),
+            );
+            // Resolve the displayed face hit against the retained indexed frame, in metres.
+            const weights = new THREE.Triangle(a, b, c).getBarycoord(
+              hit.point,
+              new THREE.Vector3(),
+            );
+            if (
+              !weights ||
+              ![weights.x, weights.y, weights.z].every(
+                (weight) => weight >= -1e-7 && weight <= 1 + 1e-7,
+              )
+            )
+              return null;
+            const position = a!
+              .multiplyScalar(weights.x)
+              .addScaledVector(b!, weights.y)
+              .addScaledVector(c!, weights.z);
+            current();
+            return Object.freeze({
+              kind: 'garment',
+              frameReportSha256,
+              triangleIndex,
+              pieceId: range.pieceId,
+              surfacePoint: Object.freeze({
+                vertexIndices: Object.freeze(vertexIndices),
+                positionM: Object.freeze([position.x, position.y, position.z] as const),
+              }),
+            });
+          }
           // Test only a compiler-identified boundary of the frontmost hit face. Screen distance
           // sets the input tolerance; identity never comes from a closest CAD or mesh match.
           const seamEdge = runtimeSeamId

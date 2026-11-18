@@ -399,6 +399,38 @@ describe('synthetic renderer lifecycle (not visual or physical acceptance)', () 
     expect(ports.renderers[0]?.renders).toBe(1);
   });
 
+  it('resolves tape points from the visible indexed f32 triangle in metres', async () => {
+    ports.clothZ = 0.25;
+    const { canvas, view } = await open();
+    const camera = ports.currentCamera;
+    const samples = [
+      { position: [0.2, 0.2, 0.25] as const, triangle: 0, indices: [0, 1, 2] },
+      { position: [0.8, 0.7, 0.25] as const, triangle: 1, indices: [3, 4, 5] },
+    ];
+    for (const { position, triangle, indices } of samples) {
+      const [x, y, z] = position;
+      const screen = clientPoint(canvas, x, y, z);
+      const hit = view.pick(...screen, undefined, true);
+      expect(hit).toMatchObject({
+        kind: 'garment',
+        frameReportSha256: view.receipt.frameReportSha256,
+        triangleIndex: triangle,
+        surfacePoint: { vertexIndices: indices },
+      });
+      if (hit?.kind !== 'garment' || !hit.surfacePoint) throw new Error('Tape point is missing.');
+      hit.surfacePoint.positionM.forEach((value, axis) =>
+        expect(value).toBeCloseTo(position[axis]!, 10),
+      );
+      expect(view.pick(...screen)).not.toHaveProperty('surfacePoint');
+    }
+    expect(view.pick(canvas.getBoundingClientRect().left + 1, 400, undefined, true)).toBeNull();
+    expect(ports.currentCamera).toBe(camera);
+    expect(ports.renderers[0]?.renders).toBe(1);
+    expect(ports.projectionReads).toBe(1);
+    ports.controller.abort();
+    expect(view.pick(550, 400, undefined, true)).toBeNull();
+  });
+
   it('selects only the inspected seam side on the frontmost exact deformed face', async () => {
     ports.clothZ = 0.2;
     const { canvas, view } = await open();
@@ -433,6 +465,7 @@ describe('synthetic renderer lifecycle (not visual or physical acceptance)', () 
       persistedModel: { id: 5, updatedAt: '2026-11-01T12:00:00Z', revision: 'r1' },
       observedBodyContentSha256: 'e'.repeat(64),
     });
+    expect(view.pick(...bodyPoint, undefined, true)).not.toHaveProperty('surfacePoint');
     ports.controller.abort();
     expect(view.pick(...bodyPoint)).toBeNull();
   });

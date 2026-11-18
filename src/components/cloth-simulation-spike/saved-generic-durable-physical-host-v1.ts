@@ -1000,13 +1000,14 @@ export function createSavedGenericDurablePhysicalHostV1(
       clientX: number,
       clientY: number,
       savedSeam?: SavedGenericDurablePhysicalPreviewSeamV1,
+      measureSurface = false,
     ): SavedGenericDurablePhysicalPreviewHitV1 | null {
       const preview = previewAdmission();
       if (!preview || !matchesPreviewScope(scope, preview.durable) || !preview.current())
         return null;
       const seam = savedSeam ? currentN1Seam(savedSeam, preview.durable) : null;
       if (!preview.current()) return null;
-      const hit = host.pickPreview(canvas, clientX, clientY, seam?.id);
+      const hit = host.pickPreview(canvas, clientX, clientY, seam?.id, measureSurface);
       if (!hit || !preview.current()) return null;
       if (hit.kind === 'body') return hit;
       const { seamSide: runtimeSide, ...garment } = hit;
