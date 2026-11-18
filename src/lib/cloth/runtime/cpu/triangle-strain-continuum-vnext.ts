@@ -40,6 +40,8 @@ export type ContinuumXpbdCorrectionOptionsVNext = {
   readonly dtS: number;
   /** Area-integrated material compliance for Q=sqrt(restArea)*C, in m/N. */
   readonly complianceMPerN: number;
+  /** Material area within a partially occupied carrier triangle, in m². */
+  readonly activeRestAreaM2?: number;
   /** Multiplier for the length-valued Q constraint, in kg*m. */
   readonly lambdaKgM: number;
 };
@@ -79,6 +81,19 @@ function assertRestArea(restAreaM2: number): void {
   if (!Number.isFinite(restAreaM2) || restAreaM2 <= MIN_REST_AREA_M2) {
     throw new RangeError('Continuum triangle restAreaM2 must be finite and > 1e-12 m^2.');
   }
+}
+
+function integrationAreaM2(restAreaM2: number, activeRestAreaM2 = restAreaM2): number {
+  if (
+    !Number.isFinite(activeRestAreaM2) ||
+    activeRestAreaM2 <= 0 ||
+    activeRestAreaM2 > restAreaM2
+  ) {
+    throw new RangeError(
+      'Active material area must be positive and at most the rest triangle area.',
+    );
+  }
+  return activeRestAreaM2;
 }
 
 function assertTriangleRestFrame(triangle: ContinuumTriangleVNext): void {
@@ -161,11 +176,12 @@ export function evaluateContinuumTriangleVNext(
   positionsM: TrianglePositions,
   triangle: ContinuumTriangleVNext,
   complianceMPerN: ContinuumComplianceMPerNVNext,
+  activeRestAreaM2?: number,
 ): ContinuumTriangleEvaluationVNext {
   assertTriangleRestFrame(triangle);
   assertCompliance(complianceMPerN);
   const strain = evaluateTriangleStrain(positionsM, triangle.restFrame);
-  const sqrtAreaM = Math.sqrt(triangle.restAreaM2);
+  const sqrtAreaM = Math.sqrt(integrationAreaM2(triangle.restAreaM2, activeRestAreaM2));
   const constraintM = {
     warp: sqrtAreaM * strain.warp,
     weft: sqrtAreaM * strain.weft,
@@ -208,7 +224,7 @@ export function solveContinuumTriangleXpbdVNext(
     throw new RangeError('inverseMassesKgInv must contain finite non-negative kg^-1 values.');
   }
 
-  const sqrtAreaM = Math.sqrt(triangle.restAreaM2);
+  const sqrtAreaM = Math.sqrt(integrationAreaM2(triangle.restAreaM2, options.activeRestAreaM2));
   const constraintBeforeM = sqrtAreaM * rawConstraint(positionsM, triangle, options.mode);
   const gradients = rawGradients(positionsM, triangle, options.mode).map((gradient) =>
     scale(gradient, sqrtAreaM),

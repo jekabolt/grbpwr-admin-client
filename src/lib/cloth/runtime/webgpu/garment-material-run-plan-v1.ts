@@ -1,3 +1,4 @@
+import type { SimulationPackageV5 } from '../../compiler/simulation-package';
 import {
   validateSealedSimulationPackageV5V1,
   type SealedSimulationPackageV5V1,
@@ -280,6 +281,113 @@ type Run = Readonly<{
   complianceInvNm?: number;
 }>;
 
+export function buildXpbdMechanicalColorRunsV1(
+  input: Readonly<{
+    counts: Readonly<{ particles: number; bend: number }>;
+    distance: SimulationPackageV5['constraints']['distance'];
+    bend: SimulationPackageV5['constraints']['bend'];
+    continuum: SimulationPackageV5['constraints']['continuumStrain'];
+    parameters: Pick<GarmentMaterialRunParametersV1, 'distanceComplianceMPerN' | 'dtS'>;
+    bendLambdas: Float32Array;
+    particleMaterialIndices: Uint32Array;
+    materials: readonly ReturnType<typeof decodeClothMaterialGpuV1>[];
+    workgroups: (count: number) => number;
+  }>,
+) {
+  const {
+    counts,
+    distance: d,
+    bend,
+    continuum: c,
+    parameters: p,
+    bendLambdas,
+    particleMaterialIndices,
+    materials,
+    workgroups,
+  } = input;
+  const distance: Run[] = d.colorRanges.map((r, color) => {
+    if (r.color !== color)
+      fail('color-order-mismatch', 'Distance color identities must remain in compiler order.');
+    return {
+      color,
+      constraintOffset: r.offset,
+      constraintCount: r.count,
+      workgroups: workgroups(r.count),
+      params: encodeXpbdDistanceColorParamsV1({
+        constraintOffset: r.offset,
+        constraintCount: r.count,
+        complianceMPerN: p.distanceComplianceMPerN,
+        dtS: p.dtS,
+      }),
+    };
+  });
+  const bendColors =
+    counts.bend === 0
+      ? []
+      : createXpbdEmbeddedScalarBendColorScheduleV2({
+          particleCount: counts.particles,
+          constraintCount: counts.bend,
+          complianceInvNm: 0,
+          dtS: p.dtS,
+          vertexQuads: bend.vertexQuads,
+          restAnglesRad: bend.restAnglesRad,
+          lambdasKgM2: bendLambdas,
+          colorRanges: bend.colorRanges,
+        });
+  const bendRuns: Run[] = [];
+  for (const color of bendColors) {
+    let start = color.constraintOffset;
+    while (start < color.constraintOffset + color.constraintCount) {
+      const materialIndex = particleMaterialIndices[bend.vertexQuads[start * 4]];
+      let end = start;
+      while (end < color.constraintOffset + color.constraintCount) {
+        const ids = [0, 1, 2, 3].map((k) => particleMaterialIndices[bend.vertexQuads[end * 4 + k]]);
+        if (ids.some((id) => id !== ids[0]))
+          fail(
+            'cross-material-bend-unsupported',
+            'A scalar hinge cannot span different material assignments.',
+          );
+        if (ids[0] !== materialIndex) break;
+        end++;
+      }
+      const count = end - start,
+        complianceInvNm = materials[materialIndex].bendComplianceInvNm.warp;
+      bendRuns.push({
+        color: color.color,
+        constraintOffset: start,
+        constraintCount: count,
+        materialIndex,
+        complianceInvNm,
+        workgroups: workgroups(count),
+        params: packXpbdEmbeddedScalarBendColorParamsV2({
+          constraintOffset: start,
+          constraintCount: count,
+          complianceInvNm,
+          dtS: p.dtS,
+        }),
+      });
+      start = end;
+    }
+  }
+  const continuum: Run[] = Array.from({ length: c.colorCount }, (_, color) => {
+    const offset = c.colorRanges[color * 2],
+      count = c.colorRanges[color * 2 + 1],
+      params = new ArrayBuffer(16),
+      view = new DataView(params);
+    view.setUint32(0, offset, true);
+    view.setUint32(4, count, true);
+    view.setFloat32(8, Math.fround(p.dtS), true);
+    return {
+      color,
+      constraintOffset: offset,
+      constraintCount: count,
+      workgroups: workgroups(count),
+      params,
+    };
+  });
+  return { distance, bendRuns, continuum };
+}
+
 export async function buildGarmentMaterialRunPlanV1(input: unknown, signal?: AbortSignal) {
   let stage = 'capture';
   try {
@@ -460,21 +568,16 @@ export async function buildGarmentMaterialRunPlanV1(input: unknown, signal?: Abo
       activationRanks[offset] = rank;
     });
     stage = 'schedules';
-    const distance: Run[] = d.colorRanges.map((r, color) => {
-      if (r.color !== color)
-        fail('color-order-mismatch', 'Distance color identities must remain in compiler order.');
-      return {
-        color,
-        constraintOffset: r.offset,
-        constraintCount: r.count,
-        workgroups: workgroups(r.count),
-        params: encodeXpbdDistanceColorParamsV1({
-          constraintOffset: r.offset,
-          constraintCount: r.count,
-          complianceMPerN: p.distanceComplianceMPerN,
-          dtS: p.dtS,
-        }),
-      };
+    const { distance, bendRuns, continuum } = buildXpbdMechanicalColorRunsV1({
+      counts,
+      distance: d,
+      bend,
+      continuum: c,
+      parameters: p,
+      bendLambdas,
+      particleMaterialIndices: retention.particleMaterialIndices,
+      materials,
+      workgroups,
     });
     const seamRuns: Run[] =
       counts.seam === 0
@@ -495,72 +598,6 @@ export async function buildGarmentMaterialRunPlanV1(input: unknown, signal?: Abo
             workgroups: workgroups(r.constraintCount),
             params: packXpbdSeamSolveColorParamsV1(r.constraintOffset, r.constraintCount),
           }));
-    const bendColors =
-      counts.bend === 0
-        ? []
-        : createXpbdEmbeddedScalarBendColorScheduleV2({
-            particleCount: counts.particles,
-            constraintCount: counts.bend,
-            complianceInvNm: 0,
-            dtS: p.dtS,
-            vertexQuads: bend.vertexQuads,
-            restAnglesRad: bend.restAnglesRad,
-            lambdasKgM2: bendLambdas,
-            colorRanges: bend.colorRanges,
-          });
-    const bendRuns: Run[] = [];
-    for (const color of bendColors) {
-      let start = color.constraintOffset;
-      while (start < color.constraintOffset + color.constraintCount) {
-        const materialIndex = retention.particleMaterialIndices[bend.vertexQuads[start * 4]];
-        let end = start;
-        while (end < color.constraintOffset + color.constraintCount) {
-          const ids = [0, 1, 2, 3].map(
-            (k) => retention.particleMaterialIndices[bend.vertexQuads[end * 4 + k]],
-          );
-          if (ids.some((id) => id !== ids[0]))
-            fail(
-              'cross-material-bend-unsupported',
-              'A scalar hinge cannot span different material assignments.',
-            );
-          if (ids[0] !== materialIndex) break;
-          end++;
-        }
-        const count = end - start,
-          complianceInvNm = materials[materialIndex].bendComplianceInvNm.warp;
-        bendRuns.push({
-          color: color.color,
-          constraintOffset: start,
-          constraintCount: count,
-          materialIndex,
-          complianceInvNm,
-          workgroups: workgroups(count),
-          params: packXpbdEmbeddedScalarBendColorParamsV2({
-            constraintOffset: start,
-            constraintCount: count,
-            complianceInvNm,
-            dtS: p.dtS,
-          }),
-        });
-        start = end;
-      }
-    }
-    const continuum: Run[] = Array.from({ length: c.colorCount }, (_, color) => {
-      const offset = c.colorRanges[color * 2],
-        count = c.colorRanges[color * 2 + 1],
-        params = new ArrayBuffer(16),
-        view = new DataView(params);
-      view.setUint32(0, offset, true);
-      view.setUint32(4, count, true);
-      view.setFloat32(8, Math.fround(p.dtS), true);
-      return {
-        color,
-        constraintOffset: offset,
-        constraintCount: count,
-        workgroups: workgroups(count),
-        params,
-      };
-    });
     const predictionFrames = Array.from({ length: p.frameCount }, (_, frame) =>
       encodeXpbdPredictFrameParamsV1({
         dtS: p.dtS,

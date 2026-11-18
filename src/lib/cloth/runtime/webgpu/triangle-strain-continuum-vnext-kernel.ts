@@ -14,6 +14,8 @@ export const CONTINUUM_STRAIN_VNEXT_SOURCE_REVISION_V1 =
 export const CONTINUUM_STRAIN_VNEXT_ENTRY_POINT_V1 = 'main' as const;
 export const CONTINUUM_STRAIN_VNEXT_SOURCE_SHA256_V1 =
   'ec1717247939d1b50e69b7a0d26ea9c2f3d96dec1033663da6b278ad27aa84fa' as const;
+export const CONTINUUM_STRAIN_CUT_SOURCE_REVISION_V1 =
+  'continuum-strain-cut-kernel-wgsl/1' as const;
 export const CONTINUUM_STRAIN_VNEXT_WORKGROUP_SIZE = 64;
 export const CONTINUUM_STRAIN_VNEXT_POSITION_TOLERANCE_M = 1e-5;
 export const CONTINUUM_STRAIN_VNEXT_RELATIVE_TOLERANCE = 3e-4;
@@ -63,13 +65,21 @@ export enum ContinuumStrainVNextStatus {
   NonFiniteOutput = 4,
 }
 
-export const CONTINUUM_STRAIN_VNEXT_WGSL = /* wgsl */ `
+const activeRestAreaCheck = /* wgsl */ `
+  if (!finiteScalar(frame.activeRestAreaM2) || frame.activeRestAreaM2 <= 0.0
+      || frame.activeRestAreaM2 > frame.restAreaM2 || frame.reserved1 != 0u) {
+    return;
+  }
+  let sqrtAreaM = sqrt(frame.activeRestAreaM2);`;
+
+function continuumStrainSource(useActiveRestArea: boolean): string {
+  return /* wgsl */ `
 const CONTINUUM_STRAIN_EFFECTIVE_MASS_FLOOR_KG_INV: f32 = 1.0e-12;
 struct ContinuumRestFrame {
   inverseDm: vec4<f32>,
   restAreaM2: f32,
   materialIndex: u32,
-  reserved0: u32,
+  ${useActiveRestArea ? 'activeRestAreaM2: f32' : 'reserved0: u32'},
   reserved1: u32,
 };
 struct ContinuumMaterial {
@@ -202,7 +212,7 @@ fn main(@builtin(global_invocation_id) invocation: vec3<u32>) {
       || abs(frame.restAreaM2 - determinantAreaM2) > restAreaToleranceM2) {
     return;
   }
-  let sqrtAreaM = sqrt(frame.restAreaM2);
+${useActiveRestArea ? activeRestAreaCheck.slice(1) : '  let sqrtAreaM = sqrt(frame.restAreaM2);'}
   let warp = solveScalar(
     p0.xyz, p1.xyz, p2.xyz, inverseMassesKgInv, frame.inverseDm, sqrtAreaM,
     0u, material.complianceMPerN.x, params.dtS, previousLambdasKgM.x
@@ -226,6 +236,12 @@ fn main(@builtin(global_invocation_id) invocation: vec3<u32>) {
   );
   statuses[constraintIndex] = 0u;
 }`;
+}
+
+export const CONTINUUM_STRAIN_VNEXT_WGSL = continuumStrainSource(false);
+export const CONTINUUM_STRAIN_CUT_WGSL_V1 = continuumStrainSource(true);
+export const CONTINUUM_STRAIN_CUT_SOURCE_SHA256_V1 =
+  '0c3736a622976dc0a030bf925fa5563944fa90724a4af0500cefcfdd7b9e8bfb' as const;
 
 export type ContinuumStrainVNextParityPack = {
   readonly caseNames: readonly string[];
