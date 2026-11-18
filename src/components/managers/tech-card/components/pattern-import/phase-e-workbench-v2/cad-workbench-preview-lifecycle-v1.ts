@@ -6,8 +6,11 @@ import {
 } from 'lib/cloth/runtime/webgpu/xpbd-device-session';
 
 type PreviewResult = Readonly<{ ok: boolean; detail?: string }>;
+type BoundedPreviewResult =
+  | (PreviewResult & Readonly<{ releaseDevice?: never }>)
+  | Readonly<{ ok: true; releaseDevice?: true; detail?: string }>;
 export type CadWorkbenchBoundedClothPreviewHostV1 = Readonly<{
-  runBounded(lease: XpbdDeviceLease, signal: AbortSignal): Promise<PreviewResult>;
+  runBounded(lease: XpbdDeviceLease, signal: AbortSignal): Promise<BoundedPreviewResult>;
   stopPreview(): Promise<void>;
 }>;
 
@@ -28,12 +31,17 @@ export type CadWorkbenchPreviewStatusV1 = Readonly<{ pending: boolean; error: st
 
 type PreviewTurn = {
   host: PreviewHost;
+  computeCanvas: HTMLCanvasElement;
+  previewCanvas: HTMLCanvasElement | null;
   controller: AbortController;
   publish(status: CadWorkbenchPreviewStatusV1): void;
   pending: boolean;
   initialStop?: Promise<void>;
   device?: Promise<PreviewDevice>;
   lease?: XpbdDeviceLease;
+  retainsCheckpoint?: true;
+  suspended?: true;
+  deviceCleanup?: Promise<void>;
   cleanup?: Promise<void>;
 };
 
@@ -52,27 +60,56 @@ export function createCadWorkbenchPreviewLifecycleV1(
   const isCurrent = (turn: PreviewTurn) =>
     current === turn && !turn.cleanup && !turn.controller.signal.aborted;
 
+  function releaseDevice(turn: PreviewTurn, drain = false) {
+    if (turn.deviceCleanup) return turn.deviceCleanup;
+    const { device, lease } = turn;
+    turn.deviceCleanup = Promise.resolve()
+      .then(async () => {
+        try {
+          if (drain) await lease?.device.queue.onSubmittedWorkDone();
+        } finally {
+          const opened = await device?.catch(() => null);
+          try {
+            lease?.release();
+          } finally {
+            await opened?.dispose();
+          }
+        }
+      })
+      .finally(() => {
+        turn.lease = undefined;
+        turn.device = undefined;
+      });
+    return turn.deviceCleanup;
+  }
+
+  async function suspend(turn: PreviewTurn, drain: boolean, error: string | null = null) {
+    turn.retainsCheckpoint = true;
+    await releaseDevice(turn, drain);
+    if (!isCurrent(turn)) return;
+    turn.suspended = true;
+    turn.pending = false;
+    turn.publish({ pending: false, error });
+  }
+
   function close(turn: PreviewTurn) {
     if (turn.cleanup) return turn.cleanup;
     cleanupCount += 1;
     const cleanup = Promise.resolve().then(async () => {
-      if (!turn.device) {
+      if (!turn.device && !turn.retainsCheckpoint) {
         await turn.initialStop;
         return;
       }
       try {
-        if (turn.lease && 'runBounded' in turn.host) turn.controller.abort();
-        if (turn.lease) await turn.host.stopPreview();
-      } finally {
-        // Let the host release its retained frame bridges before aborting their caller signal.
-        // An abort on a still-retained frame is a source invalidation, not a preview refresh.
-        turn.controller.abort();
-        const device = await turn.device.catch(() => null);
-        try {
-          turn.lease?.release();
-        } finally {
-          await device?.dispose();
+        if (turn.lease || turn.retainsCheckpoint) {
+          if ('runBounded' in turn.host) turn.controller.abort();
+          await turn.host.stopPreview();
         }
+      } finally {
+        // Let the observed frame host release its retained bridges before aborting their caller.
+        // A bounded host uses the abort to drain an active run before it clears the frame.
+        turn.controller.abort();
+        await releaseDevice(turn);
       }
     });
     turn.cleanup = cleanup;
@@ -92,6 +129,15 @@ export function createCadWorkbenchPreviewLifecycleV1(
     const detail =
       (error instanceof Error ? error.message.slice(0, 600) : null) || 'Cloth preview failed.';
     turn.pending = true;
+    if (turn.retainsCheckpoint && !turn.lease && !turn.deviceCleanup) {
+      try {
+        // No resumed run has used the new device. The previous accepted frame can be retried.
+        await suspend(turn, false, detail);
+        return;
+      } catch {
+        if (!isCurrent(turn)) return;
+      }
+    }
     const cleanup = close(turn);
     turn.publish({ pending: true, error: detail });
     await cleanup.catch(() => {});
@@ -107,31 +153,59 @@ export function createCadWorkbenchPreviewLifecycleV1(
       computeCanvas: HTMLCanvasElement,
       previewCanvas: HTMLCanvasElement | null,
       publish: PreviewTurn['publish'],
+      resumeSuspended = false,
     ) {
       if (current?.pending) return;
       const previous = current;
-      const turn: PreviewTurn = { host, controller: new AbortController(), pending: true, publish };
+      const suspended =
+        resumeSuspended &&
+        previous?.suspended &&
+        previous.host === host &&
+        previous.computeCanvas === computeCanvas &&
+        previous.previewCanvas === previewCanvas
+          ? previous
+          : null;
+      if (resumeSuspended && !suspended) return;
+      const turn: PreviewTurn = {
+        host,
+        computeCanvas,
+        previewCanvas,
+        // The accepted canvas still checks the host's original signal on every display update.
+        controller: suspended?.controller ?? new AbortController(),
+        ...(suspended && { retainsCheckpoint: true }),
+        pending: true,
+        publish,
+      };
       current = turn;
       publish({ pending: true, error: null });
       const { signal } = turn.controller;
+      let deviceLost: Promise<void> | undefined;
 
       try {
-        await (previous ? close(previous) : closing);
+        await (previous && !suspended ? close(previous) : closing);
         if (!isCurrent(turn)) return;
-        if (previous?.host !== host) {
+        if (!suspended && previous?.host !== host) {
           turn.initialStop = host.stopPreview();
           await turn.initialStop;
           if (!isCurrent(turn)) return;
         }
-        turn.device = createDevice(computeCanvas, {
-          onDeviceLost: ({ message }) => {
-            void fail(
-              turn,
-              new Error(message ? `WebGPU device lost: ${message}` : 'WebGPU device lost.'),
-            );
-          },
+        turn.device = Promise.resolve().then(() => {
+          signal.throwIfAborted();
+          return createDevice(computeCanvas, {
+            onDeviceLost: ({ message }) => {
+              if (turn.deviceCleanup) return;
+              deviceLost ??= fail(
+                turn,
+                new Error(message ? `WebGPU device lost: ${message}` : 'WebGPU device lost.'),
+              );
+            },
+          });
         });
         const device = await turn.device;
+        if (deviceLost) {
+          await deviceLost;
+          return;
+        }
         if (!isCurrent(turn)) return;
         const lease = device.acquireExclusive();
         turn.lease = lease;
@@ -140,6 +214,10 @@ export function createCadWorkbenchPreviewLifecycleV1(
           const staged = await host.runBounded(lease, signal);
           if (!isCurrent(turn)) return;
           requireSuccessful(staged);
+          if (staged.releaseDevice === true) {
+            await suspend(turn, true);
+            return;
+          }
         } else {
           if (!previewCanvas) throw new Error('The cloth preview display is unavailable.');
           const frame16 = await host.run16(lease, signal);
@@ -156,7 +234,7 @@ export function createCadWorkbenchPreviewLifecycleV1(
         turn.pending = false;
         publish({ pending: false, error: null });
       } catch (error) {
-        await fail(turn, error);
+        await (deviceLost ?? fail(turn, error));
       }
     },
 

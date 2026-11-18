@@ -47,12 +47,15 @@ export type PrepareSavedWholeAssemblyPreviewV1 = (
   savedPlacement?: RestoredWholeSourceCutPlacementV1,
 ) => Promise<SavedWholeAssemblyStagePlanV1>;
 
+export type SavedWholeAssemblyResumeV1 = Readonly<{ lastAcceptedFrame: number }>;
+
 export type SavedWholeAssemblyPreviewProgressV1 = Readonly<{
   cloth: MeasurementSurfaceAcceptedClothV1;
   action: Command['action'];
   activeSeams: ActiveSeams;
   maximumGapMm: number;
   totalStages: number;
+  paused?: SavedWholeAssemblyResumeV1;
   stopped?: Readonly<{ operationNumber: number; detail: string }>;
 }>;
 
@@ -160,102 +163,184 @@ export async function readCurrentWholeAssemblyInitialPlacementV1(
   return layout;
 }
 
-/** Hands the current saved source and rendered mannequin to the existing staged runtime. */
+type SurfaceProjection = ReturnType<
+  typeof import('lib/cloth/runtime/cpu/source-cut-surface-projection-v1').prepareSourceCutSurfaceProjectionV1
+>;
+type PausedRun = Readonly<{
+  source: Source;
+  body: ModelDisplayedTriangleBodyOwnedInputV1;
+  observedBody: DisplayedBody['hashes'];
+  commands: readonly Command[];
+  totalStages: number;
+  receipt: Receipt;
+  nextCommand: number;
+  surface: SurfaceProjection;
+  ranges: MeasurementSurfaceAcceptedClothV1['ranges'];
+  last: SavedWholeAssemblyPreviewProgressV1;
+}>;
+const suspended = new WeakMap<SavedWholeAssemblyResumeV1, PausedRun>();
+
+/** Begins or continues the same accepted whole-assembly material and render program. */
 export async function runSavedWholeAssemblyStagedPreviewV1(
   input: PrepareInput &
     Readonly<{
       ownedLease: Run['ownedLease'];
       verifySource: (source: Source, signal: AbortSignal) => Promise<void>;
       onAccepted: (progress: SavedWholeAssemblyPreviewProgressV1) => void;
+      pauseAfterAccepted?: () => boolean;
+      resume?: SavedWholeAssemblyResumeV1;
     }>,
   signal: AbortSignal,
 ): Promise<SavedWholeAssemblyPreviewProgressV1> {
-  const { source, body, ownedLease, verifySource } = input;
-  const { plan, isCurrent, requireCurrent } = await prepareCurrent(input, signal);
+  const { source, body, ownedLease, verifySource, resume } = input;
+  // A paused display and the ROOT program outlive the abort signal of the released device.
+  const isCurrent = () => input.isCurrent() && body.isCurrent();
+  const requireCurrent = () => {
+    signal.throwIfAborted();
+    if (!isCurrent()) throw new Error('The saved assembly or displayed mannequin changed.');
+  };
+  requireCurrent();
+  const prior = resume ? suspended.get(resume) : undefined;
+  if (resume && !prior)
+    throw new Error('The accepted whole-assembly frame is no longer resumable.');
+  const renderBody = projectCurrentModelDisplayedTriangleBodyInputV1(body);
+  if (!renderBody) throw new Error('The displayed mannequin is no longer available.');
+  if (
+    prior &&
+    (prior.body !== body ||
+      prior.observedBody.bodyPositionsFloat32LeSha256 !==
+        renderBody.hashes.bodyPositionsFloat32LeSha256 ||
+      prior.observedBody.bodyTrianglesUint32LeSha256 !==
+        renderBody.hashes.bodyTrianglesUint32LeSha256 ||
+      prior.source.sourceSha256 !== source.sourceSha256 ||
+      prior.source.serverAssemblyRevision !== source.serverAssemblyRevision ||
+      prior.source.sizeId !== source.sizeId ||
+      prior.source.savedCarrier?.mediaType !== source.savedCarrier?.mediaType ||
+      prior.source.savedCarrier?.sidecarSha256 !== source.savedCarrier?.sidecarSha256 ||
+      source.unavailable.length > 0)
+  ) {
+    suspended.delete(resume!);
+    throw new Error('The accepted assembly belongs to a different source or mannequin.');
+  }
 
-  const commands = plan.commands.map((command) => ({ ...command }));
-  const [first, ...following] = commands;
-  if (!first || first.action !== 'activate')
-    throw new Error('The staged assembly has no first activation.');
-  const [
-    { runStagedSourceCutFramesV1: start, continueStagedSourceCutFramesV1: advance },
-    { snapshotGarmentStagedSourceCutCoreV1 },
-    { prepareSourceCutSurfaceProjectionV1 },
-  ] = await Promise.all([
-    import('components/cloth-simulation-spike/run-staged-source-cut-frames-v1'),
-    import('lib/cloth/runtime/webgpu/garment-staged-source-cut-core-v1'),
-    import('lib/cloth/runtime/cpu/source-cut-surface-projection-v1'),
-  ]);
-  const cut = snapshotGarmentStagedSourceCutCoreV1(plan.frame.material).cut;
-  const surface = prepareSourceCutSurfaceProjectionV1(cut, plan.maxSurfaceTriangles);
-  const ranges = Object.freeze(
-    surface.drawRanges.map(({ pieceId, triangleOffset, triangleCount }) => {
-      const color = plan.pieceColors.get(pieceId);
-      if (color === undefined || !Number.isInteger(color) || color < 0 || color > 0xffffff)
-        throw new Error(`The saved cloth surface has no display color for ${pieceId}.`);
-      return Object.freeze({ triangleOffset, triangleCount, color });
-    }),
-  );
+  const {
+    runStagedSourceCutFramesV1: start,
+    continueStagedSourceCutFramesV1: advance,
+    resumeStagedSourceCutFramesV1: resumeOnLease,
+  } = await import('components/cloth-simulation-spike/run-staged-source-cut-frames-v1');
+
+  async function initialize() {
+    const { plan } = await prepareCurrent(input, signal);
+    const commands = plan.commands.map((command) => ({ ...command }));
+    if (commands[0]?.action !== 'activate')
+      throw new Error('The staged assembly has no first activation.');
+    const [{ snapshotGarmentStagedSourceCutCoreV1 }, { prepareSourceCutSurfaceProjectionV1 }] =
+      await Promise.all([
+        import('lib/cloth/runtime/webgpu/garment-staged-source-cut-core-v1'),
+        import('lib/cloth/runtime/cpu/source-cut-surface-projection-v1'),
+      ]);
+    const cut = snapshotGarmentStagedSourceCutCoreV1(plan.frame.material).cut;
+    const surface = prepareSourceCutSurfaceProjectionV1(cut, plan.maxSurfaceTriangles);
+    const ranges = Object.freeze(
+      surface.drawRanges.map(({ pieceId, triangleOffset, triangleCount }) => {
+        const color = plan.pieceColors.get(pieceId);
+        if (color === undefined || !Number.isInteger(color) || color < 0 || color > 0xffffff)
+          throw new Error(`The saved cloth surface has no display color for ${pieceId}.`);
+        return Object.freeze({ triangleOffset, triangleCount, color });
+      }),
+    );
+    return {
+      plan,
+      commands,
+      surface,
+      ranges,
+      observedBody: plan.observedBody,
+      totalStages: plan.frame.seams.stages.length,
+    };
+  }
+  const initial = prior ? undefined : await initialize();
+  const { commands, surface, ranges, observedBody, totalStages } = prior ?? initial!;
 
   await verifySource(source, signal);
   requireCurrent();
-  const renderBody = projectCurrentModelDisplayedTriangleBodyInputV1(body);
-  if (!renderBody) throw new Error('The displayed mannequin is no longer available.');
-  let receipt = await start(
-    {
-      ...plan.options,
-      ownedLease,
-      assertCurrentSource: isCurrent,
-      frame: {
-        ...plan.frame,
-        bodyPositionsM: renderBody.bodyPositionsM,
-        bodyTriangles: renderBody.bodyTriangles,
-        intent: first,
-      },
-    },
-    signal,
-  );
-  async function publish(
-    frameReceipt: Receipt,
-    action: Command['action'],
-  ): Promise<SavedWholeAssemblyPreviewProgressV1> {
-    const frame = frameReceipt.validated.at(-1);
-    if (!frame) throw new Error('The whole-assembly run did not accept a display frame.');
-    const positionsM = surface.project(frameReceipt.positionsMInvMass);
-    await verifySource(source, signal);
-    requireCurrent();
-    const progress = Object.freeze({
-      cloth: Object.freeze({ positionsM, frameNumber: frame.frame, ranges, isCurrent }),
-      action,
-      activeSeams: frame.activeSeams,
-      maximumGapMm: frame.activeSeams.reduce(
-        (maximum, seam) => Math.max(maximum, seam.maximumGapM * 1000),
-        0,
-      ),
-      totalStages: plan.frame.seams.stages.length,
-    });
-    input.onAccepted(progress);
-    return progress;
-  }
-
-  let last = await publish(receipt, first.action);
-  for (const command of following) {
+  let receipt = prior?.receipt;
+  let last = prior?.last;
+  const begin = prior?.nextCommand ?? 0;
+  for (let index = begin; index < commands.length; index++) {
+    const command = commands[index]!;
     try {
-      receipt = await advance(receipt, command, signal);
+      if (!receipt) {
+        receipt = await start(
+          {
+            ...initial!.plan.options,
+            ownedLease,
+            assertCurrentSource: isCurrent,
+            frame: {
+              ...initial!.plan.frame,
+              bodyPositionsM: renderBody.bodyPositionsM,
+              bodyTriangles: renderBody.bodyTriangles,
+              intent: command,
+            },
+          },
+          signal,
+        );
+      } else if (prior && index === begin) {
+        receipt = await resumeOnLease(receipt, command, ownedLease, signal);
+        suspended.delete(resume!);
+      } else {
+        receipt = await advance(receipt, command, signal);
+      }
     } catch (error) {
+      if (!last) throw error;
       requireCurrent();
       const live = inspectOwnedActiveXpbdDeviceLeaseV1(ownedLease);
       if (!live.ok) throw error;
       live.assertActive();
       await verifySource(source, signal);
       requireCurrent();
-      const stopped = {
-        operationNumber: command.operationOrder,
-        detail: error instanceof Error ? error.message : 'The next stage was refused.',
-      };
-      return Object.freeze({ ...last, stopped });
+      if (resume) suspended.delete(resume);
+      return Object.freeze({
+        ...last,
+        stopped: {
+          operationNumber: command.operationOrder,
+          detail: error instanceof Error ? error.message : 'The next stage was refused.',
+        },
+      });
     }
-    last = await publish(receipt, command.action);
+
+    const frame = receipt.validated.at(-1);
+    if (!frame) throw new Error('The whole-assembly run did not accept a display frame.');
+    const positionsM = surface.project(receipt.positionsMInvMass);
+    await verifySource(source, signal);
+    requireCurrent();
+    last = Object.freeze({
+      cloth: Object.freeze({ positionsM, frameNumber: frame.frame, ranges, isCurrent }),
+      action: command.action,
+      activeSeams: frame.activeSeams,
+      maximumGapMm: frame.activeSeams.reduce(
+        (maximum, seam) => Math.max(maximum, seam.maximumGapM * 1000),
+        0,
+      ),
+      totalStages,
+    });
+    input.onAccepted(last);
+    if (index + 1 < commands.length && input.pauseAfterAccepted?.() === true) {
+      const paused = Object.freeze({ lastAcceptedFrame: frame.frame });
+      suspended.set(paused, {
+        source,
+        body,
+        observedBody,
+        totalStages,
+        receipt,
+        commands,
+        nextCommand: index + 1,
+        surface,
+        ranges,
+        last,
+      });
+      return Object.freeze({ ...last, paused });
+    }
   }
+  if (!last) throw new Error('The whole-assembly run did not accept a display frame.');
   return last;
 }

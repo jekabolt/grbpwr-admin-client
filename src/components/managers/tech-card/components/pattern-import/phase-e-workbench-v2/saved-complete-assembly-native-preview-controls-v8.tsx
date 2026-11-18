@@ -15,7 +15,10 @@ import {
 } from './cad-workbench-preview-lifecycle-v1';
 import { canonicalizePatternImportDxfPhaseESavedAssemblyValueV1 as canonical } from './saved-assembly-topology-hash-v1';
 import type { SavedCrossMaterialReviewForPreviewV8 } from './saved-complete-assembly-native-review-action-v8';
-import type { SavedWholeAssemblyPreviewProgressV1 } from './saved-whole-assembly-staged-preview-v1';
+import type {
+  SavedWholeAssemblyPreviewProgressV1,
+  SavedWholeAssemblyResumeV1,
+} from './saved-whole-assembly-staged-preview-v1';
 
 type PreviewKind = 'seam' | 'whole';
 
@@ -45,6 +48,10 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
   const computeCanvas = useRef<HTMLCanvasElement>(null);
   const placementSave = useRef<AbortController | null>(null);
   const previewKind = useRef<PreviewKind>('seam');
+  const pauseRequested = useRef(false);
+  const resumeRequested = useRef(false);
+  const pausedCheckpoint = useRef<SavedWholeAssemblyResumeV1 | null>(null);
+  const [pausing, setPausing] = useState(false);
   const [lifecycle] = useState(() => createCadWorkbenchPreviewLifecycleV1());
   const [status, setStatus] = useState<CadWorkbenchPreviewStatusV1>({
     pending: false,
@@ -96,12 +103,12 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
     let work: ReturnType<Run> | null = null;
     const execute: Run = async (lease, signal) => {
       const displayed = projectCurrentModelDisplayedTriangleBodyInputV1(body);
-      const isCurrent = () =>
-        !signal.aborted &&
+      const isCurrentSource = () =>
         current.current.review === review &&
         current.current.body === body &&
         !current.current.disabled &&
         body?.isCurrent() === true;
+      const isCurrent = () => !signal.aborted && isCurrentSource();
       if (!displayed || !isCurrent())
         throw new Error('Choose a current displayed mannequin and three placement coordinates.');
       const wholeRequested = previewKind.current === 'whole';
@@ -115,6 +122,9 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
           whole.load(signal),
           import('./saved-whole-assembly-staged-preview-v1'),
         ]);
+        const resume = resumeRequested.current ? pausedCheckpoint.current : null;
+        if (resumeRequested.current && !resume)
+          throw new Error('The saved whole-assembly checkpoint is no longer available.');
         const accepted = await runSavedWholeAssemblyStagedPreviewV1(
           {
             source,
@@ -122,7 +132,9 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
             ownedLease: lease,
             prepare: whole.prepare,
             savedPlacement: whole.saved,
-            isCurrent,
+            isCurrent: isCurrentSource,
+            resume: resume ?? undefined,
+            pauseAfterAccepted: () => pauseRequested.current,
             verifySource: (_source, active) => review.verify(active),
             onAccepted(progress) {
               onAcceptedCloth(progress.cloth);
@@ -133,8 +145,11 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
           signal,
         );
         if (!isCurrent()) throw new Error('The displayed mannequin or saved assembly changed.');
+        pausedCheckpoint.current = accepted.paused ?? null;
+        pauseRequested.current = false;
+        setPausing(false);
         setWholeProgress(accepted);
-        return { ok: true };
+        return { ok: true, releaseDevice: accepted.paused ? true : undefined };
       }
       if (!validCenter) throw new Error('Enter three valid placement coordinates.');
       const load = review.load(signal);
@@ -221,6 +236,9 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
         });
       },
       async stopPreview() {
+        pausedCheckpoint.current = null;
+        pauseRequested.current = false;
+        setPausing(false);
         onAcceptedCloth(undefined);
         setAcceptedFrame(null);
         setWholeProgress(null);
@@ -248,7 +266,7 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
     };
   }, [body, disabled, host, lifecycle, onAcceptedCloth]);
 
-  const preview = (kind: PreviewKind) => {
+  const preview = (kind: PreviewKind, resumeSuspended = false) => {
     if (
       disabled ||
       editing ||
@@ -261,8 +279,12 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
       !computeCanvas.current
     )
       return;
+    if (resumeSuspended && (kind !== 'whole' || !pausedCheckpoint.current)) return;
     previewKind.current = kind;
-    void lifecycle.start(host, computeCanvas.current, null, setStatus);
+    pauseRequested.current = false;
+    resumeRequested.current = resumeSuspended;
+    setPausing(false);
+    void lifecycle.start(host, computeCanvas.current, null, setStatus, resumeSuspended);
   };
 
   async function savePlacement(kind: PreviewKind) {
@@ -365,6 +387,31 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
             Preview full layout
           </Button>
         )}
+        {status.pending && previewKind.current === 'whole' && (
+          <Button
+            type='button'
+            variant='secondary'
+            size='xs'
+            disabled={pausing || !!wholeProgress?.paused}
+            onClick={() => {
+              pauseRequested.current = true;
+              setPausing(true);
+            }}
+          >
+            {pausing || wholeProgress?.paused ? 'Pausing…' : 'Pause after frame'}
+          </Button>
+        )}
+        {!status.pending && wholeProgress?.paused && (
+          <Button
+            type='button'
+            variant='main'
+            size='xs'
+            disabled={busy || !bodyMatchesWhole || !body?.isCurrent()}
+            onClick={() => preview('whole', true)}
+          >
+            Resume full layout
+          </Button>
+        )}
         {review.wholeAssembly?.save && (
           <Button
             type='button'
@@ -432,6 +479,11 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
               ? `Full layout visible · frame ${acceptedFrame.number}`
               : `Cloth visible · frame ${acceptedFrame.number} · medium diagnostic material`)}
       </Text>
+      {!status.pending && wholeProgress?.paused && (
+        <Text component='p' size='micro' role='status'>
+          Paused after accepted frame {wholeProgress.paused.lastAcceptedFrame}.
+        </Text>
+      )}
       {wholeProgress && (
         <div
           className='space-y-1'
