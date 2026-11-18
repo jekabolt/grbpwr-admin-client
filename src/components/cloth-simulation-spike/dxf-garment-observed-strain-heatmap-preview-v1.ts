@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { CAD_WORKBENCH_SEAM_SIDE_COLORS } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/cad-workbench-seam-colors-v1';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
@@ -126,6 +127,11 @@ function deformedPieceBoundary(
   return Float32Array.from(segments);
 }
 
+export type DxfGarmentObservedPreviewSeamSideV1 = Readonly<{
+  runtimeSeamId: string;
+  sideIndex: 0 | 1;
+}>;
+
 export type DxfGarmentObservedPreviewHitV1 = Readonly<{
   frameReportSha256: string;
   triangleIndex: number;
@@ -134,7 +140,7 @@ export type DxfGarmentObservedPreviewHitV1 = Readonly<{
     | Readonly<{
         kind: 'garment';
         pieceId: string;
-        seamSide?: Readonly<{ runtimeSeamId: string; sideIndex: 0 | 1 }>;
+        seamSide?: DxfGarmentObservedPreviewSeamSideV1;
       }>
     | Readonly<{
         kind: 'body';
@@ -162,10 +168,12 @@ export async function createDxfGarmentObservedStrainHeatmapPreviewV1(
   let renderer: THREE.WebGLRenderer | null = null;
   let outline: LineSegments2 | null = null;
   let outlinedPieceId: string | null = null;
+  let outlinedSeamSide: DxfGarmentObservedPreviewSeamSideV1 | undefined;
   const clearOutline = () => {
     const old = outline;
     outline = null;
     outlinedPieceId = null;
+    outlinedSeamSide = undefined;
     if (!old) return;
     old.removeFromParent();
     try {
@@ -308,24 +316,49 @@ export async function createDxfGarmentObservedStrainHeatmapPreviewV1(
     const display = renderer;
     display.render(scene, camera);
     current();
-    const setSelectedPiece = (pieceId: string | null): boolean => {
+    const setSelectedPiece = (
+      pieceId: string | null,
+      seamSide?: DxfGarmentObservedPreviewSeamSideV1,
+    ): boolean => {
       try {
         current();
         const range = input.pieceRanges.find((piece) => piece.pieceId === pieceId);
         const nextPieceId = range?.pieceId ?? null;
-        if (nextPieceId === outlinedPieceId) return nextPieceId === pieceId;
+        const seamEdges =
+          range && seamSide
+            ? input.seamEdges.filter(
+                (edge) =>
+                  edge.pieceId === range.pieceId &&
+                  edge.runtimeSeamId === seamSide.runtimeSeamId &&
+                  edge.sideIndex === seamSide.sideIndex,
+              )
+            : [];
+        const nextSeamSide = seamEdges.length ? seamSide : undefined;
+        const exactSelection = nextPieceId === pieceId && (!seamSide || !!nextSeamSide);
+        if (
+          nextPieceId === outlinedPieceId &&
+          nextSeamSide?.runtimeSeamId === outlinedSeamSide?.runtimeSeamId &&
+          nextSeamSide?.sideIndex === outlinedSeamSide?.sideIndex
+        )
+          return exactSelection;
         clearOutline();
         if (range) {
-          const segments = deformedPieceBoundary(
-            input.finalPositions3M,
-            input.garmentTriangles,
-            range,
-          );
+          const segments = seamEdges.length
+            ? Float32Array.from(
+                seamEdges.flatMap(({ vertexIndices }) =>
+                  vertexIndices.flatMap((vertex) =>
+                    Array.from(input.finalPositions3M.subarray(vertex * 3, vertex * 3 + 3)),
+                  ),
+                ),
+              )
+            : deformedPieceBoundary(input.finalPositions3M, input.garmentTriangles, range);
           if (segments.length > 0) {
             // Use a depth-tested screen-space stroke, as in the mannequin measurement stage.
             const material = new LineMaterial({
-              color: 0x311eee,
-              linewidth: 3,
+              color: nextSeamSide
+                ? CAD_WORKBENCH_SEAM_SIDE_COLORS[nextSeamSide.sideIndex === 0 ? 'A' : 'B']
+                : 0x311eee,
+              linewidth: nextSeamSide ? 4 : 3,
               depthWrite: false,
               polygonOffset: true,
               polygonOffsetFactor: -1,
@@ -341,6 +374,7 @@ export async function createDxfGarmentObservedStrainHeatmapPreviewV1(
               outline.renderOrder = 1;
               scene.add(outline);
               outlinedPieceId = nextPieceId;
+              outlinedSeamSide = nextSeamSide && { ...nextSeamSide };
             } catch (error) {
               if (outline) clearOutline();
               else {
@@ -362,7 +396,7 @@ export async function createDxfGarmentObservedStrainHeatmapPreviewV1(
           return false;
         }
         current();
-        return outlinedPieceId === pieceId;
+        return exactSelection && outlinedPieceId === pieceId;
       } catch {
         return false;
       }

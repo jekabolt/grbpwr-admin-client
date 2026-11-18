@@ -25,7 +25,10 @@ import {
   type SavedGenericObservedPhysicalHostPersistenceContextV1,
 } from './saved-generic-observed-physical-host-v1';
 
-import type { DxfGarmentObservedPreviewHitV1 } from './dxf-garment-observed-strain-heatmap-preview-v1';
+import type {
+  DxfGarmentObservedPreviewHitV1,
+  DxfGarmentObservedPreviewSeamSideV1,
+} from './dxf-garment-observed-strain-heatmap-preview-v1';
 
 export type SavedGenericDurablePhysicalPreviewScopeV1 = Readonly<{
   row: DxfProductSavedRowIdentityV1;
@@ -49,6 +52,11 @@ export type SavedGenericDurablePhysicalPreviewSeamV1 = Readonly<{
     boundaryVertexIds: readonly string[];
     direction: 'forward' | 'reverse';
   }>[];
+}>;
+
+export type SavedGenericDurablePhysicalPreviewSelectedSideV1 = Readonly<{
+  seam: SavedGenericDurablePhysicalPreviewSeamV1;
+  sideIndex: 0 | 1;
 }>;
 
 export type SavedGenericDurablePhysicalPreviewHitV1 =
@@ -872,11 +880,13 @@ export function createSavedGenericDurablePhysicalHostV1(
       canvas: HTMLCanvasElement,
       scope: SavedGenericDurablePhysicalPreviewScopeV1 | null,
       selection: SavedGenericDurablePhysicalPreviewPieceV1 | null,
+      selectedSide?: SavedGenericDurablePhysicalPreviewSelectedSideV1,
     ): boolean {
       const preview = previewAdmission();
       if (!preview) return false;
       const { durable } = preview;
       let selectedPieceId: string | null = null;
+      let runtimeSide: DxfGarmentObservedPreviewSeamSideV1 | undefined;
       try {
         if (selection && matchesPreviewScope(scope, durable)) {
           const requested = capture(record(selection, ['scopeKey', 'pieceId', 'pieceLineKey']));
@@ -886,14 +896,34 @@ export function createSavedGenericDurablePhysicalHostV1(
                 pieceId === requested.pieceId && pieceLineKey === requested.pieceLineKey,
             );
             selectedPieceId = piece?.pieceId ?? null;
+            if (piece && selectedSide) {
+              const candidate = record(selectedSide, ['seam', 'sideIndex']);
+              const { sideIndex } = candidate;
+              const seam = currentN1Seam(
+                candidate.seam as SavedGenericDurablePhysicalPreviewSeamV1,
+                durable,
+              );
+              if (
+                seam &&
+                (sideIndex === 0 || sideIndex === 1) &&
+                seam.sides[sideIndex].pieceId === piece.pieceId &&
+                seam.sides[sideIndex].pieceLineKey === piece.pieceLineKey
+              )
+                runtimeSide = Object.freeze({ runtimeSeamId: seam.id, sideIndex });
+            }
           }
         }
       } catch {
         // A stale or malformed selection also clears a previously visible outline.
       }
       if (!preview.current()) return false;
-      const rendered = host.setPreviewSelectedPiece(canvas, selectedPieceId);
-      return rendered && preview.current() && (selection === null || selectedPieceId !== null);
+      const rendered = host.setPreviewSelectedPiece(canvas, selectedPieceId, runtimeSide);
+      return (
+        rendered &&
+        preview.current() &&
+        (selection === null || selectedPieceId !== null) &&
+        (!selectedSide || !!runtimeSide)
+      );
     },
     async stopPreview() {
       // Preview effect cleanup must not cancel the separately owned source restore/compile.

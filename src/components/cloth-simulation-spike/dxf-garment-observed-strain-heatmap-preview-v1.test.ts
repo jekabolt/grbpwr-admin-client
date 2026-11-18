@@ -16,6 +16,7 @@ const ports = vi.hoisted(() => ({
   clothZ: 0,
   onePanel: false,
   outline: null as number[] | null,
+  outlineColor: null as string | null,
   garmentColors: null as number[] | null,
   projectionReads: 0,
   frustumViolations: 0,
@@ -142,6 +143,7 @@ vi.mock('three', async (original) => {
       camera.updateMatrixWorld(true);
       ports.currentCamera = camera;
       ports.outline = null;
+      ports.outlineColor = null;
       scene.traverse((node) => {
         if (!(node instanceof actual.Mesh)) return;
         if (node.name === 'generic-observed-selected-piece-outline') {
@@ -149,6 +151,7 @@ vi.mock('three', async (original) => {
           if (!(segmentStart instanceof actual.InterleavedBufferAttribute))
             throw new Error('Outline did not retain exact start/end segment coordinates.');
           ports.outline = Array.from(segmentStart.data.array);
+          ports.outlineColor = (node.material as LineMaterial).color.getHexString();
           return;
         }
         if (node.name.endsWith('-strain-utilization'))
@@ -206,6 +209,7 @@ beforeEach(() => {
   ports.clothZ = 0;
   ports.onePanel = false;
   ports.outline = null;
+  ports.outlineColor = null;
   ports.garmentColors = null;
   ports.projectionReads = 0;
   ports.frustumViolations = 0;
@@ -296,6 +300,34 @@ describe('synthetic renderer lifecycle (not visual or physical acceptance)', () 
     expect(material).toHaveBeenCalledTimes(1);
     expect(geometry).toHaveBeenCalledTimes(1);
     expect(ports.projectionReads).toBe(1);
+  });
+
+  it('draws only the selected exact side and keeps the heatmap and camera unchanged', async () => {
+    ports.clothZ = 0.25;
+    const { view } = await open();
+    const color = ports.garmentColors;
+    const camera = ports.currentCamera;
+    const a = { runtimeSeamId: 'runtime-seam', sideIndex: 0 } as const;
+    const b = { runtimeSeamId: 'runtime-seam', sideIndex: 1 } as const;
+    expect(view.setSelectedPiece('first-panel', a)).toBe(true);
+    expect(ports.outline).toEqual([0, 0, 0.25, 1, 0, 0.25]);
+    expect(ports.outlineColor).toBe('2563eb');
+    expect(view.setSelectedPiece('second-panel', b)).toBe(true);
+    expect(ports.outline).toEqual([1, 1, 0.25, 0, 1, 0.25]);
+    expect(ports.outlineColor).toBe('f97316');
+    expect(view.setSelectedPiece('second-panel', b)).toBe(true);
+    expect(ports.renderers[0]?.renders).toBe(3);
+
+    expect(view.setSelectedPiece('second-panel', a)).toBe(false);
+    expect(ports.outlineColor).toBe('311eee');
+    expect(view.setSelectedPiece(null)).toBe(true);
+    expect(ports.outline).toBeNull();
+    expect(ports.garmentColors).toEqual(color);
+    expect(ports.currentCamera).toBe(camera);
+    expect(ports.projectionReads).toBe(1);
+    ports.controller.abort();
+    expect(view.setSelectedPiece('first-panel', a)).toBe(false);
+    expect(ports.renderers[0]?.renders).toBe(5);
   });
 
   it('clears outline geometry/material and rejects future selection when its frame revokes', async () => {

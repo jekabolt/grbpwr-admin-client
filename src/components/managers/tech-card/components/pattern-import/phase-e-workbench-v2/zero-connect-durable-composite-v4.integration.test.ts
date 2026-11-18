@@ -1,5 +1,6 @@
-import { createElement } from 'react';
+import { createElement, isValidElement, type ComponentProps, type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import * as sheet from '../sheet-viewport';
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('api/api', () => ({ abortableAdminService: vi.fn() }));
@@ -319,6 +320,30 @@ describe('zero-connect durable N=1 genuine production chain', () => {
         table = typeof next === 'function' ? next(table) : next;
       },
     }));
+    type SideAction = Readonly<{
+      'data-key': string;
+      'aria-label': string;
+      onKeyDown: NonNullable<ComponentProps<'line'>['onKeyDown']>;
+    }>;
+    let pickEdge: ComponentProps<typeof sheet.SheetViewport>['onPick'];
+    const sideActions = new Map<string, SideAction>();
+    const visitSideActions = (node: ReactNode): void => {
+      if (Array.isArray(node)) node.forEach(visitSideActions);
+      if (!isValidElement<Record<string, unknown>>(node)) return;
+      if (node.type === 'line' && String(node.props['aria-label']).startsWith('Select seam ')) {
+        const action = node.props as SideAction;
+        sideActions.set(action['aria-label'], action);
+      }
+      visitSideActions(node.props.children as ReactNode);
+    };
+    const Viewport = sheet.SheetViewport;
+    const sheetHook = vi.spyOn(sheet, 'SheetViewport').mockImplementation((props) => {
+      pickEdge = props.onPick;
+      const viewport = Viewport(props);
+      sideActions.clear();
+      visitSideActions(viewport);
+      return viewport;
+    });
     try {
       const onActiveSeamIndexChange = vi.fn();
       const renderWorkbench = () => {
@@ -421,7 +446,23 @@ describe('zero-connect durable N=1 genuine production chain', () => {
         false,
       );
       expect(renderWorkbench().markup).not.toContain('data-cad-zero-connect-saved-side-focused');
+
+      expect(sideActions.size).toBe(2);
+      pickEdge?.(sideActions.get('Select seam 1 side A')!['data-key'], { shiftKey: false });
+      expect(renderWorkbench().markup).toContain('data-cad-zero-connect-saved-side-focused="A"');
+      const stopPropagation = vi.fn();
+      const preventDefault = vi.fn();
+      const sideB = sideActions.get('Select seam 1 side B')!;
+      sideB.onKeyDown({ key: 'Enter', stopPropagation, preventDefault } as unknown as Parameters<
+        SideAction['onKeyDown']
+      >[0]);
+      expect(stopPropagation).toHaveBeenCalledOnce();
+      expect(preventDefault).toHaveBeenCalledOnce();
+      expect(renderWorkbench().markup).toContain('data-cad-zero-connect-saved-side-focused="B"');
+      pickEdge?.('outside-exact-side-bounds', { shiftKey: false });
+      expect(renderWorkbench().markup).not.toContain('data-cad-zero-connect-saved-side-focused');
     } finally {
+      sheetHook.mockRestore();
       tableHook.mockRestore();
     }
     const copied = structuredClone(projection);

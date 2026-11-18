@@ -302,6 +302,49 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
           mannequin(Object.freeze({ ...context, sceneOverlay, previewScope, previewSeam }))
       : mannequin;
 
+  const focusSelection = (nextSelection: PatternImportDxfPhaseECadWorkbenchSelectionV1 | null) => {
+    if ((nextSelection?.pieceId || nextSelection?.pieceLineKey) && tableSessionOwner) {
+      const pieces = tableSessionOwner.session.layout.pieces;
+      const index = findCadWorkbenchScopedPieceIndexV1(
+        nextSelection,
+        session.current.row.scopeKey,
+        pieces.map(({ identity }) => identity),
+      );
+      if (index < 0) return;
+      const pieceKey = pieces[index]!.identity.key;
+      const sideIndex = nextSelection.seamSideIndex;
+      if (sideIndex != null) {
+        const side = activeSeam.sides[sideIndex];
+        if (
+          !side ||
+          nextSelection.seamId !== activeSeam.seamId ||
+          nextSelection.operationNumber !== operation.sourceOperationNumber ||
+          side.pieceId !== nextSelection.pieceId ||
+          side.pieceLineKey !== nextSelection.pieceLineKey
+        )
+          return;
+      }
+      tableSessionOwner.update((current) => {
+        const activated = activatePatternImportDxfPhaseECadTableZeroCanvasPieceV1(
+          current,
+          pieceKey,
+          false,
+        );
+        return sideIndex == null
+          ? activated
+          : Object.freeze({
+              ...activated,
+              savedSeamSide: { seamId: activeSeam.seamId, sideIndex, pieceKey },
+            });
+      });
+    }
+    if (!nextSelection?.seamId) return;
+    const nextIndex = resolved.model.state.seams.findIndex(
+      ({ seamId }) => seamId === nextSelection.seamId,
+    );
+    if (nextIndex >= 0) onActiveSeamIndexChange(nextIndex);
+  };
+
   return (
     <PatternImportDxfPhaseECadWorkbenchSplitShellV1
       objectSidebar={
@@ -318,48 +361,7 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
         if (tableSessionOwner) handleCadTablePieceSelectionKey(event, tableSessionOwner);
       }}
       selection={selection}
-      onSelectionFocus={({ selection: nextSelection }) => {
-        if ((nextSelection?.pieceId || nextSelection?.pieceLineKey) && tableSessionOwner) {
-          const pieces = tableSessionOwner.session.layout.pieces;
-          const index = findCadWorkbenchScopedPieceIndexV1(
-            nextSelection,
-            session.current.row.scopeKey,
-            pieces.map(({ identity }) => identity),
-          );
-          if (index < 0) return;
-          const pieceKey = pieces[index]!.identity.key;
-          const sideIndex = nextSelection.seamSideIndex;
-          if (sideIndex != null) {
-            const side = activeSeam.sides[sideIndex];
-            if (
-              !side ||
-              nextSelection.seamId !== activeSeam.seamId ||
-              nextSelection.operationNumber !== operation.sourceOperationNumber ||
-              side.pieceId !== nextSelection.pieceId ||
-              side.pieceLineKey !== nextSelection.pieceLineKey
-            )
-              return;
-          }
-          tableSessionOwner.update((current) => {
-            const activated = activatePatternImportDxfPhaseECadTableZeroCanvasPieceV1(
-              current,
-              pieceKey,
-              false,
-            );
-            return sideIndex == null
-              ? activated
-              : Object.freeze({
-                  ...activated,
-                  savedSeamSide: { seamId: activeSeam.seamId, sideIndex, pieceKey },
-                });
-          });
-        }
-        if (!nextSelection?.seamId) return;
-        const nextIndex = resolved.model.state.seams.findIndex(
-          ({ seamId }) => seamId === nextSelection.seamId,
-        );
-        if (nextIndex >= 0) onActiveSeamIndexChange(nextIndex);
-      }}
+      onSelectionFocus={({ selection: nextSelection }) => focusSelection(nextSelection)}
       desktop={
         exactDesktop && tableSessionOwner && seamOrdinal !== null ? (
           <PatternImportDxfPhaseECadTableZeroConnectCanvasV1
@@ -393,6 +395,17 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
               ordinal: seamOrdinal,
               focusedSideIndex: focusedSeamSide,
               sides: activeSeamChoice.sides,
+              onFocusSide: (sideIndex) => {
+                const { pieceId, pieceLineKey } = activeSeamChoice.sides[sideIndex];
+                focusSelection({
+                  operationNumber: operation.sourceOperationNumber,
+                  scopeKey: session.current.row.scopeKey,
+                  pieceId,
+                  pieceLineKey,
+                  seamId: activeSeam.seamId,
+                  seamSideIndex: sideIndex,
+                });
+              },
             }}
             disabled
           />

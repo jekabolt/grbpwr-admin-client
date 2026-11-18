@@ -98,6 +98,7 @@ export type PatternImportDxfPhaseECadTableZeroConnectCanvasPropsV1 = Readonly<{
     operationNumber: number;
     ordinal: number;
     focusedSideIndex?: 0 | 1 | null;
+    onFocusSide?: (sideIndex: 0 | 1) => void;
     sides: readonly Readonly<{
       pieceId: string;
       pieceLineKey: string;
@@ -622,6 +623,16 @@ function CadTableZeroCanvas({
           fitRequest={fitRequest}
           className='min-h-0'
           onPick={(viewKey, modifiers) => {
+            if (activeTool === 'select' && savedSeam?.onFocusSide) {
+              const segment = segments.find((candidate) => candidate.viewKey === viewKey);
+              const sideIndex = segment
+                ? savedSeam.sides.findIndex((side) => sameSavedSeamEdge(side, segment))
+                : -1;
+              if (sideIndex === 0 || sideIndex === 1) {
+                savedSeam.onFocusSide(sideIndex);
+                return;
+              }
+            }
             if (selectsPieces || activeTool === 'move') {
               setTableSession((current) =>
                 activatePatternImportDxfPhaseECadTableZeroCanvasPieceV1(
@@ -811,8 +822,13 @@ function CadTableZeroCanvas({
                       !!controller.session &&
                       !connectDisabled &&
                       controller.session.status !== 'ready';
+                    const canFocusSavedSide =
+                      activeTool === 'select' &&
+                      !!savedSeam?.onFocusSide &&
+                      (savedSideIndex === 0 || savedSideIndex === 1);
                     const savedSideFocused =
                       !!savedSide && savedSideIndex === savedSeam?.focusedSideIndex;
+                    const canActivateEdge = canSelect || canFocusSavedSide;
                     const savedSideColor = savedSide
                       ? CAD_WORKBENCH_SEAM_SIDE_COLORS[savedSide]
                       : 'currentColor';
@@ -858,16 +874,23 @@ function CadTableZeroCanvas({
                           stroke='transparent'
                           strokeWidth='12'
                           vectorEffect='non-scaling-stroke'
-                          pointerEvents={canSelect ? 'stroke' : 'none'}
+                          pointerEvents={canActivateEdge ? 'stroke' : 'none'}
                           role='button'
-                          tabIndex={canSelect ? 0 : -1}
-                          aria-disabled={!canSelect}
-                          aria-label={`Choose ${segment.pieceLineKey} edge ${segment.boundaryVertexIds.join(' → ')}; hold Shift for reverse`}
+                          tabIndex={canActivateEdge ? 0 : -1}
+                          aria-disabled={!canActivateEdge}
+                          aria-pressed={canFocusSavedSide ? savedSideFocused : undefined}
+                          aria-label={
+                            canFocusSavedSide
+                              ? `Select seam ${savedSeam.ordinal} side ${savedSide}`
+                              : `Choose ${segment.pieceLineKey} edge ${segment.boundaryVertexIds.join(' → ')}; hold Shift for reverse`
+                          }
                           onKeyDown={(event) => {
-                            if (!canSelect || (event.key !== 'Enter' && event.key !== ' ')) return;
+                            if (!canActivateEdge || (event.key !== 'Enter' && event.key !== ' '))
+                              return;
                             event.preventDefault();
                             event.stopPropagation();
-                            selectEdge(segment, event.shiftKey ? 'reverse' : 'forward');
+                            if (canFocusSavedSide) savedSeam.onFocusSide?.(savedSideIndex);
+                            else selectEdge(segment, event.shiftKey ? 'reverse' : 'forward');
                           }}
                         />
                         {savedSeam && savedSide ? (

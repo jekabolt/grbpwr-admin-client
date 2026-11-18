@@ -1,3 +1,4 @@
+import type { DxfGarmentObservedPreviewSeamSideV1 } from './dxf-garment-observed-strain-heatmap-preview-v1';
 import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 import type {
   DxfExactAssemblyGraphV1,
@@ -1362,8 +1363,14 @@ export function createSavedGenericObservedPhysicalHostV1(
         return hit && hit.frameReportSha256 === view.receipt.frameReportSha256 ? hit : null;
       });
     },
-    setPreviewSelectedPiece(canvas: HTMLCanvasElement, pieceId: string | null): boolean {
-      return withMountedPreview(canvas, (view) => view.setSelectedPiece(pieceId)) ?? false;
+    setPreviewSelectedPiece(
+      canvas: HTMLCanvasElement,
+      pieceId: string | null,
+      seamSide?: DxfGarmentObservedPreviewSeamSideV1,
+    ): boolean {
+      return (
+        withMountedPreview(canvas, (view) => view.setSelectedPiece(pieceId, seamSide)) ?? false
+      );
     },
     async stopPreview() {
       if (operation?.kind === 'physical') {

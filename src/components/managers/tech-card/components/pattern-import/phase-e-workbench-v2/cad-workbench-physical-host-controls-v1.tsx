@@ -56,6 +56,7 @@ export function CadWorkbenchPhysicalHostControlsV1({
       canvas,
       interaction?.scope ?? null,
       interaction?.selectedPiece ?? null,
+      interaction?.selectedSide,
     );
   }, [host, interaction, previewReady, receipt]);
   const physicalPointer = useRef<{
