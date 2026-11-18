@@ -2399,21 +2399,32 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
         : Promise.resolve(savedCrossMaterialModelId),
     [readSavedMannequinModelId, savedCrossMaterialModelId],
   );
-  const crossMaterialPreviewControls = activeCrossMaterialReview ? (
-    <Suspense fallback={null}>
-      <SavedCompleteAssemblyNativePreviewControlsV8
-        key={activeCrossMaterialReview.sha256}
-        review={activeCrossMaterialReview}
-        body={displayedBodyInput}
-        disabled={frozen}
-        onAcceptedCloth={setAcceptedCloth}
-      />
-    </Suspense>
-  ) : null;
+  const crossMaterialPreviewControls = activeCrossMaterialReview
+    ? (tableSizeMatches: boolean) => (
+        <>
+          {!tableSizeMatches && !frozen && (
+            <Text component='p' size='micro' role='status' className='px-2 py-1'>
+              Choose {activeCrossMaterialReview.patternSize.sizeToken} in Pattern set to preview
+              this saved review.
+            </Text>
+          )}
+          <Suspense fallback={null}>
+            <SavedCompleteAssemblyNativePreviewControlsV8
+              key={activeCrossMaterialReview.sha256}
+              review={activeCrossMaterialReview}
+              body={displayedBodyInput}
+              disabled={frozen || !tableSizeMatches}
+              onAcceptedCloth={setAcceptedCloth}
+            />
+          </Suspense>
+        </>
+      )
+    : undefined;
   const physicalHost: CadWorkbenchPhysicalHostV1 = {
     onDisplayedBodyInputV1,
     acceptedCloth:
       activeCrossMaterialReview && acceptedCloth?.isCurrent() ? acceptedCloth : undefined,
+    savedReviewSize: activeCrossMaterialReview?.patternSize,
     panel: crossMaterialPreviewControls,
     arrangementSourceKey: JSON.stringify([
       physicalRow,

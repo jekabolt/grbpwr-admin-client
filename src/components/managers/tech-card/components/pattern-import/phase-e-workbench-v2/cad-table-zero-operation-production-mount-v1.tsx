@@ -86,7 +86,10 @@ import {
   type PatternImportDxfPhaseECadWorkbenchOperationsModeV1,
   type PatternImportDxfPhaseECadWorkbenchSelectionV1,
 } from './cad-workbench-split-shell-v1';
-import type { CadWorkbenchPhysicalHostV1 } from './cad-workbench-physical-host-v1';
+import type {
+  CadWorkbenchPhysicalHostV1,
+  CadWorkbenchSavedReviewSizeV1,
+} from './cad-workbench-physical-host-v1';
 import {
   createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1,
   type PatternImportDxfPhaseEZeroOperationSavedCardAuthorityRuntimeV1,
@@ -182,6 +185,7 @@ export type PatternImportDxfPhaseECadTableZeroOperationMannequinContextV1 = Read
   activeScopeKey: string | null;
   stagingBlocked: boolean;
   acceptedCloth?: CadWorkbenchPhysicalHostV1['acceptedCloth'];
+  sizeMatches: boolean;
 }>;
 
 type SavedFailoverResult = Readonly<{
@@ -613,6 +617,58 @@ export function resolvePatternImportDxfPhaseECadTableZeroOperationAfterFreshV1(
   });
 }
 
+type SelectedSize = PatternImportDxfPhaseECadTableZeroOperationFreshChoiceV1['sizes'][number];
+type TableSizeChoice = Readonly<{
+  sizeId: number;
+  review: CadWorkbenchSavedReviewSizeV1 | null;
+}>;
+
+export function currentCadTableSavedReviewSizeV1(
+  review: CadWorkbenchSavedReviewSizeV1 | undefined,
+  card: common_TechCard | null,
+  operationNumber: number | null,
+) {
+  if (
+    !review ||
+    card?.id !== review.row.techCardId ||
+    card.lockVersion !== review.row.cardLockVersion ||
+    operationNumber !== review.operationNumber ||
+    !card.techCard?.sizeIds?.includes(review.sizeId)
+  )
+    return null;
+  const rows = card.techCard.patterns?.filter(
+    ({ lineKey }) => lineKey === review.row.patternLineKey,
+  );
+  const [row] = rows ?? [];
+  return rows?.length === 1 &&
+    row.savedRowRevision === review.row.revision &&
+    row.sha256 === review.row.sha256 &&
+    row.url === review.row.url &&
+    Number(row.sizeBytes) === review.row.sizeBytes
+    ? review
+    : null;
+}
+
+export function resolveCadTableSavedReviewSizeV1(
+  sizes: readonly SelectedSize[],
+  choice: TableSizeChoice | null,
+  review: CadWorkbenchSavedReviewSizeV1 | null,
+) {
+  const exact = review
+    ? sizes.filter(
+        ({ sizeId, sizeToken }) => sizeId === review.sizeId && sizeToken === review.sizeToken,
+      )
+    : [];
+  const manual = sizes.find(({ sizeId }) => sizeId === choice?.sizeId);
+  const manualForReview = choice?.review === review ? manual : undefined;
+  const selectedSize =
+    manualForReview ?? (exact.length === 1 ? exact[0] : undefined) ?? manual ?? sizes[0];
+  return {
+    selectedSize,
+    matchesReview: exact.length === 1 && selectedSize === exact[0],
+  };
+}
+
 /**
  * The zero-row view has no selected Assembly operation to borrow. It accepts either the confirmed
  * import session or an operation-independent, revalidated saved-row authority plus the existing
@@ -631,6 +687,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
   selection = Object.freeze({ operationNumber: null }),
   operationsPanel = null,
   acceptedCloth,
+  savedReviewSize,
   defaultOperationsMode = 'collapsed',
   sourceSurface,
 }: Readonly<{
@@ -646,6 +703,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
   selection?: PatternImportDxfPhaseECadWorkbenchSelectionV1;
   operationsPanel?: ReactNode;
   acceptedCloth?: CadWorkbenchPhysicalHostV1['acceptedCloth'];
+  savedReviewSize?: CadWorkbenchSavedReviewSizeV1;
   defaultOperationsMode?: PatternImportDxfPhaseECadWorkbenchOperationsModeV1;
   sourceSurface?: 'explicit-native-drawn-sewing';
 }>) {
@@ -748,26 +806,39 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
     !savedChoices.ok && currentSavedCardGate?.ok ? currentSavedCardGate.techCard : savedCard;
   const explicitSavedChoices =
     !savedChoices.ok && currentSavedCardGate?.ok ? currentSavedCardGate.choices : savedChoices;
-  const choices = sourceSurface ? explicitSavedChoices : sourceRoute.choices;
+  const currentReviewSize = currentCadTableSavedReviewSizeV1(
+    savedReviewSize,
+    effectiveSavedCard,
+    selection.operationNumber,
+  );
+  const choices = sourceSurface || currentReviewSize ? explicitSavedChoices : sourceRoute.choices;
   const [chosenScopeKey, setChosenScopeKey] = useState('');
-  const [chosenSizeToken, setChosenSizeToken] = useState('');
-  const defaultScope = choices.ok ? choices.choices[0] : undefined;
+  const [chosenSize, setChosenSize] = useState<TableSizeChoice | null>(null);
+  const defaultScope = choices.ok
+    ? choices.choices.find(({ scopeKey }) => scopeKey === currentReviewSize?.row.scopeKey) ??
+      choices.choices[0]
+    : undefined;
   const selectedScope = choices.ok
     ? choices.choices.find(({ scopeKey }) => scopeKey === chosenScopeKey) ?? defaultScope
     : undefined;
   const scopeKey = selectedScope?.scopeKey ?? '';
-  const selectedSize =
-    selectedScope?.sizes.find(({ sizeToken }) => sizeToken === chosenSizeToken) ??
-    selectedScope?.sizes[0];
-  const sizeToken = selectedSize?.sizeToken ?? '';
-  const useFreshSession = hasMatchingFreshPatternChoiceV1(
-    freshChoices,
-    choices,
-    positiveTechCardId,
-    scopeKey,
-    sizeToken,
-    sourceSurface,
+  const { selectedSize, matchesReview } = resolveCadTableSavedReviewSizeV1(
+    selectedScope?.sizes ?? [],
+    chosenSize,
+    currentReviewSize,
   );
+  const tableSizeMatchesReview = !disabled && (!savedReviewSize || matchesReview);
+  const sizeToken = selectedSize?.sizeToken ?? '';
+  const useFreshSession =
+    !currentReviewSize &&
+    hasMatchingFreshPatternChoiceV1(
+      freshChoices,
+      choices,
+      positiveTechCardId,
+      scopeKey,
+      sizeToken,
+      sourceSurface,
+    );
   const generatedRows =
     selectedScope?.isInterlining && !useFreshSession
       ? effectiveSavedCard?.techCard?.patterns?.filter((pattern) => pattern.bomLineKey === scopeKey)
@@ -947,16 +1018,15 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
       selectClothPieceRef.current = null;
     };
   }, [disabled, prepared, resolvedSource, tableSessionOwner]);
-  const selectableCloth = useMemo(
-    () =>
-      acceptedCloth?.ranges.some(({ sourcePiece }) => sourcePiece)
-        ? Object.freeze({
-            ...acceptedCloth,
-            onSelectPiece: ((hit) => selectClothPieceRef.current?.(hit)) satisfies SelectClothPiece,
-          })
-        : acceptedCloth,
-    [acceptedCloth],
-  );
+  const selectableCloth = useMemo(() => {
+    if (!tableSizeMatchesReview) return undefined;
+    return acceptedCloth?.ranges.some(({ sourcePiece }) => sourcePiece)
+      ? Object.freeze({
+          ...acceptedCloth,
+          onSelectPiece: ((hit) => selectClothPieceRef.current?.(hit)) satisfies SelectClothPiece,
+        })
+      : acceptedCloth;
+  }, [acceptedCloth, tableSizeMatchesReview]);
   const pieceFeatures = useMemo(() => {
     if (!prepared) return undefined;
     const scopes =
@@ -1192,7 +1262,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
                   }))}
                   onValueChange={(value) => {
                     setChosenScopeKey(value);
-                    setChosenSizeToken('');
+                    setChosenSize(null);
                   }}
                   readOnly={disabled}
                 />
@@ -1201,12 +1271,17 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
                 <Select
                   name='cad-zero-operation-size'
                   size='sm'
-                  value={sizeToken}
+                  value={selectedSize ? String(selectedSize.sizeId) : ''}
                   items={(selectedScope?.sizes ?? []).map((size) => ({
-                    value: size.sizeToken,
+                    value: String(size.sizeId),
                     label: size.label,
                   }))}
-                  onValueChange={setChosenSizeToken}
+                  onValueChange={(value) => {
+                    const chosen = selectedScope?.sizes.find(
+                      ({ sizeId }) => String(sizeId) === value,
+                    );
+                    if (chosen) setChosenSize({ sizeId: chosen.sizeId, review: currentReviewSize });
+                  }}
                   readOnly={disabled}
                 />
               </span>
@@ -1271,6 +1346,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
         activeScopeKey: currentMannequinSource?.scopeKey ?? null,
         stagingBlocked: mannequinStaging?.key === mannequinStagingKey && mannequinStaging.blocked,
         acceptedCloth: selectableCloth,
+        sizeMatches: tableSizeMatchesReview,
       })}
       operationsPanel={
         operationsPanel ?? (
@@ -1337,11 +1413,14 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
       selection={selection}
       operationsPanel={operationsPanel}
       acceptedCloth={physicalHost?.acceptedCloth}
+      savedReviewSize={physicalHost?.savedReviewSize}
       defaultOperationsMode={defaultOperationsMode}
       sourceSurface={sourceSurface}
-      mannequin={({ sources, activeScopeKey, stagingBlocked, acceptedCloth }) => (
+      mannequin={({ sources, activeScopeKey, stagingBlocked, acceptedCloth, sizeMatches }) => (
         <div className='flex h-full min-h-0 flex-col'>
-          {physicalHost?.panel ? <div className='shrink-0'>{physicalHost.panel}</div> : null}
+          {physicalHost?.panel ? (
+            <div className='shrink-0'>{physicalHost.panel(sizeMatches)}</div>
+          ) : null}
           <div className='min-h-0 flex-1'>
             <PatternImportDxfPhaseECadMannequinModelPickerV1
               disabled={disabled}

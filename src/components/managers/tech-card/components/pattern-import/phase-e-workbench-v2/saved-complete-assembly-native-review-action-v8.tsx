@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useId, useRef, useState } from 'react';
 import { abortableAdminService } from 'api/api';
 import type { common_TechCard } from 'api/proto-http/admin';
 import { rollGoodsScopes } from 'components/managers/tech-card/components/piece-block-refs';
@@ -28,6 +28,8 @@ import {
 import type { PatternImportDxfPhaseEZeroOperationSavedCardAuthorityRuntimeV1 as Authority } from './zero-operation-saved-card-authority-v1';
 import { resolvePatternImportDxfPhaseEZeroOperationSavedDxfCapabilityV1 } from './zero-operation-saved-dxf-capability-v1';
 
+import type { CadWorkbenchSavedReviewSizeV1 } from './cad-workbench-physical-host-v1';
+
 type Pairing = 'start-to-start' | 'start-to-end';
 type Prepared = Awaited<ReturnType<typeof prepareSavedCompleteAssemblyNativeStitchReviewV8>>;
 type RestoredPlacement = Awaited<ReturnType<typeof readSavedCrossMaterialPlacementDocumentV9>>;
@@ -41,6 +43,7 @@ export type SavedCrossMaterialReviewForPreviewV8 = Readonly<{
   lockVersion: number;
   operationNumber: number;
   sha256: string;
+  patternSize: CadWorkbenchSavedReviewSizeV1;
   load: (signal: AbortSignal) => ReturnType<typeof readSavedCompleteAssemblyNativePhysicalSourceV8>;
   verify: (signal: AbortSignal) => Promise<void>;
   wholeAssembly?: Readonly<{
@@ -151,7 +154,7 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
     | null
   >(null);
   const verifiedPreview = !disabled && state?.status === 'reopened' ? state.preview : null;
-  useEffect(() => {
+  useLayoutEffect(() => {
     onVerifiedReview?.(verifiedPreview);
     return () => {
       if (verifiedPreview) onVerifiedReview?.(null);
@@ -278,6 +281,12 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
             lockVersion: exact.row.cardLockVersion,
             operationNumber,
             sha256: carrierSha256,
+            patternSize: Object.freeze({
+              row: exact.row,
+              operationNumber,
+              sizeId: restored.document.selection.sizeId,
+              sizeToken: restored.document.selection.sizeToken,
+            }),
             load,
             wholeAssembly: prepareWholeAssemblyPreview && {
               prepare: prepareWholeAssemblyPreview,

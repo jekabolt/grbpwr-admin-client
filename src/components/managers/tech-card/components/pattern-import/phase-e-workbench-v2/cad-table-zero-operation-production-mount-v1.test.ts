@@ -45,6 +45,8 @@ import {
 } from './cad-table-zero-connect-existing-linked-operation-rebind-v1';
 import {
   createPatternImportDxfPhaseECadTableZeroOperationAuthoringRefreshV1,
+  currentCadTableSavedReviewSizeV1,
+  resolveCadTableSavedReviewSizeV1,
   isPatternImportDxfPhaseECadTableZeroOperationAuthoringReadyV1,
   preparePatternImportDxfPhaseECadTableZeroOperationSavedFailoverV1,
   readPatternImportDxfPhaseECurrentSavedCardGateV1,
@@ -199,6 +201,86 @@ function freshChoices(techCardId: number, ok = true) {
         blocker: Object.freeze({ code: 'fresh-session-invalid', detail: FRESH_DETAIL }),
       }) as never);
 }
+
+describe('the verified saved review grade in Pattern set', () => {
+  const xs = { sizeId: 7, sizeToken: 'XS', label: 'XS', rank: 0 };
+  const m = { sizeId: 45, sizeToken: 'M', label: 'M', rank: 1 };
+  const l = { sizeId: 46, sizeToken: 'L', label: 'L', rank: 2 };
+
+  it('moves ordinary XS to verified M, allows an explicit override and resets it for a new review', async () => {
+    const prepared = await genuineSavedPrepared();
+    const card = savedCardWithRow(prepared);
+    card.techCard!.sizeIds = [xs.sizeId, m.sizeId, l.sizeId];
+    const review = {
+      row: prepared.authoringAuthority.row,
+      operationNumber: 170,
+      sizeId: m.sizeId,
+      sizeToken: m.sizeToken,
+    };
+    const size = currentCadTableSavedReviewSizeV1(review, card, 170);
+    expect(size).toBe(review);
+
+    const choices = [xs, m, l];
+    const previousXs = { sizeId: xs.sizeId, review: null };
+    expect(resolveCadTableSavedReviewSizeV1(choices, previousXs, null)).toEqual({
+      selectedSize: xs,
+      matchesReview: false,
+    });
+    expect(resolveCadTableSavedReviewSizeV1(choices, previousXs, size)).toEqual({
+      selectedSize: m,
+      matchesReview: true,
+    });
+    const explicitXs = { sizeId: xs.sizeId, review: size };
+    expect(resolveCadTableSavedReviewSizeV1(choices, explicitXs, size)).toEqual({
+      selectedSize: xs,
+      matchesReview: false,
+    });
+    expect(
+      resolveCadTableSavedReviewSizeV1(choices, { sizeId: m.sizeId, review: size }, size),
+    ).toEqual({
+      selectedSize: m,
+      matchesReview: true,
+    });
+    expect(resolveCadTableSavedReviewSizeV1(choices, explicitXs, { ...review })).toEqual({
+      selectedSize: m,
+      matchesReview: true,
+    });
+    expect(resolveCadTableSavedReviewSizeV1(choices, explicitXs, null).selectedSize).toBe(xs);
+  });
+
+  it('refuses moved saved authorities and does not substitute another ID with the same size name', async () => {
+    const prepared = await genuineSavedPrepared();
+    const card = savedCardWithRow(prepared);
+    card.techCard!.sizeIds = [xs.sizeId, m.sizeId];
+    const review = {
+      row: prepared.authoringAuthority.row,
+      operationNumber: 170,
+      sizeId: m.sizeId,
+      sizeToken: m.sizeToken,
+    };
+    expect(currentCadTableSavedReviewSizeV1(review, card, 171)).toBeNull();
+    expect(currentCadTableSavedReviewSizeV1(review, { ...card, lockVersion: 13 }, 170)).toBeNull();
+    expect(
+      currentCadTableSavedReviewSizeV1(
+        { ...review, row: { ...review.row, revision: 99 } },
+        card,
+        170,
+      ),
+    ).toBeNull();
+    expect(
+      currentCadTableSavedReviewSizeV1(
+        { ...review, row: { ...review.row, patternLineKey: 'other' } },
+        card,
+        170,
+      ),
+    ).toBeNull();
+    const sameNameWrongId = { ...m, sizeId: 77 };
+    expect(resolveCadTableSavedReviewSizeV1([xs, sameNameWrongId], null, review)).toEqual({
+      selectedSize: xs,
+      matchesReview: false,
+    });
+  });
+});
 
 describe('zero-operation current saved-card gate', () => {
   it('replaces a stale cached projection with the independently read saved DXF', async () => {

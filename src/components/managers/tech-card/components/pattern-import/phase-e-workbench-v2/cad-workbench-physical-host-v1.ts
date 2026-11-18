@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 import type { MeasurementSurfaceAcceptedClothV1 } from 'components/shared/measurement-watertight-surface-v1-stage';
 import type { DxfGarmentObservedBoundaryEdgeV1 } from 'components/cloth-simulation-spike/dxf-garment-observed-unsewn-edges-v1';
 import type {
@@ -77,6 +78,14 @@ export function bindCadWorkbenchPhysicalPreviewSelectionV1(
   };
 }
 
+/** One verified review's immutable saved grade and anchor. */
+export type CadWorkbenchSavedReviewSizeV1 = Readonly<{
+  row: DxfProductSavedRowIdentityV1;
+  operationNumber: number;
+  sizeId: number;
+  sizeToken: string;
+}>;
+
 /** One mounted CAD route supplies the current picker input and its in-viewport cloth preview. */
 export type CadWorkbenchPhysicalHostV1 = Readonly<{
   onDisplayedBodyInputV1: (input: ModelDisplayedTriangleBodyOwnedInputV1 | null) => void;
@@ -92,6 +101,7 @@ export type CadWorkbenchPhysicalHostV1 = Readonly<{
     signal: AbortSignal,
   ) => Promise<readonly CadMannequinArrangementPieceV1[] | null>;
   viewport?: (interaction: CadWorkbenchPhysicalPreviewInteractionV1 | null) => ReactNode;
-  /** Transitional read-only compatibility for the separate zero-operation route. */
-  panel?: ReactNode;
+  savedReviewSize?: CadWorkbenchSavedReviewSizeV1;
+  /** The separate saved-pattern table owns whether its exact size matches the reviewed grade. */
+  panel?: (tableSizeMatches: boolean) => ReactNode;
 }>;

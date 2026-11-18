@@ -136,6 +136,8 @@ describe('physical host production receivers', () => {
       'physicalHost?.onDisplayedBodyInputV1',
     );
     expect(attribute(zero.tree, hosts[0], 'acceptedCloth')).toBe('physicalHost?.acceptedCloth');
+    expect(attribute(zero.tree, hosts[0], 'savedReviewSize')).toBe('physicalHost?.savedReviewSize');
+    expect(zero.text).toContain('if (!tableSizeMatchesReview) return undefined;');
     expect(attribute(zero.tree, pickers[0], 'acceptedCloth')).toBe('acceptedCloth');
     expect(zero.text).toContain('acceptedCloth: selectableCloth');
     expect(zero.text).toContain(
@@ -166,26 +168,41 @@ describe('physical host production receivers', () => {
     const [dock, next] = column.children.filter((child) => !ts.isJsxText(child));
     expect(next).toBe(viewport);
     const branch = ts.isJsxExpression(dock) ? dock.expression : undefined;
-    if (!branch || !ts.isConditionalExpression(branch) || !ts.isJsxElement(branch.whenTrue)) {
+    if (!branch || !ts.isConditionalExpression(branch)) {
       throw new Error('Expected the borrowed controls in a dock before the mannequin viewport');
     }
+    const panel = ts.isParenthesizedExpression(branch.whenTrue)
+      ? branch.whenTrue.expression
+      : branch.whenTrue;
+    if (!ts.isJsxElement(panel)) throw new Error('Expected the borrowed controls in a dock.');
     expect(branch.condition.getText(zero.tree)).toBe('physicalHost?.panel');
     expect(branch.whenFalse.kind).toBe(ts.SyntaxKind.NullKeyword);
-    const dockClasses = classes(zero.tree, branch.whenTrue.openingElement);
+    const dockClasses = classes(zero.tree, panel.openingElement);
     expect(dockClasses).toContain('shrink-0');
     expect(dockClasses.join(' ')).not.toMatch(
       /(?:^|[\s:])(?:absolute|fixed|sticky|pointer-events-none)(?:$|\s)/,
     );
-    expect(jsxAttribute(zero.tree, branch.whenTrue.openingElement, 'style')).toBeUndefined();
+    expect(jsxAttribute(zero.tree, panel.openingElement, 'style')).toBeUndefined();
     const panelChildren = nodes(zero.tree, ts.isJsxExpression).filter(
       ({ expression }) =>
         expression &&
-        ts.isPropertyAccessExpression(expression) &&
-        expression.expression.getText(zero.tree) === 'physicalHost' &&
-        expression.name.text === 'panel',
+        ts.isCallExpression(expression) &&
+        expression.expression.getText(zero.tree) === 'physicalHost.panel' &&
+        expression.arguments[0]?.getText(zero.tree) === 'sizeMatches',
     );
     expect(panelChildren).toHaveLength(1);
-    expect(branch.whenTrue.children.filter((child) => !ts.isJsxText(child))).toEqual(panelChildren);
+    expect(panel.children.filter((child) => !ts.isJsxText(child))).toEqual(panelChildren);
+  });
+
+  it('drives the existing preview controls with the active table grade and verified review', () => {
+    const entry = source('../phase-e-workbench/assembly-order-entry.tsx');
+    const controls = elements(entry.tree, 'SavedCompleteAssemblyNativePreviewControlsV8');
+    expect(controls).toHaveLength(1);
+    expect(attribute(entry.tree, controls[0], 'disabled')).toBe('frozen || !tableSizeMatches');
+    expect(entry.text).toContain('savedReviewSize: activeCrossMaterialReview?.patternSize');
+    const review = source('./saved-complete-assembly-native-review-action-v8.tsx');
+    expect(review.text).toContain('sizeId: restored.document.selection.sizeId');
+    expect(review.text).toContain('sizeToken: restored.document.selection.sizeToken');
   });
 
   it('creates the body-only owner only inside the top-level no-operation branch wrapper', () => {
