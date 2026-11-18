@@ -14,7 +14,7 @@ import {
 type HostState = ReturnType<typeof useSavedClothPhysicalHostV1>;
 const strainScale = BETA_SKIRT_STRAIN_UTILIZATION_COLOR_LUT_V1;
 
-function currentStrainReceipt(
+function currentPreviewFrame(
   { host, durableSnapshot: snapshot }: HostState,
   displayedBody: SavedModelDisplayedTriangleBodySessionSnapshotV2 | undefined,
 ) {
@@ -35,6 +35,7 @@ function currentStrainReceipt(
     numeric.initializationSha256 !== binding.physicalInitializationCanonicalSha256 ||
     frame?.status !== 'diagnostic-completed' ||
     !receipt ||
+    frame.frameCount !== 32 ||
     receipt.frames !== frame.frameCount ||
     receipt.frameReportSha256 !== frame.reportSha256 ||
     receipt.sourceBindingSha256 !== frame.sourceBindingSha256 ||
@@ -52,7 +53,48 @@ function currentStrainReceipt(
     frameBody.observedBodyContentSha256 !== body.observedBodyContentSha256
   )
     return null;
-  return receipt;
+  return { receipt, frame };
+}
+
+function frameMeasurements({
+  receipt,
+  frame,
+}: NonNullable<ReturnType<typeof currentPreviewFrame>>) {
+  const validation = frame.finalValidation;
+  if (!validation?.ok || !validation.evaluated || validation.report?.frame !== receipt.frames)
+    return [];
+
+  const { parity, collision, orientation } = validation.report;
+  const measurements: [label: string, value: string][] = [];
+  const seamGapM = parity?.currentMaximumSeamGapM;
+  if (
+    (frame.layout?.counts?.seam ?? 0) > 0 &&
+    typeof seamGapM === 'number' &&
+    Number.isFinite(seamGapM) &&
+    seamGapM >= 0
+  ) {
+    const gapMm = seamGapM * 1000;
+    const label = gapMm > 0 && gapMm < 0.001 ? '<0.001' : gapMm.toFixed(3);
+    measurements.push(['Maximum seam gap', `${label} mm`]);
+  }
+  const penetratingVertices = collision?.clearance?.penetratingVertexCount;
+  if (
+    collision?.status === 'signed-clearance-measured' &&
+    collision.claims?.signedClassificationDefensible &&
+    typeof penetratingVertices === 'number' &&
+    Number.isSafeInteger(penetratingVertices) &&
+    penetratingVertices >= 0
+  )
+    measurements.push(['Penetrating garment vertices', String(penetratingVertices)]);
+  const normalReversals = orientation?.normalReversalCount;
+  if (
+    (orientation?.comparedTriangleCount ?? 0) > 0 &&
+    typeof normalReversals === 'number' &&
+    Number.isSafeInteger(normalReversals) &&
+    normalReversals >= 0
+  )
+    measurements.push(['Reversed triangle normals', String(normalReversals)]);
+  return measurements;
 }
 
 /** Compact viewport-only controls. The underlying mannequin remains mounted and visible. */
@@ -92,8 +134,10 @@ export function CadWorkbenchPhysicalHostControlsV1({
 
   const ready = state.sourceStatus === 'ready' && state.host !== null;
   const displayedBody = state.bodySession?.getSnapshot();
-  const receipt = ready ? currentStrainReceipt(state, displayedBody) : null;
+  const currentFrame = ready ? currentPreviewFrame(state, displayedBody) : null;
+  const receipt = currentFrame?.receipt ?? null;
   const previewReady = receipt !== null;
+  const measurements = currentFrame ? frameMeasurements(currentFrame) : [];
   useLayoutEffect(() => {
     const canvas = previewCanvas.current;
     if (!host || !canvas || !previewReady || !receipt) return;
@@ -236,34 +280,54 @@ export function CadWorkbenchPhysicalHostControlsV1({
                   ? 'Place pieces on mannequin.'
                   : localError ??
                     state.sourceError ??
-                    (previewReady ? 'Cloth preview' : 'Cloth ready')}
+                    (receipt ? `Cloth preview · frame ${receipt.frames}` : 'Cloth ready')}
         </Text>
       </div>
       {receipt ? (
-        <section
-          aria-label='Strain utilization legend'
+        <aside
+          aria-label={`Cloth frame ${receipt.frames}`}
           className='absolute bottom-2 left-2 flex max-w-[calc(100%-1rem)] flex-col gap-1 border border-borderColor bg-bgColor/95 px-2 py-1'
         >
-          <Text component='span' size='micro'>
-            {strainScale.legend.title} · {strainScale.legend.units}
-          </Text>
-          <div className='flex flex-wrap gap-x-2 gap-y-1'>
-            {strainScale.stops.map(({ utilization, color }) => (
-              <span className='inline-flex items-center gap-1' key={utilization}>
-                <span className='size-2' style={{ backgroundColor: color }} aria-hidden='true' />
-                <Text component='span' size='micro' className='tabular-nums'>
-                  {utilization === strainScale.clamp.maximum ? `≥${utilization}` : utilization}
+          <section aria-label='Strain utilization legend' className='flex flex-col gap-1'>
+            <Text component='span' size='micro'>
+              {strainScale.legend.title} · {strainScale.legend.units}
+            </Text>
+            <div className='flex flex-wrap gap-x-2 gap-y-1'>
+              {strainScale.stops.map(({ utilization, color }) => (
+                <span className='inline-flex items-center gap-1' key={utilization}>
+                  <span className='size-2' style={{ backgroundColor: color }} aria-hidden='true' />
+                  <Text component='span' size='micro' className='tabular-nums'>
+                    {utilization === strainScale.clamp.maximum ? `≥${utilization}` : utilization}
+                  </Text>
+                </span>
+              ))}
+            </div>
+            <Text component='span' size='micro' variant='label'>
+              {strainScale.legend.thresholdLabel} · uncalibrated
+            </Text>
+            <Text component='span' size='micro' variant='label' className='tabular-nums'>
+              Range {receipt.minimumUtilization.toFixed(3)}–{receipt.maximumUtilization.toFixed(3)}
+            </Text>
+          </section>
+          {measurements.length > 0 ? (
+            <section
+              aria-label='Current frame measurements'
+              className='flex flex-wrap gap-x-2 gap-y-1'
+            >
+              {measurements.map(([label, value]) => (
+                <Text
+                  component='span'
+                  size='micro'
+                  variant='label'
+                  className='tabular-nums'
+                  key={label}
+                >
+                  {label} {value}
                 </Text>
-              </span>
-            ))}
-          </div>
-          <Text component='span' size='micro' variant='label'>
-            {strainScale.legend.thresholdLabel} · uncalibrated
-          </Text>
-          <Text component='span' size='micro' variant='label' className='tabular-nums'>
-            Range {receipt.minimumUtilization.toFixed(3)}–{receipt.maximumUtilization.toFixed(3)}
-          </Text>
-        </section>
+              ))}
+            </section>
+          ) : null}
+        </aside>
       ) : null}
       <CadWorkbenchFirstPhysicalAuthoringV1 state={state} disabled={disabled} />
     </div>

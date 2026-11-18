@@ -127,6 +127,7 @@ const ports = vi.hoisted(() => ({
   previewDisposed: 0,
   previewEvents: [] as string[],
   previewSignals: [] as AbortSignal[],
+  finalValidationFrame: null as 16 | 32 | null,
   previewPick: null as
     | ((x: number, y: number, runtimeSeamId?: string) => DxfGarmentObservedPreviewHitV1 | null)
     | null,
@@ -157,6 +158,8 @@ vi.mock('./dxf-garment-observed-webgpu-replay-v1', () => {
     ports.calls.push({ frame, request, prior });
     ports.after?.();
     if (ports.pause) await ports.pause;
+    const { placementRequest } = request as unknown as DxfGarmentObservedWebgpuReplayRequestV1;
+    const { constraints, manifest } = placementRequest.sourceArtifact.compiledSimulation;
     return {
       ok: true,
       owner,
@@ -167,6 +170,27 @@ vi.mock('./dxf-garment-observed-webgpu-replay-v1', () => {
         bodyBinding: structuredClone(request.bodyBinding),
         sourceBindingSha256: previewMetricBinding.sourceBindingSha256,
         finalStateSha256: previewMetricBinding.finalStateSha256,
+        layout: { counts: { seam: constraints.seam.vertexPairs.length / 2 } },
+        finalValidation:
+          frame !== 32 || ports.finalValidationFrame === null
+            ? null
+            : {
+                ok: true,
+                evaluated: true,
+                report: {
+                  frame: ports.finalValidationFrame,
+                  parity: { currentMaximumSeamGapM: 0.000625 },
+                  collision: {
+                    status: 'signed-clearance-measured',
+                    clearance: { penetratingVertexCount: 0 },
+                    claims: { signedClassificationDefensible: true },
+                  },
+                  orientation: {
+                    comparedTriangleCount: manifest.triangleCount,
+                    normalReversalCount: 0,
+                  },
+                },
+              },
         strain: { renderMappingSha256: previewMetricBinding.strainRenderMappingSha256 },
         checkpoint16Matched: frame === 32,
         claims: { numericReplayOnly: true, runtimeAuthority: false, productAuthority: false },
@@ -268,6 +292,7 @@ beforeEach(() => {
   ports.previewDisposed = 0;
   ports.previewEvents.length = 0;
   ports.previewSignals.length = 0;
+  ports.finalValidationFrame = null;
   ports.previewPick = null;
   ports.previewSelect = null;
   vi.mocked(abortableAdminService).mockImplementation(
@@ -1968,6 +1993,7 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
     const f = await fixture();
     requireOk(await f.host.restore(f.request));
     const { lease } = await borrowedLease();
+    ports.finalValidationFrame = 32;
     requireOk(await f.host.run16(lease));
     requireOk(await f.host.run32(lease));
     const saved = physicalReader.projectSavedFullAssemblyPhysicalSnapshotV1(f.reader);
@@ -2093,6 +2119,8 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
     const drawControls = () => act(async () => route.render(createElement(Controls)));
     const mountedLegend = () =>
       visitMountedTree(controls, (props) => props['aria-label'] === 'Strain utilization legend');
+    const mountedMeasurements = () =>
+      visitMountedTree(controls, (props) => props['aria-label'] === 'Current frame measurements');
     const mountedCanvas = () =>
       visitMountedTree(
         controls,
@@ -2106,6 +2134,12 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
     expect(legendMarkup).toContain('1.0 = provisional visualization limit · uncalibrated');
     expect(legendMarkup).toContain('≥2');
     expect(legendMarkup).toContain('Range 0.125–2.750');
+    const measurements = mountedMeasurements();
+    expect(measurements).not.toBeNull();
+    const measurementMarkup = renderToStaticMarkup(createElement('section', measurements));
+    expect(measurementMarkup).toContain('Maximum seam gap 0.625 mm');
+    expect(measurementMarkup).toContain('Penetrating garment vertices 0');
+    expect(measurementMarkup).toContain('Reversed triangle normals 0');
     const admitted = f.host.getSnapshot();
     const currentReport = admitted.numeric.frame32Report;
     if (!currentReport) throw new Error('The admitted frame report is absent.');
@@ -2118,6 +2152,7 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
     };
     await drawControls();
     expect(mountedLegend()).toBeNull();
+    expect(mountedMeasurements()).toBeNull();
     expect(mountedCanvas()?.className).toContain('hidden');
     retainedSnapshot = null;
     await drawControls();
@@ -2290,15 +2325,26 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
     expect((await f.host.projectLatestRender()).ok).toBe(true);
     await drawControls();
     expect(mountedLegend()).toBeNull();
+    expect(mountedMeasurements()).toBeNull();
+    ports.finalValidationFrame = 16;
+    requireOk(await f.host.run32(lease));
     requireOk(await f.host.mountPreview(canvas));
     await drawControls();
     expect(mountedLegend()).not.toBeNull();
+    expect(mountedMeasurements()).toBeNull();
+    ports.finalValidationFrame = 32;
+    requireOk(await f.host.run32(lease));
+    requireOk(await f.host.mountPreview(canvas));
+    await drawControls();
+    expect(mountedLegend()).not.toBeNull();
+    expect(mountedMeasurements()).not.toBeNull();
     // The body turn can be revoked independently of a render carrying the last cloth snapshot.
     retainedSnapshot = f.host.getSnapshot();
     const originalBody = f.body.getSnapshot();
     await f.body.observe(null);
     await drawControls();
     expect(mountedLegend()).toBeNull();
+    expect(mountedMeasurements()).toBeNull();
     expect(mountedCanvas()?.className).toContain('hidden');
     await f.body.observe(f.observed.input);
     const rebound = f.body.getSnapshot();
@@ -2308,6 +2354,7 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
     expect(f.host.getSnapshot().numeric.previewReceipt).toBeNull();
     await drawControls();
     expect(mountedLegend()).toBeNull();
+    expect(mountedMeasurements()).toBeNull();
     expect(mountedCanvas()?.className).toContain('hidden');
   }, 120000);
 
