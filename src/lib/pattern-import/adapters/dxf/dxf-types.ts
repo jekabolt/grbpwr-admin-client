@@ -371,6 +371,8 @@ export type DxfPieceCandidate = PieceCandidate & {
     identitySource?: DxfBlockPiece['identitySource'];
     /** Proven by the generator's DXF marker or the system-owned card-row flag. */
     generatedFusing?: boolean;
+    /** Routing hint; the decoder-bound surface owns the exact native cut loops. */
+    nativeCutHoles?: true;
     features: Feature[];
     /** The outer contour is L14 (mode A: the true graded line) — cut = outward offset. */
     outerIsSeam: boolean;

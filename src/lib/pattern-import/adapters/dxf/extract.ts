@@ -8,6 +8,7 @@
 // Accounting: every record of BLOCKS/ENTITIES ends in exactly one bucket of the tally —
 // rendered / structural / dropped-with-a-reason. Nothing disappears silently.
 
+import { captureOwnR12CutHoles } from './native-cut-holes';
 import type {
   Affine,
   ExtractFn,
@@ -2068,7 +2069,9 @@ async function readDxfInternal(
     insertCount: b.insertCount,
   };
   progress?.(3, 3, 'done');
-  return { doc, meta };
+  const read = { doc, meta };
+  captureOwnR12CutHoles(read, raw, file.bytes, budgetOf(b.opts));
+  return read;
 }
 
 export async function readDxf(

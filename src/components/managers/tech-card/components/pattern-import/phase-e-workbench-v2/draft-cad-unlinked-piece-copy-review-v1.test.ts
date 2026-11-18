@@ -1,7 +1,15 @@
+import { readDxf } from 'lib/pattern-import/adapters/dxf/extract';
+import { segmentDxf } from 'lib/pattern-import/adapters/dxf/segment';
+import { dxfFastPath } from 'lib/pattern-import/adapters/dxf/stages';
+import { resolveNativeCutLoops } from 'lib/pattern-import/adapters/dxf/native-cut-holes';
+import { serialize } from 'lib/pattern-import/write/format';
+import type { DxfPieceCandidate } from 'lib/pattern-import/adapters/dxf/dxf-types';
+
+import { signedArea } from 'lib/pattern-import/adapters/dxf/geometry';
 import { it, expect, vi } from 'vitest';
 import { adminService } from 'api/api';
 import { writeDxfDetailed } from 'lib/pattern-import/write';
-import { readManifest } from 'lib/pattern-import/manifest';
+import { embedManifest, readManifest } from 'lib/pattern-import/manifest';
 import type { LiveCard } from 'lib/pattern-import/fabrics/apply';
 import { nativePieceCopyVerifier } from 'lib/pattern-import/fabrics/native-piece-copy-review';
 import { DXF_PRODUCT_SAVED_NATIVE_COMPILER_SOURCE_REQUEST_V1 } from 'lib/pattern-import/dxf-product-saved-native-reprocess-owner-v1';
@@ -72,10 +80,16 @@ async function seedCopy(ranks = 1, hole = false) {
           ? {
               cutLoops: [
                 [
-                  { x: x + 20, y: y + 20 },
-                  { x: x + 20, y: y + 25 },
-                  { x: x + 25, y: y + 25 },
-                  { x: x + 25, y: y + 20 },
+                  { x: x + 20 + rank, y: y + 20 },
+                  { x: x + 20 + rank, y: y + 25 },
+                  { x: x + 25 + 2 * rank, y: y + 25 },
+                  { x: x + 25 + 2 * rank, y: y + 20 },
+                ],
+                [
+                  { x: x + 60, y: y + 50 + rank },
+                  { x: x + 60, y: y + 55 + rank },
+                  { x: x + 63, y: y + 55 + rank },
+                  { x: x + 63, y: y + 50 + rank },
                 ],
               ],
             }
@@ -91,7 +105,7 @@ async function seedCopy(ranks = 1, hole = false) {
 }
 
 async function chosen(ranks: number) {
-  const f = await seedCopy(ranks);
+  const f = await seedCopy(ranks, true);
   const ordinary = await draftThroughWizardStages(
     new File([f.written.dxfText], 'original.dxf'),
     f.card,
@@ -291,10 +305,25 @@ it.each([1, 2])(
         const aliases = readback.native.draft.aliases;
         expect(aliases.find((a) => a.blockName === 'FP')?.pieceLineKey).toBe(sourceKey);
         expect(aliases.find((a) => a.blockName === identity)?.pieceLineKey).toBe(newKey);
-        const copy = readback.native.draft.scopes[0]!.writerReplay!.job.pieces.find(
-          (p) => p.identity === identity,
-        )!;
-        expect(copy.sizes.map((s) => s.drills.length)).toEqual(Array(ranks).fill(1));
+        nativePieceCopyVerifier(
+          f.written.dxfText,
+          'FP',
+          identity,
+        )(new TextDecoder().decode(f.bytes));
+        const pieces = readback.native.draft.scopes[0]!.writerReplay!.job.pieces;
+        for (const id of ['FP', identity]) {
+          const piece = pieces.find((p) => p.identity === id)!;
+          expect(piece.sizes.map((s) => s.rank)).toEqual(f.job.sizes.map((s) => s.rank));
+          for (const size of piece.sizes) {
+            expect(size.drills).toHaveLength(1);
+            expect(size.internal.filter((i) => i.label === 'hole')).toEqual([]);
+            expect(size.cutLoops?.map((loop) => signedArea(loop))).toEqual([
+              -5 * (5 + size.rank),
+              -15,
+            ]);
+            expect(size.areaMm2).toBe(signedArea(size.cut) - 5 * (5 + size.rank) - 15);
+          }
+        }
       } finally {
         readback.dispose();
       }
@@ -305,7 +334,7 @@ it.each([1, 2])(
   },
 );
 
-it('detects a layer-1 cut hole reclassified as internal ink by ordinary import', async () => {
+it('retains the cut hole on layer 1 through the ordinary importer', async () => {
   const f = await seedCopy(1, true),
     original = f.written.dxfText;
   const copy = structuredClone(f.job.pieces[0]!);
@@ -319,7 +348,7 @@ it('detects a layer-1 cut hole reclassified as internal ink by ordinary import',
   check(produced);
   const draft = await draftThroughWizardStages(new File([produced], 'hole-copy.dxf'), f.card);
   expect(draft.scopes[0]!.manifest.gate?.passed).toBe(true);
-  expect(() => check(draft.scopes[0]!.dxfText)).toThrow('native layer');
+  check(draft.scopes[0]!.dxfText);
 });
 
 it('requires the exact native hole and drill on every source and duplicate rank', async () => {
@@ -343,4 +372,140 @@ it('requires the exact native hole and drill on every source and duplicate rank'
     if (change === 'original') job.pieces[1]!.sizes[0]!.drills = [];
     expect(() => prove(writeDxfDetailed(job).dxfText)).toThrow();
   }
+});
+
+async function decodeCutFixture(text: string, generatedFusing = false) {
+  return readDxf(
+    {
+      id: 'native-cuts',
+      name: 'cut-holes.dxf',
+      bytes: new TextEncoder().encode(text).buffer,
+      generatedFusing,
+    },
+    { sagittaMm: 0.05, keepFills: true },
+  );
+}
+it('requires the original decoded feature ownership and exact unchanged cut frame for the rank', async () => {
+  const f = await seedCopy(2, true),
+    read = await decodeCutFixture(f.written.dxfText);
+  const seg = segmentDxf(read),
+    fast = dxfFastPath(read, seg);
+  const c = fast.families[0]!.candidates[0] as DxfPieceCandidate,
+    sibling = fast.families[0]!.candidates[1] as DxfPieceCandidate;
+  const card = f.job.sizes[c.rank]!;
+  expect(c.dxf.nativeCutHoles).toBe(true);
+  expect(resolveNativeCutLoops(c.dxf, c.rank, card, c.outer)?.map(signedArea)).toEqual([-25, -15]);
+  expect(resolveNativeCutLoops(structuredClone(c.dxf), c.rank, card, c.outer)).toBeNull();
+  expect(resolveNativeCutLoops(sibling.dxf, c.rank, card, c.outer)).toBeNull();
+  expect(resolveNativeCutLoops(c.dxf, c.rank, { ...card, sizeId: 98 }, c.outer)).toBeNull();
+  expect(resolveNativeCutLoops(c.dxf, c.rank, { ...card, token: 'L' }, c.outer)).toBeNull();
+  expect(
+    resolveNativeCutLoops(
+      c.dxf,
+      c.rank,
+      card,
+      c.outer.map((p) => ({ ...p, x: p.x + 1 })),
+    ),
+  ).toBeNull();
+  expect(() => dxfFastPath({ ...read, doc: structuredClone(read.doc) }, seg)).toThrow('ownership');
+  expect(() => dxfFastPath(read, seg, true)).toThrow('ownership');
+});
+
+it.each(['foreign', 'generated-fusing'] as const)(
+  'keeps the established %s layer-1 interpretation',
+  async (kind) => {
+    const f = await seedCopy(1, true),
+      text =
+        kind === 'foreign' ? writeDxfDetailed(f.job, { embed: null }).dxfText : f.written.dxfText;
+    const read = await decodeCutFixture(text, kind === 'generated-fusing'),
+      fast = dxfFastPath(read, segmentDxf(read));
+    const c = fast.families[0]!.candidates[0] as DxfPieceCandidate;
+    expect(c.dxf.nativeCutHoles).toBeUndefined();
+    expect(
+      c.dxf.features.filter((feature) => feature.kind === 'internal' && feature.label === 'hole'),
+    ).toHaveLength(2);
+  },
+);
+
+it.each([
+  'positive-interior',
+  'touching',
+  'nested',
+  'drifted-area',
+  'duplicate-insert',
+  'duplicate-block',
+  'not-straight',
+] as const)('refuses claimed own-format holes with %s', async (kind) => {
+  const f = await seedCopy(1, true),
+    size = f.job.pieces[0]!.sizes[0]!,
+    holes = size.cutLoops!;
+  let input = f.written.dxfText;
+  if (kind === 'positive-interior') {
+    holes.forEach((loop) => loop.reverse());
+    input = writeDxfDetailed(f.job).dxfText;
+  } else if (kind === 'touching') {
+    const min = Math.min(...size.cut.map((p) => p.x)),
+      dx = min - Math.min(...holes[0]!.map((p) => p.x));
+    holes[0] = holes[0]!.map((p) => ({ ...p, x: p.x + dx }));
+    input = writeDxfDetailed(f.job).dxfText;
+  } else if (kind === 'nested') {
+    const first = holes[0]!,
+      origin = first[0]!;
+    holes[1] = first.map((p) => ({
+      x: origin.x + 1 + (p.x - origin.x) * 0.3,
+      y: origin.y + 1 + (p.y - origin.y) * 0.3,
+    }));
+    input = writeDxfDetailed(f.job).dxfText;
+  } else if (kind === 'drifted-area') {
+    const m = readManifest(input)!;
+    m.blocks[0]!.areaMm2 += 1;
+    input = embedManifest(input, m);
+  } else if (kind === 'duplicate-block') {
+    const end = serialize([
+      [0, 'ENDSEC'],
+      [0, 'SECTION'],
+      [2, 'ENTITIES'],
+    ]);
+    expect(input).toContain(end);
+    input = input.replace(
+      end,
+      serialize([
+        [0, 'BLOCK'],
+        [8, '0'],
+        [2, 'FP_M'],
+        [70, '0'],
+        [0, 'ENDBLK'],
+        [8, '0'],
+      ]) + end,
+    );
+  } else if (kind === 'duplicate-insert') {
+    const header = serialize([
+      [0, 'SECTION'],
+      [2, 'ENTITIES'],
+    ]);
+    input = input.replace(
+      header,
+      header +
+        serialize([
+          [0, 'INSERT'],
+          [8, '0'],
+          [2, 'FP_M'],
+          [10, '0.000000'],
+          [20, '0.000000'],
+          [30, '0.000000'],
+        ]),
+    );
+  } else {
+    const vertex = serialize([
+      [0, 'VERTEX'],
+      [8, '1'],
+      [10, '20.000000'],
+      [20, '20.000000'],
+      [30, '0.000000'],
+    ]);
+    expect(input).toContain(vertex);
+    input = input.replace(vertex, vertex + serialize([[42, '0.015625']]));
+  }
+  const read = await decodeCutFixture(input);
+  expect(() => dxfFastPath(read, segmentDxf(read))).toThrow('Native DXF cut hole');
 });

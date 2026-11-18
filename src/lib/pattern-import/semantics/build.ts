@@ -17,6 +17,7 @@
 //                `_L` drawn + `_R` = its mirror across the grain (G12), ppg per hand;
 //   7. growth  — cut area must grow with size (G8) → 'non-monotone' when > 2 sizes.
 
+import { resolveNativeCutLoops } from '../adapters/dxf/native-cut-holes';
 import { isMirrorSymmetric } from '../ai/geom';
 import { chainView, partAt, sheetView } from '../assemble/composite';
 import { parseQuantity, saysFold } from '../ai/evidence';
@@ -183,6 +184,7 @@ type DxfExtra = {
     identitySource?: 'label' | 'block-name';
     generatedFusing?: boolean;
     features?: Feature[];
+    nativeCutHoles?: true;
     instances?: number;
     /** The block's own QUANTITY label (AAMA/CLO), if it carries one. */
     quantity?: number | null;
@@ -2093,12 +2095,23 @@ export function buildPieceSpecsDetailed(
               confidence: foldFeat ? foldFeat.confidence : 0.6,
             } satisfies FoldFeature)
           : null;
+      const cutLoops = c.dxf?.nativeCutHoles
+        ? resolveNativeCutLoops(c.dxf, c.rank, card, cut)
+        : null;
+      if (c.dxf?.nativeCutHoles && !cutLoops) {
+        blockedHere = {
+          reason: 'offset-topology',
+          detail: `${card.token}: the size or native cut boundary changed; its holes cannot be applied to this shape.`,
+        };
+        break;
+      }
       const spec: PieceSizeSpec = {
         // SOURCE rank (SizeRun.sizes[rank]): the write stage looks walls up by candidate rank
         rank: c.rank,
         sizeToken: card.token,
         sizeId: card.sizeId,
         cut,
+        ...(cutLoops ? { cutLoops } : {}),
         seam,
         grain,
         notches: notchesOut,
@@ -2108,7 +2121,7 @@ export function buildPieceSpecsDetailed(
         offset,
         walls: mr?.cleaned.length ? c.walls.filter((w) => !mr.cleaned.includes(w)) : c.walls,
         bbox: bboxOf(cut),
-        areaMm2: areaOf(cut),
+        areaMm2: areaOf(cut) + (cutLoops?.reduce((a, loop) => a + signedArea(loop), 0) ?? 0),
         ...(c.rankFrom === 'continuity' ? { continuity: continuityRecord(c) } : {}),
         ...(sizeKinks.length ? { kinks: sizeKinks } : {}),
         ...(c.rankFrom === 'repair' && c.repair

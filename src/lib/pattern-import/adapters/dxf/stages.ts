@@ -7,6 +7,7 @@
 // Contract gap this fills (proposed for 08-CONTRACT §4.1 in reports/F8.md): for kind 'dxf' with
 // `presegmented`, the worker runs `dxfFastPath` instead of assemble → chains → pieces.
 
+import { nativeCutHolesOf } from './native-cut-holes';
 import type {
   AllowanceDecision,
   Chain,
@@ -423,11 +424,12 @@ function candidateOf(
       ranges: [range(d.path)],
       confidence: 1,
     } satisfies DrillFeature);
+  const cutHoles = nativeCutHolesOf(read, p, rank, outerIsSeam, rulGraded, pathById, features);
   const page = read.doc.pages[0];
   for (const [ids, role] of Object.entries(p.roles)) {
     const id = Number(ids);
     const path = pathById.get(id);
-    if (!path) continue;
+    if (!path || cutHoles?.has(id)) continue;
     if (role === 'internal' || role === 'hole') {
       features.push({
         kind: 'internal',
@@ -475,6 +477,7 @@ function candidateOf(
       sizeSource: p.sizeSource,
       identitySource: p.identitySource,
       ...(read.meta.generatedFusing ? { generatedFusing: true } : {}),
+      ...(cutHoles ? { nativeCutHoles: true } : {}),
       features,
       outerIsSeam: outerIsSeam && !!p.seam,
       ...(p.zeroAllowanceSeam ? { zeroAllowanceSeam: true as const } : {}),
