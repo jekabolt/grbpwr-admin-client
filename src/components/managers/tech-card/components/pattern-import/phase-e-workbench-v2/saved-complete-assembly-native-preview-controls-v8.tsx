@@ -3,6 +3,7 @@ import {
   projectCurrentModelDisplayedTriangleBodyInputV1,
   subscribeModelDisplayedTriangleBodyInputInvalidationV1,
   type ModelDisplayedTriangleBodyOwnedInputV1,
+  type ModelDisplayedTriangleBodyInputProjectionV1,
 } from 'components/cloth-simulation-spike/model-displayed-triangle-body-input-v1';
 import type { MeasurementSurfaceAcceptedClothV1 } from 'components/shared/measurement-watertight-surface-v1-stage';
 import { Button, Input, Text } from 'ui';
@@ -14,6 +15,17 @@ import {
 } from './cad-workbench-preview-lifecycle-v1';
 import { canonicalizePatternImportDxfPhaseESavedAssemblyValueV1 as canonical } from './saved-assembly-topology-hash-v1';
 import type { SavedCrossMaterialReviewForPreviewV8 } from './saved-complete-assembly-native-review-action-v8';
+
+function matchesSavedBody(
+  displayed: ModelDisplayedTriangleBodyInputProjectionV1 | null,
+  saved: NonNullable<SavedCrossMaterialReviewForPreviewV8['placement']>['body'],
+) {
+  return (
+    displayed?.identity.modelId === `tech-card-base-model:${saved.modelId}` &&
+    displayed.hashes.bodyPositionsFloat32LeSha256 === saved.observed.bodyPositionsFloat32LeSha256 &&
+    displayed.hashes.bodyTrianglesUint32LeSha256 === saved.observed.bodyTrianglesUint32LeSha256
+  );
+}
 
 export default function SavedCompleteAssemblyNativePreviewControlsV8({
   review,
@@ -40,6 +52,11 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
   });
   const [acceptedFrame, setAcceptedFrame] = useState<number | null>(null);
   const savedCenter = review.placement?.placement.centerMm;
+  const savedBody = review.placement?.body;
+  const bodyMatchesPlacement = useMemo(
+    () => !savedBody || matchesSavedBody(body?.project() ?? null, savedBody),
+    [body, savedBody],
+  );
   const [editing, setEditing] = useState(false);
   const [x, setX] = useState(() => String(savedCenter?.[0] ?? 0));
   const [y, setY] = useState(() => String(savedCenter?.[1] ?? 1010));
@@ -72,6 +89,8 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
         body?.isCurrent() === true;
       if (!displayed || !validCenter || !isCurrent())
         throw new Error('Choose a current displayed mannequin and three placement coordinates.');
+      if (savedBody && !matchesSavedBody(displayed, savedBody))
+        throw new Error('The displayed mannequin differs from the saved placement.');
       const load = review.load(signal);
       const source = await load;
       if (review.placement && body) {
@@ -161,7 +180,7 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
         await work?.catch(() => {});
       },
     };
-  }, [body, onAcceptedCloth, review, validCenter, x, y, z]);
+  }, [body, onAcceptedCloth, review, savedBody, validCenter, x, y, z]);
 
   useLayoutEffect(() => {
     const cancel = () => {
@@ -187,6 +206,7 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
       editing ||
       placementSave.current ||
       !validCenter ||
+      !bodyMatchesPlacement ||
       !body?.isCurrent() ||
       !computeCanvas.current
     )
@@ -195,7 +215,14 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
   };
 
   async function savePlacement() {
-    if (disabled || status.pending || placementSave.current || !canSave || !body?.isCurrent())
+    if (
+      disabled ||
+      status.pending ||
+      placementSave.current ||
+      !canSave ||
+      !bodyMatchesPlacement ||
+      !body?.isCurrent()
+    )
       return;
     const controller = new AbortController();
     placementSave.current = controller;
@@ -268,7 +295,7 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
           type='button'
           variant='main'
           size='xs'
-          disabled={busy || editing || !validCenter || !body?.isCurrent()}
+          disabled={busy || editing || !validCenter || !bodyMatchesPlacement || !body?.isCurrent()}
           onClick={preview}
         >
           {status.pending
@@ -282,7 +309,7 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
             type='button'
             variant='secondary'
             size='xs'
-            disabled={busy || !canSave || !body?.isCurrent()}
+            disabled={busy || !canSave || !bodyMatchesPlacement || !body?.isCurrent()}
             onClick={() => void savePlacement()}
           >
             {placementStatus.pending ? 'Saving placement…' : 'Save placement'}
@@ -293,7 +320,7 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
             type='button'
             variant='secondary'
             size='xs'
-            disabled={busy}
+            disabled={busy || (!editing && !bodyMatchesPlacement)}
             onClick={editing ? cancelEdit : () => setEditing(true)}
           >
             {editing ? 'Cancel placement edit' : 'Edit placement'}
@@ -313,9 +340,11 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
       <Text component='p' size='micro' role={status.error ? 'alert' : 'status'}>
         {status.error ??
           (acceptedFrame === null
-            ? body?.isCurrent()
-              ? 'Medium diagnostic cloth · 4 mm starting layer separation'
-              : 'Choose a mannequin to preview this saved seam.'
+            ? !body?.isCurrent()
+              ? 'Choose a mannequin to preview this saved seam.'
+              : !bodyMatchesPlacement
+                ? `Choose the mannequin and pose saved for this placement (#${savedBody?.modelId}).`
+                : 'Medium diagnostic cloth · 4 mm starting layer separation'
             : `Cloth visible · frame ${acceptedFrame} · medium diagnostic material`)}
       </Text>
       <canvas ref={computeCanvas} width={1} height={1} hidden aria-hidden='true' />
