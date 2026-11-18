@@ -11,7 +11,7 @@ import { Button, Close, Text } from 'ui';
 
 export function MobileNavMenu() {
   const [open, setOpen] = useState(false);
-  const { canRead, isSuper, account } = usePermissions();
+  const { canSee, account } = usePermissions();
   const { pathname } = useLocation();
 
   // Same grouped source and same filter as desktop: drop unreadable items and, for a non-super
@@ -19,7 +19,7 @@ export function MobileNavMenu() {
   const groups = [...NAV_GROUPS, ADMIN_GROUP]
     .map((group) => ({
       ...group,
-      items: group.items.filter((item) => (isSuper || !item.superOnly) && canRead(item.section)),
+      items: group.items.filter((item) => canSee(item)),
     }))
     .filter((group) => group.items.length > 0);
 

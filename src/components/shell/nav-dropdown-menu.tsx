@@ -20,7 +20,7 @@ export function NavDropdownMenu({
   onOpenChange,
   className,
 }: NavDropdownMenuProps) {
-  const { canRead, isSuper } = usePermissions();
+  const { canSee } = usePermissions();
   const { pathname } = useLocation();
 
   // Hide items the account can't read, then hide any group left empty. A super-only item fails
@@ -29,7 +29,7 @@ export function NavDropdownMenu({
   const visibleGroups = groups
     .map((group) => ({
       ...group,
-      items: group.items.filter((item) => (isSuper || !item.superOnly) && canRead(item.section)),
+      items: group.items.filter((item) => canSee(item)),
     }))
     .filter((group) => group.items.length > 0);
 

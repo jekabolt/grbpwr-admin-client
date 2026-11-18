@@ -1,8 +1,14 @@
+import { useQueryClient } from '@tanstack/react-query';
+import { authService } from 'api/api';
+import { clearAuthToken } from 'api/auth-headers';
+import { accountsKeys } from 'components/managers/accounts/utils/hooks';
 import { ADMIN_GROUP, ROUTES } from 'constants/routes';
+import { isLekaloHost } from 'lib/host';
 import { cn } from 'lib/utility';
+import { useWorkspace } from 'lib/workspace/use-workspace';
 import { FC, ReactNode, useCallback, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Button } from 'ui';
+import { Button, HeaderNote, Pill } from 'ui';
 import { CommandPalette, PALETTE_KEY_HINT, useCommandPaletteShortcut } from './command-palette';
 import { LeftSideNavMenu } from './left-side-nav-menu';
 import { NavDropdownMenu } from './nav-dropdown-menu';
@@ -18,8 +24,16 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
   const [paletteOpen, setPaletteOpen] = useState(false);
   useCommandPaletteShortcut(useCallback(() => setPaletteOpen(true), []));
 
+  const queryClient = useQueryClient();
+  const { workspace, gate } = useWorkspace();
+  const lekalo = isLekaloHost();
+  const title = lekalo ? workspace?.name || '' : 'grbpwr';
+
   const handleLogout = () => {
-    localStorage.removeItem('authToken');
+    // A backend before teams has no SignOut: only a workspace says the call exists.
+    if (workspace) authService.SignOut({}).catch(() => undefined);
+    clearAuthToken();
+    queryClient.removeQueries({ queryKey: accountsKeys.all });
     navigate(ROUTES.login, { replace: true });
   };
 
@@ -40,14 +54,15 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
       >
         <LeftSideNavMenu onNavOpenChange={setIsNavOpen} />
 
-        <div className='flex grow basis-0 items-center justify-center'>
+        <div className='flex grow basis-0 items-center justify-center gap-2'>
           <Button
             asChild
             size='lg'
             className='text-center transition-colors hover:opacity-70 active:opacity-50'
           >
-            <Link to='/'>grbpwr</Link>
+            <Link to='/'>{title}</Link>
           </Button>
+          {workspace?.readOnly && <Pill tone='warn'>read only</Pill>}
         </div>
 
         <div className='flex grow basis-0 items-center justify-end gap-1'>
@@ -87,7 +102,15 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
           </Button>
         </div>
       </div>
-      <div className='h-full print:h-full print:pt-0 pt-26 px-2.5'>{children}</div>
+      <div className='h-full print:h-full print:pt-0 pt-26 px-2.5'>
+        {gate === 'missing' ? (
+          <div className='flex justify-center pt-block'>
+            <HeaderNote tone='warn'>no workspace</HeaderNote>
+          </div>
+        ) : (
+          children
+        )}
+      </div>
       <SnackBar />
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
     </>

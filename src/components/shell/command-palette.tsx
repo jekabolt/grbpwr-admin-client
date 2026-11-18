@@ -47,17 +47,17 @@ export function useCommandPaletteShortcut(onOpen: () => void) {
 }
 
 function usePages(): PageRow[] {
-  const { canRead, isSuper } = usePermissions();
+  const { canSee } = usePermissions();
   return useMemo(
     () => [
       ...[...NAV_GROUPS, ADMIN_GROUP].flatMap((g) =>
         g.items
-          .filter((i) => (isSuper || !i.superOnly) && canRead(i.section))
+          .filter((i) => canSee(i))
           .map((i) => ({ label: i.label, group: g.label, route: i.route })),
       ),
       { label: 'my profile', group: 'account', route: ROUTES.me },
     ],
-    [canRead, isSuper],
+    [canSee],
   );
 }
 
