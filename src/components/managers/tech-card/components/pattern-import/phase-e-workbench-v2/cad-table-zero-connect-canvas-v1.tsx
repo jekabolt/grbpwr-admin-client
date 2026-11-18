@@ -58,6 +58,7 @@ import {
   startPatternImportDxfPhaseECadTableZeroConnectControllerV1,
 } from './cad-table-zero-connect-controller-v1';
 import { sameSavedDraftRowV1 } from './draft-cad-saved-source-selection-v1';
+import type { CadTableSavedTopstitchOverlayV1 } from './cad-table-saved-topstitch-overlay-v1';
 import { PatternImportDxfPhaseEDraftCadGridRulersV1 } from './draft-cad-grid-rulers-v1';
 import { PatternImportDxfPhaseECadWorkbenchToolButtonV1 } from './cad-workbench-tool-button-v1';
 import { CAD_WORKBENCH_SEAM_SIDE_COLORS } from './cad-workbench-seam-colors-v1';
@@ -93,6 +94,8 @@ export type PatternImportDxfPhaseECadTableZeroConnectCanvasPropsV1 = Readonly<{
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
   tableSessionOwner?: CadTableZeroCanvasOwner;
   pieceFeatures?: CadTablePieceFeaturesByKey;
+  savedTopstitch?: CadTableSavedTopstitchOverlayV1;
+  savedTopstitchError?: string;
   authoringAuthority?: PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1 | null;
   authoringAuthorityRefresh?: PatternImportDxfPhaseEZeroConnectAuthoringRefreshOwnerV1 | null;
   zeroConnectAuthoringHandoff?: PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1;
@@ -380,6 +383,8 @@ function CadTableZeroCanvas({
   savedAnnotations,
   savedAnnotationBlocker,
   savedAnnotationEditControl,
+  savedTopstitch,
+  savedTopstitchError,
   owner,
 }: PatternImportDxfPhaseECadTableZeroConnectCanvasPropsV1 & { owner: CadTableZeroCanvasOwner }) {
   const authority = useMemo(
@@ -394,6 +399,7 @@ function CadTableZeroCanvas({
   const [fitRequest, setFitRequest] = useState(0);
   const [measurementsVisible, setMeasurementsVisible] = useState(true);
   const [calloutsVisible, setCalloutsVisible] = useState(true);
+  const [topstitchVisible, setTopstitchVisible] = useState(true);
   const [hiddenFeatureLayers, setHiddenFeatureLayers] = useState<
     ReadonlySet<CadTablePieceFeatureLayer>
   >(() => new Set());
@@ -617,6 +623,15 @@ function CadTableZeroCanvas({
             pressed={boundaryVisibility['sewing-boundary']}
             onClick={() => toggleBoundary('sewing-boundary')}
           />
+          {savedTopstitch ? (
+            <PatternImportDxfPhaseECadWorkbenchToolButtonV1
+              icon='internal-line'
+              label='Show topstitch'
+              active={topstitchVisible}
+              pressed={topstitchVisible}
+              onClick={() => setTopstitchVisible((visible) => !visible)}
+            />
+          ) : null}
           {savedAnnotationEditControl}
           {!!savedAnnotations?.measurements.length && (
             <PatternImportDxfPhaseECadWorkbenchToolButtonV1
@@ -829,6 +844,20 @@ function CadTableZeroCanvas({
                         materialRings={pieceLayout.sourceMaterialRings}
                       />
                     ) : null}
+                    {topstitchVisible && savedTopstitch?.pieceKey === pieceLayout.identity.key ? (
+                      <polyline
+                        data-cad-saved-topstitch={savedTopstitch.lineKey}
+                        data-cad-saved-topstitch-operation={savedTopstitch.operationNumber}
+                        data-cad-saved-topstitch-offset-mm={savedTopstitch.widthMm}
+                        points={ptsAttr(savedTopstitch.pointsMm)}
+                        fill='none'
+                        stroke='var(--color-highlightColor)'
+                        strokeWidth={1.6}
+                        strokeDasharray='3 2'
+                        vectorEffect='non-scaling-stroke'
+                        pointerEvents='none'
+                      />
+                    ) : null}
                     {savedAnnotations ? (
                       <PatternImportDxfPhaseEDraftCadTopologyOverlayV1
                         projection={projection}
@@ -1009,6 +1038,7 @@ function CadTableZeroCanvas({
         className='min-h-8 border-t border-borderColor px-2 py-1 text-micro text-labelColor'
       >
         {savedSeam ? <SavedSeamMeasurements seam={savedSeam} projection={projection} /> : null}
+        {savedTopstitchError ? <p>{savedTopstitchError}</p> : null}
         {savedAnnotationBlocker ??
           status ??
           (selectsPieces

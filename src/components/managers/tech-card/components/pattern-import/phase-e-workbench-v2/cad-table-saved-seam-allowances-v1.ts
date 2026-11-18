@@ -29,7 +29,11 @@ export type CadTableSavedSeamAllowancesByPieceV1 = ReadonlyMap<
   CadTableSavedSeamAllowanceV1
 >;
 
-function sameSourceRing(displayed: readonly PtMm[], source: readonly PtMm[]): boolean {
+export function sameCadTableSourceRingV1(
+  displayed: readonly PtMm[],
+  source: readonly PtMm[],
+): boolean {
+  if (!displayed.length) return false;
   if (displayed.length !== source.length) return false;
   return source.some((start, i) => {
     if (displayed[0].x !== start.x || displayed[0].y !== start.y) return false;
@@ -127,7 +131,7 @@ export function projectCadTableSavedSeamAllowancesV1({
       rawCut.provenance.sourceFileId !== projection.sourceFileId ||
       !rawCut.provenance.instancePath.length ||
       !finiteRing(cut) ||
-      !sameSourceRing(cut, rawCut.pointsMm)
+      !sameCadTableSourceRingV1(cut, rawCut.pointsMm)
     )
       continue;
 

@@ -44,6 +44,7 @@ import {
   type PatternImportDxfPhaseECadTablePressAuthoringOwnerV1,
 } from './cad-table-press-authoring-v1';
 import { CadTablePressControlV1 } from './cad-table-press-control-v1';
+import type { CadTableSavedTopstitchOverlayV1 } from './cad-table-saved-topstitch-overlay-v1';
 import {
   bindPatternImportDxfPhaseECadTableZeroOperationFreshToSavedAuthorityV1,
   capturePatternImportDxfPhaseECadTableZeroOperationSavedRebindExpectationV1,
@@ -1055,6 +1056,72 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
     );
   }, [cardSession, prepared, selectedScope?.label]);
   const resolvedSavedCard = currentPreparation?.resolvedSavedCard ?? effectiveSavedCard;
+  const [savedTopstitch, setSavedTopstitch] = useState<{
+    key: string;
+    overlay?: CadTableSavedTopstitchOverlayV1;
+    error?: string;
+  } | null>(null);
+  const savedTopstitchOperation = resolvedSavedCard?.techCard?.operations?.find(
+    ({ operationNumber, topstitchLines }) =>
+      operationNumber === selection.operationNumber && topstitchLines?.length,
+  );
+  const savedTopstitchSizeId = selectedSize?.sizeId;
+  const savedTopstitchKey =
+    resolvedSource === 'saved' && savedTopstitchOperation?.operationNumber && savedTopstitchSizeId
+      ? `${preparationKey}:${savedTopstitchOperation.operationNumber}:${savedTopstitchSizeId}`
+      : '';
+  useEffect(() => {
+    if (
+      !savedTopstitchKey ||
+      !savedAuthority ||
+      !savedTopstitchOperation?.operationNumber ||
+      !savedTopstitchSizeId ||
+      !prepared ||
+      !('authoringAuthority' in prepared)
+    )
+      return;
+    const operationNumber = savedTopstitchOperation.operationNumber;
+    const controller = new AbortController();
+    void import('./cad-table-saved-topstitch-overlay-v1')
+      .then(({ prepareCadTableSavedTopstitchOverlayV1 }) =>
+        prepareCadTableSavedTopstitchOverlayV1(
+          {
+            authority: savedAuthority,
+            row: prepared.authoringAuthority.row,
+            operationNumber,
+            sizeId: savedTopstitchSizeId,
+            projection: prepared.projection,
+            orderSizeIds,
+            sizeNameById,
+          },
+          controller.signal,
+        ),
+      )
+      .then(
+        (overlay) => {
+          if (!controller.signal.aborted) setSavedTopstitch({ key: savedTopstitchKey, overlay });
+        },
+        (error: unknown) => {
+          if (!controller.signal.aborted)
+            setSavedTopstitch({
+              key: savedTopstitchKey,
+              error: error instanceof Error ? error.message : 'The saved Topstitch is unavailable.',
+            });
+        },
+      );
+    return () => controller.abort();
+  }, [
+    orderSizeIds,
+    prepared,
+    savedAuthority,
+    savedTopstitchKey,
+    savedTopstitchOperation?.operationNumber,
+    savedTopstitchSizeId,
+    sizeNameById,
+  ]);
+  const currentTopstitch = savedTopstitchKey && savedTopstitch?.key === savedTopstitchKey
+    ? savedTopstitch
+    : null;
   const resolvedSavedChoices = useMemo(
     () =>
       listPatternImportDxfPhaseECadTableZeroOperationSavedChoicesV1(
@@ -1390,6 +1457,8 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
               catalog={prepared.catalog}
               projection={prepared.projection}
               pieceFeatures={pieceFeatures}
+              savedTopstitch={currentTopstitch?.overlay}
+              savedTopstitchError={currentTopstitch?.error}
               tableSessionOwner={tableSessionOwner}
               authoringAuthority={authoringReady ? authoringPrepared?.authoringAuthority : null}
               authoringAuthorityRefresh={authoringReady ? authoringAuthorityRefresh : null}
