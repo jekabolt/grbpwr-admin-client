@@ -490,11 +490,13 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
       <Text component='p' size='micro' role={status.error ? 'alert' : 'status'}>
         {status.error ??
           (acceptedFrame === null
-            ? !body?.isCurrent()
-              ? 'Choose a mannequin to preview this saved seam.'
-              : !bodyMatchesPlacement
-                ? `Choose the mannequin and pose saved for this placement (#${savedBody?.modelId}).`
-                : 'Medium diagnostic cloth · 4 mm starting layer separation'
+            ? savedWhole && !bodyMatchesWhole
+              ? `Choose mannequin #${savedWhole.body.modelId} and its saved pose to preview the full layout.`
+              : !body?.isCurrent()
+                ? 'Choose a mannequin to preview this saved seam.'
+                : !bodyMatchesPlacement
+                  ? `Choose the mannequin and pose saved for this placement (#${savedBody?.modelId}).`
+                  : 'Medium diagnostic cloth · 4 mm starting layer separation'
             : acceptedFrame.kind === 'whole'
               ? `Full layout visible · frame ${acceptedFrame.number}`
               : `Cloth visible · frame ${acceptedFrame.number} · medium diagnostic material`)}
