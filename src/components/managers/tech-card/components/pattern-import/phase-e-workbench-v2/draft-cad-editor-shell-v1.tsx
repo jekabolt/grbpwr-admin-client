@@ -32,6 +32,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_TOOL_GROUPS_V1 = Object.freeze
       'internal-line',
       'pattern-line',
       'french-curve',
+      'guideline',
       'add-point',
       'edge-length',
     ] as const),

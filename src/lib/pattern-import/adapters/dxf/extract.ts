@@ -2029,6 +2029,7 @@ async function readDxfInternal(
     warnings: b.warnings,
   };
   let zeroAllowanceSeamBlocks: DxfMeta['zeroAllowanceSeamBlocks'];
+  let authoredInternalByBlock: DxfMeta['authoredInternalByBlock'];
   if (manifest && dec.binary === null && !file.generatedFusing && !dec.generatedFusing) {
     try {
       const conversion = readManifestBytes(file.bytes);
@@ -2040,6 +2041,11 @@ async function readDxfInternal(
       zeroAllowanceSeamBlocks = new Map(
         (conversion?.blocks ?? []).flatMap(({ block, contour, hasSeam, identity }) =>
           hasSeam && contour && zeroAllowancePieces.has(identity) ? [[block, contour]] : [],
+        ),
+      );
+      authoredInternalByBlock = new Map(
+        (conversion?.blocks ?? []).flatMap(({ block, authoredInternal }) =>
+          authoredInternal?.length ? [[block, authoredInternal]] : [],
         ),
       );
     } catch {
@@ -2056,6 +2062,7 @@ async function readDxfInternal(
     units,
     manifest,
     ...(zeroAllowanceSeamBlocks?.size ? { zeroAllowanceSeamBlocks } : {}),
+    ...(authoredInternalByBlock?.size ? { authoredInternalByBlock } : {}),
     generatedFusing: dec.generatedFusing || file.generatedFusing === true,
     modelLabels,
     groups: b.groups,

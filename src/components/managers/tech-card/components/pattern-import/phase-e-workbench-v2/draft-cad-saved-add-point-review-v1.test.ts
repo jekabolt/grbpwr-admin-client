@@ -1165,3 +1165,112 @@ it('retains one authored single notch on its exact saved-size piece through the 
     f.source.dispose();
   }
 });
+
+it.each(['internal-line', 'pattern-line', 'french-curve', 'guideline'] as const)(
+  'reopens the authored %s as the same typed native layer-8 path after ordinary review',
+  async (tool) => {
+    const f = await fixture(true);
+    vi.stubGlobal('Worker', InProcessTransport);
+    const worker = new ImportWorkerClient();
+    try {
+      const { recordPatternImportDxfPhaseEDraftCadCanvasPointV1 } = await import(
+        './draft-cad-canvas-v1'
+      );
+      const { compilePatternImportDxfPhaseEDraftCadGeometryV1 } = await import(
+        './draft-cad-geometry-compile-v1'
+      );
+      const { projection, selection } = f.compileInput;
+      const pieceId = projection.pieces[0]!.pieceId;
+      const contour = projection.pieces[0]!.contours[0]!;
+      const points = contour.vertices.map(({ pointMm }) => pointMm);
+      const minX = Math.min(...points.map(({ x }) => x));
+      const minY = Math.min(...points.map(({ y }) => y));
+      const width = Math.max(...points.map(({ x }) => x)) - minX;
+      const height = Math.max(...points.map(({ y }) => y)) - minY;
+      const start = { x: minX + width * 0.25, y: minY + height * 0.25 };
+      const control = { x: minX + width * 0.5, y: minY + height * 0.65 };
+      const end = { x: minX + width * 0.75, y: minY + height * 0.25 };
+      const edit = recordPatternImportDxfPhaseEDraftCadCanvasPointV1({
+        session: f.initial,
+        projection,
+        activeTool: tool,
+        activePieceIndex: 0,
+        sequence: 0,
+        pendingPoints: tool === 'french-curve' ? [start, control] : [start],
+        pointMm: end,
+      });
+      expect(edit.recorded).toBe(true);
+      const compileSource = createPatternImportDxfPhaseEDraftCadCompileSourceV1(
+        f.source.native.draft,
+      );
+      if (!compileSource) throw Error('Fixture lacks a current writer source.');
+      const compiled = compilePatternImportDxfPhaseEDraftCadGeometryV1({
+        session: edit.session,
+        projection,
+        selection,
+        compileSource,
+      });
+      if (!compiled.ok) throw Error(JSON.stringify(compiled.blockers));
+      const label = `draft-cad:${tool}`;
+      const first = compiled.artifact.manifest.blocks.find(({ identity }) => identity === pieceId)!;
+      expect(first.authoredInternal).toHaveLength(1);
+      expect(first.authoredInternal?.[0]?.label).toBe(label);
+      const file = new File([compiled.artifact.dxfText], 'main-cad-compiled.dxf', {
+        type: 'image/vnd.dxf',
+      });
+      const reviewed = await draftThroughWizardStages(file, f.current.card, worker);
+      const scope = reviewed.scopes[0]!;
+      const feature = scope
+        .writerReplay!.job.pieces.find(({ identity }) => identity === pieceId)
+        ?.sizes[0]?.internal.find((candidate) => candidate.label === label);
+      expect(feature?.closed).toBe(false);
+      expect(feature?.pts.length).toBeGreaterThan(tool === 'french-curve' ? 3 : 2);
+      const second = scope.manifest.blocks.find(({ identity }) => identity === pieceId)!;
+      expect(second.authoredInternal).toHaveLength(1);
+      expect(second.authoredInternal?.[0]?.label).toBe(label);
+      expect(scope.manifest.gate?.passed).toBe(true);
+      if (tool === 'french-curve') {
+        const bytes = new TextEncoder().encode(scope.dxfText);
+        const row = {
+          ...f.current.row,
+          revision: f.current.row.revision + 1,
+          cardLockVersion: f.current.row.cardLockVersion + 1,
+          sizeBytes: bytes.byteLength,
+          sha256: await digestFullAssemblyFixture(bytes),
+        };
+        const card = structuredClone(f.current.card);
+        card.existingPatterns![0]!.manifest = scope.manifest;
+        const reopened = await createSavedThreePanelSourceV1(
+          { ...(await createSavedThreePanelFixtureV1(2)), bytes, row, card },
+          true,
+        );
+        try {
+          expect(reopened.native.row).toEqual(row);
+          expect(reopened.native.nativeSewingReplay?.replayReady).toBe(true);
+          const reopenedFeature = reopened.native.draft.scopes[0]!.writerReplay!.job.pieces.find(
+            ({ identity }) => identity === pieceId,
+          )?.sizes[0]?.internal.find((candidate) => candidate.label === label);
+          expect(reopenedFeature?.pts).toHaveLength(feature!.pts.length);
+          expect(reopenedFeature?.closed).toBe(false);
+        } finally {
+          reopened.dispose();
+        }
+        const altered = readManifest(compiled.artifact.dxfText)!;
+        const block = altered.blocks.find(({ identity }) => identity === pieceId)!;
+        block.authoredInternal![0]!.vertices[0]! += 100;
+        const changed = new File(
+          [embedManifest(compiled.artifact.dxfText, altered)],
+          'main-cad-compiled.dxf',
+          { type: 'image/vnd.dxf' },
+        );
+        await expect(
+          draftThroughWizardStages(changed, f.current.card, new ImportWorkerClient()),
+        ).rejects.toThrow('saved layer-8 path');
+      }
+    } finally {
+      worker.dispose();
+      vi.unstubAllGlobals();
+      f.source.dispose();
+    }
+  },
+);

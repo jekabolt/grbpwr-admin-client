@@ -19,7 +19,9 @@
 //   • every open 2-point L8 line (internal or fold) gets a midpoint: the card's parser takes any
 //     2-point open chain ≥ 1 cm as a grain candidate (pieces.ts), and a fold line won that way (K1 d).
 
+import { isAuthoredInternalLabel } from '../manifest/authored-internal';
 import type {
+  AuthoredInternalLabel,
   Affine,
   DraftScopeTarget,
   DrillFeature,
@@ -99,7 +101,7 @@ export type PlannedBlock = {
   cutLoops: PtMm[][];
   seam: PtMm[] | null;
   /** L8 lines: internal features, then the fold line. Open 2-pt lines already densified. */
-  internal: { pts: PtMm[]; closed: boolean }[];
+  internal: { pts: PtMm[]; closed: boolean; authoredLabel?: AuthoredInternalLabel }[];
   /** How many of `internal` are the fold line (0/1) — the manifest counts both as internal. */
   foldLines: number;
   /**
@@ -426,6 +428,7 @@ export function planBlocks(
           ? simplify(f.pts, true, WRITE_SIMPLIFY_MM)
           : densifyOpen2(simplify(f.pts, false, WRITE_SIMPLIFY_MM)),
         closed: f.closed,
+        ...(isAuthoredInternalLabel(f.label) ? { authoredLabel: f.label } : {}),
       }));
       let foldLines = 0;
       if (s.fold) {

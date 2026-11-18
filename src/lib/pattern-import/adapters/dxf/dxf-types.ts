@@ -6,6 +6,7 @@ import type {
   AllowanceDecision,
   BoxMm,
   Feature,
+  ManifestAuthoredInternalPath,
   ManifestBlock,
   PathId,
   PieceCandidate,
@@ -98,6 +99,7 @@ export type DxfMeta = {
   manifest: boolean;
   /** Manifest blocks explicitly emitted with a sewing boundary and zero allowance. */
   zeroAllowanceSeamBlocks?: ReadonlyMap<string, NonNullable<ManifestBlock['contour']>>;
+  authoredInternalByBlock?: ReadonlyMap<string, readonly ManifestAuthoredInternalPath[]>;
   /** Proven by the generator's DXF marker or the system-owned card-row flag. */
   generatedFusing: boolean;
   /** Model-space `KEY: value` texts (AAMA header: STYLE NAME, SAMPLE SIZE, UNITS, AUTHOR…). */

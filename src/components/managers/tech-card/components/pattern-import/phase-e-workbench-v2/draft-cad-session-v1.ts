@@ -44,6 +44,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_PRODUCTIVE_TOOLS_V1 = Object.f
   'internal-line',
   'pattern-line',
   'french-curve',
+  'guideline',
   'add-point',
   'edge-length',
   'dart',

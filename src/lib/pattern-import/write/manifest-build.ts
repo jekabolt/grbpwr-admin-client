@@ -1,6 +1,7 @@
 // The ConversionManifest of one scope file (08-CONTRACT §3), built from the plan — never from
 // the text, so the gate can compare the two.
 
+import { authoredInternalVertices } from '../manifest/authored-internal';
 import type {
   ReplayRecord,
   AutopilotRecord,
@@ -62,9 +63,15 @@ export function manifestBlock(b: PlannedBlock, sigPts?: number): ManifestBlock {
     maxX = Math.max(maxX, p.x);
     maxY = Math.max(maxY, p.y);
   }
+  const authoredInternal = b.internal.flatMap(({ pts, closed, authoredLabel }, index) =>
+    authoredLabel
+      ? [{ index, label: authoredLabel, closed, vertices: authoredInternalVertices(pts) }]
+      : [],
+  );
   return {
     block: b.name,
     ...(b.protectedLineSplit ? { protectedLineSplit: b.protectedLineSplit } : {}),
+    ...(authoredInternal.length ? { authoredInternal } : {}),
     identity: b.identity,
     sizeToken: b.sizeToken,
     sizeId: b.sizeId,

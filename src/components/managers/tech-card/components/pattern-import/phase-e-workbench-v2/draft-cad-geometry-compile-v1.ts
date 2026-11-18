@@ -164,6 +164,7 @@ const INTERNAL_TOOLS = new Set<PatternImportDxfPhaseEDraftCadToolV1>([
   'internal-line',
   'pattern-line',
   'french-curve',
+  'guideline',
   'dart',
 ]);
 const PRODUCTIVE_TOOLS = new Set<PatternImportDxfPhaseEDraftCadToolV1>(
@@ -306,20 +307,17 @@ function internalFeature(
   command: PatternImportDxfPhaseEDraftCadCommandV1,
   primitive: PatternImportDxfPhaseEDraftCadPreviewPrimitiveV1,
 ): InternalFeature | null {
-  if (command.tool === 'internal-line' && primitive.kind === 'path')
-    return {
-      kind: 'internal',
-      pts: primitive.pointsMm.map(({ x, y }) => ({ x, y })),
-      closed: false,
-      label: 'draft-cad:internal-line',
-      ...featureBase(),
-    };
-  if (command.tool === 'pattern-line' && primitive.kind === 'path')
+  if (
+    primitive.kind === 'path' &&
+    (command.tool === 'internal-line' ||
+      command.tool === 'pattern-line' ||
+      command.tool === 'guideline')
+  )
     return {
       kind: 'internal',
       pts: primitive.pointsMm.map(({ x, y }) => ({ x, y })),
       closed: primitive.closed,
-      label: 'draft-cad:pattern-line',
+      label: `draft-cad:${command.tool}`,
       ...featureBase(),
     };
   if (command.tool === 'french-curve' && primitive.kind === 'curve')

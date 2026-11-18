@@ -1344,7 +1344,8 @@ function toolInstruction(tool: PatternImportDxfPhaseEDraftCadToolV1, sizeToken: 
   if (tool === 'cut') return 'Click two points to split the piece across its grade.';
   if (tool === 'dart')
     return `For size ${sizeToken}, pick an exact edge, then click the apex and intake.`;
-  if (tool === 'guideline') return 'Click two points to record one dashed construction guideline.';
+  if (tool === 'guideline')
+    return `Click two points to add a dashed construction guideline in size ${sizeToken}.`;
   if (tool === 'internal-line')
     return `Click two points to add an internal line in size ${sizeToken}.`;
   if (tool === 'pattern-line')

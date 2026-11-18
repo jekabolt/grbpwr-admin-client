@@ -20,6 +20,7 @@ export type SavedAssemblyPhysicalAnchorV1 = Readonly<{
     | Readonly<{
         kind: 'dxf';
         aliases: readonly ScopedAlias[];
+        /** The piece's native L14 boundary. An interior attachment has its own explicit path. */
         nativeSewingPath?: SavedAssemblyNativeSewingPathV1 | null;
       }>
     | Readonly<{ kind: 'garment-label'; label: Label }>;

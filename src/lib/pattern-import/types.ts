@@ -2656,8 +2656,24 @@ export type ManifestProtectedLineSplit = {
   progress: number;
 };
 
+export type AuthoredInternalLabel =
+  | 'draft-cad:internal-line'
+  | 'draft-cad:pattern-line'
+  | 'draft-cad:french-curve'
+  | 'draft-cad:guideline';
+
+export type ManifestAuthoredInternalPath = {
+  /** Zero-based order among the block's native layer-8 paths. */
+  index: number;
+  label: AuthoredInternalLabel;
+  closed: boolean;
+  /** Alternating coordinates on the writer's 0.000001 mm grid, in block coordinates. */
+  vertices: number[];
+};
+
 export type ManifestBlock = {
   protectedLineSplit?: ManifestProtectedLineSplit;
+  authoredInternal?: ManifestAuthoredInternalPath[];
   block: string;
   identity: PieceKey;
   sizeToken: string;

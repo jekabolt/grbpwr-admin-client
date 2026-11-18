@@ -292,6 +292,7 @@ function commandKind(
     tool === 'ellipse' ||
     tool === 'internal-line' ||
     tool === 'pattern-line' ||
+    tool === 'guideline' ||
     tool === 'french-curve'
   )
     return 'construct';
@@ -308,6 +309,7 @@ const CAD_TOOL_LABELS: Readonly<
   'internal-line': 'Internal line',
   'pattern-line': 'Pattern line',
   'french-curve': 'French curve',
+  guideline: 'Guideline',
   'add-point': 'Add point',
   dart: 'Dart',
   cut: 'Cut',
@@ -405,6 +407,11 @@ function commandParameters(
       return Object.freeze([
         Object.freeze({ label: 'Kind', value: command.payload.kind }),
         Object.freeze({ label: 'Depth', value: `${command.payload.depthMm} mm` }),
+      ]);
+    case 'guideline':
+      return Object.freeze([
+        Object.freeze({ label: 'Start', value: pointLabel(command.payload.fromMm) }),
+        Object.freeze({ label: 'End', value: pointLabel(command.payload.toMm) }),
       ]);
     case 'internal-line':
     case 'french-curve':
@@ -543,6 +550,8 @@ function cadCommandShapeValid(command: PatternImportDxfPhaseEDraftCadCommandV1):
       command.payload.pointsMm.every(finitePoint) &&
       (command.tool !== 'pattern-line' || typeof command.payload.closed === 'boolean')
     );
+  if (command.tool === 'guideline')
+    return finitePoint(command.payload.fromMm) && finitePoint(command.payload.toMm);
   if (command.tool === 'french-curve')
     return (
       Array.isArray(command.payload.controlPointsMm) &&

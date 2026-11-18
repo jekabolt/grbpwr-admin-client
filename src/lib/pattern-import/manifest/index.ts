@@ -32,6 +32,7 @@
 // Main-thread safe by contract: JSON, string and fflate (pure JS) operations only, no imports beyond
 // `types.ts` (and the siblings `identity.ts`, the G11 identity grammar the wizard and the gate share,
 // and `contour-sig.ts`, the F14f cut-ring signature the writer embeds and the card checks).
+import { parseManifestAuthoredInternal } from './authored-internal';
 import { parseProtectedLineSplit } from './protected-line-split';
 import { Inflate, deflateSync } from 'fflate';
 import {
@@ -920,10 +921,17 @@ export function validateManifest(x: unknown): ConversionManifest {
         fail(`${p}.protectedLineSplit`, 'invalid or repeated protected vertex');
       sawProtectedSplit = true;
     }
+    const authoredInternal =
+      b.authoredInternal === undefined
+        ? null
+        : parseManifestAuthoredInternal(b.authoredInternal, b.internal as number);
+    if (b.authoredInternal !== undefined && !authoredInternal)
+      fail(`${p}.authoredInternal`, 'invalid native layer-8 path metadata');
     const [x0, y0, x1, y1] = b.bboxMm as number[];
     return {
       block: b.block,
       ...(split ? { protectedLineSplit: split } : {}),
+      ...(authoredInternal ? { authoredInternal } : {}),
       identity: b.identity,
       sizeToken: b.sizeToken,
       sizeId: b.sizeId,
