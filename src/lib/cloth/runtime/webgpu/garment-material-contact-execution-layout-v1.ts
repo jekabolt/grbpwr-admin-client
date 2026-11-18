@@ -23,6 +23,10 @@ export const GARMENT_MATERIAL_CONTACT_EXECUTION_LAYOUT_V1 =
   'garment-material-contact-execution-layout/1' as const;
 export const GARMENT_MATERIAL_CONTACT_REPLAY_PROFILE_V1 =
   'garment-material-contact-replay/1' as const;
+export const GARMENT_MATERIAL_NATIVE_DIAGNOSTIC_BODY_CONTACT_V1 = Object.freeze({
+  id: 'garment-material-native-diagnostic-body-contact/1',
+  clearanceMarginM: 0.008,
+} as const);
 type CorePlan = Extract<GarmentMaterialRunPlanResultV1, { ok: true }>['plan'];
 type Counts = CorePlan['report']['counts'];
 type Bytes = ArrayBuffer | Float32Array | Uint32Array;
@@ -341,6 +345,7 @@ const diagnosticFields = new Set<Field>([
 /** Pure layout: the executor must independently obtain a real plan/body/device before using it. */
 export function buildGarmentMaterialContactExecutionLayoutV1(
   request: GarmentMaterialContactExecutionLayoutRequestV1,
+  nativeDiagnosticBodyContactId?: typeof GARMENT_MATERIAL_NATIVE_DIAGNOSTIC_BODY_CONTACT_V1.id,
 ) {
   try {
     const captured = captureCore(request);
@@ -366,7 +371,9 @@ export function buildGarmentMaterialContactExecutionLayoutV1(
     if (
       input.profile !== GARMENT_MATERIAL_CONTACT_REPLAY_PROFILE_V1 ||
       ![16, 32].includes(input.frameCount) ||
-      ![1, -1].includes(input.bodyOutwardSign)
+      ![1, -1].includes(input.bodyOutwardSign) ||
+      (nativeDiagnosticBodyContactId !== undefined &&
+        nativeDiagnosticBodyContactId !== GARMENT_MATERIAL_NATIVE_DIAGNOSTIC_BODY_CONTACT_V1.id)
     )
       reject('Fixed execution profile/frame/sign required.');
     const bodyVertexCount = integer(input.bodyVertexCount, 4, 20000, 'body vertices');
@@ -837,7 +844,9 @@ export function buildGarmentMaterialContactExecutionLayoutV1(
       particleCount: c.particles,
       bodyVertexCount,
       bodyTriangleCount,
-      clearanceMarginM: 0.002,
+      clearanceMarginM: nativeDiagnosticBodyContactId
+        ? GARMENT_MATERIAL_NATIVE_DIAGNOSTIC_BODY_CONTACT_V1.clearanceMarginM
+        : 0.002,
       maximumCorrectionM: 0.08,
       minimumNormalLengthSquaredM4: 1e-20,
       outwardNormalSign: input.bodyOutwardSign,

@@ -16,6 +16,7 @@ import {
   packGarmentMaterialContactCheckpointV1,
   decodeGarmentMaterialContactCheckpointV1,
   GARMENT_MATERIAL_CONTACT_REPLAY_PROFILE_V1,
+  GARMENT_MATERIAL_NATIVE_DIAGNOSTIC_BODY_CONTACT_V1,
   type GarmentMaterialContactExecutionLayoutRequestV1,
   type GarmentMaterialContactExecutionLayoutV1,
   type GarmentMaterialContactCheckpointV1,
@@ -195,6 +196,23 @@ describe('full contact execution layout: genuine compiler content, synthetic bod
     if (!r16.ok || !r32.ok) throw new Error(JSON.stringify([r16.blockers, r32.blockers]));
     request16 = requestLayout(r16.plan);
     request32 = requestLayout(r32.plan);
+  });
+  it('changes only the contact margin for the named coarse DXF policy in both replays', () => {
+    const policy = GARMENT_MATERIAL_NATIVE_DIAGNOSTIC_BODY_CONTACT_V1;
+    for (const request of [request16, request32]) {
+      const ordinary = requireLayout(request);
+      const diagnostic = buildGarmentMaterialContactExecutionLayoutV1(request, policy.id);
+      expect(diagnostic.ok).toBe(true);
+      if (!diagnostic.ok) throw new Error(JSON.stringify(diagnostic.blockers));
+      const expectedParams = ordinary.contactParams.slice();
+      expect(new DataView(expectedParams).getFloat32(16, true)).toBe(Math.fround(0.002));
+      new DataView(expectedParams).setFloat32(16, policy.clearanceMarginM, true);
+      expect(diagnostic.layout).toEqual({ ...ordinary, contactParams: expectedParams });
+    }
+    expect(
+      buildGarmentMaterialContactExecutionLayoutV1(request16, 'unknown-policy' as typeof policy.id)
+        .ok,
+    ).toBe(false);
   });
   it('accounts every actual core/body/strain/checkpoint buffer for real 78/114 content and nonmultiple64 dispatches', () => {
     const before = structuredClone(request16),

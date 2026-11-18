@@ -1,6 +1,7 @@
 import {
   buildGarmentMaterialContactExecutionLayoutV1,
   decodeGarmentMaterialContactCheckpointV1,
+  GARMENT_MATERIAL_NATIVE_DIAGNOSTIC_BODY_CONTACT_V1,
   type GarmentMaterialContactExecutionLayoutV1,
   type GarmentMaterialContactExecutionLayoutRequestV1,
   type GarmentMaterialContactCheckpointV1,
@@ -416,6 +417,7 @@ export type DxfGarmentObservedWebgpuReplayReportV1 = Readonly<{
   finalStateSha256: string | null;
   checkpoint16Matched: boolean | null;
   strain: StrainReceipt | null;
+  nativeDiagnosticBodyContact?: typeof GARMENT_MATERIAL_NATIVE_DIAGNOSTIC_BODY_CONTACT_V1;
   execution: Readonly<Trace>;
   blockers: readonly string[];
   claims: typeof CLAIMS;
@@ -975,6 +977,9 @@ async function run(
     cleaned = false;
   let minted: DxfGarmentObservedWebgpuReplayOwnerV1 | null = null;
   let detachGpuError: (() => void) | null = null;
+  let nativeDiagnosticBodyContact:
+    | typeof GARMENT_MATERIAL_NATIVE_DIAGNOSTIC_BODY_CONTACT_V1
+    | undefined;
   const unlink = () => {
     unlinks.splice(0).forEach((fn) => fn());
   };
@@ -1029,6 +1034,7 @@ async function run(
       finalStateSha256,
       checkpoint16Matched,
       strain: strainReceipt(strain),
+      ...(nativeDiagnosticBodyContact ? { nativeDiagnosticBodyContact } : {}),
       execution: capture(trace) as Trace,
       blockers: [...blockers],
       claims: CLAIMS,
@@ -1204,6 +1210,20 @@ async function run(
         sha256: 'd0ec81303ef3935c13163a365434a41b8af5f1f8244add4a93de74a071711386',
       },
     };
+    const source = r.placementRequest.sourceRequest;
+    // This existing diagnostic recipe uses a coarse cloth mesh. The extra vertex padding
+    // compensates for contact between its vertices. The independent exact face gate still applies.
+    if (
+      r.schemaVersion === DXF_GARMENT_OBSERVED_WEBGPU_REPLAY_V1 &&
+      'samplingRequest' in source &&
+      source.handoff.source.exporterId === 'grbpwr.saved-native-drawn-sewing' &&
+      source.handoff.source.provenanceKind === 'untrusted-product' &&
+      source.materialPolicy.policyId === 'browser-medium-isotropic-diagnostic-mesh' &&
+      source.materialPolicy.revision === '1' &&
+      source.samplingRequest.targetEdgeMm === 40
+    ) {
+      nativeDiagnosticBodyContact = GARMENT_MATERIAL_NATIVE_DIAGNOSTIC_BODY_CONTACT_V1;
+    }
     sourceBindingSha256 = await dataHash({
       profile: r.profile,
       placementReportSha256,
@@ -1211,6 +1231,7 @@ async function run(
       bodyBinding: r.bodyBinding,
       deviceIdentity: inspection.identity,
       hostCompileGeneration: r.hostCompileGeneration,
+      ...(nativeDiagnosticBodyContact ? { nativeDiagnosticBodyContact } : {}),
     });
     current();
     if (prior && prior.sourceBindingSha256 !== sourceBindingSha256)
@@ -1259,17 +1280,20 @@ async function run(
     const volume = initialValidation.report.collision.topology.bodySignedVolumeM3;
     if (!Number.isFinite(volume) || Math.abs(volume) <= 1e-12)
       fail('Body signed volume cannot orient exact contacts.');
-    const admitted = buildGarmentMaterialContactExecutionLayoutV1({
-      corePlan: core,
-      bodyVertexCount: body.bodyPositionsM.length / 3,
-      bodyTriangleCount: body.bodyTriangles.length / 3,
-      freeParticleCount: core.report.counts.particles - pins.length,
-      frameCount,
-      profile: r.profile,
-      bodyOutwardSign: volume > 0 ? 1 : -1,
-      budgets: r.executionBudgets,
-      deviceLimits: inspection.limits,
-    });
+    const admitted = buildGarmentMaterialContactExecutionLayoutV1(
+      {
+        corePlan: core,
+        bodyVertexCount: body.bodyPositionsM.length / 3,
+        bodyTriangleCount: body.bodyTriangles.length / 3,
+        freeParticleCount: core.report.counts.particles - pins.length,
+        frameCount,
+        profile: r.profile,
+        bodyOutwardSign: volume > 0 ? 1 : -1,
+        budgets: r.executionBudgets,
+        deviceLimits: inspection.limits,
+      },
+      nativeDiagnosticBodyContact?.id,
+    );
     if (!admitted.ok) fail('Combined GPU layout refused: ' + JSON.stringify(admitted.blockers));
     layout = admitted.layout;
     await freshBody();
