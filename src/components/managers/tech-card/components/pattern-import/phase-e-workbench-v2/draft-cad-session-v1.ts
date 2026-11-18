@@ -12,6 +12,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_TOOLS_V1 = Object.freeze([
   'circle',
   'ellipse',
   'add-point',
+  'move-point',
   'edge-length',
   'internal-line',
   'french-curve',
@@ -51,6 +52,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_PRODUCTIVE_TOOLS_V1 = Object.f
   'draft-point',
   'point-only',
   'add-point',
+  'move-point',
   'edge-length',
   'dart',
   'fish-eye',
@@ -170,6 +172,10 @@ export type PatternImportDxfPhaseEDraftCadCommandV1 =
         /** Exact ordered source edge. Absent only on legacy session evidence and never compiles. */
         edge?: PatternImportDxfPhaseEDraftCadBoundaryAnchorV1;
       }
+    >
+  | Command<
+      'move-point',
+      { entityId: string; contourId: string; vertexId: string; pointMm: PtMm; sizeToken: string }
     >
   | Command<
       'edge-length',
@@ -470,6 +476,13 @@ function validCommand(value: unknown): value is PatternImportDxfPhaseEDraftCadCo
               payload.contourId &&
             (payload.edge as PatternImportDxfPhaseEDraftCadBoundaryAnchorV1)
               .boundaryVertexIds[0] === payload.afterVertexId))
+      );
+    case 'move-point':
+      return (
+        stableId(payload.contourId) &&
+        stableId(payload.vertexId) &&
+        point(payload.pointMm) &&
+        stableId(payload.sizeToken)
       );
     case 'edge-length':
       return (

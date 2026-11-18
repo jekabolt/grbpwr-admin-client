@@ -565,6 +565,49 @@ export function buildPatternImportDxfPhaseEDraftCadPreviewV1(
         bounds = extendPoints(bounds, [baseLeftMm, baseRightMm, apexMm]);
         break;
       }
+      case 'move-point': {
+        const { contourId, vertexId, pointMm, sizeToken } = command.payload;
+        const piece = projection.pieces.find(
+          ({ pieceId, pieceLineKey }) =>
+            pieceId === command.target.pieceId && pieceLineKey === command.target.pieceLineKey,
+        );
+        const contour = piece?.contours.find((item) => item.contourId === contourId);
+        const index = contour?.vertices.findIndex((vertex) => vertex.vertexId === vertexId) ?? -1;
+        if (
+          !contour?.closed ||
+          contour.role === 'hole' ||
+          index < 0 ||
+          projection.sizeToken !== sizeToken ||
+          !finitePoint(pointMm)
+        ) {
+          blockers.push(
+            commandBlocker(
+              command,
+              'anchor-unavailable',
+              'Choose one exact outline vertex in the active size.',
+            ),
+          );
+          break;
+        }
+        const count = contour.vertices.length;
+        const pointsMm = [
+          contour.vertices[(index + count - 1) % count]!.pointMm,
+          pointMm,
+          contour.vertices[(index + 1) % count]!.pointMm,
+        ].map(clonePoint);
+        primitives.push(
+          deepFreeze({
+            ...base,
+            kind: 'path' as const,
+            pointsMm,
+            closed: false,
+            role: 'outline' as const,
+            stroke: 'solid' as const,
+          }),
+        );
+        bounds = extendPoints(bounds, pointsMm);
+        break;
+      }
       case 'edge-length': {
         const { edge, fixed, lengthMm, sizeToken } = command.payload;
         const segment = exactAnchorSegment(session, projection, command.target, edge);

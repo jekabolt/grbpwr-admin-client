@@ -13,6 +13,7 @@ import type { PieceSizeSpec, PtMm } from 'lib/pattern-import/types';
 import type { PatternImportDxfPhaseEDraftCadCommandV1 } from './draft-cad-session-v1';
 
 type Command = Extract<PatternImportDxfPhaseEDraftCadCommandV1, { tool: 'edge-length' }>;
+type MovePoint = Extract<PatternImportDxfPhaseEDraftCadCommandV1, { tool: 'move-point' }>;
 type SelectedSizePhaseD = Extract<DxfProductPhaseDSizeSelectionResultV1, { ok: true }>['phaseD'];
 type Result = { ok: true; size: PieceSizeSpec } | { ok: false; detail: string };
 
@@ -47,14 +48,34 @@ export function resizeDraftCadSelectedSizeEdgeV1(
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1,
   phaseD: SelectedSizePhaseD,
 ): Result {
-  const { edge, fixed, lengthMm, sizeToken } = command.payload;
+  return editExactOutlineVertex(source, command, projection, phaseD);
+}
+
+export function moveDraftCadSelectedSizeVertexV1(
+  source: PieceSizeSpec,
+  command: MovePoint,
+  projection: PatternImportDxfProductPhaseEAssemblyProjectionV1,
+  phaseD: SelectedSizePhaseD,
+): Result {
+  return editExactOutlineVertex(source, command, projection, phaseD);
+}
+
+function editExactOutlineVertex(
+  source: PieceSizeSpec,
+  command: Command | MovePoint,
+  projection: PatternImportDxfProductPhaseEAssemblyProjectionV1,
+  phaseD: SelectedSizePhaseD,
+): Result {
+  const { sizeToken } = command.payload;
+  const contourId =
+    command.tool === 'edge-length' ? command.payload.edge.contourId : command.payload.contourId;
   if (source.sizeToken !== sizeToken || projection.sizeToken !== sizeToken)
-    return { ok: false, detail: 'The edge edit belongs to a different selected size.' };
+    return { ok: false, detail: 'The outline edit belongs to a different selected size.' };
   const pieces = projection.pieces.filter(
     ({ pieceId, pieceLineKey }) =>
       pieceId === command.target.pieceId && pieceLineKey === command.target.pieceLineKey,
   );
-  const contours = pieces[0]?.contours.filter(({ contourId }) => contourId === edge.contourId);
+  const contours = pieces[0]?.contours.filter((value) => value.contourId === contourId);
   const contour = pieces.length === 1 && contours?.length === 1 ? contours[0] : null;
   if (!contour?.closed || contour.role === 'hole')
     return { ok: false, detail: 'Choose one exact closed cut or sewing outline.' };
@@ -78,12 +99,19 @@ export function resizeDraftCadSelectedSizeEdgeV1(
     new Set(samples.map(({ sourceCurveId }) => sourceCurveId)).size !== samples.length ||
     !contour.vertices.every(({ vertexId }) => sampleIds.has(vertexId))
   )
-    return { ok: false, detail: 'Use a straight native outline to change length with this tool.' };
-  const [fromId, toId] = edge.boundaryVertexIds;
+    return { ok: false, detail: 'Choose a native outline with straight segments.' };
+  const fromId =
+    command.tool === 'edge-length'
+      ? command.payload.edge.boundaryVertexIds[0]
+      : command.payload.vertexId;
   const start = contour.vertices.findIndex(({ vertexId }) => vertexId === fromId);
   const next = (start + 1) % contour.vertices.length;
-  if (start < 0 || contour.vertices[next]?.vertexId !== toId)
-    return { ok: false, detail: 'The two ordered edge vertices are no longer adjacent.' };
+  if (
+    start < 0 ||
+    (command.tool === 'edge-length' &&
+      contour.vertices[next]?.vertexId !== command.payload.edge.boundaryVertexIds[1])
+  )
+    return { ok: false, detail: 'The selected original vertices no longer match the outline.' };
 
   const primary = contour.role === 'cut-boundary' ? source.cut : source.seam;
   if (!primary || source.offset || source.continuity || source.repair || source.kinks?.length)
@@ -112,24 +140,44 @@ export function resizeDraftCadSelectedSizeEdgeV1(
   )
     return {
       ok: false,
-      detail: 'Resize requires unambiguous clockwise holes inside the original cut.',
+      detail: 'The edit requires unambiguous clockwise holes inside the original cut.',
     };
 
   const from = contour.vertices[start]!.pointMm;
   const to = contour.vertices[next]!.pointMm;
+  const beforeSelection =
+    contour.vertices[(start + contour.vertices.length - 1) % contour.vertices.length]!.pointMm;
   const matching = vertices
     .map((point, i) =>
-      samePoint(point, from) && samePoint(vertices[(i + 1) % vertices.length]!, to) ? i : -1,
+      samePoint(point, from) &&
+      samePoint(vertices[(i + 1) % vertices.length]!, to) &&
+      (command.tool === 'edge-length' ||
+        samePoint(vertices[(i + vertices.length - 1) % vertices.length]!, beforeSelection))
+        ? i
+        : -1,
     )
     .filter((i) => i >= 0);
   if (matching.length !== 1 || vertices.length !== contour.vertices.length)
-    return { ok: false, detail: 'The selected edge does not match the retained writer outline.' };
+    return { ok: false, detail: 'The selected vertices do not match the retained writer outline.' };
   const index = matching[0]!;
-  const moving = fixed === 'start' ? (index + 1) % vertices.length : index;
-  const resized = resizeDraftStraightEdgeV1(from, to, fixed, lengthMm);
-  if (!resized)
-    return { ok: false, detail: 'Enter a positive length for one nondegenerate straight edge.' };
-  const movedPoint = resized[fixed === 'start' ? 1 : 0];
+  let moving = index;
+  let movedPoint: PtMm;
+  if (command.tool === 'edge-length') {
+    const { fixed, lengthMm } = command.payload;
+    const resized = resizeDraftStraightEdgeV1(from, to, fixed, lengthMm);
+    if (!resized)
+      return { ok: false, detail: 'Enter a positive length for one nondegenerate straight edge.' };
+    moving = fixed === 'start' ? (index + 1) % vertices.length : index;
+    movedPoint = resized[fixed === 'start' ? 1 : 0];
+  } else {
+    movedPoint = command.payload.pointMm;
+    if (
+      !Number.isFinite(movedPoint.x) ||
+      !Number.isFinite(movedPoint.y) ||
+      samePoint(movedPoint, from)
+    )
+      return { ok: false, detail: 'Enter a different finite X and Y for the selected point.' };
+  }
   const oldPoint = vertices[moving]!;
   const before = vertices[(moving + vertices.length - 1) % vertices.length]!;
   const after = vertices[(moving + 1) % vertices.length]!;
@@ -155,7 +203,7 @@ export function resizeDraftCadSelectedSizeEdgeV1(
     selfIntersects(nextRing) ||
     footOnSegment(movedPoint, before, after).d <= EPS
   )
-    return { ok: false, detail: 'The new edge length would collapse or cross the outline.' };
+    return { ok: false, detail: 'The vertex move would collapse or cross the outline.' };
 
   if (source.textMarks?.some(({ at }) => !pointInPolygon(at, nextRing)))
     return { ok: false, detail: 'Move the text anchor inside the resized outline.' };

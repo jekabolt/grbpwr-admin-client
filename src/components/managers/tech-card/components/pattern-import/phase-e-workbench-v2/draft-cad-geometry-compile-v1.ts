@@ -1,4 +1,4 @@
-import { closestOnPolyline, pointInPolygon } from 'lib/pattern-import/semantics/geom';
+import { applyAffine, closestOnPolyline, pointInPolygon } from 'lib/pattern-import/semantics/geom';
 import { normalizeAuthoredText } from 'lib/pattern-import/manifest/authored-text';
 import { segIntersect } from 'lib/pattern-import/pieces/geom';
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
@@ -20,7 +20,10 @@ import {
   buildPatternImportDxfPhaseEDraftCadPreviewV1,
   type PatternImportDxfPhaseEDraftCadPreviewPrimitiveV1,
 } from './draft-cad-preview-v1';
-import { resizeDraftCadSelectedSizeEdgeV1 } from './draft-cad-edge-length-geometry-v1';
+import {
+  moveDraftCadSelectedSizeVertexV1,
+  resizeDraftCadSelectedSizeEdgeV1,
+} from './draft-cad-edge-length-geometry-v1';
 import { executePatternImportDxfPhaseEDraftCadAddPointGeometryV1 } from './draft-cad-add-point-geometry-executor-v1';
 import { executePatternImportDxfPhaseEDraftCadCutGeometryV1 } from './draft-cad-cut-geometry-executor-v1';
 import {
@@ -55,6 +58,7 @@ export type PatternImportDxfPhaseEDraftCadGeometryCompileBlockerCodeV1 =
   | 'writer-size-unavailable'
   | 'preview-blocked'
   | 'edge-length-geometry-blocked'
+  | 'move-point-geometry-blocked'
   | 'add-point-geometry-blocked'
   | 'rectangle-geometry-blocked'
   | 'pen-geometry-blocked'
@@ -86,6 +90,7 @@ export type PatternImportDxfPhaseEDraftCadCompiledFeatureV1 = Readonly<{
     | 'drill'
     | 'notch'
     | 'boundary-point'
+    | 'moved-vertex'
     | 'edge-length'
     | 'piece-create'
     | 'split'
@@ -238,7 +243,7 @@ function supported(command: PatternImportDxfPhaseEDraftCadCommandV1): boolean {
   if (INTERNAL_TOOLS.has(command.tool)) return true;
   if (command.tool === 'draft-point' || command.tool === 'point-only') return true;
   if (command.tool === 'add-point') return Boolean(command.payload.edge);
-  if (command.tool === 'edge-length') return true;
+  if (command.tool === 'edge-length' || command.tool === 'move-point') return true;
   if (command.tool === 'cut') return command.payload.keepSide === 'both';
   if (command.tool === 'spread') return command.payload.amountMm > 0;
   if (command.tool === 'mark')
@@ -822,17 +827,27 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
       continue;
     }
 
-    if (command.tool === 'edge-length') {
-      const resized = resizeDraftCadSelectedSizeEdgeV1(size, command, projection, selection.phaseD);
-      if (!resized.ok) return blocked('edge-length-geometry-blocked', resized.detail, command);
-      Object.assign(size, resized.size);
+    if (command.tool === 'edge-length' || command.tool === 'move-point') {
+      const edited =
+        command.tool === 'edge-length'
+          ? resizeDraftCadSelectedSizeEdgeV1(size, command, projection, selection.phaseD)
+          : moveDraftCadSelectedSizeVertexV1(size, command, projection, selection.phaseD);
+      if (!edited.ok)
+        return blocked(
+          command.tool === 'edge-length'
+            ? 'edge-length-geometry-blocked'
+            : 'move-point-geometry-blocked',
+          edited.detail,
+          command,
+        );
+      Object.assign(size, edited.size);
       compiledFeatures.push({
         commandId: command.commandId,
         entityId: command.payload.entityId,
         tool: command.tool,
         pieceId: command.target.pieceId,
         sizeToken: selected.sizeToken,
-        output: 'edge-length',
+        output: command.tool === 'edge-length' ? 'edge-length' : 'moved-vertex',
       });
       continue;
     }
@@ -1053,6 +1068,30 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
       'writer-failed',
       error instanceof Error ? error.message : 'The deterministic DXF writer failed.',
     );
+  }
+
+  for (const command of compileCommands) {
+    if (command.tool !== 'move-point') continue;
+    const matches = written.plan.blocks.filter(
+      ({ identity, labelSize }) =>
+        identity === command.target.pieceId && labelSize === command.payload.sizeToken,
+    );
+    const [block] = matches;
+    if (!block || matches.length !== 1)
+      return blocked(
+        'move-point-geometry-blocked',
+        'The moved point lost its exact writer block.',
+        command,
+      );
+    const target = applyAffine(block.transform, command.payload.pointMm);
+    const retainsPoint = (ring: readonly PtMm[]) =>
+      ring.some(({ x, y }) => Math.hypot(x - target.x, y - target.y) <= 1e-7);
+    if (!retainsPoint(block.cut) || (block.seam && !retainsPoint(block.seam)))
+      return blocked(
+        'move-point-geometry-blocked',
+        'The DXF writer would omit the moved outline point.',
+        command,
+      );
   }
 
   for (const feature of compiledFeatures) {

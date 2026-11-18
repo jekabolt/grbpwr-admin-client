@@ -4,7 +4,7 @@ import { createPatternImportDxfProductSavedRuntimeSeedV1Fixture } from 'lib/clot
 import { parseDxf } from 'lib/nesting/dxf/parse';
 import { entityToChain } from 'lib/nesting/dxf/entities';
 import { projectPatternImportDxfProductPhaseEAssemblyV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
-import { signedArea } from 'lib/pattern-import/semantics/geom';
+import { applyAffine, signedArea } from 'lib/pattern-import/semantics/geom';
 import type { PtMm } from 'lib/pattern-import/types';
 import { writeDxfDetailed } from 'lib/pattern-import/write';
 import { expect, it } from 'vitest';
@@ -12,8 +12,10 @@ import { expect, it } from 'vitest';
 import { createPatternImportDxfPhaseEBoundDraftCadSessionV1 } from './draft-cad-binding-v1';
 import {
   buildPatternImportDxfPhaseEDraftCadCanvasDartBasesV1,
+  buildPatternImportDxfPhaseEDraftCadExactVertexOptionsV1,
   recordPatternImportDxfPhaseEDraftCadCanvasBoundaryPickV1,
   recordPatternImportDxfPhaseEDraftCadCanvasPointV1,
+  recordPatternImportDxfPhaseEDraftCadMovePointV1,
 } from './draft-cad-canvas-v1';
 import { createPatternImportDxfPhaseEDraftCadCompileSourceV1 } from './draft-cad-compile-source-v1';
 import { compilePatternImportDxfPhaseEDraftCadGeometryV1 } from './draft-cad-geometry-compile-v1';
@@ -123,6 +125,117 @@ it.each(['start', 'end'] as const)(
     ).toBe(true);
   },
 );
+
+it('moves one verified point in the selected size and writes its exact native coordinate', async () => {
+  const { session, projection, selection, compileSource, draft } = await setup();
+  const options = buildPatternImportDxfPhaseEDraftCadExactVertexOptionsV1(
+    session,
+    projection,
+    0,
+    true,
+  );
+  const vertex = options[0]!;
+  const next = options[1]!;
+  const pointMm = {
+    x: vertex.pointMm.x + (next.pointMm.x - vertex.pointMm.x) / 5,
+    y: vertex.pointMm.y + (next.pointMm.y - vertex.pointMm.y) / 5,
+  };
+  const input = {
+    session,
+    projection,
+    activePieceIndex: 0,
+    sequence: 0,
+    vertexKey: vertex.key,
+    pointMm,
+  };
+  for (const invalid of [
+    { ...input, vertexKey: 'stale' },
+    { ...input, pointMm: vertex.pointMm },
+    { ...input, pointMm: { x: Number.NaN, y: pointMm.y } },
+  ]) {
+    expect(recordPatternImportDxfPhaseEDraftCadMovePointV1(invalid)).toMatchObject({
+      recorded: false,
+      session,
+    });
+  }
+
+  const moved = recordPatternImportDxfPhaseEDraftCadMovePointV1(input);
+  expect(moved.recorded).toBe(true);
+  expect(moved.session.history[0]?.commands[0]).toMatchObject({
+    tool: 'move-point',
+    target: { pieceId: vertex.anchor.pieceId, pieceLineKey: vertex.anchor.pieceLineKey },
+    payload: {
+      vertexId: vertex.anchor.vertexId,
+      contourId: vertex.anchor.contourId,
+      pointMm,
+      sizeToken: 'M',
+    },
+  });
+  const undone = undoPatternImportDxfPhaseEDraftCadSessionV1(moved.session);
+  if (!undone.ok) throw new Error(undone.blocker.detail);
+  expect(undone.session.cursor).toBe(0);
+  const redone = redoPatternImportDxfPhaseEDraftCadSessionV1(undone.session);
+  if (!redone.ok) throw new Error(redone.blocker.detail);
+  const compiled = compilePatternImportDxfPhaseEDraftCadGeometryV1({
+    session: redone.session,
+    projection,
+    selection,
+    compileSource,
+  });
+  if (!compiled.ok) throw new Error(JSON.stringify(compiled.blockers));
+  const original = draft.scopes[0]!.writerReplay!.job.pieces;
+  const changed = compiled.artifact.compiledJob.pieces;
+  const pieceId = vertex.anchor.pieceId;
+  expect(changed.filter(({ identity }) => identity !== pieceId)).toEqual(
+    original.filter(({ identity }) => identity !== pieceId),
+  );
+  const before = original.find(({ identity }) => identity === pieceId)!.sizes;
+  const after = changed.find(({ identity }) => identity === pieceId)!.sizes;
+  expect(after.filter(({ sizeToken }) => sizeToken !== 'M')).toEqual(
+    before.filter(({ sizeToken }) => sizeToken !== 'M'),
+  );
+  expect(after.find(({ sizeToken }) => sizeToken === 'M')!.cut).toEqual(
+    before
+      .find(({ sizeToken }) => sizeToken === 'M')!
+      .cut.map((point) =>
+        point.x === vertex.pointMm.x && point.y === vertex.pointMm.y ? pointMm : point,
+      ),
+  );
+  const block = compiled.artifact.manifest.blocks.find(
+    ({ identity, sizeToken }) => identity === pieceId && sizeToken === 'M',
+  )!;
+  const parsed = parseDxf(new TextEncoder().encode(compiled.artifact.dxfText).buffer, 'mm');
+  const layout = writeDxfDetailed(compiled.artifact.compiledJob).transforms[block.block]!;
+  const writtenPoint = applyAffine(layout, pointMm);
+  for (const layer of ['1', '14']) {
+    const outline = parsed.dxf.blocks[block.block]!.entities.find(
+      (entity) =>
+        entity.layer === layer && (entity.type === 'POLYLINE' || entity.type === 'LWPOLYLINE'),
+    );
+    expect(outline).toBeDefined();
+    expect(
+      entityToChain(outline!, 1, 0.001)!.pts.some(
+        ({ x, y }) => Math.hypot(x - writtenPoint.x, y - writtenPoint.y) < 0.000001,
+      ),
+    ).toBe(true);
+  }
+
+  const collapsed = recordPatternImportDxfPhaseEDraftCadMovePointV1({
+    ...input,
+    pointMm: next.pointMm,
+  });
+  expect(collapsed.recorded).toBe(true);
+  const refused = compilePatternImportDxfPhaseEDraftCadGeometryV1({
+    session: collapsed.session,
+    projection,
+    selection,
+    compileSource,
+  });
+  expect(refused).toMatchObject({
+    ok: false,
+    blockers: [expect.objectContaining({ code: 'move-point-geometry-blocked' })],
+  });
+});
 
 it('refuses a missing exact edge or a collapsed length before recording anything', async () => {
   const { session, projection, edge } = await setup();

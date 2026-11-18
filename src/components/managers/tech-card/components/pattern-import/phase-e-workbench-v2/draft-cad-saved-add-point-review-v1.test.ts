@@ -24,7 +24,7 @@ import {
   isCurrentSavedAddPointReviewClaimV1,
 } from './draft-cad-saved-add-point-review-v1';
 
-async function fixture(stable = false) {
+async function fixture(stable = false, separateAllowance = true) {
   const seed = await createSavedThreePanelFixtureV1(2);
   if (stable) {
     const ids: Record<string, string> = { FRONT: 'FP', BACK: 'BP' };
@@ -36,7 +36,7 @@ async function fixture(stable = false) {
     for (const piece of seed.card.existingPieces) piece.name = ids[piece.name]!;
     for (const alias of seed.card.existingAliases!) alias.blockName = ids[alias.blockName]!;
   }
-  for (const piece of seed.job.pieces) {
+  for (const piece of separateAllowance ? seed.job.pieces : []) {
     const size = piece.sizes[0]!,
       sx = size.cut.reduce((n, p) => n + p.x, 0) / size.cut.length,
       sy = size.cut.reduce((n, p) => n + p.y, 0) / size.cut.length;
@@ -1849,6 +1849,163 @@ it('reopens a native text mark without turning it into size, fold or quantity me
       }
     }
   } finally {
+    vi.unstubAllGlobals();
+    f.source.dispose();
+  }
+});
+
+it('reopens a numeric outline move from both native paths after ordinary Wizard Apply', async () => {
+  const f = await fixture(true, false);
+  vi.stubGlobal('Worker', InProcessTransport);
+  const worker = new ImportWorkerClient();
+  const url = 'https://saved-full-assembly.invalid/moved-outline.dxf';
+  let stored = new Uint8Array();
+  const upload = vi
+    .spyOn(adminService, 'UploadPattern')
+    .mockImplementation(async ({ raw, filename }) => {
+      stored = Uint8Array.from(atob(raw!), (char) => char.charCodeAt(0));
+      return { url, filename, sizeBytes: stored.length };
+    });
+  try {
+    const {
+      buildPatternImportDxfPhaseEDraftCadExactVertexOptionsV1,
+      recordPatternImportDxfPhaseEDraftCadMovePointV1,
+    } = await import('./draft-cad-canvas-v1');
+    const { compilePatternImportDxfPhaseEDraftCadGeometryV1 } = await import(
+      './draft-cad-geometry-compile-v1'
+    );
+    const { parseDxf } = await import('lib/nesting/dxf/parse');
+    const { entityToChain } = await import('lib/nesting/dxf/entities');
+    const { bboxOf } = await import('lib/pattern-import/semantics/geom');
+    const { projection } = f.compileInput;
+    const vertices = buildPatternImportDxfPhaseEDraftCadExactVertexOptionsV1(
+      f.initial,
+      projection,
+      0,
+      true,
+    );
+    const [point, next] = vertices;
+    if (!point || !next) throw Error('The exact source outline has no adjacent points.');
+    const shift = {
+      x: (next.pointMm.x - point.pointMm.x) * 0.15,
+      y: (next.pointMm.y - point.pointMm.y) * 0.15,
+    };
+    const pointMm = { x: point.pointMm.x + shift.x, y: point.pointMm.y + shift.y };
+    const edit = recordPatternImportDxfPhaseEDraftCadMovePointV1({
+      session: f.initial,
+      projection,
+      activePieceIndex: 0,
+      sequence: 0,
+      vertexKey: point.key,
+      pointMm,
+    });
+    expect(edit.recorded, edit.blocker ?? '').toBe(true);
+    const compiled = compilePatternImportDxfPhaseEDraftCadGeometryV1({
+      ...f.compileInput,
+      session: edit.session,
+    });
+    if (!compiled.ok) throw Error(JSON.stringify(compiled.blockers));
+    const file = new File([compiled.artifact.dxfText], 'main-cad-compiled.dxf', {
+      type: 'image/vnd.dxf',
+    });
+    const reviewed = await draftThroughWizardStages(file, f.current.card, worker);
+    const scope = reviewed.scopes[0]!;
+    expect(scope.manifest.gate?.passed).toBe(true);
+    expect(upload).not.toHaveBeenCalled();
+    const prior = f.current.row;
+    const card = structuredClone(f.current.card);
+    const target = card.scopes[0]!;
+    const live: LiveCard = {
+      patterns: [{ ...card.existingPatterns![0]!, ...target, sizeId: 7 }],
+      pieces: card.existingPieces,
+      aliases: card.existingAliases!.map((alias) => ({ ...alias, ...target })),
+    };
+    let row: DxfProductSavedRowIdentityV1 | undefined;
+    const apply = createCardApply({
+      read: () => live,
+      write: (path, value) => {
+        if (!Array.isArray(value)) throw Error('Unexpected import write.');
+        if (path === 'patterns') live.patterns = value;
+        else if (path === 'pieces') live.pieces = value;
+        else if (path === 'pieceDxfAliases') live.aliases = value;
+        else throw Error(path);
+      },
+      scopeOf: (candidate) =>
+        candidate.bomLineKey === target.bomLineKey &&
+        candidate.fabricPurpose === target.fabricPurpose
+          ? target.scopeKey
+          : '',
+      storageSizeId: 7,
+      readPreviousLockVersion: () => prior.cardLockVersion,
+      save: async () => {
+        const committed = live.patterns.find((pattern) => pattern.url === url)!;
+        row = {
+          ...prior,
+          url,
+          revision: prior.revision + 1,
+          cardLockVersion: prior.cardLockVersion + 1,
+          patternLineKey: committed.lineKey!,
+          sizeBytes: committed.sizeBytes!,
+          sha256: committed.sha256!,
+        };
+        return 'ok';
+      },
+    });
+    const result = await applyDirectDxfReviewedDraftV1(
+      reviewed,
+      [file],
+      undefined,
+      () => true,
+      () => apply(reviewed),
+    );
+    if (!result.ok || !result.commitReceipt || !row) throw Error(JSON.stringify(result));
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(result.commitReceipt.previousLockVersion).toBe(prior.cardLockVersion);
+    expect(row.sha256).toBe(await digestFullAssemblyFixture(stored));
+    expect(row.sha256).not.toBe(prior.sha256);
+    const bytes = Uint8Array.from(stored);
+    card.existingPatterns![0] = {
+      ...card.existingPatterns![0]!,
+      url: row.url,
+      lineKey: row.patternLineKey,
+      manifest: scope.manifest,
+    };
+    const reopened = await createSavedThreePanelSourceV1(
+      { ...(await createSavedThreePanelFixtureV1(2)), bytes, row, card },
+      true,
+    );
+    try {
+      expect(reopened.native.row).toEqual(row);
+      const normalize = (points: readonly { x: number; y: number }[]) => {
+        const { minX, minY } = bboxOf(points);
+        return points
+          .map(({ x, y }) => [Math.round((x - minX) * 1e6), Math.round((y - minY) * 1e6)].join(','))
+          .sort();
+      };
+      const expected = vertices.map((vertex) => (vertex === point ? pointMm : vertex.pointMm));
+      const block = scope.manifest.blocks.find(
+        ({ identity }) => identity === point.anchor.pieceId,
+      )!;
+      const raw = parseDxf(bytes.buffer, 'mm').dxf.blocks[block.block]!;
+      for (const layer of ['1', '14']) {
+        const outline = raw.entities.find(
+          (entity) =>
+            entity.layer === layer && (entity.type === 'POLYLINE' || entity.type === 'LWPOLYLINE'),
+        );
+        expect(outline).toBeDefined();
+        expect(normalize(entityToChain(outline!, 1, 0.001)!.pts)).toEqual(normalize(expected));
+      }
+      const restored = reopened.native.draft.scopes[0]!.writerReplay!.job.pieces.find(
+        ({ identity }) => identity === point.anchor.pieceId,
+      )!.sizes[0]!;
+      expect(normalize(restored.cut)).toEqual(normalize(expected));
+      expect(normalize(restored.seam!)).toEqual(normalize(expected));
+    } finally {
+      reopened.dispose();
+    }
+  } finally {
+    upload.mockRestore();
+    worker.dispose();
     vi.unstubAllGlobals();
     f.source.dispose();
   }

@@ -43,6 +43,7 @@ export type PatternImportDxfPhaseECadWorkbenchIconV1 =
   | 'circle'
   | 'ellipse'
   | 'add-point'
+  | 'move-point'
   | 'internal-line'
   | 'french-curve'
   | 'draft-point'
@@ -77,6 +78,7 @@ const ICONS: Readonly<Record<PatternImportDxfPhaseECadWorkbenchIconV1, ElementTy
     circle: CircleIcon,
     ellipse: CircleIcon,
     'add-point': PlusIcon,
+    'move-point': Crosshair2Icon,
     'internal-line': RulerHorizontalIcon,
     'french-curve': MagicWandIcon,
     'draft-point': Crosshair2Icon,
