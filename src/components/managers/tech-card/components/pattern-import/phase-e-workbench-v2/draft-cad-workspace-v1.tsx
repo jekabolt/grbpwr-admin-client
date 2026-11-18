@@ -31,9 +31,6 @@ import {
 } from 'react';
 import { Button, Input, Pill, Select, Text } from 'ui';
 
-import { PRESS_EQUIPMENT_LABELS } from '../../equipment-options';
-import { PRESS_ACTION_LABELS } from '../../operation-options';
-
 import { PatternImportDxfPhaseEDraftCadCanvasV1 } from './draft-cad-canvas-v1';
 import {
   applyPatternImportDxfPhaseEDraftCadArrangementActionV1,
@@ -51,13 +48,7 @@ import {
 import { usePatternImportDxfPhaseECadWorkbenchMeasurementUnitV1 } from './cad-workbench-split-shell-v1';
 import type { PatternImportDxfPhaseECadTableCrossScopeAuthoringHandoffResultV1 } from './cad-table-cross-scope-authoring-handoff-v1';
 import type { PatternImportDxfPhaseECadTableCrossScopeConnectSideV1 } from './cad-table-cross-scope-connect-v1';
-import {
-  PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_PRESS_ACTIONS_V1,
-  PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_PRESS_EQUIPMENT_V1,
-  type PatternImportDxfPhaseECadTablePressActionV1,
-  type PatternImportDxfPhaseECadTablePressAuthoringResultV1,
-  type PatternImportDxfPhaseECadTablePressEquipmentV1,
-} from './cad-table-press-authoring-v1';
+import { CadTablePressControlV1, type CreateCadTablePressDraftV1 } from './cad-table-press-control-v1';
 import { stagePatternImportDxfPhaseECadSemanticCompiledArtifactV1 } from './cad-command-semantic-reimport-session-owner-v1';
 import {
   PATTERN_IMPORT_DXF_PHASE_E_CAD_COMMAND_COMPILED_REIMPORT_HANDOFF_V1,
@@ -205,11 +196,7 @@ export type PatternImportDxfPhaseEDraftCadWorkspacePropsV1 = Readonly<{
     direction: 'same' | 'reversed',
   ) => Promise<PatternImportDxfPhaseECadTableCrossScopeAuthoringHandoffResultV1>;
   pressDraftDisabled?: boolean;
-  onCreatePressDraft?: (
-    selectedPieceIds: readonly string[],
-    pressAction: PatternImportDxfPhaseECadTablePressActionV1,
-    pressEquipment: PatternImportDxfPhaseECadTablePressEquipmentV1,
-  ) => PatternImportDxfPhaseECadTablePressAuthoringResultV1;
+  onCreatePressDraft?: CreateCadTablePressDraftV1;
 }>;
 
 export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
@@ -271,11 +258,6 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
   const [crossScopeConnecting, setCrossScopeConnecting] = useState(false);
   const [crossScopeResult, setCrossScopeResult] =
     useState<PatternImportDxfPhaseECadTableCrossScopeAuthoringHandoffResultV1 | null>(null);
-  const [pressAction, setPressAction] = useState<string>('');
-  const [pressEquipment, setPressEquipment] = useState<string>('');
-  const [pressResult, setPressResult] =
-    useState<PatternImportDxfPhaseECadTablePressAuthoringResultV1 | null>(null);
-  const pressSubmitLocked = useRef(false);
   const [localArrangements, setLocalArrangements] =
     useState<PatternImportDxfPhaseEDraftCadArrangementByScopeV1>({});
   const [compileState, setCompileState] =
@@ -361,11 +343,6 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
     () => (copyMounted.current ? copySelection.current : null),
     [],
   );
-  const selectedPieceIdentity = selectedPieceIds.join('\u0000');
-  useEffect(() => {
-    pressSubmitLocked.current = false;
-    setPressResult(null);
-  }, [selectedPieceIdentity]);
   const publishArrangement = (next: PatternImportDxfPhaseEDraftCadArrangementScopeV1): void => {
     if (onArrangementScopeChange) onArrangementScopeChange(next);
     else
@@ -496,24 +473,6 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
     } finally {
       setCrossScopeConnecting(false);
     }
-  };
-  const submitPressDraft = () => {
-    if (
-      pressSubmitLocked.current ||
-      !onCreatePressDraft ||
-      pressDraftDisabled ||
-      !PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_PRESS_ACTIONS_V1.includes(pressAction as never) ||
-      !PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_PRESS_EQUIPMENT_V1.includes(pressEquipment as never)
-    )
-      return;
-    pressSubmitLocked.current = true;
-    const result = onCreatePressDraft(
-      selectedPieceIds,
-      pressAction as PatternImportDxfPhaseECadTablePressActionV1,
-      pressEquipment as PatternImportDxfPhaseECadTablePressEquipmentV1,
-    );
-    if (!result.ok) pressSubmitLocked.current = false;
-    setPressResult(result);
   };
   const compileDraft = async () => {
     const epoch = compiledReimportEpoch.current + 1;
@@ -821,77 +780,17 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
                   }
                 />
               ))}
-            {showPatternImportDxfPhaseECadContextualPressV1(
-              arrangeActive,
-              selectedPieceIds,
-              Boolean(onCreatePressDraft),
-            ) ? (
-              <div
-                className='flex min-w-0 items-center gap-1 border-l border-hairline pl-2'
-                data-cad-contextual-press-authoring=''
-              >
-                <Text component='span' size='micro' className='whitespace-nowrap font-bold'>
-                  Press · {selectedPieceIds.length}
-                </Text>
-                <Select
-                  name='cad-contextual-press-action'
-                  size='sm'
-                  value={pressAction}
-                  placeholder='action'
-                  items={PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_PRESS_ACTIONS_V1.map((value) => ({
-                    value,
-                    label: PRESS_ACTION_LABELS[value],
-                  }))}
-                  onValueChange={(value) => {
-                    pressSubmitLocked.current = false;
-                    setPressAction(value);
-                    setPressResult(null);
-                  }}
-                  readOnly={pressDraftDisabled}
-                />
-                <Select
-                  name='cad-contextual-press-equipment'
-                  size='sm'
-                  value={pressEquipment}
-                  placeholder='equipment'
-                  items={PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_PRESS_EQUIPMENT_V1.map((value) => ({
-                    value,
-                    label: PRESS_EQUIPMENT_LABELS[value],
-                  }))}
-                  onValueChange={(value) => {
-                    pressSubmitLocked.current = false;
-                    setPressEquipment(value);
-                    setPressResult(null);
-                  }}
-                  readOnly={pressDraftDisabled}
-                />
-                <Button
-                  type='button'
-                  size='xs'
-                  variant='main'
-                  disabled={
-                    pressDraftDisabled ||
-                    !pressAction ||
-                    !pressEquipment ||
-                    Boolean(pressResult?.ok)
-                  }
-                  onClick={submitPressDraft}
-                >
-                  Add draft
-                </Button>
-                {pressResult ? (
-                  <Text
-                    component='span'
-                    size='micro'
-                    variant={pressResult.ok ? 'label' : 'errorLabel'}
-                    className='max-w-48 truncate'
-                    title={pressResult.blocker?.detail}
-                    data-cad-contextual-press-result={pressResult.ok ? 'inserted' : 'refused'}
-                  >
-                    {pressResult.ok ? 'draft added' : pressResult.blocker.detail}
-                  </Text>
-                ) : null}
-              </div>
+            {onCreatePressDraft ? (
+              <CadTablePressControlV1
+                selectedPieceIds={selectedPieceIds}
+                disabled={pressDraftDisabled}
+                visible={showPatternImportDxfPhaseECadContextualPressV1(
+                  arrangeActive,
+                  selectedPieceIds,
+                  true,
+                )}
+                onCreateDraft={onCreatePressDraft}
+              />
             ) : null}
             {crossScopeConnectActive ? (
               <div

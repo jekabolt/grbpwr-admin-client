@@ -40,6 +40,11 @@ import {
 } from './cad-table-piece-selection-panel-v1';
 import { projectCadTablePieceFeatures } from './cad-table-piece-features-v1';
 import {
+  planPatternImportDxfPhaseECadTablePressForProjectionV1,
+  type PatternImportDxfPhaseECadTablePressAuthoringOwnerV1,
+} from './cad-table-press-authoring-v1';
+import { CadTablePressControlV1 } from './cad-table-press-control-v1';
+import {
   bindPatternImportDxfPhaseECadTableZeroOperationFreshToSavedAuthorityV1,
   capturePatternImportDxfPhaseECadTableZeroOperationSavedRebindExpectationV1,
   verifyPatternImportDxfPhaseECadTableZeroOperationSavedAuthorityRefreshV1,
@@ -70,6 +75,7 @@ import {
   readPatternImportDxfPhaseEZeroConnectCurrentSavedReplayV1,
 } from './cad-table-zero-connect-phase-e-authority-v1';
 import { useGuardedPieceRename } from '../../guarded-piece-rename';
+import { buildPatternImportDxfPhaseESavedCardContextV1 } from './saved-card-production-projection-v1';
 import {
   hasMatchingFreshPatternChoiceV1,
   routePatternImportDxfPhaseECadTableZeroOperationSourceV1,
@@ -679,6 +685,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
   techCardId,
   cardSession,
   zeroConnectAuthoringHandoff,
+  pressAuthoringHandoff,
   mannequin,
   disabled = false,
   savedCard = null,
@@ -695,6 +702,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
   techCardId?: number;
   cardSession: PatternImportDxfPhaseECardSessionV1 | null;
   zeroConnectAuthoringHandoff?: PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1;
+  pressAuthoringHandoff?: PatternImportDxfPhaseECadTablePressAuthoringOwnerV1;
   mannequin: (context: PatternImportDxfPhaseECadTableZeroOperationMannequinContextV1) => ReactNode;
   disabled?: boolean;
   savedCard?: common_TechCard | null;
@@ -1108,6 +1116,51 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
       authoringPrepared,
       rebindExpectation,
     ) && authoringAuthorityRefresh !== null;
+  const pressScopeKeysByPiece = useMemo(() => {
+    if (!resolvedSavedCard?.id || !resolvedSavedCard.techCard) return null;
+    const context = buildPatternImportDxfPhaseESavedCardContextV1(
+      resolvedSavedCard,
+      orderSizeIds,
+      sizeNameById,
+    );
+    const scopeKeysByPiece = new Map<string, Set<string>>();
+    for (const { pieceLineKey, scopeKey } of context.existingAliases ?? []) {
+      const scopeKeys = scopeKeysByPiece.get(pieceLineKey) ?? new Set<string>();
+      scopeKeys.add(scopeKey);
+      scopeKeysByPiece.set(pieceLineKey, scopeKeys);
+    }
+    return scopeKeysByPiece;
+  }, [resolvedSavedCard, orderSizeIds, sizeNameById]);
+  const selectedPressPieces = tableSessionOwner?.session.layout.pieces.filter(({ identity }) =>
+    tableSessionOwner.session.layout.selectedPieceKeys.includes(identity.key),
+  );
+  const pressControl =
+    !disabled &&
+    authoringReady &&
+    prepared &&
+    authoringPrepared?.authoringAuthority.row.cardLockVersion === resolvedSavedCard?.lockVersion &&
+    authoringPrepared?.catalog.canonicalSha256 === prepared.catalog.canonicalSha256 &&
+    pressAuthoringHandoff?.status === 'available' &&
+    pressScopeKeysByPiece &&
+    selectedPressPieces?.length ? (
+      <CadTablePressControlV1
+        key={preparationKey}
+        selectedPieceIds={selectedPressPieces.map(({ identity }) => identity.pieceId)}
+        onCreateDraft={(selectedPieceIds, pressAction, pressEquipment) => {
+          const planned = planPatternImportDxfPhaseECadTablePressForProjectionV1({
+            techCardId: prepared.techCardId,
+            projection: prepared.projection,
+            scopeKey: prepared.scopeKey,
+            readPieceScopeKeys: (pieceLineKey) => [...(pressScopeKeysByPiece.get(pieceLineKey) ?? [])],
+            selectedPieceIds,
+            pressAction,
+            pressEquipment,
+          });
+          if (planned.ok) return pressAuthoringHandoff.ingest(planned.candidate);
+          return { ok: false, inserted: 0, historyKey: null, blocker: planned.blocker };
+        }}
+      />
+    ) : null;
   const preparationBlocker = !choices.ok
     ? choices.blocker
     : currentPreparation?.status === 'settled' && currentPreparation.result?.ok === false
@@ -1291,6 +1344,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
               {currentPreparation?.status === 'loading' && (
                 <span className='text-micro text-labelColor'>opening exact saved geometry…</span>
               )}
+              {pressControl}
             </div>
           )}
 
@@ -1370,6 +1424,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
   techCardId,
   physicalHost,
   zeroConnectAuthoringHandoff,
+  pressAuthoringHandoff,
   disabled = false,
   selection,
   operationsPanel,
@@ -1379,6 +1434,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
   techCardId?: number;
   physicalHost?: CadWorkbenchPhysicalHostV1;
   zeroConnectAuthoringHandoff?: PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1;
+  pressAuthoringHandoff?: PatternImportDxfPhaseECadTablePressAuthoringOwnerV1;
   disabled?: boolean;
   selection?: PatternImportDxfPhaseECadWorkbenchSelectionV1;
   operationsPanel?: ReactNode;
@@ -1408,6 +1464,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
       techCardId={techCardId}
       cardSession={cardSession}
       zeroConnectAuthoringHandoff={zeroConnectAuthoringHandoff}
+      pressAuthoringHandoff={pressAuthoringHandoff}
       disabled={disabled}
       savedCard={savedCard.data ?? null}
       orderSizeIds={orderSizeIds}

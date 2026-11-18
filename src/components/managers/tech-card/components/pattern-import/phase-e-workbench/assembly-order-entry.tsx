@@ -2760,6 +2760,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
       <PatternImportDxfPhaseECadTableZeroOperationProductionMountV1
         techCardId={techCardId}
         physicalHost={physicalHost}
+        pressAuthoringHandoff={pressAuthoringHandoff}
         sourceSurface={useSavedSewingEdges ? 'explicit-native-drawn-sewing' : undefined}
         zeroConnectAuthoringHandoff={
           (savedEmptyOperation || savedLinkedN1) && zeroConnectAuthoringHandoff

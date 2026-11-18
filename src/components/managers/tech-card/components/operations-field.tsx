@@ -7013,10 +7013,12 @@ const isKindField = (field: string): field is KindField =>
 function PatternImportDxfPhaseECadTableTopLevelZeroOperationMountV1({
   techCardId,
   zeroConnectAuthoringHandoff,
+  pressAuthoringHandoff,
   disabled,
 }: Readonly<{
   techCardId?: number;
   zeroConnectAuthoringHandoff: PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1;
+  pressAuthoringHandoff: PatternImportDxfPhaseECadTablePressAuthoringOwnerV1;
   disabled: boolean;
 }>) {
   const savedClothPhysicalHost = useSavedClothPhysicalHostV1({
@@ -7036,6 +7038,7 @@ function PatternImportDxfPhaseECadTableTopLevelZeroOperationMountV1({
       techCardId={techCardId}
       physicalHost={physicalHost}
       zeroConnectAuthoringHandoff={zeroConnectAuthoringHandoff}
+      pressAuthoringHandoff={pressAuthoringHandoff}
       disabled={disabled}
     />
   );
@@ -11879,6 +11882,7 @@ export function OperationsField({
             <PatternImportDxfPhaseECadTableTopLevelZeroOperationMountV1
               techCardId={techCardId}
               zeroConnectAuthoringHandoff={zeroConnectAuthoringHandoff}
+              pressAuthoringHandoff={pressAuthoringHandoff}
               disabled={frozen}
             />
           </div>
