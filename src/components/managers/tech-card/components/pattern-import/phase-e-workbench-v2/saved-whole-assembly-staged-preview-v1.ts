@@ -397,7 +397,11 @@ export async function runSavedWholeAssemblyStagedPreviewV1(
       totalStages,
     });
     input.onAccepted(last);
-    if (index + 1 < commands.length && input.pauseAfterAccepted?.() === true) {
+    if (index + 1 < commands.length && input.pauseAfterAccepted) {
+      // Let the accepted frame and any pending controls update before starting another command.
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      requireCurrent();
+      if (!input.pauseAfterAccepted()) continue;
       const paused = Object.freeze({ lastAcceptedFrame: frame.frame });
       suspended.set(paused, {
         source,

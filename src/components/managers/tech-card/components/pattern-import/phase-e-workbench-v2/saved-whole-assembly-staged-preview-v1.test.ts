@@ -142,8 +142,36 @@ describe('same Workbench staged checkpoint', () => {
       );
       const [range] = accepted.cloth.ranges;
       expect(range).toMatchObject({ color: 0x296dc3, triangleOffset: 0, triangleCount: 1 });
-      expect(range.sourcePiece).toEqual(sourceCuts.length === 1 ? cut : undefined);
+      const { row, sizeToken, pieceId, pieceLineKey, sourceInstancePath } = cut;
+      expect(range.sourcePiece).toEqual(
+        sourceCuts.length === 1
+          ? { row, sizeToken, pieceId, pieceLineKey, sourceInstancePath }
+          : undefined,
+      );
     }
+  });
+
+  it('honors a queued pause after presenting a frame and before advancing', async () => {
+    calls.start.mockResolvedValue(frame(1));
+    calls.advance.mockResolvedValue(frame(2));
+    const { request } = fixture();
+    let pausedByOperator = false;
+
+    const result = await runSavedWholeAssemblyStagedPreviewV1(
+      {
+        ...request,
+        onAccepted() {
+          setTimeout(() => {
+            pausedByOperator = true;
+          }, 0);
+        },
+        pauseAfterAccepted: () => pausedByOperator,
+      },
+      new AbortController().signal,
+    );
+
+    expect(result.paused?.lastAcceptedFrame).toBe(1);
+    expect(calls.advance).not.toHaveBeenCalled();
   });
 
   it('keeps the accepted frame after the old signal is aborted and continues on a different lease', async () => {
