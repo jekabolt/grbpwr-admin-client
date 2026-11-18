@@ -117,8 +117,18 @@ describe('same Workbench staged checkpoint', () => {
       pieceId: 'exact-native-dxf-piece',
       pieceLineKey: 'piece',
       sizeToken: 'M',
+      blockName: 'fixture_M',
+      contourId: 'native-cut',
+      nativePathId: 1,
       sourceInstancePath: ['insert-a'],
-    } as NonNullable<Request['source']>['sourceCuts'][number];
+      nativePointsMm: [
+        { x: 0, y: 0 },
+        { x: 10, y: 0 },
+        { x: 0, y: 10 },
+      ],
+      grain: null,
+      nativeNotchPoints: [],
+    } satisfies NonNullable<Request['source']>['sourceCuts'][number];
     calls.start.mockResolvedValue(frame(1));
     for (const sourceCuts of [[cut], [cut, { ...cut, sourceInstancePath: ['insert-b'] }], []]) {
       const source = { ...request.source, sourceCuts };
