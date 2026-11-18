@@ -50,6 +50,7 @@ import { chainView, partAt, sheetView } from 'lib/pattern-import/assemble/compos
 import { gradeView } from 'lib/pattern-import/chains/face-role';
 
 import { type Bridge, facingBridges, wallBridges } from './bridges';
+import { landedBorrowWalls } from './landed-borrow';
 import { gradeHook, SOLVER_MODEL, type GradeHook } from './grade/hook';
 import { gradeOrderRun } from './continuity-order';
 import { seedFaces, type SeedFaceDiag } from './seed-face';
@@ -859,6 +860,8 @@ function fillOneSheet(
     return mask;
   };
 
+  // another size's line, only the stretch between this size's own landings (BORROW_LANDED_OFF)
+  const borrowed = landedBorrowWalls(set, model);
   /** Pass A walls of one rank: common + own + rescued + the operator's + lone stretches. */
   const baseItems = (r: number, excl: Set<ChainId>) => {
     const ownIds = model.mode === 'single' ? [] : model.byRank[r];
@@ -869,6 +872,7 @@ function fillOneSheet(
             ...itemsOf(set, [...model.common, ...ownIds, ...extraOf(r)]),
             ...rescuedItems(r),
             ...sandwichItems(r),
+            ...(borrowed[r] ?? []),
           ]),
       ...lone,
       ...opBridges(r).map((b) => ({ chain: -2, pts: [b.from, b.to] })),
