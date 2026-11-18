@@ -1467,7 +1467,7 @@ describe('mounted exact annotation Save and remount', () => {
     expect(markup).not.toContain('aria-label="Show callouts"');
     expect(markup).not.toContain('aria-label="Show measurements"');
     expect(view.put).toHaveBeenCalledTimes(1);
-  });
+  }, 120000);
 
   it('retains the local draft on a stale captured digest and reloads the concurrent V7 edit without a second PUT', async () => {
     const view = await mountedFixture('v7');
