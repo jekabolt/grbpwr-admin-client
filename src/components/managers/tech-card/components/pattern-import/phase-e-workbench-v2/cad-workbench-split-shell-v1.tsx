@@ -1,6 +1,7 @@
 import type { DxfGarmentObservedBoundaryEdgeV1 } from 'components/cloth-simulation-spike/dxf-garment-observed-unsewn-edges-v1';
 import {
   createContext,
+  useCallback,
   useContext,
   useLayoutEffect,
   useRef,
@@ -36,6 +37,29 @@ const MeasurementUnitContext = createContext<MeasurementUnitContextV1 | null>(nu
 
 export function usePatternImportDxfPhaseECadWorkbenchMeasurementUnitV1(): MeasurementUnitContextV1 | null {
   return useContext(MeasurementUnitContext);
+}
+
+const RegisterPreviewContext = createContext<(() => () => void) | null>(null);
+
+/** Keeps its mannequin slot visible on automatic compact layout while a preview is current. */
+export function useCadWorkbenchRetainMannequinPreviewV1(current: boolean) {
+  const register = useContext(RegisterPreviewContext);
+  const unregister = useRef<(() => void) | undefined>(undefined);
+  const retain = useCallback(
+    (keep: boolean) => {
+      if (keep) unregister.current ??= register?.();
+      else {
+        unregister.current?.();
+        unregister.current = undefined;
+      }
+    },
+    [register],
+  );
+  useLayoutEffect(() => {
+    retain(current);
+  });
+  useLayoutEffect(() => () => retain(false), [retain]);
+  return retain;
 }
 
 export const PATTERN_IMPORT_DXF_PHASE_E_CAD_WORKBENCH_SPLIT_SHELL_CLAIMS_V1 = Object.freeze({
@@ -88,10 +112,12 @@ export function resolvePatternImportDxfPhaseECadWorkbenchLayoutV1(
   operations: PatternImportDxfPhaseECadWorkbenchOperationsModeV1,
   dockWidth: number,
   splitPercent: number,
+  retainPreview = false,
 ) {
   const railWidth = operations === 'collapsed' ? COLLAPSED_DOCK_WIDTH : 0;
   const canSplit = availableWidth === null || availableWidth - railWidth >= MIN_SPLIT_TRACK_WIDTH;
-  const viewMode = view === 'split' && !canSplit ? 'desktop-only' : view;
+  const compactView = retainPreview ? 'mannequin-only' : 'desktop-only';
+  const viewMode = view === 'split' && !canSplit ? compactView : view;
   const workspaceMinimum =
     viewMode === 'split' ? MIN_SPLIT_TRACK_WIDTH : Math.max(DESKTOP_MIN_WIDTH, MANNEQUIN_MIN_WIDTH);
   const inlineDockLimit =
@@ -316,6 +342,11 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
   const [floatingPosition, setFloatingPosition] =
     useState<PatternImportDxfPhaseECadWorkbenchFloatingPositionV1 | null>(null);
   const [dragging, setDragging] = useState<DragState['kind'] | null>(null);
+  const [currentPreviews, setCurrentPreviews] = useState(0);
+  const registerPreview = useCallback(() => {
+    setCurrentPreviews((count) => count + 1);
+    return () => setCurrentPreviews((count) => count - 1);
+  }, []);
   const operationsWidthPx = clampPatternImportDxfPhaseECadWorkbenchOperationsWidthV1(
     controlledOperationsWidthPx ?? uncontrolledOperationsWidthPx,
   );
@@ -326,6 +357,7 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
       operationsMode,
       operationsWidthPx,
       controlledSplitPercent ?? uncontrolledSplitPercent,
+      currentPreviews > 0,
     );
   const hasSidebar = Boolean(objectSidebar);
 
@@ -736,7 +768,9 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
                 aria-label='Mannequin and sewn cloth preview'
                 style={{ minWidth: split ? MANNEQUIN_MIN_WIDTH : 0 }}
               >
-                {renderSlot(mannequin, 'mannequin', selection, onSelectionFocus)}
+                <RegisterPreviewContext.Provider value={registerPreview}>
+                  {renderSlot(mannequin, 'mannequin', selection, onSelectionFocus)}
+                </RegisterPreviewContext.Provider>
               </aside>
             ) : null}
           </div>

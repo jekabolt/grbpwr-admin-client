@@ -8,6 +8,7 @@ import {
 import type { MeasurementSurfaceAcceptedClothV1 } from 'components/shared/measurement-watertight-surface-v1-stage';
 import { Button, Input, Text } from 'ui';
 import { CAD_WORKBENCH_SEAM_SIDE_COLORS } from './cad-workbench-seam-colors-v1';
+import { useCadWorkbenchRetainMannequinPreviewV1 } from './cad-workbench-split-shell-v1';
 import {
   createCadWorkbenchPreviewLifecycleV1,
   type CadWorkbenchBoundedClothPreviewHostV1,
@@ -67,6 +68,9 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
   } | null>(null);
   const [wholeProgress, setWholeProgress] = useState<SavedWholeAssemblyPreviewProgressV1 | null>(
     null,
+  );
+  const retainPreview = useCadWorkbenchRetainMannequinPreviewV1(
+    !disabled && (status.pending || acceptedFrame !== null),
   );
   const savedCenter = review.placement?.placement.centerMm;
   const savedBody = review.placement?.body;
@@ -284,7 +288,16 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
     pauseRequested.current = false;
     resumeRequested.current = resumeSuspended;
     setPausing(false);
-    void lifecycle.start(host, computeCanvas.current, null, setStatus, resumeSuspended);
+    void lifecycle.start(
+      host,
+      computeCanvas.current,
+      null,
+      (next) => {
+        if (next.pending) retainPreview(true);
+        setStatus(next);
+      },
+      resumeSuspended,
+    );
   };
 
   async function savePlacement(kind: PreviewKind) {

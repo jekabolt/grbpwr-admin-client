@@ -5,7 +5,10 @@ import type { SavedModelDisplayedTriangleBodySessionSnapshotV2 } from 'component
 import { Button, Text } from 'ui';
 
 import type { CadWorkbenchPhysicalPreviewInteractionV1 } from './cad-workbench-physical-host-v1';
-import { usePatternImportDxfPhaseECadWorkbenchMeasurementUnitV1 } from './cad-workbench-split-shell-v1';
+import {
+  useCadWorkbenchRetainMannequinPreviewV1,
+  usePatternImportDxfPhaseECadWorkbenchMeasurementUnitV1,
+} from './cad-workbench-split-shell-v1';
 import { formatPatternImportDxfPhaseEMeasurementValueV1 } from './measurement-units-v1';
 import type { useSavedClothPhysicalHostV1 } from './use-saved-cloth-physical-host-v1';
 import {
@@ -157,9 +160,10 @@ export function CadWorkbenchPhysicalHostControlsV1({
       !previewCanvas.current
     )
       return;
-    void lifecycle.start(host, computeCanvas.current, previewCanvas.current, (status) =>
-      setPreviewStatus({ ...status, host }),
-    );
+    void lifecycle.start(host, computeCanvas.current, previewCanvas.current, (status) => {
+      if (status.pending) retainPreview(true);
+      setPreviewStatus({ ...status, host });
+    });
   };
 
   const ready = state.sourceStatus === 'ready' && state.host !== null;
@@ -170,6 +174,9 @@ export function CadWorkbenchPhysicalHostControlsV1({
   const currentFrame = ready ? currentPreviewFrame(state, displayedBody) : null;
   const receipt = currentFrame?.receipt ?? null;
   const previewReady = receipt !== null;
+  const retainPreview = useCadWorkbenchRetainMannequinPreviewV1(
+    !disabled && (pending || previewReady),
+  );
   const measurements = currentFrame ? frameMeasurements(currentFrame) : [];
   const unit = usePatternImportDxfPhaseECadWorkbenchMeasurementUnitV1()?.unit ?? 'mm';
   const scopeKey = interaction ? measurementScopeKey(interaction.scope) : null;
