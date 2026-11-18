@@ -350,7 +350,9 @@ function PlacementAuthoring({ state, disabled }: { state: HostState; disabled: b
     setError(null);
   }, [geometry]);
   if (!geometry) return null;
-  const busy = disabled || authoring.status === 'saving';
+  const saving = authoring.status === 'saving';
+  const retrying = authoring.status === 'save-retry';
+  const busy = disabled || saving || retrying;
   const submit = () => {
     try {
       const placements = geometry.pieces.map((piece) => {
@@ -480,13 +482,19 @@ function PlacementAuthoring({ state, disabled }: { state: HostState; disabled: b
           </div>
         );
       })}
-      {error ? (
+      {error ?? authoring.error ? (
         <Text component='p' size='micro' variant='errorLabel'>
-          {error}
+          {error ?? authoring.error}
         </Text>
       ) : null}
-      <Button type='button' size='xs' variant='main' disabled={busy} onClick={submit}>
-        {authoring.status === 'saving' ? 'Saving…' : 'Save placement'}
+      <Button
+        type='button'
+        size='xs'
+        variant='main'
+        disabled={disabled || saving}
+        onClick={retrying ? state.retryFirstPlacementSave : submit}
+      >
+        {saving ? 'Saving…' : retrying ? 'Retry save placement' : 'Save placement'}
       </Button>
     </div>
   );
@@ -534,7 +542,9 @@ export function CadWorkbenchFirstPhysicalAuthoringV1({
       {authoring.status === 'compile-required' || authoring.status === 'compiling' ? (
         <CompileAuthoring state={state} disabled={disabled} />
       ) : null}
-      {authoring.status === 'placement-required' || authoring.status === 'saving' ? (
+      {authoring.status === 'placement-required' ||
+      authoring.status === 'saving' ||
+      authoring.status === 'save-retry' ? (
         <PlacementAuthoring state={state} disabled={disabled} />
       ) : null}
       {authoring.status === 'blocked' ? (

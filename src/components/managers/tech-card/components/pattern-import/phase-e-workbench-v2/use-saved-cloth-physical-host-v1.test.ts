@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   bodySnapshot: Object.freeze({ status: 'observed-body-bound', generation: 1 }),
   createBodySession: vi.fn(),
   createObservedHost: vi.fn(),
+  actorSnapshot: vi.fn(),
   consume: vi.fn(),
   disposeObservedHost: vi.fn(),
   projectAuthoring: vi.fn(),
@@ -117,21 +118,37 @@ beforeEach(() => {
     return { ok: true, result: { generation: 7 } };
   });
   mocks.disposeObservedHost.mockResolvedValue(true);
+  mocks.actorSnapshot.mockReturnValue({
+    status: 'compiled',
+    sourceGeneration: 7,
+    initializationSha256: null,
+    targetSha256: null,
+  });
   mocks.createObservedHost.mockReturnValue({
+    getSnapshot: mocks.actorSnapshot,
     consume: mocks.consume,
     dispose: mocks.disposeObservedHost,
   });
   mocks.projectAuthoring.mockResolvedValue({
     ok: true,
+    sourceGeneration: 7,
+    observedTarget: { canonicalSha256: 'b'.repeat(64) },
     sourceGeometry: Object.freeze({ pieces: Object.freeze([]) }),
   });
   mocks.prepareFirst.mockResolvedValue(Object.freeze({ bootstrap: 'current-v6' }));
   mocks.buildFirst.mockReturnValue(Object.freeze({ request: 'compile' }));
   mocks.bindFirst.mockImplementation(async () => {
     mocks.compileSignalWasAbortedAtBind = mocks.compileSignal?.aborted ?? null;
-    return mocks.compileSignalWasAbortedAtBind
-      ? { ok: false, detail: 'compiled source lifetime was revoked' }
-      : { ok: true };
+    if (mocks.compileSignalWasAbortedAtBind)
+      return { ok: false, detail: 'compiled source lifetime was revoked' };
+    const initializationSha256 = 'a'.repeat(64);
+    mocks.actorSnapshot.mockReturnValue({
+      status: 'initialization-bound',
+      sourceGeneration: 7,
+      initializationSha256,
+      targetSha256: 'b'.repeat(64),
+    });
+    return { ok: true, sourceGeneration: 7, initializationSha256 };
   });
   mocks.persistFirst.mockResolvedValue({ ok: true });
 });
@@ -237,9 +254,9 @@ describe('first physical authoring source lifetime', () => {
   let latest: ReturnType<typeof useSavedClothPhysicalHostV1>;
   const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-  function Harness() {
+  function Harness({ currentRow = row }: { currentRow?: typeof row }) {
     latest = useSavedClothPhysicalHostV1({
-      row,
+      row: currentRow,
       selectedOperationNumber: 10,
       cardProjection: cardProjection as never,
     });
@@ -252,7 +269,7 @@ describe('first physical authoring source lifetime', () => {
     );
     root = createRoot(reactContainer() as never);
     await act(async () => {
-      root.render(createElement(Harness));
+      root.render(createElement(Harness, {}));
       await tick();
     });
     await act(tick);
@@ -285,5 +302,177 @@ describe('first physical authoring source lifetime', () => {
     expect(mocks.bindFirst).toHaveBeenCalledTimes(1);
     expect(mocks.persistFirst).toHaveBeenCalledTimes(1);
     expect(latest!.firstAuthoring.status).toBe('idle');
+  });
+
+  const placements = [
+    {
+      pieceId: 'front',
+      pieceLineKey: 'body-front',
+      pivot: {
+        contourId: 'outline',
+        vertexId: 'v2',
+        positionMm: [80, 50],
+        positionM: [0.08, 0.05, 0],
+      },
+      rotationRowMajor: [0, -1, 0, 1, 0, 0, 0, 0, 1],
+      translationM: [-0.11, 1.22, 0.33],
+    },
+  ] as const;
+  const unknown = {
+    ok: false,
+    writeOutcome: 'unknown',
+    blockers: [{ detail: 'Response lost; verify storage.' }],
+  };
+  async function openPlacement() {
+    await act(async () => latest.startFirstAuthoring());
+    await act(async () => latest.compileFirstAuthoring({} as never));
+    expect(latest.firstAuthoring.status).toBe('placement-required');
+  }
+
+  it('keeps one bound placement after uncertain persistence and retries only on a new manual click', async () => {
+    await openPlacement();
+    const oldSave = latest.saveFirstAuthoring;
+    const geometry = latest.firstAuthoring.sourceGeometry;
+    let rejectFirst!: (value: typeof unknown) => void;
+    mocks.persistFirst.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          rejectFirst = resolve;
+        }),
+    );
+    let first!: Promise<void>;
+    await act(async () => {
+      first = oldSave(placements);
+      void oldSave(placements);
+      await tick();
+    });
+    expect(latest.firstAuthoring.status).toBe('saving');
+    expect(mocks.persistFirst).toHaveBeenCalledOnce();
+    await act(async () => {
+      rejectFirst(unknown);
+      await first;
+    });
+    expect(latest.firstAuthoring).toMatchObject({
+      status: 'save-retry',
+      error: unknown.blockers[0]!.detail,
+    });
+    expect(latest.firstAuthoring.sourceGeometry).toBe(geometry);
+    expect(mocks.disposeObservedHost).not.toHaveBeenCalled();
+    await act(async () => {
+      await latest.startFirstAuthoring();
+      await oldSave(placements);
+    });
+    expect(mocks.persistFirst).toHaveBeenCalledOnce();
+    const retrySave = latest.retryFirstPlacementSave;
+    await act(async () => {
+      await Promise.all([retrySave(), retrySave()]);
+    });
+    expect(mocks.bindFirst).toHaveBeenCalledOnce();
+    expect(mocks.bindFirst.mock.calls[0]![1].placements).toEqual(placements);
+    expect(mocks.persistFirst.mock.calls.map(([host, generation]) => [host, generation])).toEqual(
+      Array(2).fill([mocks.createObservedHost.mock.results[0]!.value, 7]),
+    );
+    expect(latest.firstAuthoring.status).toBe('idle');
+  });
+
+  it.each(['row', 'close'] as const)(
+    'revokes a retained retry on %s replacement',
+    async (reason) => {
+      await openPlacement();
+      mocks.persistFirst.mockResolvedValueOnce(unknown);
+      await act(async () => latest.saveFirstAuthoring(placements));
+      const staleRetry = latest.retryFirstPlacementSave;
+      expect(latest.firstAuthoring.status).toBe('save-retry');
+      await act(async () => {
+        if (reason === 'row')
+          root.render(
+            createElement(Harness, { currentRow: { ...row, revision: row.revision + 1 } }),
+          );
+        else {
+          latest.retry();
+          await staleRetry();
+        }
+      });
+      await act(async () => staleRetry());
+      expect(mocks.persistFirst).toHaveBeenCalledOnce();
+      expect(mocks.disposeObservedHost).toHaveBeenCalledOnce();
+      expect(latest.firstAuthoring.status).toBe('idle');
+    },
+  );
+
+  it('drops a pending save completion after the operator closes the source', async () => {
+    await openPlacement();
+    let finish!: (value: typeof unknown) => void;
+    mocks.persistFirst.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    let write!: Promise<void>;
+    await act(async () => {
+      write = latest.saveFirstAuthoring(placements);
+      await tick();
+    });
+    await act(async () => {
+      latest.retry();
+      finish(unknown);
+      await write;
+    });
+    expect(latest.firstAuthoring.status).toBe('idle');
+    expect(mocks.compileSignal?.aborted).toBe(true);
+    expect(mocks.persistFirst).toHaveBeenCalledOnce();
+    expect(mocks.projectAuthoring).toHaveBeenCalledOnce();
+  });
+
+  it('preserves editable placement input after an unbound validation failure on a current source', async () => {
+    await openPlacement();
+    const geometry = latest.firstAuthoring.sourceGeometry;
+    mocks.bindFirst.mockResolvedValueOnce({ ok: false, detail: 'Choose a current source pivot.' });
+    await act(async () => latest.saveFirstAuthoring(placements));
+    expect(latest.firstAuthoring).toMatchObject({
+      status: 'placement-required',
+      error: 'Choose a current source pivot.',
+    });
+    expect(latest.firstAuthoring.sourceGeometry).toBe(geometry);
+    expect(mocks.persistFirst).not.toHaveBeenCalled();
+    await act(async () => latest.saveFirstAuthoring(placements));
+    expect(mocks.persistFirst).toHaveBeenCalledOnce();
+  });
+  it.each(['actor', 'generation'] as const)(
+    'refuses to retry a replaced %s before persistence',
+    async (kind) => {
+      await openPlacement();
+      mocks.persistFirst.mockResolvedValueOnce(unknown);
+      await act(async () => latest.saveFirstAuthoring(placements));
+      expect(latest.firstAuthoring.status).toBe('save-retry');
+      const previous = mocks.actorSnapshot();
+      mocks.actorSnapshot.mockReturnValue({
+        ...previous,
+        ...(kind === 'actor' ? { initializationSha256: 'c'.repeat(64) } : { sourceGeneration: 8 }),
+      });
+      await act(async () => latest.retryFirstPlacementSave());
+      expect(latest.firstAuthoring.status).toBe('blocked');
+      expect(mocks.persistFirst).toHaveBeenCalledOnce();
+      expect(mocks.disposeObservedHost).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('retires placement if the genuine source re-read reports drift after an uncertain write', async () => {
+    await openPlacement();
+    mocks.projectAuthoring.mockResolvedValueOnce({
+      ok: false,
+      detail: 'Fresh AO/row/outer provenance changed.',
+    });
+    mocks.persistFirst.mockResolvedValueOnce(unknown);
+    await act(async () => latest.saveFirstAuthoring(placements));
+    expect(latest.firstAuthoring).toMatchObject({
+      status: 'blocked',
+      sourceGeometry: null,
+      error: 'Fresh AO/row/outer provenance changed.',
+    });
+    await act(async () => latest.retryFirstPlacementSave());
+    expect(mocks.persistFirst).toHaveBeenCalledOnce();
+    expect(mocks.disposeObservedHost).toHaveBeenCalledOnce();
   });
 });

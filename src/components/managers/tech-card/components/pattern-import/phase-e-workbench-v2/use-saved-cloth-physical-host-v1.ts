@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   createSavedGenericDurablePhysicalHostV1,
@@ -79,7 +87,14 @@ export type SavedClothFirstAuthoringStateV1 =
       status: 'placement-required';
       bootstrap: SavedFullAssemblyGenericFirstBootstrapV1;
       sourceGeometry: SavedGenericObservedSourceGeometryV1;
-      error: null;
+      error: string | null;
+    }>
+  | Readonly<{
+      status: 'save-retry';
+      bootstrap: SavedFullAssemblyGenericFirstBootstrapV1;
+      sourceGeometry: SavedGenericObservedSourceGeometryV1;
+      initializationSha256: string;
+      error: string;
     }>
   | Readonly<{
       status: 'saving';
@@ -237,7 +252,6 @@ export function useSavedClothPhysicalHostV1({
     });
   }, [techCardId, scopeKey, patternLineKey, revision, cardLockVersion, url, sizeBytes, sha256]);
   const [retryGeneration, setRetryGeneration] = useState(0);
-  const retry = useCallback(() => setRetryGeneration((value) => value + 1), []);
   const sourceKey =
     savedRow && cardProjection && selectedOperationNumber > 0
       ? JSON.stringify([
@@ -273,13 +287,18 @@ export function useSavedClothPhysicalHostV1({
     if (host) await host.dispose();
   }, []);
 
-  useEffect(() => {
+  const retry = useCallback(() => {
+    void releaseFirstAuthoring();
+    setRetryGeneration((value) => value + 1);
+  }, [releaseFirstAuthoring]);
+
+  useLayoutEffect(() => {
     setFirstAuthoring({ status: 'idle', bootstrap: null, sourceGeometry: null, error: null });
     void releaseFirstAuthoring();
     return () => {
       void releaseFirstAuthoring();
     };
-  }, [releaseFirstAuthoring, sourceKey]);
+  }, [releaseFirstAuthoring, sourceKey, cardProjection, bodySession]);
 
   useEffect(() => {
     if (
@@ -357,10 +376,10 @@ export function useSavedClothPhysicalHostV1({
       !cardProjection ||
       !bodySession ||
       !sourceKey ||
-      firstAuthoring.status === 'preparing'
+      firstControllerRef.current ||
+      (firstAuthoring.status !== 'idle' && firstAuthoring.status !== 'blocked')
     )
       return;
-    await releaseFirstAuthoring();
     const controller = new AbortController();
     firstControllerRef.current = controller;
     setFirstAuthoring({ status: 'preparing', bootstrap: null, sourceGeometry: null, error: null });
@@ -381,6 +400,7 @@ export function useSavedClothPhysicalHostV1({
       });
     } catch (error) {
       if (firstControllerRef.current !== controller || controller.signal.aborted) return;
+      void releaseFirstAuthoring();
       setFirstAuthoring({
         status: 'blocked',
         bootstrap: null,
@@ -399,13 +419,22 @@ export function useSavedClothPhysicalHostV1({
     sourceStatus,
   ]);
 
+  const publishedSource = firstControllerRef.current;
   const compileFirstAuthoring = useCallback(
     async (choices: SavedFullAssemblyGenericFirstCompileChoicesV1) => {
-      if (firstAuthoring.status !== 'compile-required' || !bodySession || !savedRow || !sourceKey)
+      if (
+        firstAuthoring.status !== 'compile-required' ||
+        !publishedSource ||
+        firstControllerRef.current !== publishedSource ||
+        firstHostRef.current ||
+        !bodySession ||
+        !savedRow ||
+        !sourceKey
+      )
         return;
       const bootstrap = firstAuthoring.bootstrap;
       setFirstAuthoring({ status: 'compiling', bootstrap, sourceGeometry: null, error: null });
-      await releaseFirstAuthoring();
+      publishedSource.abort();
       const controller = new AbortController();
       firstControllerRef.current = controller;
       const authoringHost = createSavedGenericObservedPhysicalHostV1({
@@ -452,7 +481,7 @@ export function useSavedClothPhysicalHostV1({
           firstControllerRef.current === controller &&
           !controller.signal.aborted
         ) {
-          await releaseFirstAuthoring();
+          void releaseFirstAuthoring();
           setFirstAuthoring({
             status: 'blocked',
             bootstrap,
@@ -462,68 +491,143 @@ export function useSavedClothPhysicalHostV1({
         }
       }
     },
-    [bodySession, firstAuthoring, releaseFirstAuthoring, savedRow, sourceKey],
+    [bodySession, firstAuthoring, publishedSource, releaseFirstAuthoring, savedRow, sourceKey],
   );
 
-  const saveFirstAuthoring = useCallback(
-    async (placements: readonly SavedFullAssemblyTablePiecePlacementV1[]) => {
-      if (firstAuthoring.status !== 'placement-required') return;
-      const authoringHost = firstHostRef.current;
-      const generation = firstGenerationRef.current;
-      if (!authoringHost || generation < 1) return;
-      const { bootstrap, sourceGeometry } = firstAuthoring;
-      setFirstAuthoring({
-        status: 'saving',
-        bootstrap,
-        sourceGeometry,
-        error: null,
-      });
-      // The controller stored in `firstControllerRef` owns the compiled source lifetime. Aborting
-      // it here revokes the genuine observed-host source before bind/persist can consume it. A
-      // save has its own operation controller; release/replacement still aborts both lifetimes.
-      firstSaveControllerRef.current?.abort();
+  const authoringHost = firstHostRef.current;
+  const generation = firstGenerationRef.current;
+  const savePlacement = useCallback(
+    async (placements: readonly SavedFullAssemblyTablePiecePlacementV1[] | null) => {
+      if (
+        (firstAuthoring.status !== 'placement-required' &&
+          firstAuthoring.status !== 'save-retry') ||
+        (placements === null) !== (firstAuthoring.status === 'save-retry') ||
+        !authoringHost ||
+        firstHostRef.current !== authoringHost ||
+        generation < 1 ||
+        firstGenerationRef.current !== generation ||
+        firstSaveControllerRef.current ||
+        !bodySession
+      )
+        return;
+      const sourceController = firstControllerRef.current;
+      if (!sourceController || sourceController.signal.aborted) return;
       const controller = new AbortController();
       firstSaveControllerRef.current = controller;
-      const sourceController = firstControllerRef.current;
-      try {
-        const bound = await bindSavedFullAssemblyGenericFirstAuthoringV1(
-          authoringHost,
-          {
-            expectedGeneration: generation,
-            placements,
-          },
-          controller.signal,
+      const ownsAttempt = () =>
+        firstHostRef.current === authoringHost &&
+        firstControllerRef.current === sourceController &&
+        !sourceController.signal.aborted &&
+        firstSaveControllerRef.current === controller &&
+        !controller.signal.aborted;
+      const bodyCurrent = () => {
+        const snapshot = bodySession.getSnapshot();
+        return (
+          snapshot.status === 'observed-body-bound' &&
+          snapshot.generation === bodySnapshot.generation
         );
-        if (!bound.ok) throw new Error(bound.detail);
+      };
+      const retire = (error: string) => {
+        void releaseFirstAuthoring();
+        setFirstAuthoring({ status: 'blocked', bootstrap: null, sourceGeometry: null, error });
+      };
+      const { bootstrap, sourceGeometry } = firstAuthoring;
+      let boundSha =
+        firstAuthoring.status === 'save-retry' ? firstAuthoring.initializationSha256 : null;
+      try {
+        // A retained handler from before the bind must never replace the confirmed actor.
+        if (!ownsAttempt()) return;
+        const actor = authoringHost.getSnapshot();
+        if (!bodyCurrent() || actor.sourceGeneration !== generation) {
+          retire('The placement source or mannequin changed.');
+          return;
+        }
+        if (
+          actor.initializationSha256 !== boundSha ||
+          (boundSha && actor.status !== 'initialization-bound')
+        ) {
+          if (boundSha) retire('The confirmed placement changed. Reopen physical setup.');
+          return;
+        }
+        setFirstAuthoring({ status: 'saving', bootstrap, sourceGeometry, error: null });
+        if (placements) {
+          const bound = await bindSavedFullAssemblyGenericFirstAuthoringV1(
+            authoringHost,
+            { expectedGeneration: generation, placements },
+            controller.signal,
+          );
+          if (!bound.ok) throw new Error(bound.detail);
+          boundSha = bound.initializationSha256;
+        }
+        if (!ownsAttempt()) return;
+        if (!bodyCurrent()) {
+          retire('The displayed mannequin changed.');
+          return;
+        }
         const persisted = await persistCurrentSavedGenericObservedPhysicalHostV1(
           authoringHost,
           generation,
           controller.signal,
         );
         if (!persisted.ok) throw new Error(persisted.blockers[0].detail);
-        await releaseFirstAuthoring();
-        setFirstAuthoring({ status: 'idle', bootstrap: null, sourceGeometry: null, error: null });
-        retry();
+        if (ownsAttempt() && bodyCurrent()) retry();
       } catch (error) {
-        if (
-          firstHostRef.current !== authoringHost ||
-          firstSaveControllerRef.current !== controller ||
-          controller.signal.aborted ||
-          sourceController === null ||
-          firstControllerRef.current !== sourceController ||
-          sourceController.signal.aborted
-        )
-          return;
-        setFirstAuthoring({
-          status: 'blocked',
-          bootstrap,
-          sourceGeometry,
-          error: detail(error),
-        });
+        if (!ownsAttempt()) return;
+        // A read-only check distinguishes a still-current editable/bound actor from a changed
+        // row, body or V6. Only an explicit subsequent gesture may retry persistence.
+        const fresh = await projectSavedGenericObservedPhysicalHostAuthoringContextV1(
+          authoringHost,
+          generation,
+          controller.signal,
+        );
+        if (!ownsAttempt()) return;
+        const actor = authoringHost.getSnapshot();
+        const current =
+          fresh.ok &&
+          fresh.sourceGeneration === generation &&
+          bodyCurrent() &&
+          actor.sourceGeneration === generation &&
+          actor.initializationSha256 === boundSha &&
+          (!boundSha ||
+            (actor.status === 'initialization-bound' &&
+              actor.targetSha256 === fresh.observedTarget.canonicalSha256));
+        if (!current) {
+          retire(
+            fresh.ok ? 'The saved source or confirmed mannequin placement changed.' : fresh.detail,
+          );
+        } else if (boundSha) {
+          setFirstAuthoring({
+            status: 'save-retry',
+            bootstrap,
+            sourceGeometry,
+            initializationSha256: boundSha,
+            error: detail(error),
+          });
+        } else {
+          setFirstAuthoring({
+            status: 'placement-required',
+            bootstrap,
+            sourceGeometry,
+            error: detail(error),
+          });
+        }
+      } finally {
+        if (firstSaveControllerRef.current === controller) firstSaveControllerRef.current = null;
       }
     },
-    [firstAuthoring, releaseFirstAuthoring, retry],
+    [
+      authoringHost,
+      generation,
+      bodySession,
+      bodySnapshot.generation,
+      firstAuthoring,
+      releaseFirstAuthoring,
+      retry,
+    ],
   );
+  const saveFirstAuthoring = (placements: readonly SavedFullAssemblyTablePiecePlacementV1[]) =>
+    savePlacement(placements);
+  const retryFirstPlacementSave = () => savePlacement(null);
 
   return {
     /** Rowless zero-operation compatibility only; saved routes no longer expose profile selection. */
@@ -545,5 +649,6 @@ export function useSavedClothPhysicalHostV1({
     startFirstAuthoring,
     compileFirstAuthoring,
     saveFirstAuthoring,
+    retryFirstPlacementSave,
   } as const;
 }
