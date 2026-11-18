@@ -43,7 +43,8 @@ vi.mock('./saved-dxf-reprocess-host-v1', () => ({
 vi.mock('./foreign-saved-dxf-reprocess-host-v1', () => ({
   createPatternImportDxfPhaseEForeignSavedDxfReprocessHostV1: mocks.foreignHost,
 }));
-vi.mock('./saved-full-assembly-snapshot-production-v1', () => ({
+vi.mock('./saved-full-assembly-snapshot-production-v1', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./saved-full-assembly-snapshot-production-v1')>()),
   readSavedFullAssemblySnapshotV1: async () => ({}),
   projectSavedFullAssemblySnapshotV1: mocks.snapshot,
   disposeSavedFullAssemblySnapshotV1: mocks.disposeReceipt,
@@ -129,6 +130,7 @@ beforeEach(() => {
       bytes: new Uint8Array([1]),
     },
     operations: [{ operationNumber: 150, seamKeys: ['seam'] }],
+    operationsPayloadCanonicalJson: '[{"operationNumber":150,"seamKeys":["seam"]}]',
     seams: [{ seamKey: 'seam', anchoredSize: 'M' }],
   });
   mocks.decoded.mockResolvedValue({
@@ -158,6 +160,19 @@ const refused = (
 ) => ({ ok: false, blockers: [{ code, detail: code }] });
 
 describe('native first bootstrap manifest-aware owner routing', () => {
+  it('refuses an unequal saved ratio before opening either native DXF owner', async () => {
+    const snapshot = mocks.snapshot();
+    mocks.snapshot.mockReturnValue({
+      ...snapshot,
+      operationsPayloadCanonicalJson:
+        '[{"operationNumber":150,"seamKeys":["seam"],"stitching":{"fullnessRatio":{"value":"1.15"}}}]',
+    });
+    await expect(prepare()).rejects.toMatchObject({ code: 'unsupported-fullness-ratio' });
+    expect(mocks.exactHost).not.toHaveBeenCalled();
+    expect(mocks.foreignHost).not.toHaveBeenCalled();
+    expect(mocks.disposeReceipt).toHaveBeenCalledOnce();
+  });
+
   it('uses exact saved native replay for canonical wizard output and keeps original source draft identity', async () => {
     const result = await prepare();
     expect(result.sourceRequest.draft).toBe(draft);
