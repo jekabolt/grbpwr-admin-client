@@ -295,6 +295,8 @@ export async function createMeasurementOpenReferenceUniformWaistHipRuntimeV1(opt
       })
     : null;
   const solved = widened?.solved ?? bounded;
+  // The hip back runs as its own main-thread task, so a frame can paint between it and the solve.
+  if (basis.kind === 'female') await new Promise<void>((resolve) => setTimeout(resolve, 0));
   const hipBack = femaleHipBackV1({ basis, measurements, openReference, modes, solved });
   const represented = solved.representedMeasurements;
   const status =

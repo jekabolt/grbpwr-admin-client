@@ -40,6 +40,7 @@ const SEAM_RAMP_M = 0.01;
 const SECTION_POLICY = Object.freeze({ weldToleranceM: 0.00002 });
 const PROFILE_STEP_M = 0.002;
 const TABLE_STEP_M = 0.004;
+const SLICE_M = 0.01;
 
 type Vec3 = readonly [number, number, number];
 
@@ -160,6 +161,41 @@ function trianglesInBand(
   return Uint32Array.from(kept);
 }
 
+/**
+ * Triangles by 10 mm height slice. A horizontal section at y only meets triangles whose height span
+ * holds y, so each section reads its own slice instead of the whole band (the result is the same:
+ * the kept triangles are an order-preserving subset that contains every triangle the plane cuts).
+ * The hip back change never moves a vertex in y, so slices built once serve every changed mesh.
+ */
+function triangleSlices(
+  positionsM: Float32Array,
+  triangleIndices: Uint16Array | Uint32Array,
+  lowY: number,
+  highY: number,
+): (y: number) => Uint32Array {
+  const count = Math.max(1, Math.ceil((highY - lowY) / SLICE_M));
+  const buckets: number[][] = Array.from({ length: count }, () => []);
+  for (let t = 0; t < triangleIndices.length; t += 3) {
+    const a = positionsM[triangleIndices[t] * 3 + 1];
+    const b = positionsM[triangleIndices[t + 1] * 3 + 1];
+    const c = positionsM[triangleIndices[t + 2] * 3 + 1];
+    const low = Math.min(a, b, c);
+    const high = Math.max(a, b, c);
+    if (high < lowY || low > highY) continue;
+    const first = Math.max(0, Math.floor((low - lowY) / SLICE_M));
+    const last = Math.min(count - 1, Math.floor((high - lowY) / SLICE_M));
+    for (let k = first; k <= last; k += 1) {
+      buckets[k].push(triangleIndices[t], triangleIndices[t + 1], triangleIndices[t + 2]);
+    }
+  }
+  const slices = buckets.map((bucket) => Uint32Array.from(bucket));
+  const empty = new Uint32Array(0);
+  return (y) => {
+    const k = Math.floor((y - lowY) / SLICE_M);
+    return k >= 0 && k < count ? slices[k] : empty;
+  };
+}
+
 function spansMidline(stats: SectionStatsV1 | null, midX: number): boolean {
   return stats != null && stats.minX < midX - 0.03 && stats.maxX > midX + 0.03;
 }
@@ -192,13 +228,13 @@ export function measureFemaleHipBackShareV1(options: {
   const seed: [number, number] = [options.hipStationM[0], options.hipStationM[2]];
   const midX = options.hipStationM[0];
   const hipY = options.hipStationM[1];
-  const indices = trianglesInBand(
+  const slices = triangleSlices(
     options.positionsM,
     options.triangleIndices,
     hipY - 0.25 * H,
     hipY + 0.2 * H,
   );
-  const at = (y: number) => sectionStats(options.positionsM, indices, y, seed);
+  const at = (y: number) => sectionStats(options.positionsM, slices(y), y, seed);
   if (!spansMidline(at(hipY), midX)) return null;
   let low = hipY;
   while (low > hipY - 0.2 * H && spansMidline(at(low - 0.005), midX)) low -= 0.005;
@@ -367,7 +403,7 @@ export function applyFemaleHipBackShareV1(options: {
   const lowY = levelY - radiusDown;
   const highY = levelY + radiusUp;
   const seed: [number, number] = [options.hipStationM[0], options.hipStationM[2]];
-  const bandIndices = trianglesInBand(
+  const bandSlices = triangleSlices(
     options.positionsM,
     options.triangleIndices,
     lowY - 0.01,
@@ -378,7 +414,8 @@ export function applyFemaleHipBackShareV1(options: {
   const tableYs: number[] = [];
   const table: SectionStatsV1[] = [];
   for (let y = lowY; y < highY + TABLE_STEP_M; y += TABLE_STEP_M) {
-    const stats = sectionStats(options.positionsM, bandIndices, Math.min(y, highY), seed);
+    const tableY = Math.min(y, highY);
+    const stats = sectionStats(options.positionsM, bandSlices(tableY), tableY, seed);
     if (!stats) return unchanged('rejected', `No torso section at ${y.toFixed(3)} m.`, before);
     tableYs.push(Math.min(y, highY));
     table.push(stats);
@@ -501,7 +538,7 @@ export function applyFemaleHipBackShareV1(options: {
     return fb != null && Math.abs(fb) <= tolerance ? b : undefined;
   };
   const ratioAt = (positionsM: Float32Array) => {
-    const stats = sectionStats(positionsM, bandIndices, levelY, seed);
+    const stats = sectionStats(positionsM, bandSlices(levelY), levelY, seed);
     return stats ? (stats.sideZ - stats.minZ) / stats.girthM : undefined;
   };
   const backScale = secant(
@@ -528,7 +565,12 @@ export function applyFemaleHipBackShareV1(options: {
   for (let pass = 0; pass < GIRTH_CORRECTION_PASSES; pass += 1) {
     const measured = positionsM;
     const corrected = scales.map((scale, index) => {
-      const girthM = sectionStats(measured, bandIndices, tableYs[index], seed)?.girthM;
+      const girthM = sectionStats(
+        measured,
+        bandSlices(tableYs[index]),
+        tableYs[index],
+        seed,
+      )?.girthM;
       return girthM ? (scale * table[index].girthM) / girthM : scale;
     });
     ({ positionsM, scales } = deform(backScale, corrected));
