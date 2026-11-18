@@ -1,0 +1,230 @@
+import { currentHost } from 'lib/host';
+import { cn } from 'lib/utility';
+import { type ReactNode, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Button, HeaderNote, Input, Row, Section, Text, ViewSwitch } from 'ui';
+
+// The approved «sheet» (V3): a narrow side block (wordmark + mode switch, or the team) beside
+// one form block of label|value rows and a foot with the one action. Phone: one column.
+
+export function AuthSheet({ side, children }: { side: ReactNode; children: ReactNode }) {
+  return (
+    <main className='min-h-screen bg-pageBg px-2.5 pt-4 sm:pt-[12vh]'>
+      <div className='mx-auto grid max-w-[48.75rem] grid-cols-1 gap-stack sm:grid-cols-[12.5rem_minmax(0,1fr)] sm:gap-gutter'>
+        {side}
+        {children}
+      </div>
+    </main>
+  );
+}
+
+export function SheetForm({
+  title,
+  note,
+  noteTone = 'warn',
+  onSubmit,
+  children,
+}: {
+  title: string;
+  note?: string;
+  noteTone?: 'warn' | 'mut' | 'ok';
+  onSubmit?: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <Section
+      title={title}
+      headerClassName='[&_*]:normal-case'
+      className='min-w-0'
+      action={note ? <HeaderNote tone={noteTone}>{note}</HeaderNote> : undefined}
+    >
+      {onSubmit ? (
+        <form
+          noValidate
+          onSubmit={(e) => {
+            e.preventDefault();
+            onSubmit();
+          }}
+        >
+          {children}
+        </form>
+      ) : (
+        children
+      )}
+    </Section>
+  );
+}
+
+export function SheetRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <Row
+      className='grid grid-cols-1 items-center gap-1 py-2 sm:grid-cols-[6rem_minmax(0,1fr)] sm:gap-3 [&>span:last-child]:min-w-0'
+      label={
+        <Text size='micro' variant='label' tracking='label' component='span'>
+          {label}
+        </Text>
+      }
+      value={children}
+    />
+  );
+}
+
+export function SheetFoot({ left, children }: { left?: ReactNode; children: ReactNode }) {
+  return (
+    <div className='flex flex-wrap items-center justify-between gap-3 pt-1.5'>
+      {left ?? <span />}
+      {children}
+    </div>
+  );
+}
+
+export function SheetSubmit({
+  children,
+  disabled,
+  loading,
+  onClick,
+}: {
+  children: string;
+  disabled?: boolean;
+  loading?: boolean;
+  onClick?: () => void;
+}) {
+  return (
+    <Button
+      variant='main'
+      size='lg'
+      type={onClick ? 'button' : 'submit'}
+      onClick={onClick}
+      disabled={disabled || loading}
+      loading={loading}
+      className='w-full py-2 sm:w-auto sm:min-w-[9.375rem]'
+    >
+      {children}
+    </Button>
+  );
+}
+
+export function SheetLink({ children, onClick }: { children: string; onClick: () => void }) {
+  return (
+    <Button variant='underline' className='text-labelColor hover:text-textColor' onClick={onClick}>
+      {children}
+    </Button>
+  );
+}
+
+const FIELD = 'h-8 max-sm:h-10';
+
+export function SheetInput({
+  invalid,
+  className,
+  ...props
+}: {
+  invalid?: boolean;
+  className?: string;
+  [k: string]: unknown;
+}) {
+  return (
+    <Input
+      spellCheck={false}
+      aria-invalid={invalid || undefined}
+      className={cn(FIELD, className)}
+      {...props}
+    />
+  );
+}
+
+export function PasswordInput({
+  value,
+  onChange,
+  invalid,
+  autoComplete = 'current-password',
+  placeholder,
+  autoFocus,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  invalid?: boolean;
+  autoComplete?: string;
+  placeholder?: string;
+  autoFocus?: boolean;
+}) {
+  const [shown, setShown] = useState(false);
+  return (
+    <div className='relative'>
+      <SheetInput
+        type={shown ? 'text' : 'password'}
+        name='password'
+        value={value}
+        invalid={invalid}
+        autoComplete={autoComplete}
+        placeholder={placeholder}
+        autoFocus={autoFocus}
+        className='pr-12'
+        onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
+      />
+      <Button
+        variant='simpleReverse'
+        className='absolute inset-y-px right-px px-2 text-labelColor hover:text-textColor'
+        onClick={() => setShown((s) => !s)}
+      >
+        {shown ? 'hide' : 'show'}
+      </Button>
+    </div>
+  );
+}
+
+/** A value shown instead of a field (an email already given), with an optional `change`. */
+export function SheetValue({ children, onChange }: { children: ReactNode; onChange?: () => void }) {
+  return (
+    <div className='flex min-w-0 items-baseline justify-between gap-2'>
+      <span className='min-w-0 break-all font-bold'>{children}</span>
+      {onChange && <SheetLink onClick={onChange}>change</SheetLink>}
+    </div>
+  );
+}
+
+export function Wordmark({ children }: { children: string }) {
+  return (
+    <Text component='span' size='statBig' className='block leading-none'>
+      {children}
+    </Text>
+  );
+}
+
+/** Root side: the wordmark and the `sign up | log in` switch. */
+export function RootSide({ mode }: { mode: 'signup' | 'login' }) {
+  const navigate = useNavigate();
+  return (
+    <Section className='self-start'>
+      <Wordmark>lekalo</Wordmark>
+      <ViewSwitch
+        className='[&_*]:normal-case'
+        label='mode'
+        columns={2}
+        value={mode}
+        onChange={(next) => navigate(next === 'signup' ? '/' : '/login')}
+        options={[
+          { value: 'signup', label: 'sign up' },
+          { value: 'login', label: 'log in' },
+        ]}
+      />
+    </Section>
+  );
+}
+
+/** Team (or console) side: its name as the wordmark, `lekalo` under it. */
+export function TeamSide({ name, sub = 'lekalo' }: { name: string; sub?: string }) {
+  return (
+    <Section className='self-start'>
+      <Wordmark>{name}</Wordmark>
+      <Text size='micro' variant='label' tracking='label' component='span' className='block'>
+        {sub}
+      </Text>
+    </Section>
+  );
+}
+
+/** `<slug>.beta.lekalo.studio` after an address field. */
+export function baseSuffix(): string {
+  return `.${currentHost().base}`;
+}

@@ -12,12 +12,14 @@ import { ContextProvider } from 'context';
 import { initObservability, observabilityEnabled, reportBoundaryError } from 'lib/observability';
 import { DictionaryProvider } from 'lib/providers/dictionary-provider';
 import { recoverStaleBuild, registerStaleBuildProbe } from 'lib/stale-reload';
-import { lazy, StrictMode, Suspense, type ComponentType } from 'react';
+import { lazy, StrictMode, Suspense, type ComponentType, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ErrorBoundary, type FallbackProps } from 'react-error-boundary';
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom';
 import { TooltipProvider } from 'ui';
 import { Layout } from 'components/shell/layout';
+import { currentHost } from 'lib/host';
+import { FeatureGuard, WorkspaceProvider } from 'lib/workspace/provider';
 import './global.css';
 
 // A deploy replaces every hashed chunk, so a tab that was already open asks for a file that is no
@@ -308,6 +310,17 @@ const PrintSmokePage = lazyRoute(() =>
   import('components/managers/print/print-smoke').then((m) => ({ default: m.PrintSmokePage })),
 );
 
+// Lekalo hosts (design §4): the root host is only sign-up / log-in, the console host is the
+// operator shell, a team host is this admin plus its own log-in, hand-off and invite pages.
+const HOST_KIND = currentHost().kind;
+const RootApp = lazyRoute(() => import('components/auth/root-app'));
+const ConsoleApp = lazyRoute(() => import('components/shell/console-layout'));
+const PeoplePage = lazyRoute(() => import('components/shell/people-page'));
+const Handoff = lazyRoute(() =>
+  import('components/auth/handoff').then((m) => ({ default: m.Handoff })),
+);
+const Join = lazyRoute(() => import('components/auth/join').then((m) => ({ default: m.Join })));
+
 // Configure QueryClient with best practices
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -376,11 +389,15 @@ const ProtectedLayout = () => (
     {/* Mounted inside the auth gate so the dictionary is fetched only once a
         valid token exists (after login), not at app boot before login. */}
     <DictionaryProvider>
-      <Layout>
-        <Suspense fallback={<LoadingFallback />}>
-          <Outlet />
-        </Suspense>
-      </Layout>
+      <WorkspaceProvider>
+        <Layout>
+          <Suspense fallback={<LoadingFallback />}>
+            <FeatureGuard>
+              <Outlet />
+            </FeatureGuard>
+          </Suspense>
+        </Layout>
+      </WorkspaceProvider>
     </DictionaryProvider>
   </ProtectedRoute>
 );
@@ -390,11 +407,22 @@ const ProtectedLayout = () => (
 const ProtectedBare = () => (
   <ProtectedRoute>
     <DictionaryProvider>
-      <Suspense fallback={<LoadingFallback />}>
-        <Outlet />
-      </Suspense>
+      <WorkspaceProvider>
+        <Suspense fallback={<LoadingFallback />}>
+          <FeatureGuard>
+            <Outlet />
+          </FeatureGuard>
+        </Suspense>
+      </WorkspaceProvider>
     </DictionaryProvider>
   </ProtectedRoute>
+);
+
+// The root and console hosts get their own route trees; team and legacy hosts keep the admin's.
+const HostRoutes = ({ children }: { children: ReactNode }) => (
+  <Suspense fallback={<LoadingFallback />}>
+    {HOST_KIND === 'root' ? <RootApp /> : HOST_KIND === 'console' ? <ConsoleApp /> : children}
+  </Suspense>
 );
 
 const container = document.getElementById('root');
@@ -412,9 +440,22 @@ const app = (
       <ContextProvider>
         <QueryClientProvider client={queryClient}>
           <BrowserRouter>
-            <Suspense fallback={<LoadingFallback />}>
+            <HostRoutes>
               <Routes>
-                <Route path={ROUTES.login} element={<LoginBlock />} />
+                <Route
+                  path={ROUTES.login}
+                  element={
+                    HOST_KIND === 'team' ? (
+                      <ProtectedRoute>
+                        <Navigate to={ROUTES.main} replace />
+                      </ProtectedRoute>
+                    ) : (
+                      <LoginBlock />
+                    )
+                  }
+                />
+                {HOST_KIND === 'team' && <Route path={ROUTES.handoff} element={<Handoff />} />}
+                {HOST_KIND === 'team' && <Route path={ROUTES.join} element={<Join />} />}
                 <Route path='/' element={<ProtectedLayout />}>
                   <Route path={ROUTES.main} element={<AnalyticsHome />} />
                   {/* Без `disabled`: страница библиотеки — единственное место, где снимки можно
@@ -512,6 +553,7 @@ const app = (
                       в отличие от /accounts, который гейт закрывает и который уводит сюда
                       редиректом, когда accounts:read нет. */}
                   <Route path={ROUTES.me} element={<MyProfile />} />
+                  {HOST_KIND === 'team' && <Route path={ROUTES.people} element={<PeoplePage />} />}
                 </Route>
                 {/* Layout-less protected route: a standalone page so the browser print
                     engine (Safari especially) renders the document in normal flow, with
@@ -609,7 +651,7 @@ const app = (
                   />
                 )}
               </Routes>
-            </Suspense>
+            </HostRoutes>
           </BrowserRouter>
           <ReactQueryDevtools initialIsOpen={false} />
         </QueryClientProvider>
