@@ -9,7 +9,10 @@ import { createPatternImportDxfProductSavedRuntimeSeedV1Fixture } from 'lib/clot
 import { projectPatternImportDxfProductPhaseEAssemblyV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 
 import { derivePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1 } from './cad-table-connect-edge-segments-v1';
-import { capturePatternImportDxfPhaseECadTableZeroOperationSavedRebindExpectationV1 } from './cad-table-zero-operation-authority-rebind-v1';
+import {
+  capturePatternImportDxfPhaseECadTableZeroOperationSavedRebindExpectationV1,
+  verifyPatternImportDxfPhaseECadTableZeroOperationSavedAuthorityRefreshV1,
+} from './cad-table-zero-operation-authority-rebind-v1';
 import {
   createPatternImportDxfPhaseECadTableZeroConnectControllerStateV1,
   selectPatternImportDxfPhaseECadTableZeroConnectControllerEdgeV1,
@@ -69,6 +72,10 @@ type FreshPrepared = Extract<
 async function genuineSavedPrepared(
   importGeneration = 37,
   cardLockVersion = 12,
+  savedSizes = [
+    { sizeId: 45, sizeToken: 'M', label: 'm_48ta_m' },
+    { sizeId: 46, sizeToken: 'L', label: 'l_50ta_m' },
+  ],
 ): Promise<SavedPrepared> {
   const seed = await createPatternImportDxfProductSavedRuntimeSeedV1Fixture();
   const selection = await selectPatternImportDxfProductDraftPhaseDSizeV1(seed.draft, 'main', 'M');
@@ -96,6 +103,7 @@ async function genuineSavedPrepared(
     draft: seed.draft,
     selection: selection.selection,
     catalog: catalog.catalog,
+    savedSizes,
     generation,
   });
   if (!authoringAuthority) throw new Error('The production mount fixture authority was rejected.');
@@ -945,6 +953,33 @@ describe('existing saved one-physical-seam operation exact rebind', () => {
     });
   });
 
+  it('rejects a legacy numeric spelling shared with another card rank and invalidates pending authority on rank drift', async () => {
+    const original = await genuineSavedPrepared();
+    const rank = { sizeId: 45, sizeToken: 'M', label: 'm_48ta_m' };
+    const competing = await genuineSavedPrepared(37, 12, [
+      rank,
+      { sizeId: 35, sizeToken: '48', label: '48' },
+    ]);
+    expect(original.authoringAuthority.selectedRank).toEqual({
+      sizeId: 45,
+      spellings: ['48', 'm'],
+    });
+    expect(competing.authoringAuthority.selectedRank).toEqual({ sizeId: 45, spellings: ['m'] });
+    const ambiguous = await genuineSavedPrepared(37, 12, [
+      rank,
+      { sizeId: 39, sizeToken: 'M', label: 'm_38ta_f' },
+    ]);
+    expect(ambiguous.authoringAuthority.selectedRank.spellings).toHaveLength(0);
+    const otherId = await genuineSavedPrepared(37, 12, [{ ...rank, sizeId: 39 }]);
+    const expected =
+      capturePatternImportDxfPhaseECadTableZeroOperationSavedRebindExpectationV1(original);
+    for (const wrong of [competing, ambiguous, otherId])
+      expect(
+        verifyPatternImportDxfPhaseECadTableZeroOperationSavedAuthorityRefreshV1(expected, wrong)
+          .ok,
+      ).toBe(false);
+  });
+
   it('rebinds a stale anchored seam only from its original rank and unique operation owner', async () => {
     const fixture = await existingLinkedN1Fixture();
     const rank = fixture.request.catalog.sizeToken;
@@ -985,6 +1020,14 @@ describe('existing saved one-physical-seam operation exact rebind', () => {
     });
     expect(rebind.receipt.storedSeam.sideA[0]!.contourSig).not.toBe(staleSeam.sideA[0]!.contourSig);
     expect(rebind.receipt.storedSeam.sideB[0]!.contourSig).not.toBe(staleSeam.sideB[0]!.contourSig);
+    for (const spelling of ['m', '48', '<M>']) {
+      const legacy = { ...staleSeam, anchoredSize: spelling };
+      const saved = structuredClone(card);
+      saved.seams![0]!.anchoredSize = spelling;
+      expect(capture({ ...inputs, currentRows: [legacy, fixture.pose], savedCard: saved }).ok).toBe(
+        true,
+      );
+    }
     const wrongRank = { ...staleSeam, anchoredSize: 'L' };
     expect(rank).toBe('M');
     const other = structuredClone(card);

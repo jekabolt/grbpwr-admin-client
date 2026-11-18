@@ -1,4 +1,5 @@
 import type { common_TechCard } from 'api/proto-http/admin';
+import { bareToken } from '../../nesting/block-code';
 import type { PieceGeom } from 'lib/assembly-skeleton/types';
 import {
   anchorToWire,
@@ -494,10 +495,15 @@ export function capturePatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV
       'The selected exact edges must come from one current saved DXF size on this card.',
     );
   const { originalAnchoredSize } = target.target;
-  if (originalAnchoredSize && sourceSizeToken !== originalAnchoredSize)
+  if (
+    originalAnchoredSize &&
+    !input.request.authoringAuthority.selectedRank.spellings.includes(
+      bareToken(originalAnchoredSize),
+    )
+  )
     return blockedCapture(
       'existing-linked-n1-source-size-invalid',
-      `Select size ${originalAnchoredSize} and choose both edges for this saved seam.`,
+      `Choose both edges at the saved seam size (${originalAnchoredSize}).`,
     );
   const candidateInputs = input.request.candidate.connection.sides.map(({ pieceLineKey }) =>
     pieceLineKey.trim(),

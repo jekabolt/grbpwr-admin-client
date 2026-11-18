@@ -518,6 +518,7 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
       selection: selection.selection,
       catalog: catalogResult.catalog,
       generation: request.generation,
+      savedSizes: scope.sizes,
       ...(savedReplay ? { savedReplay } : {}),
     });
     if (!authoringAuthority)

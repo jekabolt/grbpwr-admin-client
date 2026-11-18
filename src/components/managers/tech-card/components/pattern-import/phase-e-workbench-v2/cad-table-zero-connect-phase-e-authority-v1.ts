@@ -6,6 +6,7 @@ import {
   type PatternImportDxfProductPhaseEAssemblyProjectionV1,
 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
+import { bareToken, sizeTokensOf } from '../../nesting/block-code';
 import type { CardDraft } from 'lib/pattern-import/types';
 
 import {
@@ -25,6 +26,7 @@ export type PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1 = Readonly<{
   catalogCanonicalSha256: string;
   sizeSelectionCanonicalSha256: string;
   sourceFileId: string;
+  selectedRank: Readonly<{ sizeId: number | null; spellings: readonly string[] }>;
   preparationGeneration: number;
   importGeneration: number;
   readonly [preparedAuthorityBrand]: never;
@@ -128,6 +130,30 @@ export function readPatternImportDxfPhaseEZeroConnectSavedSceneProjectionV1(
   return result.projection;
 }
 
+type SavedSize = Readonly<{ sizeId: number; sizeToken: string; label: string }>;
+
+/** One stored DXF spelling can select a rank only when no other rank in this card uses it. */
+function savedRank(token: string, sizes?: readonly SavedSize[]) {
+  const ranks = sizes?.map((size) => ({
+    sizeId: size.sizeId,
+    token: size.sizeToken,
+    spellings: new Set(
+      [size.sizeToken, ...sizeTokensOf(size.label)].map(bareToken).filter(Boolean),
+    ),
+  }));
+  const selected = ranks?.filter((rank) => rank.token === token);
+  if (!ranks || selected?.length !== 1)
+    return Object.freeze({
+      sizeId: null,
+      spellings: Object.freeze(ranks ? [] : [bareToken(token)]),
+    });
+  const rank = selected[0]!;
+  const spellings = [...rank.spellings].filter((spelling) =>
+    ranks.every((other) => other === rank || !other.spellings.has(spelling)),
+  );
+  return Object.freeze({ sizeId: rank.sizeId, spellings: Object.freeze(spellings.sort()) });
+}
+
 /**
  * Keeps the replay draft and selected Phase-D carrier private while an ordinary card save may
  * replace the preparation. The public token exposes only immutable exact bindings.
@@ -139,6 +165,7 @@ export function capturePatternImportDxfPhaseEZeroConnectPreparedAuthorityV1(
     selection: SuccessfulSelection;
     catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1;
     generation: PatternImportDxfPhaseECadTableZeroOperationGenerationTicketV1;
+    savedSizes?: readonly SavedSize[];
     savedReplay?: PatternImportDxfProductVerifiedSavedReplayV1;
   }>,
 ): PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1 | null {
@@ -163,6 +190,7 @@ export function capturePatternImportDxfPhaseEZeroConnectPreparedAuthorityV1(
   const token = Object.freeze({
     schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_PREPARED_AUTHORITY_V1,
     row: Object.freeze({ ...row }),
+    selectedRank: savedRank(catalog.sizeToken, input.savedSizes),
     catalogCanonicalSha256: catalog.canonicalSha256,
     sizeSelectionCanonicalSha256: selection.selection.canonicalSha256,
     sourceFileId: catalog.sourceFileId,
