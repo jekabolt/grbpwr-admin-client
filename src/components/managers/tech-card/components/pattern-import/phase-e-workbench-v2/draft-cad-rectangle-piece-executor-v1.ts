@@ -1,12 +1,20 @@
 import { identityProblem, sizeTokenTest } from 'lib/pattern-import/manifest';
+import { dist, footOnSegment, selfIntersects } from 'lib/pattern-import/semantics/geom';
+import { stripSpikes } from 'lib/pattern-import/spikes';
 import type { PieceSpec, PtMm, WriteJob } from 'lib/pattern-import/types';
+import { bboxOf, signedArea, simplify } from 'lib/pattern-import/write/geom';
+import { WRITE_SIMPLIFY_MM } from 'lib/pattern-import/write/plan';
 
-import type { PatternImportDxfPhaseEDraftCadCommandV1 } from './draft-cad-session-v1';
+import type {
+  PatternImportDxfPhaseEDraftCadCommandV1,
+  PatternImportDxfPhaseEDraftCadPenPieceV1,
+} from './draft-cad-session-v1';
 
 export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_RECTANGLE_PIECE_EXECUTOR_V1 =
   'pattern-import-dxf-phase-e-draft-cad-rectangle-piece-executor/1' as const;
 
 type RectangleCommand = Extract<PatternImportDxfPhaseEDraftCadCommandV1, { tool: 'rectangle' }>;
+type PenCommand = Extract<PatternImportDxfPhaseEDraftCadCommandV1, { tool: 'pen' }>;
 
 export type PatternImportDxfPhaseEDraftCadRectanglePieceBlockerCodeV1 =
   | 'invalid-input'
@@ -18,7 +26,9 @@ export type PatternImportDxfPhaseEDraftCadRectanglePieceBlockerCodeV1 =
   | 'overlap-policy-ambiguous'
   | 'grading-requirement';
 
-export type PatternImportDxfPhaseEDraftCadRectanglePieceResultV1 =
+export type PatternImportDxfPhaseEDraftCadRectanglePieceResultV1<
+  VertexIds extends readonly string[] = readonly [string, string, string, string],
+> =
   | Readonly<{
       ok: true;
       job: WriteJob;
@@ -26,7 +36,7 @@ export type PatternImportDxfPhaseEDraftCadRectanglePieceResultV1 =
         pieceId: string;
         pieceLineKey: string;
         contourId: string;
-        vertexIds: readonly [string, string, string, string];
+        vertexIds: VertexIds;
         sizeToken: string;
         gradingPolicy: 'ungraded-current-size';
       }>;
@@ -71,7 +81,7 @@ function deepFreeze<T>(value: T, seen = new Set<object>()): T {
 function blocked(
   code: PatternImportDxfPhaseEDraftCadRectanglePieceBlockerCodeV1,
   detail: string,
-): PatternImportDxfPhaseEDraftCadRectanglePieceResultV1 {
+): Extract<PatternImportDxfPhaseEDraftCadRectanglePieceResultV1, { ok: false }> {
   return deepFreeze({
     ok: false as const,
     job: null,
@@ -203,7 +213,101 @@ export function executePatternImportDxfPhaseEDraftCadRectanglePieceV1(
       `Rectangle coordinates must stay inside the ±${MAX_ABS_COORDINATE_MM} mm authoring envelope.`,
     );
 
-  const contextPieces = job.pieces.filter(({ identity }) => identity === command.target.pieceId);
+  const origin = command.payload.originMm;
+  const cut = [
+    { x: origin.x, y: origin.y },
+    { x: maxX, y: origin.y },
+    { x: maxX, y: maxY },
+    { x: origin.x, y: maxY },
+  ];
+  return appendLinearPiece(
+    job,
+    command.target.pieceId,
+    newPiece,
+    cut,
+    selectedSizeToken,
+    widthMm * heightMm,
+    'rectangle',
+  );
+}
+
+/** A new ungraded cut/sew outline from the operator's explicitly closed Pen path. */
+export function executePatternImportDxfPhaseEDraftCadPenPieceV1(
+  source: WriteJob,
+  command: PenCommand,
+  selectedSizeToken: string,
+): PatternImportDxfPhaseEDraftCadRectanglePieceResultV1<readonly string[]> {
+  const { newPiece, pointsMm, closed } = command.payload;
+  if (
+    !closed ||
+    !newPiece ||
+    newPiece.gradingPolicy !== 'ungraded-current-size' ||
+    newPiece.placementPolicy !== 'separate-writer-block' ||
+    !Array.isArray(pointsMm) ||
+    pointsMm.length < 3 ||
+    pointsMm.length > 256 ||
+    pointsMm.length !== newPiece.vertexIds.length ||
+    !pointsMm.every(
+      (point) =>
+        finitePoint(point) &&
+        Math.abs(point.x) <= MAX_ABS_COORDINATE_MM &&
+        Math.abs(point.y) <= MAX_ABS_COORDINATE_MM,
+    )
+  )
+    return blocked(
+      'invalid-input',
+      'A Pen piece requires a complete closed outline in the selected size.',
+    );
+  const box = bboxOf(pointsMm);
+  const scale = Math.max(box.maxX - box.minX, box.maxY - box.minY);
+  const isTouching = pointsMm.some((point, index) =>
+    pointsMm.some((from, edge) => {
+      const next = (edge + 1) % pointsMm.length;
+      return (
+        index !== edge &&
+        index !== next &&
+        footOnSegment(point, from, pointsMm[next]!).d <= 0.000001
+      );
+    }),
+  );
+  const { x, y } = pointsMm[0]!;
+  const area = signedArea(pointsMm.map((point) => ({ x: point.x - x, y: point.y - y })));
+  const cut = area < 0 ? [...pointsMm].reverse() : pointsMm;
+  if (
+    Math.abs(area) < MIN_DIMENSION_MM ** 2 ||
+    pointsMm.some(
+      (point, index) => dist(point, pointsMm[(index + 1) % pointsMm.length]!) < MIN_DIMENSION_MM,
+    ) ||
+    isTouching ||
+    selfIntersects(pointsMm, scale) ||
+    stripSpikes(simplify(cut, true, WRITE_SIMPLIFY_MM)).ring.length !== pointsMm.length
+  )
+    return blocked(
+      'invalid-dimensions',
+      'The Pen outline must be simple, with distinguishable corners and no crossings or touching edges.',
+    );
+  const vertexIds = area < 0 ? [...newPiece.vertexIds].reverse() : newPiece.vertexIds;
+  return appendLinearPiece(
+    structuredClone(source),
+    command.target.pieceId,
+    { ...newPiece, vertexIds },
+    cut,
+    selectedSizeToken,
+    Math.abs(area),
+    'pen',
+  );
+}
+
+function appendLinearPiece<VertexIds extends readonly string[]>(
+  job: WriteJob,
+  contextPieceId: string,
+  newPiece: PatternImportDxfPhaseEDraftCadPenPieceV1 & { vertexIds: VertexIds },
+  cut: readonly PtMm[],
+  selectedSizeToken: string,
+  areaMm2: number,
+  tool: 'rectangle' | 'pen',
+): PatternImportDxfPhaseEDraftCadRectanglePieceResultV1<VertexIds> {
+  const contextPieces = job.pieces.filter(({ identity }) => identity === contextPieceId);
   const selectedSizes = job.sizes.filter(({ token }) => token === selectedSizeToken);
   const contextSizes = contextPieces[0]?.sizes.filter(
     ({ sizeToken }) => sizeToken === selectedSizeToken,
@@ -211,7 +315,7 @@ export function executePatternImportDxfPhaseEDraftCadRectanglePieceV1(
   if (contextPieces.length !== 1 || selectedSizes.length !== 1 || contextSizes?.length !== 1)
     return blocked(
       'stale-source',
-      'Rectangle context and selected size must resolve exactly once in the retained writer job.',
+      'Draft piece context and selected size must resolve exactly once in the retained writer job.',
     );
 
   if (
@@ -220,7 +324,7 @@ export function executePatternImportDxfPhaseEDraftCadRectanglePieceV1(
   )
     return blocked(
       'duplicate-identity',
-      `Rectangle piece identity ${newPiece.pieceId} is already present or the source is ambiguous.`,
+      `Draft piece identity ${newPiece.pieceId} is already present or the source is ambiguous.`,
     );
 
   const identityIssue = identityProblem(newPiece.pieceId, {
@@ -230,21 +334,14 @@ export function executePatternImportDxfPhaseEDraftCadRectanglePieceV1(
   if (identityIssue)
     return blocked(
       'invalid-input',
-      `Rectangle piece identity ${newPiece.pieceId} is not writer-safe: ${identityIssue}.`,
+      `Draft piece identity ${newPiece.pieceId} is not writer-safe: ${identityIssue}.`,
     );
   if (!/^[A-Z][A-Z0-9]*$/.test(newPiece.pieceId))
     return blocked(
       'invalid-input',
-      'Rectangle piece identity must be one writer-safe code word; modifiers are not inferred.',
+      'Draft piece identity must be one writer-safe code word; modifiers are not inferred.',
     );
 
-  const origin = command.payload.originMm;
-  const cut = [
-    { x: origin.x, y: origin.y },
-    { x: maxX, y: origin.y },
-    { x: maxX, y: maxY },
-    { x: origin.x, y: maxY },
-  ];
   const selectedSize = selectedSizes[0]!;
   const contextPiece = contextPieces[0]!;
   const piece: PieceSpec = {
@@ -263,7 +360,7 @@ export function executePatternImportDxfPhaseEDraftCadRectanglePieceV1(
       meaning: 'cut',
       allowanceMm: 0,
       origin: 'operator',
-      evidence: ['draft-cad:rectangle:create-piece:ungraded-current-size'],
+      evidence: [`draft-cad:${tool}:create-piece:ungraded-current-size`],
     },
     fabrics: [...contextPiece.fabrics],
     fused: false,
@@ -282,8 +379,8 @@ export function executePatternImportDxfPhaseEDraftCadRectanglePieceV1(
         fold: null,
         offset: null,
         walls: [],
-        bbox: { minX: origin.x, minY: origin.y, maxX, maxY },
-        areaMm2: widthMm * heightMm,
+        bbox: bboxOf(cut),
+        areaMm2,
       },
     ],
   };
@@ -297,7 +394,7 @@ export function executePatternImportDxfPhaseEDraftCadRectanglePieceV1(
       pieceId: newPiece.pieceId,
       pieceLineKey: newPiece.pieceLineKey,
       contourId: newPiece.contourId,
-      vertexIds: [...newPiece.vertexIds] as [string, string, string, string],
+      vertexIds: structuredClone(newPiece.vertexIds),
       sizeToken: selectedSizeToken,
       gradingPolicy: newPiece.gradingPolicy,
     },

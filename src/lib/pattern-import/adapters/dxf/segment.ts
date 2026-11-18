@@ -3,6 +3,7 @@
 // 10-CLO-DXF-FORMAT §2 (dialect, cut-line mode, grain arrow, POINT notches, notch twins, labels,
 // sizes, pairs, ungraded layer 1).
 
+import { contourSigProblem } from '../../manifest/contour-sig';
 import type { AllowanceDecision, IRPath, IRText, PathId, PtMm, Style } from '../../types';
 import { PATIMPORT } from '../../types';
 import type {
@@ -633,7 +634,8 @@ function blockPiece(
 
   // seam (L14)
   const seamPick = pickOuter(by('seam'), '14');
-  let seam = seamPick.outer;
+  const authoredSeam = seamPick.outer;
+  let seam = authoredSeam;
   let seamSource: DxfBlockPiece['seamSource'] = seam ? 'L14' : null;
   for (const p of seamPick.rest) roles[p.id] = p.closed ? 'seam-extra' : 'other';
 
@@ -659,9 +661,30 @@ function blockPiece(
     }
   }
 
-  // L1 == L14 → mode B: the seam lives on layer 8
+  // CLO mode B reuses L14 for the cut. The writer's explicit zero-allowance block
+  // retains its independent L14 path when both source rings match exactly.
+  const signature = group.block && read.meta.zeroAllowanceSeamBlocks?.get(group.block);
+  const explicitZeroAllowanceSeam = Boolean(
+    signature &&
+      cut?.layer === '1' &&
+      authoredSeam &&
+      cut.paths.length === 1 &&
+      authoredSeam.paths.length === 1 &&
+      seamPick.loops.length === 1 &&
+      seamPick.rest.length === 0 &&
+      cut.pts.length === authoredSeam.pts.length &&
+      cut.pts.every(
+        ({ x, y }, index) => x === authoredSeam.pts[index]?.x && y === authoredSeam.pts[index]?.y,
+      ) &&
+      !contourSigProblem(signature, cut.pts),
+  );
   let cutEqualsSeam = false;
-  if (cut && seam && Math.abs(cut.areaMm2 - seam.areaMm2) <= 1e-4 * cut.areaMm2) {
+  if (
+    !explicitZeroAllowanceSeam &&
+    cut &&
+    seam &&
+    Math.abs(cut.areaMm2 - seam.areaMm2) <= 1e-4 * cut.areaMm2
+  ) {
     const ds = sampleDistances(seam, cut);
     cutEqualsSeam = Math.max(...ds) < 0.05;
   }
@@ -860,6 +883,7 @@ function blockPiece(
     cut,
     seam,
     seamSource,
+    ...(explicitZeroAllowanceSeam ? { zeroAllowanceSeam: true as const } : {}),
     cutEqualsSeam,
     seamToCutMm,
     grain,

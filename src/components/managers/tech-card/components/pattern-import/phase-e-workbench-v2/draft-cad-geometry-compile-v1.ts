@@ -18,7 +18,10 @@ import {
 import { resizeDraftCadSelectedSizeEdgeV1 } from './draft-cad-edge-length-geometry-v1';
 import { executePatternImportDxfPhaseEDraftCadAddPointGeometryV1 } from './draft-cad-add-point-geometry-executor-v1';
 import { executePatternImportDxfPhaseEDraftCadCutGeometryV1 } from './draft-cad-cut-geometry-executor-v1';
-import { executePatternImportDxfPhaseEDraftCadRectanglePieceV1 } from './draft-cad-rectangle-piece-executor-v1';
+import {
+  executePatternImportDxfPhaseEDraftCadPenPieceV1,
+  executePatternImportDxfPhaseEDraftCadRectanglePieceV1,
+} from './draft-cad-rectangle-piece-executor-v1';
 import { executePatternImportDxfPhaseEDraftCadRoundPieceV1 } from './draft-cad-round-piece-executor-v1';
 import type { PatternImportDxfPhaseEDraftCadCompileSourceV1 } from './draft-cad-compile-source-v1';
 import type {
@@ -45,6 +48,7 @@ export type PatternImportDxfPhaseEDraftCadGeometryCompileBlockerCodeV1 =
   | 'edge-length-geometry-blocked'
   | 'add-point-geometry-blocked'
   | 'rectangle-geometry-blocked'
+  | 'pen-geometry-blocked'
   | 'round-piece-geometry-blocked'
   | 'cut-geometry-blocked'
   | 'spread-geometry-blocked'
@@ -214,6 +218,7 @@ function activeCommands(
 
 function supported(command: PatternImportDxfPhaseEDraftCadCommandV1): boolean {
   if (!PRODUCTIVE_TOOLS.has(command.tool)) return false;
+  if (command.tool === 'pen') return command.payload.closed && Boolean(command.payload.newPiece);
   if (command.tool === 'rectangle') return Boolean(command.payload.newPiece);
   if (command.tool === 'circle' || command.tool === 'ellipse')
     return Boolean(command.payload.newPiece);
@@ -568,53 +573,48 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
         command,
       );
 
-    if (command.tool === 'rectangle') {
-      if (primitive.kind !== 'rectangle' || !command.payload.newPiece)
+    if (command.tool === 'rectangle' || command.tool === 'pen') {
+      const isPen = command.tool === 'pen';
+      const geometryBlocker = isPen ? 'pen-geometry-blocked' : 'rectangle-geometry-blocked';
+      const matches = isPen
+        ? primitive.kind === 'path' && primitive.closed && primitive.role === 'outline'
+        : primitive.kind === 'rectangle';
+      if (!matches || !command.payload.newPiece)
         return blocked(
           'preview-blocked',
-          'Create rectangle does not have one exact rectangle primitive and piece identity.',
+          `Create ${command.tool} requires an exact closed outline and piece identity.`,
           command,
         );
-      const rectangle = executePatternImportDxfPhaseEDraftCadRectanglePieceV1(
-        job,
-        command,
-        selected.sizeToken,
-      );
-      if (!rectangle.ok)
+      const created = isPen
+        ? executePatternImportDxfPhaseEDraftCadPenPieceV1(job, command, selected.sizeToken)
+        : executePatternImportDxfPhaseEDraftCadRectanglePieceV1(job, command, selected.sizeToken);
+      if (!created.ok)
         return blocked(
-          'rectangle-geometry-blocked',
-          `${rectangle.blockers[0].code}: ${rectangle.blockers[0].detail}`,
+          geometryBlocker,
+          `${created.blockers[0].code}: ${created.blockers[0].detail}`,
           command,
         );
-      const topologyIds = [
-        rectangle.createdPiece.pieceId,
-        rectangle.createdPiece.pieceLineKey,
-        rectangle.createdPiece.contourId,
-        ...rectangle.createdPiece.vertexIds,
-      ];
+      const { pieceId, pieceLineKey, contourId, vertexIds } = created.createdPiece;
+      const topologyIds = [pieceId, pieceLineKey, contourId, ...vertexIds];
       if (
         topologyIds.some((identity) => createdTopologyIds.has(identity)) ||
         new Set(topologyIds).size !== topologyIds.length
       )
         return blocked(
-          'rectangle-geometry-blocked',
-          'duplicate-identity: Rectangle piece, line, contour and vertex identities must be globally distinct from the bound source and active piece creations.',
+          geometryBlocker,
+          `duplicate-identity: ${command.tool} piece, line, contour and vertex identities must be globally distinct from the bound source and active piece creations.`,
           command,
         );
       for (const identity of topologyIds) createdTopologyIds.add(identity);
-      job = structuredClone(rectangle.job);
+      job = structuredClone(created.job);
       compiledFeatures.push({
         commandId: command.commandId,
         entityId: command.payload.entityId,
         tool: command.tool,
-        pieceId: rectangle.createdPiece.pieceId,
+        pieceId,
         sizeToken: selected.sizeToken,
         output: 'piece-create',
-        createdTopology: {
-          pieceLineKey: rectangle.createdPiece.pieceLineKey,
-          contourId: rectangle.createdPiece.contourId,
-          vertexIds: rectangle.createdPiece.vertexIds,
-        },
+        createdTopology: { pieceLineKey, contourId, vertexIds },
       });
       continue;
     }

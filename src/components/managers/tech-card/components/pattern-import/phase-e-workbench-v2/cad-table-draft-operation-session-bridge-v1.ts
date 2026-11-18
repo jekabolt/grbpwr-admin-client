@@ -286,6 +286,7 @@ function commandKind(
   if (tool === 'dart') return 'dart';
   if (tool === 'mark' || tool === 'notch' || tool === 'add-point') return 'detail';
   if (
+    tool === 'pen' ||
     tool === 'rectangle' ||
     tool === 'circle' ||
     tool === 'ellipse' ||
@@ -300,6 +301,7 @@ function commandKind(
 const CAD_TOOL_LABELS: Readonly<
   Partial<Record<PatternImportDxfPhaseEDraftCadCommandV1['tool'], string>>
 > = Object.freeze({
+  pen: 'Create Pen piece',
   rectangle: 'Create rectangle piece',
   circle: 'Create circle piece',
   ellipse: 'Create ellipse piece',
@@ -326,6 +328,11 @@ function commandParameters(
   command: PatternImportDxfPhaseEDraftCadCommandV1,
 ): readonly Readonly<{ label: string; value: string }>[] {
   switch (command.tool) {
+    case 'pen':
+      return Object.freeze([
+        Object.freeze({ label: 'Piece', value: command.payload.newPiece?.pieceLineKey ?? '—' }),
+        Object.freeze({ label: 'Corners', value: String(command.payload.pointsMm.length) }),
+      ]);
     case 'rectangle':
       return Object.freeze([
         Object.freeze({ label: 'Piece', value: command.payload.newPiece?.pieceLineKey ?? '—' }),
@@ -456,6 +463,27 @@ function cadCommandShapeValid(command: PatternImportDxfPhaseEDraftCadCommandV1):
     !CAD_STABLE_ID.test(command.payload?.entityId ?? '')
   )
     return false;
+  if (command.tool === 'pen') {
+    const { closed, pointsMm, newPiece } = command.payload;
+    return Boolean(
+      closed &&
+        Array.isArray(pointsMm) &&
+        pointsMm.length >= 3 &&
+        pointsMm.length <= 256 &&
+        pointsMm.every(finitePoint) &&
+        newPiece &&
+        CAD_STABLE_ID.test(newPiece.pieceId) &&
+        CAD_STABLE_ID.test(newPiece.pieceLineKey) &&
+        CAD_STABLE_ID.test(newPiece.contourId) &&
+        Array.isArray(newPiece.vertexIds) &&
+        newPiece.vertexIds.length === pointsMm.length &&
+        new Set(newPiece.vertexIds).size === newPiece.vertexIds.length &&
+        newPiece.vertexIds.every((vertexId) => CAD_STABLE_ID.test(vertexId)) &&
+        newPiece.displayName.trim().length > 0 &&
+        newPiece.gradingPolicy === 'ungraded-current-size' &&
+        newPiece.placementPolicy === 'separate-writer-block',
+    );
+  }
   if (command.tool === 'rectangle') {
     const newPiece = command.payload.newPiece;
     return (

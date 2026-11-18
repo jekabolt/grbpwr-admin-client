@@ -37,6 +37,7 @@ export type PatternImportDxfPhaseEDraftCadToolV1 =
  * not advertised as working CAD actions in the production rail.
  */
 export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_PRODUCTIVE_TOOLS_V1 = Object.freeze([
+  'pen',
   'rectangle',
   'circle',
   'ellipse',
@@ -79,6 +80,12 @@ export type PatternImportDxfPhaseEDraftCadRectanglePieceV1 = Readonly<{
   placementPolicy: 'separate-writer-block';
 }>;
 
+export type PatternImportDxfPhaseEDraftCadPenPieceV1 = Readonly<
+  Omit<PatternImportDxfPhaseEDraftCadRectanglePieceV1, 'vertexIds'> & {
+    vertexIds: readonly string[];
+  }
+>;
+
 /**
  * Explicit identity and approximation contract for circle/ellipse piece creation. PieceSpec stores
  * closed boundaries as point loops, so curved authoring uses a deterministic bounded polyline and
@@ -103,7 +110,15 @@ type Command<Tool extends PatternImportDxfPhaseEDraftCadToolV1, Payload> = Reado
 }>;
 
 export type PatternImportDxfPhaseEDraftCadCommandV1 =
-  | Command<'pen', { entityId: string; pointsMm: readonly PtMm[]; closed: boolean }>
+  | Command<
+      'pen',
+      {
+        entityId: string;
+        pointsMm: readonly PtMm[];
+        closed: boolean;
+        newPiece?: PatternImportDxfPhaseEDraftCadPenPieceV1;
+      }
+    >
   | Command<
       'rectangle',
       {
@@ -338,17 +353,17 @@ function boundaryAnchor(value: unknown): value is PatternImportDxfPhaseEDraftCad
   );
 }
 
-function rectanglePiece(value: unknown): value is PatternImportDxfPhaseEDraftCadRectanglePieceV1 {
+function linearPiece(value: unknown, count: number): boolean {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const candidate = value as Partial<PatternImportDxfPhaseEDraftCadRectanglePieceV1>;
+  const candidate = value as Partial<PatternImportDxfPhaseEDraftCadPenPieceV1>;
   return (
     stableId(candidate.pieceId) &&
     stableId(candidate.pieceLineKey) &&
     stableId(candidate.contourId) &&
     Array.isArray(candidate.vertexIds) &&
-    candidate.vertexIds.length === 4 &&
+    candidate.vertexIds.length === count &&
     candidate.vertexIds.every(stableId) &&
-    new Set(candidate.vertexIds).size === 4 &&
+    new Set(candidate.vertexIds).size === count &&
     typeof candidate.displayName === 'string' &&
     candidate.displayName.trim().length > 0 &&
     candidate.displayName.trim().length <= 256 &&
@@ -401,6 +416,15 @@ function validCommand(value: unknown): value is PatternImportDxfPhaseEDraftCadCo
   if (!stableId(payload.entityId)) return false;
   switch (value.tool) {
     case 'pen':
+      return (
+        points(payload.pointsMm, 2) &&
+        typeof payload.closed === 'boolean' &&
+        (payload.newPiece === undefined ||
+          (payload.closed &&
+            payload.pointsMm.length >= 3 &&
+            payload.pointsMm.length <= 256 &&
+            linearPiece(payload.newPiece, payload.pointsMm.length)))
+      );
     case 'pattern-line':
       return points(payload.pointsMm, 2) && typeof payload.closed === 'boolean';
     case 'rectangle':
@@ -409,7 +433,7 @@ function validCommand(value: unknown): value is PatternImportDxfPhaseEDraftCadCo
         finitePositive(payload.widthMm) &&
         finitePositive(payload.heightMm) &&
         Number.isFinite(payload.rotationDeg) &&
-        (payload.newPiece === undefined || rectanglePiece(payload.newPiece))
+        (payload.newPiece === undefined || linearPiece(payload.newPiece, 4))
       );
     case 'circle':
       return (

@@ -24,6 +24,7 @@ import type {
   StyleId,
 } from '../../types';
 import { PATIMPORT } from '../../types';
+import { readManifestBytes } from '../../manifest';
 import {
   createDxfCurveSampleV1,
   createDxfInsertInstancePathV1,
@@ -2026,6 +2027,24 @@ async function readDxfInternal(
     pages: [page],
     warnings: b.warnings,
   };
+  let zeroAllowanceSeamBlocks: DxfMeta['zeroAllowanceSeamBlocks'];
+  if (manifest && dec.binary === null && !file.generatedFusing && !dec.generatedFusing) {
+    try {
+      const conversion = readManifestBytes(file.bytes);
+      const zeroAllowancePieces = new Set(
+        conversion?.pieces
+          .filter((piece) => piece.allowanceMm === 0)
+          .map((piece) => piece.identity),
+      );
+      zeroAllowanceSeamBlocks = new Map(
+        (conversion?.blocks ?? []).flatMap(({ block, contour, hasSeam, identity }) =>
+          hasSeam && contour && zeroAllowancePieces.has(identity) ? [[block, contour]] : [],
+        ),
+      );
+    } catch {
+      // The native read follows the ordinary foreign-file rules if the manifest is invalid.
+    }
+  }
   const meta: DxfMeta = {
     version,
     dialect,
@@ -2035,6 +2054,7 @@ async function readDxfInternal(
     binary: dec.binary,
     units,
     manifest,
+    ...(zeroAllowanceSeamBlocks?.size ? { zeroAllowanceSeamBlocks } : {}),
     generatedFusing: dec.generatedFusing || file.generatedFusing === true,
     modelLabels,
     groups: b.groups,

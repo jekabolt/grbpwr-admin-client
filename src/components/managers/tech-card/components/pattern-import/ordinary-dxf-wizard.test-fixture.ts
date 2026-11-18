@@ -59,6 +59,7 @@ export async function draftThroughWizardStages(
   card: CardContext,
   client: ImportClient = new DirectClient(),
   open?: PatternImportOpenFile,
+  resolveDetails?: (initial: StageIO['semantics']['out']) => Partial<StageIO['semantics']['in']>,
 ) {
   const { sessionId } = await client.open([open ?? (await directDxfAuthoringOpenFileV1(file, 0))]);
   const run = <S extends StageName>(stage: S, input: StageIO[S]['in']) =>
@@ -93,16 +94,21 @@ export async function draftThroughWizardStages(
       operatorGrain: {},
     };
     const initial = await run('semantics', semanticsInput);
+    const reviewedInput = { ...semanticsInput, ...resolveDetails?.(initial) };
+    const reviewed = resolveDetails ? await run('semantics', reviewedInput) : initial;
     const assignment = pinToScope(
       await run('fabrics', { bom: card.scopes }),
       'main',
-      initial.pieces.map(({ seed }) => seed),
+      reviewed.pieces.map(({ seed }) => seed),
       card.scopes,
     );
-    const semantics = await run('semantics', semanticsInput);
+    const semantics = await run('semantics', reviewedInput);
     expect(semantics.blocked).toEqual([]);
     const capture = await captureDirectDxfAuthoringV1([file], run);
-    expect(capture.dxfNativeSewingReplay?.replayReady).toBe(true);
+    expect(
+      capture.dxfNativeSewingReplay?.replayReady,
+      JSON.stringify(capture.dxfNativeSewingReplay?.blockers),
+    ).toBe(true);
     const written = await run('write', {
       techCardId: card.techCardId,
       scopes: card.scopes,

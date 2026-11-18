@@ -6,6 +6,7 @@ import type {
   AllowanceDecision,
   BoxMm,
   Feature,
+  ManifestBlock,
   PathId,
   PieceCandidate,
   PtMm,
@@ -95,6 +96,8 @@ export type DxfMeta = {
   binary: 'r12' | 'r13+' | null;
   units: DxfUnits;
   manifest: boolean;
+  /** Manifest blocks explicitly emitted with a sewing boundary and zero allowance. */
+  zeroAllowanceSeamBlocks?: ReadonlyMap<string, NonNullable<ManifestBlock['contour']>>;
   /** Proven by the generator's DXF marker or the system-owned card-row flag. */
   generatedFusing: boolean;
   /** Model-space `KEY: value` texts (AAMA header: STYLE NAME, SAMPLE SIZE, UNITS, AUTHOR…). */
@@ -275,6 +278,8 @@ export type DxfBlockPiece = {
   cut: DxfContour | null;
   seam: DxfContour | null;
   seamSource: 'L14' | 'L8-loop' | 'L8-chain' | null;
+  /** Both labelled native boundaries are present and exactly coincide by declared design. */
+  zeroAllowanceSeam?: true;
   /** L1 and L14 are the same contour (mode B marker). */
   cutEqualsSeam: boolean;
   /** Median distance seam → cut over seam vertices, mm (the allowance as drawn). */
@@ -369,6 +374,7 @@ export type DxfPieceCandidate = PieceCandidate & {
     features: Feature[];
     /** The outer contour is L14 (mode A: the true graded line) — cut = outward offset. */
     outerIsSeam: boolean;
+    zeroAllowanceSeam?: true;
     /** The block's `seamPair` allowance, mm (the uniform same-look loop inside the outline). */
     seamPairMm?: number;
     /** F14 R5: the block is inserted this many times (identical copies) = its cut quantity. */

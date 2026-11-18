@@ -24,6 +24,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_TOOL_GROUPS_V1 = Object.freeze
     id: 'construct',
     label: 'Construct',
     tools: Object.freeze([
+      'pen',
       'rectangle',
       'circle',
       'ellipse',
@@ -200,9 +201,13 @@ export function PatternImportDxfPhaseEDraftCadEditorShellV1({
     (count, transaction) => count + transaction.commands.length,
     0,
   );
-  const draftRectanglePieces = activeTransactions.flatMap(({ commands }) =>
+  const draftNewPieces = activeTransactions.flatMap(({ commands }) =>
     commands.flatMap((command) =>
-      command.tool === 'rectangle' && command.payload.newPiece
+      (command.tool === 'pen' ||
+        command.tool === 'rectangle' ||
+        command.tool === 'circle' ||
+        command.tool === 'ellipse') &&
+      command.payload.newPiece
         ? [
             {
               objectKey: `draft:${command.commandId}`,
@@ -216,7 +221,7 @@ export function PatternImportDxfPhaseEDraftCadEditorShellV1({
         : [],
     ),
   );
-  const pieceCount = session.source.catalog.pieces.length + draftRectanglePieces.length;
+  const pieceCount = session.source.catalog.pieces.length + draftNewPieces.length;
   const openProductiveToolGroup = PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_TOOL_GROUPS_V1.find(
     ({ id }) => id === openToolGroupId,
   );
@@ -369,7 +374,7 @@ export function PatternImportDxfPhaseEDraftCadEditorShellV1({
                 label: piece.pieceLineKey,
                 quantity: 1,
               })),
-              ...draftRectanglePieces,
+              ...draftNewPieces,
             ]}
             selectedPieceIds={selectedPieceIds}
             materialScopes={materialScopes}

@@ -178,6 +178,7 @@ type DxfExtra = {
     group?: number;
     identity?: string;
     outerIsSeam?: boolean;
+    zeroAllowanceSeam?: true;
     sizeSource?: 'label' | 'block-name' | 'none';
     identitySource?: 'label' | 'block-name';
     generatedFusing?: boolean;
@@ -1261,7 +1262,18 @@ export function buildPieceSpecsDetailed(
         ],
       };
     }
-    const resolvedAllowance = resolvePatternImportSemanticsAllowanceMm(A);
+    const explicitZeroAllowance =
+      !ov.allowance && p.cands.every(({ c }) => c.dxf?.zeroAllowanceSeam);
+    if (explicitZeroAllowance)
+      A = {
+        meaning: 'both',
+        allowanceMm: 0,
+        origin: 'measured',
+        evidence: ['The exact saved DXF cut and sewing boundaries coincide.'],
+      };
+    const resolvedAllowance = explicitZeroAllowance
+      ? { allowanceMm: 0, defaulted: false }
+      : resolvePatternImportSemanticsAllowanceMm(A);
     const allowMm = resolvedAllowance.allowanceMm;
     if (resolvedAllowance.defaulted)
       pieceNotes.push(`no allowance known: the other line is ${allowMm} mm (default)`);

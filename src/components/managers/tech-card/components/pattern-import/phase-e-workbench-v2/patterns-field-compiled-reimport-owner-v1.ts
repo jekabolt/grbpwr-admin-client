@@ -46,13 +46,15 @@ export function registerPatternImportDxfPhaseEPatternsFieldCompiledReimportOwner
     reviewAlreadyOpen: input.reviewAlreadyOpen,
     openExistingImportReview: (artifact) => {
       const addPoint = artifact.compiledFeatures.some((feature) => feature.tool === 'add-point');
+      const manualApply =
+        addPoint || artifact.compiledFeatures.some(({ output }) => output === 'piece-create');
       const file = addPoint
         ? takeCompiledSavedAddPointFileV1(artifact)
         : new File([artifact.dxfText], compiledFileName(artifact), { type: 'image/vnd.dxf' });
       input.openExistingImportReview(
         Object.freeze({
           scopeKey: artifact.scope.scopeKey,
-          ...(addPoint ? { requireManualApply: true as const } : {}),
+          ...(manualApply ? { requireManualApply: true as const } : {}),
           files: Object.freeze([file]) as readonly [File],
         }),
       );

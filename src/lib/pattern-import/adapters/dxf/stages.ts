@@ -477,6 +477,7 @@ function candidateOf(
       ...(read.meta.generatedFusing ? { generatedFusing: true } : {}),
       features,
       outerIsSeam: outerIsSeam && !!p.seam,
+      ...(p.zeroAllowanceSeam ? { zeroAllowanceSeam: true as const } : {}),
       ...(p.seamPair ? { seamPairMm: p.seamPair.offsetMm } : {}),
       ...(p.instances ? { instances: p.instances } : {}),
       // D3: the block's QUANTITY label is the CAD's word on the count (semantics reads it)

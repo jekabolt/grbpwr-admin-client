@@ -10,6 +10,7 @@ import { createPatternImportDxfPhaseEBoundDraftCadSessionV1 } from './draft-cad-
 import {
   buildPatternImportDxfPhaseEDraftCadCanvasDartBasesV1,
   recordPatternImportDxfPhaseEDraftCadCanvasBoundaryPickV1,
+  recordPatternImportDxfPhaseEDraftCadCanvasPointV1,
 } from './draft-cad-canvas-v1';
 import { createPatternImportDxfPhaseEDraftCadCompileSourceV1 } from './draft-cad-compile-source-v1';
 import { compilePatternImportDxfPhaseEDraftCadGeometryV1 } from './draft-cad-geometry-compile-v1';
@@ -140,4 +141,107 @@ it('refuses a missing exact edge or a collapsed length before recording anything
     expect(result.recorded).toBe(false);
     expect(result.session).toBe(session);
   }
+});
+
+it('closes a concave Pen outline into its own exact native cut and sewing block', async () => {
+  const { session, projection, selection, compileSource, draft } = await setup();
+  const pointsMm = [
+    { x: 15, y: 30 },
+    { x: 115, y: 30 },
+    { x: 115, y: 90 },
+    { x: 75, y: 68 },
+    { x: 15, y: 90 },
+  ];
+  const input = {
+    session,
+    projection,
+    activePieceIndex: 0,
+    activeTool: 'pen',
+    sequence: 0,
+  } as const;
+  let pendingPoints: readonly (typeof pointsMm)[number][] = [];
+  for (const pointMm of pointsMm) {
+    const point = recordPatternImportDxfPhaseEDraftCadCanvasPointV1({
+      ...input,
+      pendingPoints,
+      pointMm,
+    });
+    expect(point.recorded).toBe(false);
+    expect(point.blocker).toBeNull();
+    pendingPoints = point.pendingPoints;
+  }
+  const edit = recordPatternImportDxfPhaseEDraftCadCanvasPointV1({
+    ...input,
+    pendingPoints,
+    pointMm: pointsMm[pointsMm.length - 1]!,
+    closePen: true,
+  });
+  expect(edit.recorded).toBe(true);
+  expect(edit.pendingPoints).toEqual([]);
+  const compiled = compilePatternImportDxfPhaseEDraftCadGeometryV1({
+    session: edit.session,
+    projection,
+    selection,
+    compileSource,
+  });
+  if (!compiled.ok) throw new Error(JSON.stringify(compiled.blockers));
+  const { artifact } = compiled;
+  expect(artifact.compiledFeatures).toEqual([
+    expect.objectContaining({
+      tool: 'pen',
+      pieceId: 'DRAFTPEN1',
+      sizeToken: 'M',
+      output: 'piece-create',
+    }),
+  ]);
+  const nativeSpec = artifact.compiledJob.pieces.find(({ identity }) => identity === 'DRAFTPEN1')!;
+  expect(nativeSpec.sizes).toEqual([expect.objectContaining({ cut: pointsMm, seam: pointsMm })]);
+  expect(artifact.compiledJob.pieces.slice(0, -1)).toEqual(
+    draft.scopes[0]!.writerReplay!.job.pieces,
+  );
+  const written = artifact.manifest.blocks.find(({ identity }) => identity === 'DRAFTPEN1')!;
+  const decoded = parseDxf(new TextEncoder().encode(artifact.dxfText).buffer, 'mm');
+  const expected = pointsMm.map(({ x, y }) => ({ x: x - pointsMm[0]!.x, y: y - pointsMm[0]!.y }));
+  for (const layer of ['1', '14']) {
+    const entities = decoded.dxf.blocks[written.block]!.entities.filter(
+      (entity) =>
+        entity.layer === layer && (entity.type === 'POLYLINE' || entity.type === 'LWPOLYLINE'),
+    );
+    expect(entities).toHaveLength(1);
+    const contour = entityToChain(entities[0]!, 1, 0.001);
+    expect(contour?.closed).toBe(true);
+    const points = contour!.pts;
+    expect(points.map(({ x, y }) => ({ x: x - points[0]!.x, y: y - points[0]!.y }))).toEqual(
+      expected,
+    );
+  }
+});
+
+it('refuses a crossing Pen outline before deterministic DXF export', async () => {
+  const { session, projection, selection, compileSource } = await setup();
+  const pendingPoints = [
+    { x: 0, y: 0 },
+    { x: 120, y: 100 },
+    { x: 10, y: 100 },
+    { x: 80, y: 0 },
+  ];
+  const edit = recordPatternImportDxfPhaseEDraftCadCanvasPointV1({
+    session,
+    projection,
+    activePieceIndex: 0,
+    activeTool: 'pen',
+    sequence: 0,
+    pendingPoints,
+    pointMm: pendingPoints[3]!,
+    closePen: true,
+  });
+  expect(edit.recorded).toBe(true);
+  expect(
+    compilePatternImportDxfPhaseEDraftCadGeometryV1({
+      session: edit.session,
+      projection,
+      selection,
+      compileSource,
+    }),
+  ).toMatchObject({ ok: false, blockers: [{ code: 'pen-geometry-blocked' }] });
 });

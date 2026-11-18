@@ -271,7 +271,10 @@ class InProcessClient implements ImportClient {
     this.sessions.clear();
   }
 }
-export async function createSavedThreePanelSourceV1(seed: SavedThreePanelFixtureV1) {
+export async function createSavedThreePanelSourceV1(
+  seed: SavedThreePanelFixtureV1,
+  nativeSewingReplay = false,
+) {
   const host = createPatternImportDxfPhaseESavedDxfReprocessHostV1({
     resolveCard: async () => ({
       card: structuredClone(seed.card),
@@ -279,6 +282,7 @@ export async function createSavedThreePanelSourceV1(seed: SavedThreePanelFixture
     }),
     readAuthoritativeRow: async () => ({ row: seed.row, downloadUrl: seed.row.url }),
     createClient: () => new InProcessClient(),
+    nativeSewingReplay,
     fetch: (async () =>
       new Response(seed.bytes.slice(), {
         status: 200,

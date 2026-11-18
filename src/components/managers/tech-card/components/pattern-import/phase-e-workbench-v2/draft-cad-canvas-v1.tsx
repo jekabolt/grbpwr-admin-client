@@ -60,7 +60,6 @@ const INPUT_TOOLS = new Set<PatternImportDxfPhaseEDraftCadToolV1>([
 const TWO_POINT_TOOLS = new Set<PatternImportDxfPhaseEDraftCadToolV1>([
   'rectangle',
   'circle',
-  'pen',
   'cut',
   'guideline',
   'internal-line',
@@ -150,6 +149,7 @@ type PointInput = Readonly<{
   pendingPoints: readonly PtMm[];
   pendingDartBase?: PatternImportDxfPhaseEDraftCadCanvasDartBaseV1 | null;
   sequence: number;
+  closePen?: boolean;
 }>;
 
 type ProjectedPiece = PatternImportDxfProductPhaseEAssemblyProjectionV1['pieces'][number];
@@ -594,14 +594,27 @@ function commandForPoint(
       };
     }
     case 'pen': {
-      const from = input.pendingPoints[0];
-      if (!from) return null;
+      if (!input.closePen || input.pendingPoints.length < 3) return null;
+      const pieceLineKey = `draft-pen:${ids.sequence}`;
       return {
-        label: 'Draw pen path',
+        label: 'Close Pen outline',
         command: {
           ...common,
           tool: 'pen',
-          payload: { entityId: ids.entityId, pointsMm: [from, input.pointMm], closed: false },
+          payload: {
+            entityId: ids.entityId,
+            pointsMm: input.pendingPoints,
+            closed: true,
+            newPiece: {
+              pieceId: `DRAFTPEN${ids.sequence}`,
+              pieceLineKey,
+              contourId: `${pieceLineKey}:cut`,
+              vertexIds: input.pendingPoints.map((_, index) => `${pieceLineKey}:v${index}`),
+              displayName: `Pen piece ${ids.sequence}`,
+              gradingPolicy: 'ungraded-current-size',
+              placementPolicy: 'separate-writer-block',
+            },
+          },
         },
       };
     }
@@ -867,6 +880,24 @@ export function recordPatternImportDxfPhaseEDraftCadCanvasPointV1(
       recorded: false,
       blocker: null,
     };
+  if (input.activeTool === 'pen' && !input.closePen) {
+    if (input.pendingPoints.length >= 256)
+      return failPointInput(input, 'Close the Pen outline before adding more than 256 corners.');
+    if (
+      input.pendingPoints.some(
+        ({ x, y }) => Math.hypot(x - input.pointMm.x, y - input.pointMm.y) < 0.1,
+      )
+    )
+      return failPointInput(input, 'Place each Pen corner at a distinct point.');
+    return {
+      session: input.session,
+      pendingPoints: [...input.pendingPoints, input.pointMm],
+      pendingDartBase: null,
+      sequence: input.sequence,
+      recorded: false,
+      blocker: null,
+    };
+  }
   if (TWO_POINT_TOOLS.has(input.activeTool) && input.pendingPoints.length === 0)
     return {
       session: input.session,
@@ -901,8 +932,7 @@ export function recordPatternImportDxfPhaseEDraftCadCanvasPointV1(
   if (nextCommand.command.tool === 'circle' && !nextCommand.command.payload.radiusMm)
     return failPointInput(input, 'Circle radius must be greater than zero.');
   if (
-    (nextCommand.command.tool === 'pen' ||
-      nextCommand.command.tool === 'cut' ||
+    (nextCommand.command.tool === 'cut' ||
       nextCommand.command.tool === 'guideline' ||
       nextCommand.command.tool === 'internal-line' ||
       nextCommand.command.tool === 'pattern-line') &&
@@ -1301,7 +1331,8 @@ function PreviewPrimitive({
 }
 
 function toolInstruction(tool: PatternImportDxfPhaseEDraftCadToolV1, sizeToken: string): string {
-  if (tool === 'pen') return 'Click two points to record one open Pen path intent.';
+  if (tool === 'pen')
+    return `Place at least three corners, then close the outline to create a piece in size ${sizeToken}.`;
   if (tool === 'cut') return 'Click two points to split the piece across its grade.';
   if (tool === 'dart')
     return `For size ${sizeToken}, pick an exact edge, then click the apex and intake.`;
@@ -1426,6 +1457,28 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
   const displayTransforms = arrangeActive ? arrangement?.transforms : undefined;
   const overlayTransform = piece && displayTransforms?.[piece.pieceId];
   const renderedPieces = arrangeActive ? projection.pieces : piece ? [piece] : [];
+  const drawPoint = (pointMm: PtMm, closePen = false) => {
+    const result = recordPatternImportDxfPhaseEDraftCadCanvasPointV1({
+      session,
+      projection,
+      activePieceIndex,
+      activeTool,
+      pointMm,
+      pendingPoints,
+      pendingDartBase,
+      sequence: sequence.current,
+      closePen,
+    });
+    setPendingPoints(result.pendingPoints);
+    setPendingDartBase(result.pendingDartBase);
+    setInputError(result.blocker);
+    sequence.current = result.sequence;
+    if (result.recorded) onSessionChange(result.session);
+  };
+  const clearPen = () => {
+    setPendingPoints([]);
+    setInputError(null);
+  };
 
   return (
     <section
@@ -1434,6 +1487,12 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
       data-active-topology-tool={activeTopologyTool ?? undefined}
       data-draft-cad-input={interactionEnabled ? 'enabled' : 'blocked'}
       data-draft-cad-history-cursor={session.cursor}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape' && activeTool === 'pen' && pendingPoints.length) {
+          event.stopPropagation();
+          clearPen();
+        }
+      }}
       className='flex h-full min-h-0 flex-col gap-2'
     >
       <div className='relative min-h-0 flex-1 overflow-hidden bg-bgColor'>
@@ -1515,21 +1574,7 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
           }}
           onPoint={(pointMm) => {
             if (!interactionEnabled || activeTopologyTool) return;
-            const result = recordPatternImportDxfPhaseEDraftCadCanvasPointV1({
-              session,
-              projection,
-              activePieceIndex,
-              activeTool,
-              pointMm,
-              pendingPoints,
-              pendingDartBase,
-              sequence: sequence.current,
-            });
-            setPendingPoints(result.pendingPoints);
-            setPendingDartBase(result.pendingDartBase);
-            setInputError(result.blocker);
-            sequence.current = result.sequence;
-            if (result.recorded) onSessionChange(result.session);
+            drawPoint(pointMm);
           }}
         >
           {({ box, unit }) => (
@@ -1873,6 +1918,25 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
                 ? 'Choose an exact highlighted vertex from the sealed projection.'
                 : toolInstruction(activeTool, projection.sizeToken))}
       </div>
+      {activeTool === 'pen' && pendingPoints.length > 0 && interactionEnabled && (
+        <div className='flex flex-wrap gap-2'>
+          <button
+            type='button'
+            className='border border-borderColor px-2 py-1 text-small disabled:opacity-50'
+            disabled={pendingPoints.length < 3}
+            onClick={() => drawPoint(pendingPoints[pendingPoints.length - 1]!, true)}
+          >
+            Close Pen outline
+          </button>
+          <button
+            type='button'
+            className='border border-borderColor px-2 py-1 text-small'
+            onClick={clearPen}
+          >
+            Cancel outline
+          </button>
+        </div>
+      )}
       {activeTool === 'edge-length' && pendingDartBase && interactionEnabled && (
         <div
           className='flex flex-wrap items-end gap-2'
