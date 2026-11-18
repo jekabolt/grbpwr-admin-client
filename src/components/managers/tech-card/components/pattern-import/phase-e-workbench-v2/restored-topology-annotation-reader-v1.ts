@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react';
 
+import { PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V4 } from './composite-sidecar-v4';
+import { PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V5 } from './composite-sidecar-v5';
+
 import {
   matchesPatternImportDxfProductExactNDesktopGeometryV2,
   matchesPatternImportDxfProductExactNSessionFreshAuthorityV1,
@@ -163,7 +166,10 @@ export function usePatternImportDxfPhaseERestoredTopologyAnnotationsV1(
       stored.generation === generation &&
       stored.result.status === 'ready' &&
       stored.result.readback.sidecarSha256 === expectedPreviousSidecarSha256 &&
-      stored.result.readback.mediaType === next.mediaType
+      (stored.result.readback.mediaType === next.mediaType ||
+        (stored.result.readback.mediaType ===
+          PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V4 &&
+          next.mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V5))
         ? { ...stored, result: { status: 'ready', readback: next } }
         : stored,
     );

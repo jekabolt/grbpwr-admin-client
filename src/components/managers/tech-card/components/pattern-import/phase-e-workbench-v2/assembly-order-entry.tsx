@@ -2486,6 +2486,9 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
           saveWrappedTopologyAnnotations={
             frozen ? undefined : exactNApplicationOwner?.saveWrappedTopologyAnnotations
           }
+          saveStandaloneTopologyAnnotations={
+            frozen ? undefined : exactNApplicationOwner?.topologyAnnotations.save
+          }
           sceneOverlayInput={
             exactNMannequinStaging?.ok
               ? {

@@ -2,6 +2,8 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { useEffect, useRef, useState } from 'react';
 import { Button, Pencil1Icon, Text } from 'ui';
 
+import { PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V4 } from './composite-sidecar-v4';
+import { PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V5 } from './composite-sidecar-v5';
 import { PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6 } from './composite-sidecar-v6';
 import { PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7 } from './composite-sidecar-v7';
 import type {
@@ -13,6 +15,7 @@ import {
   type PatternImportDxfPhaseEExactNTopologyAnnotationEditorHandleV1,
 } from './exact-n-topology-annotation-editor-v1';
 import type { PatternImportDxfPhaseERestoredTopologyAnnotationReadbackV1 } from './restored-topology-annotation-reader-v1';
+import type { PatternImportDxfPhaseETopologyAnnotationApplicationTransactionV5 } from './topology-annotation-application-transaction-v5';
 import type { PatternImportDxfPhaseETopologyAnnotationDraftV5 } from './topology-annotation-save-control-v5';
 import type { PatternImportDxfPhaseEWrappedTopologyAnnotationSaveV1 } from './wrapped-topology-annotation-save-v1';
 
@@ -29,13 +32,15 @@ export function PatternImportDxfPhaseESavedTopologyAnnotationEditControlV1({
   geometry,
   saved,
   save,
+  saveStandalone,
   onReadback,
   onReload,
 }: Readonly<{
   session: PatternImportDxfPhaseEExactNAssemblyOrderSessionV2;
   geometry: PatternImportDxfProductExactNDesktopGeometryV2;
   saved: Saved;
-  save: PatternImportDxfPhaseEWrappedTopologyAnnotationSaveV1;
+  save?: PatternImportDxfPhaseEWrappedTopologyAnnotationSaveV1;
+  saveStandalone?: PatternImportDxfPhaseETopologyAnnotationApplicationTransactionV5['save'];
   onReadback: (expectedPreviousSidecarSha256: string, next: Saved) => void;
   onReload: () => void;
 }>) {
@@ -45,12 +50,13 @@ export function PatternImportDxfPhaseESavedTopologyAnnotationEditControlV1({
   const pendingRef = useRef<AbortController | null>(null);
   useEffect(() => () => pendingRef.current?.abort(), []);
   const { annotationSource, projection } = geometry;
-  if (
-    !annotationSource ||
-    (saved.mediaType !== PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6 &&
-      saved.mediaType !== PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7)
-  )
-    return null;
+  const standalone =
+    saved.mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V4 ||
+    saved.mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V5;
+  const wrapped =
+    saved.mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6 ||
+    saved.mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7;
+  if (!annotationSource || !(standalone ? saveStandalone : wrapped && save)) return null;
 
   const dirty = edit !== null && JSON.stringify(edit.draft) !== JSON.stringify(edit.baseline.draft);
   const submit = async () => {
@@ -67,32 +73,51 @@ export function PatternImportDxfPhaseESavedTopologyAnnotationEditControlV1({
     pendingRef.current = controller;
     setEdit({ ...edit, status: 'saving', detail: 'Saving and verifying annotations…' });
     try {
-      const result = await save(
-        {
+      const expected = edit.baseline.sidecarSha256;
+      let next: Saved;
+      if (standalone && saveStandalone) {
+        const result = await saveStandalone(
           session,
-          geometry,
-          expectedPreviousSidecarSha256: edit.baseline.sidecarSha256,
-          draft: edit.draft,
-        },
-        controller.signal,
-      );
-      if (controller.signal.aborted) return;
-      if (!result.ok) {
-        setEdit({
-          ...edit,
-          status: 'blocked',
-          detail:
-            result.writeOutcome === 'not-attempted'
-              ? result.detail
-              : `Save could not be verified. ${result.detail}`,
-        });
+          { ...annotationSource, projection },
+          edit.draft,
+          controller.signal,
+          expected,
+        );
+        if (controller.signal.aborted) return;
+        if (!result.ok) {
+          setEdit({ ...edit, status: 'blocked', detail: result.blockers[0].detail });
+          return;
+        }
+        next = {
+          mediaType: result.mediaType,
+          sidecarSha256: result.readback.sidecarSha256,
+          draft: { measurements: result.readback.measurements, callouts: result.readback.callouts },
+        };
+      } else if (save) {
+        const result = await save(
+          { session, geometry, expectedPreviousSidecarSha256: expected, draft: edit.draft },
+          controller.signal,
+        );
+        if (controller.signal.aborted) return;
+        if (!result.ok) {
+          setEdit({
+            ...edit,
+            status: 'blocked',
+            detail:
+              result.writeOutcome === 'not-attempted'
+                ? result.detail
+                : `Save could not be verified. ${result.detail}`,
+          });
+          return;
+        }
+        next = {
+          mediaType: result.mediaType,
+          sidecarSha256: result.sidecarSha256,
+          draft: result.readback,
+        };
+      } else {
         return;
       }
-      const next = {
-        mediaType: result.mediaType,
-        sidecarSha256: result.sidecarSha256,
-        draft: result.readback,
-      };
       onReadback(edit.baseline.sidecarSha256, next);
       setEdit({
         baseline: next,

@@ -1,4 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   PATTERN_IMPORT_DXF_PRODUCT_PHASE_E_ASSEMBLY_PROJECTION_V1,
@@ -6,6 +8,9 @@ import {
 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 
 import { PATTERN_IMPORT_DXF_PHASE_E_CALLOUT_SESSION_V1 } from './callout-session-v1';
+import { PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V4 } from './composite-sidecar-v4';
+import { PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V5 } from './composite-sidecar-v5';
+import { PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7 } from './composite-sidecar-v7';
 import {
   selectPatternImportDxfPhaseEDraftCadTopologyToolV1,
   startPatternImportDxfPhaseEDraftCadAnnotationReanchorV1,
@@ -17,6 +22,7 @@ import {
   selectPatternImportDxfPhaseEExactNTopologyVertexV1,
 } from './exact-n-topology-annotation-editor-v1';
 import type { PatternImportDxfPhaseEVertexAnchorV1 } from './measurement-v1';
+import { PatternImportDxfPhaseESavedTopologyAnnotationEditControlV1 } from './saved-topology-annotation-edit-control-v1';
 import type { PatternImportDxfPhaseETopologyAnnotationDraftV5 } from './topology-annotation-save-control-v5';
 
 const projection: PatternImportDxfProductPhaseEAssemblyProjectionV1 = Object.freeze({
@@ -90,6 +96,42 @@ function selectTool(
 }
 
 describe('exact-N topology annotation editor', () => {
+  it.each([
+    PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V4,
+    PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V5,
+    PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7,
+  ])('exposes the restored editor only with the supported save owner for %s', (mediaType) => {
+    const wrapped = mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7;
+    const props = {
+      session: {} as never,
+      geometry: {
+        projection,
+        annotationSource: { identity: 'source:exact', revision: '3', sha256: 'a'.repeat(64) },
+      } as never,
+      saved: { mediaType, sidecarSha256: 'b'.repeat(64), draft: emptyDraft },
+      onReadback: vi.fn(),
+      onReload: vi.fn(),
+    };
+    const supported = wrapped ? { save: vi.fn() } : { saveStandalone: vi.fn() };
+    const unsupported = wrapped ? { saveStandalone: vi.fn() } : { save: vi.fn() };
+    expect(
+      renderToStaticMarkup(
+        createElement(PatternImportDxfPhaseESavedTopologyAnnotationEditControlV1, {
+          ...props,
+          ...supported,
+        }),
+      ),
+    ).toContain('aria-label="Edit annotations"');
+    expect(
+      renderToStaticMarkup(
+        createElement(PatternImportDxfPhaseESavedTopologyAnnotationEditControlV1, {
+          ...props,
+          ...unsupported,
+        }),
+      ),
+    ).toBe('');
+  });
+
   it('turns exact projection vertex picks into the caller-owned measurement draft', () => {
     let state = selectTool(
       createPatternImportDxfPhaseEExactNTopologyEditorSessionV1('source:exact', emptyDraft),

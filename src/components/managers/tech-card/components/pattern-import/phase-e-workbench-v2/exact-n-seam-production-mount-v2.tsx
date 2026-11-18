@@ -41,6 +41,7 @@ import {
   type PatternImportDxfPhaseERestoredTopologyAnnotationReaderV1,
 } from './restored-topology-annotation-reader-v1';
 import { PatternImportDxfPhaseESavedTopologyAnnotationEditControlV1 } from './saved-topology-annotation-edit-control-v1';
+import type { PatternImportDxfPhaseETopologyAnnotationApplicationTransactionV5 } from './topology-annotation-application-transaction-v5';
 import type { PatternImportDxfPhaseEWrappedTopologyAnnotationSaveV1 } from './wrapped-topology-annotation-save-v1';
 import type { PatternImportDxfProductExactNSeamUiSelectionOwnerV2 } from './exact-n-seam-atomic-ui-selection-v2';
 import type { PatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV1 } from './golden-card-production-v2-snapshot-feed-v1';
@@ -131,6 +132,7 @@ export type PatternImportDxfProductExactNSeamProductionMountPropsV2 = Readonly<{
   topologyAnnotationAuthoring?: ReactNode;
   readSavedTopologyAnnotations?: PatternImportDxfPhaseERestoredTopologyAnnotationReaderV1;
   saveWrappedTopologyAnnotations?: PatternImportDxfPhaseEWrappedTopologyAnnotationSaveV1;
+  saveStandaloneTopologyAnnotations?: PatternImportDxfPhaseETopologyAnnotationApplicationTransactionV5['save'];
 }>;
 
 function sceneOverlayBlocked(
@@ -263,6 +265,7 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
   topologyAnnotationAuthoring = null,
   readSavedTopologyAnnotations,
   saveWrappedTopologyAnnotations,
+  saveStandaloneTopologyAnnotations,
 }: PatternImportDxfProductExactNSeamProductionMountPropsV2): ReactNode {
   const resolved = resolvePatternImportDxfProductExactNSeamProductionMountV2(
     session,
@@ -461,13 +464,14 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
             }
             savedAnnotationEditControl={
               !session.productionFeed &&
-              saveWrappedTopologyAnnotations &&
+              (saveWrappedTopologyAnnotations || saveStandaloneTopologyAnnotations) &&
               savedAnnotations?.status === 'ready' ? (
                 <PatternImportDxfPhaseESavedTopologyAnnotationEditControlV1
                   session={session}
                   geometry={exactDesktop}
                   saved={savedAnnotations.readback}
                   save={saveWrappedTopologyAnnotations}
+                  saveStandalone={saveStandaloneTopologyAnnotations}
                   onReadback={annotationRead.publish}
                   onReload={annotationRead.reload}
                 />

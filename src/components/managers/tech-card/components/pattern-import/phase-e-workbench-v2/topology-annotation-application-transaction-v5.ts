@@ -381,9 +381,15 @@ export function createPatternImportDxfPhaseETopologyAnnotationApplicationTransac
       callouts: readonly PatternImportDxfPhaseECalloutV1[];
     }>,
     signal: AbortSignal,
+    expectedPreviousSidecarSha256?: string,
   ): Promise<PatternImportDxfPhaseETopologyAnnotationApplicationResultV5> => {
     try {
       const current = await readCurrent(session, source, signal);
+      if (
+        expectedPreviousSidecarSha256 !== undefined &&
+        expectedPreviousSidecarSha256 !== current.sidecarSha256
+      )
+        throw new TypeError('Saved annotations changed. Reload them before saving your edits.');
       if (
         current.mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6 ||
         current.mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7
