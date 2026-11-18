@@ -18,7 +18,12 @@ import type {
   PutTechCardPatternSemanticSidecarRequest,
   TechCardPatternSemanticSidecar,
 } from 'api/proto-http/admin';
-import { createXpbdDeviceSession } from 'lib/cloth/runtime/webgpu/xpbd-device-session';
+import {
+  createXpbdDeviceSession,
+  inspectOwnedActiveXpbdDeviceLeaseV1,
+  type CreateXpbdDeviceSessionOptions,
+  type XpbdDeviceLease,
+} from 'lib/cloth/runtime/webgpu/xpbd-device-session';
 import { createSavedModelDisplayedTriangleBodySessionV2 } from 'components/managers/models/components/saved-model-displayed-triangle-body-session-v2';
 import * as bodyApi from 'components/managers/models/components/saved-model-displayed-triangle-body-session-v2';
 import {
@@ -144,11 +149,14 @@ vi.mock('./dxf-garment-observed-webgpu-replay-v1', () => {
     request: Record<string, unknown>,
     frame: number,
     prior: unknown,
+    lease: XpbdDeviceLease,
     signal: AbortSignal,
   ) => {
     const controller = new AbortController(),
       owner = Object.freeze({ syntheticNumericFrame: frame });
     const cancel = () => controller.abort();
+    const inspection = inspectOwnedActiveXpbdDeviceLeaseV1(lease);
+    if (inspection.ok) void inspection.lost.then(cancel, cancel);
     signal.addEventListener('abort', cancel, { once: true });
     controller.signal.addEventListener('abort', () => signal.removeEventListener('abort', cancel), {
       once: true,
@@ -203,15 +211,15 @@ vi.mock('./dxf-garment-observed-webgpu-replay-v1', () => {
     DXF_GARMENT_OBSERVED_WEBGPU_REPLAY_PROFILE_V1: 'garment-material-contact-replay/1',
     runDxfGarmentObservedWebgpu16ReplayV1: (
       r: Record<string, unknown>,
-      _l: unknown,
+      lease: XpbdDeviceLease,
       s: AbortSignal,
-    ) => run(r, 16, null, s),
+    ) => run(r, 16, null, lease, s),
     runDxfGarmentObservedWebgpu32ReplayV1: (
       r: Record<string, unknown>,
       p: unknown,
-      _l: unknown,
+      lease: XpbdDeviceLease,
       s: AbortSignal,
-    ) => run(r, 32, p, s),
+    ) => run(r, 32, p, lease, s),
     getDxfGarmentObservedWebgpuReplayLifetimeV1: (o: object) =>
       ports.live.get(o)?.signal.aborted === false ? ports.live.get(o)!.signal : null,
     disposeDxfGarmentObservedWebgpuReplayV1: (o: object) => {
@@ -667,6 +675,11 @@ async function fixture(withAnnotations = false) {
   // Real persisted outer changes the full snapshot; old source is correctly no longer usable.
   expect((await pre.projectAuthoringContext(1)).ok).toBe(false);
   await pre.dispose();
+  return { ...(await freshPhysicalFixtureHost(body)), body, observed, context, storage };
+}
+async function freshPhysicalFixtureHost(
+  body: ReturnType<typeof createSavedModelDisplayedTriangleBodySessionV2>,
+) {
   const nextNative = await createSavedThreePanelSourceV1(seed);
   cleanup.push(nextNative.dispose);
   const next = await savedThreePanelCompileRequestV1(seed, nextNative);
@@ -679,12 +692,8 @@ async function fixture(withAnnotations = false) {
   cleanup.push(() => host.dispose());
   return {
     host,
-    body,
-    observed,
     native: nextNative,
-    context,
     reader,
-    storage,
     request: {
       verifiedReceipt: reader,
       sourceOwner: next.sourceOwner,
@@ -692,8 +701,9 @@ async function fixture(withAnnotations = false) {
     },
   };
 }
-async function borrowedLease() {
-  const device = Object.assign(new EventTarget(), {
+type DeviceLoss = Parameters<NonNullable<CreateXpbdDeviceSessionOptions['onDeviceLost']>>[0];
+function fixtureDevice(lost = new Promise<DeviceLoss>(() => {})) {
+  return Object.assign(new EventTarget(), {
     limits: {
       maxBufferSize: 268435456,
       maxStorageBufferBindingSize: 134217728,
@@ -706,10 +716,13 @@ async function borrowedLease() {
       maxUniformBuffersPerShaderStage: 4,
       maxBindGroups: 4,
     },
-    lost: new Promise<never>(() => {}),
+    lost,
     queue: { onSubmittedWorkDone: vi.fn(async () => {}) },
     destroy: vi.fn(),
   });
+}
+async function borrowedLease() {
+  const device = fixtureDevice();
   const session = await createXpbdDeviceSession(
     { getContext: () => ({ configure() {}, unconfigure() {} }) } as unknown as HTMLCanvasElement,
     {
@@ -1769,6 +1782,165 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
     });
     expect(device.destroy).not.toHaveBeenCalled();
     expect((await f.body.projectCurrentBody()).status).toBe('projected');
+  }, 120000);
+
+  it('renders adapter and retained-frame device failure, then restores and cleans up the same saved arrangement', async () => {
+    const f = await fixture(true);
+    requireOk(await f.host.restore(f.request));
+    const savedOuter = structuredClone(outer);
+    const lost = deferredSessionValue<DeviceLoss>();
+    const lostDevice = fixtureDevice(lost.promise);
+    const retryDevice = fixtureDevice();
+    const requestDevice = vi
+      .fn()
+      .mockResolvedValueOnce(lostDevice)
+      .mockResolvedValueOnce(retryDevice);
+    const requestAdapter = vi.fn().mockResolvedValue({ requestDevice }).mockResolvedValueOnce(null);
+    const computeContext = { configure: vi.fn(), unconfigure: vi.fn() };
+    const computeCanvas = {
+      getContext: vi.fn(() => computeContext),
+    } as unknown as HTMLCanvasElement;
+    const previewCanvas = {} as HTMLCanvasElement;
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    vi.stubGlobal('window', { event: undefined, location: { origin: 'http://fixture.local' } });
+    vi.stubGlobal('navigator', {
+      gpu: { requestAdapter, getPreferredCanvasFormat: () => 'bgra8unorm' },
+    });
+    cleanup.push(() => vi.unstubAllGlobals());
+
+    type Host = typeof f.host;
+    const retry = vi.fn();
+    const view = mountAnnotationFixtureView(({ host }: { host: Host | null }) => {
+      const state: ComponentProps<typeof CadWorkbenchPhysicalHostControlsV1>['state'] = {
+        profile: '',
+        setProfile: () => undefined,
+        selected: null,
+        onDisplayedBodyInputV1: f.body.onDisplayedBodyInputV1,
+        host,
+        bodySession: f.body,
+        sourceStatus: host ? 'ready' : 'awaiting-mannequin',
+        sourceError: null,
+        durableSnapshot: host?.getSnapshot() ?? null,
+        retry,
+        firstAuthoring: { status: 'idle', bootstrap: null, sourceGeometry: null, error: null },
+        startFirstAuthoring: async () => {},
+        compileFirstAuthoring: async () => {},
+        saveFirstAuthoring: async () => {},
+      };
+      const controls = CadWorkbenchPhysicalHostControlsV1({ state });
+      for (const [canvas, identify] of [
+        [computeCanvas, (item: Record<string, unknown>) => item.hidden === true],
+        [
+          previewCanvas,
+          (item: Record<string, unknown>) =>
+            item['aria-label'] === 'Cloth simulation on the selected mannequin',
+        ],
+      ] as const) {
+        const node = visitMountedTree(controls, identify);
+        const ref = node?.ref as RefObject<HTMLCanvasElement | null> | undefined;
+        if (ref) ref.current = canvas;
+      }
+      return controls;
+    });
+    const labeled = (label: string) =>
+      visitMountedTree(view.output(), (item) => item['aria-label'] === label);
+    const text = (value: string) =>
+      visitMountedTree(view.output(), (item) => item.children === value);
+    const click = (label: string) => {
+      const action = text(label)?.onClick as (() => void) | undefined;
+      if (!action) throw new Error(`Mounted action unavailable: ${label}`);
+      action();
+    };
+    const expectNoPreview = () => {
+      expect(labeled('Cloth simulation on the selected mannequin')?.className).toContain('hidden');
+      expect(labeled('Strain utilization legend')).toBeNull();
+      expect(labeled('Current frame measurements')).toBeNull();
+    };
+
+    await view.render({ host: f.host });
+    await act(async () => {
+      click('Preview');
+      await vi.waitFor(() => expect(requestAdapter).toHaveBeenCalledTimes(1));
+    });
+    expect(text('The browser did not provide a WebGPU adapter.')?.role).toBe('alert');
+    expect(text('Preview')?.disabled).toBe(false);
+    expectNoPreview();
+    expect(requestDevice).not.toHaveBeenCalled();
+    expect(ports.calls).toHaveLength(0);
+
+    const frame32Started = deferredSessionValue<void>();
+    const frame32Paused = deferredSessionValue<void>();
+    ports.after = () => {
+      if (ports.calls.at(-1)?.frame !== 32) return;
+      ports.pause = frame32Paused.promise;
+      frame32Started.resolve();
+    };
+    await act(async () => {
+      click('Preview');
+      await frame32Started.promise;
+    });
+    expect(f.host.getSnapshot().numeric.frame16Report?.frameCount).toBe(16);
+    expect(f.host.getSnapshot().numeric.status).toBe('running32');
+    expect(requestDevice).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      lost.resolve({
+        __brand: 'GPUDeviceLostInfo',
+        message: 'Retained checkpoint device was lost',
+        reason: 'unknown',
+      });
+      frame32Paused.resolve();
+      await vi.waitFor(() => expect(lostDevice.destroy).toHaveBeenCalledTimes(1));
+    });
+    ports.after = null;
+    ports.pause = null;
+    expect(text('WebGPU device lost: Retained checkpoint device was lost')?.role).toBe('alert');
+    expectNoPreview();
+    expect(f.host.getSnapshot()).toMatchObject({ status: 'blocked', binding: null });
+    expect(ports.previewEvents).toEqual([]);
+    expect(computeContext.unconfigure).toHaveBeenCalledTimes(1);
+    expect(text('Retry')?.disabled).toBe(false);
+    expect(text('Preview')).toBeNull();
+    await act(async () => click('Retry'));
+    expect(retry).toHaveBeenCalledTimes(1);
+
+    const next = await freshPhysicalFixtureHost(f.body);
+    requireOk(await next.host.restore(next.request));
+    ports.finalValidationFrame = 32;
+    await view.render({ host: next.host });
+    await act(async () => {
+      click('Preview');
+      await vi.waitFor(() => expect(next.host.getSnapshot().status).toBe('preview-ready'), {
+        timeout: 10_000,
+      });
+    });
+    expect(ports.calls.map(({ frame }) => frame)).toEqual([16, 32, 16, 32]);
+    expect(requestDevice).toHaveBeenCalledTimes(2);
+    expect(ports.previewEvents).toEqual(['create']);
+    expect(labeled('Strain utilization legend')).not.toBeNull();
+    expect(labeled('Current frame measurements')).not.toBeNull();
+
+    await f.body.observe(null);
+    await view.render({ host: null });
+    await vi.waitFor(() => expect(retryDevice.destroy).toHaveBeenCalledTimes(1));
+    expect(text('Select a mannequin.')).not.toBeNull();
+    expect(text('Preview')).toBeNull();
+    expectNoPreview();
+    expect(ports.previewEvents).toEqual(['create', 'dispose']);
+    await view.unmount();
+    expect(lostDevice.destroy).toHaveBeenCalledTimes(1);
+    expect(retryDevice.destroy).toHaveBeenCalledTimes(1);
+    expect(computeContext.configure).toHaveBeenCalledTimes(2);
+    expect(computeContext.unconfigure).toHaveBeenCalledTimes(2);
+    expect(outer).toEqual(savedOuter);
+    const reopened = requireOk(
+      await V7.decodePatternImportDxfProductCompositeSidecarV7(
+        new Uint8Array(Buffer.from(outer!.sidecarBytes!, 'base64')),
+      ),
+    );
+    expect(reopened.nestedCompositeV6.mannequinArrangement?.pieces[0]?.transform).toEqual({
+      offsetM: [0.125, -0.0625, 0.25],
+      rotationRad: 0.5,
+    });
   }, 120000);
 
   it('preserves current binding and borrowed body when an explicit Stop cancels a held fresh read', async () => {

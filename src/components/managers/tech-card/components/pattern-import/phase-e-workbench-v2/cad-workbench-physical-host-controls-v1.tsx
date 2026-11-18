@@ -133,6 +133,9 @@ export function CadWorkbenchPhysicalHostControlsV1({
   };
 
   const ready = state.sourceStatus === 'ready' && state.host !== null;
+  const restoreRequired =
+    ready && state.durableSnapshot?.status === 'blocked' && !state.durableSnapshot.binding;
+  const statusError = state.sourceStatus === 'blocked' || restoreRequired || Boolean(localError);
   const displayedBody = state.bodySession?.getSnapshot();
   const currentFrame = ready ? currentPreviewFrame(state, displayedBody) : null;
   const receipt = currentFrame?.receipt ?? null;
@@ -234,7 +237,7 @@ export function CadWorkbenchPhysicalHostControlsV1({
         onLostPointerCapture={cancelPick}
       />
       <div className='pointer-events-auto absolute top-2 right-2 flex max-w-[min(24rem,calc(100%-1rem))] items-center gap-2 border border-borderColor bg-bgColor/95 px-2 py-1'>
-        {ready ? (
+        {ready && !restoreRequired ? (
           <Button
             type='button'
             size='xs'
@@ -254,12 +257,12 @@ export function CadWorkbenchPhysicalHostControlsV1({
           >
             {state.firstAuthoring.status === 'preparing' ? 'Opening…' : 'Place pieces'}
           </Button>
-        ) : state.sourceStatus === 'blocked' ? (
+        ) : state.sourceStatus === 'blocked' || restoreRequired ? (
           <Button
             type='button'
             size='xs'
             variant='secondary'
-            disabled={disabled}
+            disabled={disabled || pending}
             onClick={state.retry}
           >
             Retry
@@ -268,7 +271,8 @@ export function CadWorkbenchPhysicalHostControlsV1({
         <Text
           component='span'
           size='micro'
-          variant={state.sourceStatus === 'blocked' || localError ? 'errorLabel' : 'label'}
+          variant={statusError ? 'errorLabel' : 'label'}
+          role={statusError ? 'alert' : 'status'}
         >
           {state.sourceStatus === 'idle'
             ? 'Save the assembly to preview cloth.'
@@ -280,7 +284,11 @@ export function CadWorkbenchPhysicalHostControlsV1({
                   ? 'Place pieces on mannequin.'
                   : localError ??
                     state.sourceError ??
-                    (receipt ? `Cloth preview · frame ${receipt.frames}` : 'Cloth ready')}
+                    (restoreRequired
+                      ? state.durableSnapshot?.detail ?? 'Restore saved cloth to preview again.'
+                      : receipt
+                        ? `Cloth preview · frame ${receipt.frames}`
+                        : 'Cloth ready')}
         </Text>
       </div>
       {receipt ? (
