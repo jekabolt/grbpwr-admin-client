@@ -155,13 +155,27 @@ describe('V1 selected durable physical source handoff', () => {
     const host = variable('physicalHost');
     expect(ts.isObjectLiteralExpression(host)).toBe(true);
     if (!ts.isObjectLiteralExpression(host)) throw new Error('Expected shared host input.');
-    const callback = host.properties.find(
-      (p): p is ts.PropertyAssignment =>
-        ts.isPropertyAssignment(p) && p.name.getText(tree) === 'onDisplayedBodyInputV1',
-    );
-    expect(callback?.initializer.getText(tree)).toBe(
-      'savedClothPhysicalHost.onDisplayedBodyInputV1',
-    );
+    expect(
+      host.properties.some(
+        (property) =>
+          ts.isShorthandPropertyAssignment(property) &&
+          property.name.getText(tree) === 'onDisplayedBodyInputV1',
+      ),
+    ).toBe(true);
+    const dispatch = variable('onDisplayedBodyInputV1');
+    if (!ts.isCallExpression(dispatch)) throw new Error('Expected the shared body callback.');
+    const setDisplayedBodyInput = vi.fn();
+    const onDisplayedBodyInputV1 = vi.fn();
+    const observe = evaluate<(input: unknown) => void>(dispatch.arguments[0]!.getText(tree), {
+      setDisplayedBodyInput,
+      savedClothPhysicalHost: { onDisplayedBodyInputV1 },
+    });
+    const displayedBody = Object.freeze({ fixture: 'displayed body' });
+    observe(displayedBody);
+    observe(null);
+    for (const consumer of [setDisplayedBodyInput, onDisplayedBodyInputV1]) {
+      expect(consumer.mock.calls).toEqual([[displayedBody], [null]]);
+    }
     const controls = elements('CadWorkbenchPhysicalHostProductionMountV1');
     expect(controls).toHaveLength(1);
     expect(attribute(controls[0], 'state')).toBe('savedClothPhysicalHost');
@@ -182,6 +196,21 @@ describe('V1 selected durable physical source handoff', () => {
     expect(variable('physicalHost').pos).toBeLessThan(
       elements('PatternImportDxfPhaseECadTableZeroOperationProductionMountV1')[0].pos,
     );
+  });
+
+  it('routes cross-material review to the ordinary editor without the single-row draft fallback', () => {
+    const ordinary = elements('PatternImportDxfPhaseECadTableDraftOperationsPanelV1');
+    expect(ordinary).toHaveLength(1);
+    expect(attribute(ordinary[0], 'editor')).toBe('operationsPanel');
+    expect(attribute(ordinary[0], 'navigation')).toBe('operationNavigation');
+    const result = attribute(ordinary[0], 'result');
+    const fallbackResult = { ok: false, blocker: { code: 'exact-connection-incomplete' } };
+    expect(evaluate(result!, { savedCrossMaterialActions: {}, fallbackResult })).toBeNull();
+    expect(evaluate(result!, { savedCrossMaterialActions: null, fallbackResult })).toBe(
+      fallbackResult,
+    );
+    expect(elements('SavedCompleteAssemblyNativeReviewActionV8')).toHaveLength(1);
+    expect(source).toContain('!savedCrossMaterialActions && durableReloadBlocker');
   });
 
   it('preserves beta auto-open and incomplete-operation browse-fallback routing', () => {

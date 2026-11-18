@@ -2753,7 +2753,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
                 </Text>
               </CalloutBox>
             ) : null}
-            {durableReloadBlocker ? (
+            {!savedCrossMaterialActions && durableReloadBlocker ? (
               <CalloutBox
                 tone={durableReloadBlocker.retryable ? 'error' : 'note'}
                 className='mb-2'
@@ -2778,7 +2778,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
             ) : null}
             <PatternImportDxfPhaseECadTableDraftOperationsPanelV1
               editor={operationsPanel}
-              result={fallbackResult}
+              result={savedCrossMaterialActions ? null : fallbackResult}
               operationNumber={source.selectedOperationNumber}
               navigation={operationNavigation}
               stitchVisual={stitchVisual}

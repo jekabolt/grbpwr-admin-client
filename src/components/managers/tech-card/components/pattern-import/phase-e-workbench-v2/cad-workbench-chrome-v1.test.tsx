@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { Button } from 'ui';
+import { PATTERN_IMPORT_DXF_PHASE_E_CAD_OPERATION_NAVIGATION_V1 } from './cad-operation-navigation-v1';
 
 import {
   openPatternImportDxfPhaseECadOperationDetailsForEditV1,
@@ -146,9 +147,68 @@ describe('Assembly Table chrome', () => {
     expect(markup).toContain('data-cad-operation-context-pane');
     expect(markup).toContain('data-cad-operation-spec-pane');
     expect(markup).toContain('data-cad-operation-draft-pane');
+    expect(markup).toContain('Select an Assembly Order operation.');
+    expect(markup).toContain('operation unavailable');
     expect(markup).toContain('data-test-operation-editor');
     expect(markup).not.toContain('Spec · authoritative editor');
     expect(markup).not.toContain('Draft · Pattern edits');
+  });
+
+  it('keeps the ordinary editor in saved review without a draft blocker or missing-seam fallback', () => {
+    const editor = <div data-test-operation-editor=''>Existing operation editor</div>;
+    const review = renderToStaticMarkup(
+      <PatternImportDxfPhaseECadTableDraftOperationsPanelV1
+        editor={editor}
+        operationNumber={170}
+        result={null}
+      />,
+    );
+    expect(review).toContain('OPERATION #170');
+    expect(review.match(/data-test-operation-editor/g)).toHaveLength(1);
+    expect(review).not.toMatch(
+      /operation unavailable|no seam|No inputs|data-cad-operation-draft-pane|issues/u,
+    );
+
+    const navigation = {
+      schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_CAD_OPERATION_NAVIGATION_V1,
+      selectedIndex: 7,
+      items: [
+        {
+          index: 7,
+          operationNumber: 170,
+          title: 'Finish pocket',
+          work: 'Join',
+          typeLabel: 'Stitch',
+          status: { missing: false, broken: false, problem: false, draft: false, review: false },
+          context: {
+            inputs: [
+              { key: 'front', label: 'Front' },
+              { key: 'pocketing', label: 'Pocket bag' },
+            ],
+            seamKeys: ['physical-170', 'pose-170'],
+            output: { key: 'front-with-pocket', label: 'Front with pocket' },
+            warnings: [],
+            bomRefs: [],
+          },
+        },
+      ],
+    };
+    const withCurrentOperation = renderToStaticMarkup(
+      <PatternImportDxfPhaseECadTableDraftOperationsPanelV1
+        editor={editor}
+        operationNumber={170}
+        result={null}
+        navigation={navigation}
+        onSelectOperation={() => undefined}
+      />,
+    );
+    expect(withCurrentOperation).toContain('Assembly Order operation switcher');
+    expect(withCurrentOperation).toContain('Finish pocket');
+    expect(withCurrentOperation).toContain('Front + Pocket bag');
+    expect(withCurrentOperation).toContain('physical-170 + pose-170');
+    expect(withCurrentOperation).toContain('Front with pocket');
+    expect(withCurrentOperation.match(/data-test-operation-editor/g)).toHaveLength(1);
+    expect(withCurrentOperation).not.toMatch(/no seam|data-cad-operation-draft-pane|issues/u);
   });
 
   it('opens operation details before routing an editable stitch fact', () => {

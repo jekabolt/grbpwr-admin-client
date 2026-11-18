@@ -153,7 +153,8 @@ export function PatternImportDxfPhaseECadTableDraftOperationsPanelV1({
 }: Readonly<{
   /** The one caller-owned OperationEditor node. This component never creates another owner. */
   editor: ReactNode;
-  result: PatternImportDxfPhaseECadTableDraftOperationSessionBridgeResultV1;
+  /** A saved review can show the ordinary operation without a session draft plan. */
+  result: PatternImportDxfPhaseECadTableDraftOperationSessionBridgeResultV1 | null;
   operationNumber: number;
   /** Read-only projection built beside the sole OperationsField useFieldArray owner. */
   navigation?: PatternImportDxfPhaseECadOperationNavigationV1 | null;
@@ -228,7 +229,7 @@ export function PatternImportDxfPhaseECadTableDraftOperationsPanelV1({
   };
   const issueCount =
     (currentItem?.context.warnings.length ?? 0) +
-    (result.ok ? 0 : 1) +
+    (result?.ok === false ? 1 : 0) +
     (cadCommandDrafts && !cadCommandDrafts.ok ? 1 : 0);
   const canSwitchOperation = Boolean(navigation?.items.length && onSelectOperation);
   const editStitchField = onEditStitchField
@@ -313,56 +314,58 @@ export function PatternImportDxfPhaseECadTableDraftOperationsPanelV1({
               </Text>
             </div>
             <div className='flex flex-wrap justify-end gap-1'>
-              <CurrentOperationStatus item={currentItem} />
+              {currentItem || result ? <CurrentOperationStatus item={currentItem} /> : null}
               {issueCount ? <Pill tone='warn'>{issueCount} issues</Pill> : null}
             </div>
           </div>
         </header>
 
-        <div
-          className='flex min-h-8 items-center gap-1 overflow-x-auto whitespace-nowrap border-b border-hairline bg-pageBg px-2 py-1'
-          aria-label='Current operation summary'
-          data-cad-current-operation-summary=''
-        >
-          {currentItem?.work ? <Pill tone='ink'>{currentItem.work}</Pill> : null}
-          {currentItem?.typeLabel && currentItem.typeLabel !== currentItem.work ? (
-            <Text component='span' size='micro' variant='label'>
-              {currentItem.typeLabel}
-            </Text>
-          ) : null}
-          <Text component='span' size='micro' className='font-bold'>
-            {currentItem?.context.inputs.map(({ label }) => label).join(' + ') || 'No inputs'}
-          </Text>
-          <Text component='span' size='micro' variant='label'>
-            →
-          </Text>
-          {currentItem?.context.seamKeys.length ? (
+        {result || currentItem?.context.seamKeys.length ? (
+          <div
+            className='flex min-h-8 items-center gap-1 overflow-x-auto whitespace-nowrap border-b border-hairline bg-pageBg px-2 py-1'
+            aria-label='Current operation summary'
+            data-cad-current-operation-summary=''
+          >
+            {currentItem?.work ? <Pill tone='ink'>{currentItem.work}</Pill> : null}
+            {currentItem?.typeLabel && currentItem.typeLabel !== currentItem.work ? (
+              <Text component='span' size='micro' variant='label'>
+                {currentItem.typeLabel}
+              </Text>
+            ) : null}
             <Text component='span' size='micro' className='font-bold'>
-              {currentItem.context.seamKeys.join(' + ')}
+              {currentItem?.context.inputs.map(({ label }) => label).join(' + ') || 'No inputs'}
             </Text>
-          ) : (
             <Text component='span' size='micro' variant='label'>
-              no seam
+              →
             </Text>
-          )}
-          <Text component='span' size='micro' variant='label'>
-            →
-          </Text>
-          <Text component='span' size='micro' className='font-bold'>
-            {currentItem?.context.output?.label ?? 'No output'}
-          </Text>
-          <span className='mx-1 h-4 w-px shrink-0 bg-borderColor' />
-          <StitchContext
-            stitch={stitchVisual}
-            capabilities={stitchEditCapabilities}
-            onEditStitchField={editStitchField}
-          />
-          {currentItem?.context.bomRefs.map((material) => (
-            <Pill key={material.key} tone='mut' title={material.key}>
-              {material.label}
-            </Pill>
-          ))}
-        </div>
+            {currentItem?.context.seamKeys.length ? (
+              <Text component='span' size='micro' className='font-bold'>
+                {currentItem.context.seamKeys.join(' + ')}
+              </Text>
+            ) : (
+              <Text component='span' size='micro' variant='label'>
+                no seam
+              </Text>
+            )}
+            <Text component='span' size='micro' variant='label'>
+              →
+            </Text>
+            <Text component='span' size='micro' className='font-bold'>
+              {currentItem?.context.output?.label ?? 'No output'}
+            </Text>
+            <span className='mx-1 h-4 w-px shrink-0 bg-borderColor' />
+            <StitchContext
+              stitch={stitchVisual}
+              capabilities={stitchEditCapabilities}
+              onEditStitchField={editStitchField}
+            />
+            {currentItem?.context.bomRefs.map((material) => (
+              <Pill key={material.key} tone='mut' title={material.key}>
+                {material.label}
+              </Pill>
+            ))}
+          </div>
+        ) : null}
       </div>
 
       <details
@@ -444,271 +447,278 @@ export function PatternImportDxfPhaseECadTableDraftOperationsPanelV1({
           <div data-cad-current-operation-editor-owner=''>{editor}</div>
         </div>
 
-        <section
-          className='divide-y divide-borderColor border-t border-hairline'
-          aria-label='Session Draft Operations'
-          data-cad-operation-draft-pane=''
-        >
-          <div className='space-y-2 px-3 py-2'>
-            <div className='flex items-center justify-between gap-2'>
-              <Text component='h4' size='micro' className='font-bold'>
-                Draft operations
-              </Text>
-              <Pill tone='attention'>Unsaved</Pill>
-            </div>
-            {result.ok ? (
-              <ol className='space-y-2' data-cad-draft-operation-list=''>
-                {result.plan.operations.map((operation) => (
-                  <li
-                    key={operation.operationRef}
-                    className='space-y-2 border-t border-hairline py-2 first:border-t-0 first:pt-0'
-                    data-draft-operation-ref={operation.operationRef}
-                    data-draft-operation-readiness={operation.readiness}
-                  >
-                    <div className='flex items-start justify-between gap-2'>
-                      <div>
-                        {onFocusOperation ? (
-                          <Button
-                            type='button'
-                            size='xs'
-                            variant='underline'
-                            onClick={() => onFocusOperation(operation.operationNumber)}
-                          >
-                            #{operation.operationNumber} · {operation.processKind}
-                          </Button>
-                        ) : (
-                          <Text component='p' size='micro' className='font-bold'>
-                            #{operation.operationNumber} · {operation.processKind}
-                          </Text>
-                        )}
-                        <Text component='p' size='micro' variant='label' className='tabular-nums'>
-                          order {operation.order + 1} · stage {operation.stage} ·{' '}
-                          {operation.route.drafts.length} exact seam
-                          {operation.route.drafts.length === 1 ? '' : 's'}
-                        </Text>
-                      </div>
-                      <Pill
-                        tone={operation.readiness === 'complete-session-draft' ? 'ok' : 'attention'}
-                      >
-                        {operation.readiness === 'complete-session-draft' ? 'ready' : 'incomplete'}
-                      </Pill>
-                    </div>
-
-                    {operation.route.drafts.length ? (
-                      <div
-                        className='flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-micro'
-                        aria-label='Exact seams joined on the table'
-                      >
-                        <Text component='span' size='micro' variant='label'>
-                          Seams joined on table
-                        </Text>
-                        {operation.route.drafts.map((draft) => (
-                          <span
-                            key={draft.draftOperationId}
-                            className='min-w-0'
-                            data-cad-draft-seam={draft.draftOperationId}
-                          >
-                            <span className='block font-bold tabular-nums'>
-                              {draft.connection?.intentId ?? draft.draftOperationId}
-                            </span>
-                            {draft.connection?.sides?.length === 2 ? (
-                              <span className='block text-labelColor'>
-                                {draft.connection.sides[0].pieceLineKey}{' '}
-                                {draft.connection.sides[0].boundaryVertexIds.join(' → ')} ↔{' '}
-                                {draft.connection.sides[1].pieceLineKey}{' '}
-                                {draft.connection.sides[1].boundaryVertexIds.join(' → ')}
-                              </span>
-                            ) : null}
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
-
-                    <div className='grid grid-cols-1 gap-2 text-micro'>
-                      <div>
-                        <Text component='p' size='micro' variant='label'>
-                          Current operation dependencies
-                        </Text>
-                        <Text component='p' size='micro' className='break-all'>
-                          {operation.dependsOnOperationRefs.length
-                            ? operation.dependsOnOperationRefs.join(' → ')
-                            : 'none in this session projection'}
-                        </Text>
-                      </div>
-                      <div>
-                        <Text component='p' size='micro' variant='label'>
-                          Incomplete Assembly Order fields
-                        </Text>
-                        <div className='mt-1 flex flex-wrap gap-1'>
-                          {operation.incompleteFields.length ? (
-                            operation.incompleteFields.map((field) => (
-                              <Pill key={field} tone='attention'>
-                                {field}
-                              </Pill>
-                            ))
-                          ) : (
-                            <Text component='span' size='micro'>
-                              none
-                            </Text>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </li>
-                ))}
-              </ol>
-            ) : (
-              <CalloutBox tone='error'>
-                <Text component='p' className='font-bold'>
-                  Draft Operation #{result.blocker.operationNumber ?? operationNumber} blocked
+        {result ? (
+          <section
+            className='divide-y divide-borderColor border-t border-hairline'
+            aria-label='Session Draft Operations'
+            data-cad-operation-draft-pane=''
+          >
+            <div className='space-y-2 px-3 py-2'>
+              <div className='flex items-center justify-between gap-2'>
+                <Text component='h4' size='micro' className='font-bold'>
+                  Draft operations
                 </Text>
-                <Text component='p' size='micro'>
-                  {result.blocker.detail} [{result.blocker.code}]
-                </Text>
-              </CalloutBox>
-            )}
-          </div>
-
-          {cadCommandDrafts ? (
-            !cadCommandDrafts.ok ? (
-              <div className='space-y-2 px-3 py-2'>
-                <div className='flex items-center justify-between gap-2'>
-                  <Text component='h4' size='micro' className='font-bold'>
-                    Pattern edits
-                  </Text>
-                  <Pill tone='warn'>blocked</Pill>
-                </div>
-                <CalloutBox tone='error'>
-                  <Text component='p' className='font-bold'>
-                    Pattern edit draft blocked
-                  </Text>
-                  <Text component='p' size='micro'>
-                    {cadCommandDrafts.blocker.detail} [{cadCommandDrafts.blocker.code}]
-                  </Text>
-                </CalloutBox>
+                <Pill tone='attention'>Unsaved</Pill>
               </div>
-            ) : cadCommandDrafts.drafts.length ? (
-              <div className='space-y-2 px-3 py-2'>
-                <div className='flex items-center justify-between gap-2'>
-                  <Text component='h4' size='micro' className='font-bold'>
-                    Pattern edits
-                  </Text>
-                  <Pill tone={cadCommandSourceLocked ? 'ok' : 'attention'}>
-                    {cadCommandSourceLocked ? 'handed off · source locked' : 'draft'}
-                  </Pill>
-                </div>
-                {cadCommandAuthoringHandoff?.status === 'available' && !cadCommandSourceLocked ? (
-                  <div className='flex flex-wrap items-center justify-between gap-2'>
-                    <Button
-                      type='button'
-                      size='xs'
-                      variant='underline'
-                      onClick={() =>
-                        setSelectedDraftIds(
-                          selectedDraftIds.length === cadCommandDrafts.drafts.length
-                            ? []
-                            : cadCommandDrafts.drafts.map(
-                                ({ draftOperationId }) => draftOperationId,
-                              ),
-                        )
-                      }
-                    >
-                      {selectedDraftIds.length === cadCommandDrafts.drafts.length
-                        ? 'Clear selection'
-                        : 'Select batch'}
-                    </Button>
-                    <Button
-                      type='button'
-                      size='xs'
-                      variant='main'
-                      disabled={!selectedDraftIds.length}
-                      onClick={handoffCadCommandDrafts}
-                      data-cad-command-authoring-handoff=''
-                    >
-                      Add {selectedDraftIds.length || 'selected'} to Assembly Order
-                    </Button>
-                  </div>
-                ) : !cadCommandSourceLocked ? (
-                  <Text
-                    component='p'
-                    size='micro'
-                    variant='label'
-                    data-cad-command-authoring-unavailable=''
-                  >
-                    {cadCommandAuthoringHandoff?.status === 'unavailable'
-                      ? `${cadCommandAuthoringHandoff.blocker.detail} [${cadCommandAuthoringHandoff.blocker.code}]`
-                      : 'Assembly Order authoring owner unavailable [authoring-owner-unavailable]'}
-                  </Text>
-                ) : null}
-                <ol className='divide-y divide-borderColor' data-cad-command-draft-list=''>
-                  {cadCommandDrafts.drafts.map((draft) => (
+              {result.ok ? (
+                <ol className='space-y-2' data-cad-draft-operation-list=''>
+                  {result.plan.operations.map((operation) => (
                     <li
-                      key={draft.draftOperationId}
-                      className='space-y-1 py-2'
-                      data-cad-command-draft={draft.draftOperationId}
-                      data-cad-command-kind={draft.processKind}
+                      key={operation.operationRef}
+                      className='space-y-2 border-t border-hairline py-2 first:border-t-0 first:pt-0'
+                      data-draft-operation-ref={operation.operationRef}
+                      data-draft-operation-readiness={operation.readiness}
                     >
                       <div className='flex items-start justify-between gap-2'>
-                        {cadCommandAuthoringHandoff?.status === 'available' &&
-                        !cadCommandSourceLocked ? (
-                          <CheckboxCommon
-                            name={`cad-command-draft-${draft.draftOperationId}`}
-                            className='mt-0.5 h-4 w-4 shrink-0'
-                            aria-label={`Select ${draft.label}`}
-                            checked={selectedDraftIds.includes(draft.draftOperationId)}
-                            onChange={() => toggleCadCommandDraft(draft.draftOperationId)}
-                          />
-                        ) : null}
-                        <div className='min-w-0'>
-                          <Text component='p' size='micro' className='truncate font-bold'>
-                            {draft.label}
-                          </Text>
-                          <Text component='p' size='micro' variant='label'>
-                            revision {draft.sourceRevision} · order {draft.order + 1}
+                        <div>
+                          {onFocusOperation ? (
+                            <Button
+                              type='button'
+                              size='xs'
+                              variant='underline'
+                              onClick={() => onFocusOperation(operation.operationNumber)}
+                            >
+                              #{operation.operationNumber} · {operation.processKind}
+                            </Button>
+                          ) : (
+                            <Text component='p' size='micro' className='font-bold'>
+                              #{operation.operationNumber} · {operation.processKind}
+                            </Text>
+                          )}
+                          <Text component='p' size='micro' variant='label' className='tabular-nums'>
+                            order {operation.order + 1} · stage {operation.stage} ·{' '}
+                            {operation.route.drafts.length} exact seam
+                            {operation.route.drafts.length === 1 ? '' : 's'}
                           </Text>
                         </div>
-                        <Pill tone='mut'>{draft.processKind}</Pill>
+                        <Pill
+                          tone={
+                            operation.readiness === 'complete-session-draft' ? 'ok' : 'attention'
+                          }
+                        >
+                          {operation.readiness === 'complete-session-draft'
+                            ? 'ready'
+                            : 'incomplete'}
+                        </Pill>
                       </div>
-                      <div className='flex flex-wrap gap-x-2 gap-y-1 text-micro'>
-                        {draft.parameters.map((parameter) => (
-                          <span key={parameter.label}>
-                            <span className='text-labelColor'>{parameter.label}</span>{' '}
-                            <span className='font-bold'>{parameter.value}</span>
-                          </span>
-                        ))}
+
+                      {operation.route.drafts.length ? (
+                        <div
+                          className='flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-micro'
+                          aria-label='Exact seams joined on the table'
+                        >
+                          <Text component='span' size='micro' variant='label'>
+                            Seams joined on table
+                          </Text>
+                          {operation.route.drafts.map((draft) => (
+                            <span
+                              key={draft.draftOperationId}
+                              className='min-w-0'
+                              data-cad-draft-seam={draft.draftOperationId}
+                            >
+                              <span className='block font-bold tabular-nums'>
+                                {draft.connection?.intentId ?? draft.draftOperationId}
+                              </span>
+                              {draft.connection?.sides?.length === 2 ? (
+                                <span className='block text-labelColor'>
+                                  {draft.connection.sides[0].pieceLineKey}{' '}
+                                  {draft.connection.sides[0].boundaryVertexIds.join(' → ')} ↔{' '}
+                                  {draft.connection.sides[1].pieceLineKey}{' '}
+                                  {draft.connection.sides[1].boundaryVertexIds.join(' → ')}
+                                </span>
+                              ) : null}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      <div className='grid grid-cols-1 gap-2 text-micro'>
+                        <div>
+                          <Text component='p' size='micro' variant='label'>
+                            Current operation dependencies
+                          </Text>
+                          <Text component='p' size='micro' className='break-all'>
+                            {operation.dependsOnOperationRefs.length
+                              ? operation.dependsOnOperationRefs.join(' → ')
+                              : 'none in this session projection'}
+                          </Text>
+                        </div>
+                        <div>
+                          <Text component='p' size='micro' variant='label'>
+                            Incomplete Assembly Order fields
+                          </Text>
+                          <div className='mt-1 flex flex-wrap gap-1'>
+                            {operation.incompleteFields.length ? (
+                              operation.incompleteFields.map((field) => (
+                                <Pill key={field} tone='attention'>
+                                  {field}
+                                </Pill>
+                              ))
+                            ) : (
+                              <Text component='span' size='micro'>
+                                none
+                              </Text>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                      <Text component='p' size='micro' variant='label'>
-                        Depends on:{' '}
-                        <span data-cad-command-dependencies={draft.draftOperationId}>
-                          {draft.dependsOnDraftIds.length
-                            ? draft.dependsOnDraftIds.join(' → ')
-                            : 'none'}
-                        </span>
-                      </Text>
                     </li>
                   ))}
                 </ol>
-                {handoffResult && !handoffResult.ok ? (
+              ) : (
+                <CalloutBox tone='error'>
+                  <Text component='p' className='font-bold'>
+                    Draft Operation #{result.blocker.operationNumber ?? operationNumber} blocked
+                  </Text>
+                  <Text component='p' size='micro'>
+                    {result.blocker.detail} [{result.blocker.code}]
+                  </Text>
+                </CalloutBox>
+              )}
+            </div>
+
+            {cadCommandDrafts ? (
+              !cadCommandDrafts.ok ? (
+                <div className='space-y-2 px-3 py-2'>
+                  <div className='flex items-center justify-between gap-2'>
+                    <Text component='h4' size='micro' className='font-bold'>
+                      Pattern edits
+                    </Text>
+                    <Pill tone='warn'>blocked</Pill>
+                  </div>
                   <CalloutBox tone='error'>
                     <Text component='p' className='font-bold'>
-                      Pattern edit handoff blocked
+                      Pattern edit draft blocked
                     </Text>
                     <Text component='p' size='micro'>
-                      {handoffResult.blocker.detail} [{handoffResult.blocker.code}]
+                      {cadCommandDrafts.blocker.detail} [{cadCommandDrafts.blocker.code}]
                     </Text>
                   </CalloutBox>
-                ) : handoffResult?.ok ? (
-                  <CalloutBox tone='note'>
-                    <Text component='p' size='micro'>
-                      Added {handoffResult.inserted} draft operation
-                      {handoffResult.inserted === 1 ? '' : 's'} to the existing Assembly Order form.
+                </div>
+              ) : cadCommandDrafts.drafts.length ? (
+                <div className='space-y-2 px-3 py-2'>
+                  <div className='flex items-center justify-between gap-2'>
+                    <Text component='h4' size='micro' className='font-bold'>
+                      Pattern edits
                     </Text>
-                  </CalloutBox>
-                ) : null}
-              </div>
-            ) : null
-          ) : null}
-        </section>
+                    <Pill tone={cadCommandSourceLocked ? 'ok' : 'attention'}>
+                      {cadCommandSourceLocked ? 'handed off · source locked' : 'draft'}
+                    </Pill>
+                  </div>
+                  {cadCommandAuthoringHandoff?.status === 'available' && !cadCommandSourceLocked ? (
+                    <div className='flex flex-wrap items-center justify-between gap-2'>
+                      <Button
+                        type='button'
+                        size='xs'
+                        variant='underline'
+                        onClick={() =>
+                          setSelectedDraftIds(
+                            selectedDraftIds.length === cadCommandDrafts.drafts.length
+                              ? []
+                              : cadCommandDrafts.drafts.map(
+                                  ({ draftOperationId }) => draftOperationId,
+                                ),
+                          )
+                        }
+                      >
+                        {selectedDraftIds.length === cadCommandDrafts.drafts.length
+                          ? 'Clear selection'
+                          : 'Select batch'}
+                      </Button>
+                      <Button
+                        type='button'
+                        size='xs'
+                        variant='main'
+                        disabled={!selectedDraftIds.length}
+                        onClick={handoffCadCommandDrafts}
+                        data-cad-command-authoring-handoff=''
+                      >
+                        Add {selectedDraftIds.length || 'selected'} to Assembly Order
+                      </Button>
+                    </div>
+                  ) : !cadCommandSourceLocked ? (
+                    <Text
+                      component='p'
+                      size='micro'
+                      variant='label'
+                      data-cad-command-authoring-unavailable=''
+                    >
+                      {cadCommandAuthoringHandoff?.status === 'unavailable'
+                        ? `${cadCommandAuthoringHandoff.blocker.detail} [${cadCommandAuthoringHandoff.blocker.code}]`
+                        : 'Assembly Order authoring owner unavailable [authoring-owner-unavailable]'}
+                    </Text>
+                  ) : null}
+                  <ol className='divide-y divide-borderColor' data-cad-command-draft-list=''>
+                    {cadCommandDrafts.drafts.map((draft) => (
+                      <li
+                        key={draft.draftOperationId}
+                        className='space-y-1 py-2'
+                        data-cad-command-draft={draft.draftOperationId}
+                        data-cad-command-kind={draft.processKind}
+                      >
+                        <div className='flex items-start justify-between gap-2'>
+                          {cadCommandAuthoringHandoff?.status === 'available' &&
+                          !cadCommandSourceLocked ? (
+                            <CheckboxCommon
+                              name={`cad-command-draft-${draft.draftOperationId}`}
+                              className='mt-0.5 h-4 w-4 shrink-0'
+                              aria-label={`Select ${draft.label}`}
+                              checked={selectedDraftIds.includes(draft.draftOperationId)}
+                              onChange={() => toggleCadCommandDraft(draft.draftOperationId)}
+                            />
+                          ) : null}
+                          <div className='min-w-0'>
+                            <Text component='p' size='micro' className='truncate font-bold'>
+                              {draft.label}
+                            </Text>
+                            <Text component='p' size='micro' variant='label'>
+                              revision {draft.sourceRevision} · order {draft.order + 1}
+                            </Text>
+                          </div>
+                          <Pill tone='mut'>{draft.processKind}</Pill>
+                        </div>
+                        <div className='flex flex-wrap gap-x-2 gap-y-1 text-micro'>
+                          {draft.parameters.map((parameter) => (
+                            <span key={parameter.label}>
+                              <span className='text-labelColor'>{parameter.label}</span>{' '}
+                              <span className='font-bold'>{parameter.value}</span>
+                            </span>
+                          ))}
+                        </div>
+                        <Text component='p' size='micro' variant='label'>
+                          Depends on:{' '}
+                          <span data-cad-command-dependencies={draft.draftOperationId}>
+                            {draft.dependsOnDraftIds.length
+                              ? draft.dependsOnDraftIds.join(' → ')
+                              : 'none'}
+                          </span>
+                        </Text>
+                      </li>
+                    ))}
+                  </ol>
+                  {handoffResult && !handoffResult.ok ? (
+                    <CalloutBox tone='error'>
+                      <Text component='p' className='font-bold'>
+                        Pattern edit handoff blocked
+                      </Text>
+                      <Text component='p' size='micro'>
+                        {handoffResult.blocker.detail} [{handoffResult.blocker.code}]
+                      </Text>
+                    </CalloutBox>
+                  ) : handoffResult?.ok ? (
+                    <CalloutBox tone='note'>
+                      <Text component='p' size='micro'>
+                        Added {handoffResult.inserted} draft operation
+                        {handoffResult.inserted === 1 ? '' : 's'} to the existing Assembly Order
+                        form.
+                      </Text>
+                    </CalloutBox>
+                  ) : null}
+                </div>
+              ) : null
+            ) : null}
+          </section>
+        ) : null}
       </details>
     </div>
   );
