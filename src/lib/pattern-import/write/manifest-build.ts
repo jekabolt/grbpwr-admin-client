@@ -2,11 +2,13 @@
 // the text, so the gate can compare the two.
 
 import { authoredInternalVertices } from '../manifest/authored-internal';
+import { AUTHORED_NOTCH_STROKES } from '../manifest/authored-notches';
 import type {
   ReplayRecord,
   AutopilotRecord,
   ConversionManifest,
   ManifestBlock,
+  ManifestAuthoredNotchGroup,
   ManifestContinuity,
   ManifestPiece,
   PieceSpec,
@@ -20,6 +22,35 @@ import { contourSigCap, contourSignature } from '../manifest/contour-sig';
 // area to 1 mm² keep the per-block entry short (M1: the 999 prologue of a 138-block sheet).
 const r1 = (v: number) => Math.round(v * 10) / 10;
 const r0 = (v: number) => Math.round(v);
+
+function authoredNotchesOf(block: PlannedBlock): ManifestAuthoredNotchGroup[] {
+  const groups = [];
+  for (let index = 0; index < block.notches.length; ) {
+    const firstStroke = index;
+    const first = block.notches[index]!.authoredGroup;
+    if (!first) {
+      index++;
+      continue;
+    }
+    const strokeCount = AUTHORED_NOTCH_STROKES[first.shape];
+    const vertices = [];
+    for (let stroke = 0; stroke < strokeCount; stroke++, index++) {
+      const native = block.notches[index];
+      const group = native?.authoredGroup;
+      if (
+        !native ||
+        !group ||
+        first.groupId !== group.groupId ||
+        first.shape !== group.shape ||
+        group.index !== stroke
+      )
+        throw new Error(`${block.name}: the authored notch strokes are missing or out of order.`);
+      vertices.push(...authoredInternalVertices([native.a, native.b]));
+    }
+    groups.push({ groupId: first.groupId, shape: first.shape, firstStroke, vertices });
+  }
+  return groups;
+}
 
 export const LAYERS = { cut: '1', seam: '14', grain: '7', notch: '4', internal: '8' } as const;
 
@@ -72,11 +103,13 @@ export function manifestBlock(b: PlannedBlock, sigPts?: number): ManifestBlock {
     const [x, y] = authoredInternalVertices([at]);
     return { anchor: [x!, y!] as [number, number], text };
   });
+  const authoredNotches = authoredNotchesOf(b);
   return {
     block: b.name,
     ...(b.protectedLineSplit ? { protectedLineSplit: b.protectedLineSplit } : {}),
     ...(authoredInternal.length ? { authoredInternal } : {}),
     ...(authoredText?.length ? { authoredText } : {}),
+    ...(authoredNotches.length ? { authoredNotches } : {}),
     identity: b.identity,
     sizeToken: b.sizeToken,
     sizeId: b.sizeId,

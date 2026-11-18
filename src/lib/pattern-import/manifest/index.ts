@@ -34,6 +34,7 @@
 // and `contour-sig.ts`, the F14f cut-ring signature the writer embeds and the card checks).
 import { parseManifestAuthoredText } from './authored-text';
 import { parseManifestAuthoredInternal } from './authored-internal';
+import { parseManifestAuthoredNotches } from './authored-notches';
 import { parseProtectedLineSplit } from './protected-line-split';
 import { Inflate, deflateSync } from 'fflate';
 import {
@@ -932,12 +933,19 @@ export function validateManifest(x: unknown): ConversionManifest {
       b.authoredText === undefined ? null : parseManifestAuthoredText(b.authoredText);
     if (b.authoredText !== undefined && !authoredText)
       fail(`${p}.authoredText`, 'invalid native CAD text metadata');
+    const authoredNotches =
+      b.authoredNotches === undefined
+        ? null
+        : parseManifestAuthoredNotches(b.authoredNotches, b.notches as number);
+    if (b.authoredNotches !== undefined && !authoredNotches)
+      fail(`${p}.authoredNotches`, 'invalid native layer-4 notch group');
     const [x0, y0, x1, y1] = b.bboxMm as number[];
     return {
       block: b.block,
       ...(split ? { protectedLineSplit: split } : {}),
       ...(authoredInternal ? { authoredInternal } : {}),
       ...(authoredText ? { authoredText } : {}),
+      ...(authoredNotches ? { authoredNotches } : {}),
       identity: b.identity,
       sizeToken: b.sizeToken,
       sizeId: b.sizeId,

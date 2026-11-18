@@ -1166,6 +1166,127 @@ it('retains one authored single notch on its exact saved-size piece through the 
   }
 });
 
+it.each(['double', 'triple', 'v'] as const)(
+  'preserves %s notch groups as native layer-4 strokes after ordinary review and fresh read',
+  async (notchKind) => {
+    const f = await fixture(true);
+    vi.stubGlobal('Worker', InProcessTransport);
+    const worker = new ImportWorkerClient();
+    try {
+      const {
+        buildPatternImportDxfPhaseEDraftCadCanvasDartBasesV1,
+        recordPatternImportDxfPhaseEDraftCadCanvasBoundaryPickV1,
+      } = await import('./draft-cad-canvas-v1');
+      const { compilePatternImportDxfPhaseEDraftCadGeometryV1 } = await import(
+        './draft-cad-geometry-compile-v1'
+      );
+      const { parseDxf } = await import('lib/nesting/dxf/parse');
+      const { projection, selection } = f.compileInput;
+      const target = projection.pieces[0]!;
+      const contour = target.contours.find(({ role }) => role === 'cut-boundary')!;
+      const base = buildPatternImportDxfPhaseEDraftCadCanvasDartBasesV1(
+        f.initial,
+        projection,
+        0,
+      ).find(({ anchor }) => anchor.contourId === contour.contourId);
+      if (!base) throw Error('Fixture lacks the exact cut edge.');
+      const edit = recordPatternImportDxfPhaseEDraftCadCanvasBoundaryPickV1({
+        session: f.initial,
+        projection,
+        activeTool: 'notch',
+        activePieceIndex: 0,
+        sequence: 0,
+        baseKey: base.key,
+        notchKind,
+      });
+      expect(edit.recorded).toBe(true);
+      const compileSource = createPatternImportDxfPhaseEDraftCadCompileSourceV1(
+        f.source.native.draft,
+      );
+      if (!compileSource) throw Error('Fixture lacks a writer source.');
+      const compiled = compilePatternImportDxfPhaseEDraftCadGeometryV1({
+        session: edit.session,
+        projection,
+        selection,
+        compileSource,
+      });
+      if (!compiled.ok) throw Error(JSON.stringify(compiled.blockers));
+      const strokeCount = notchKind === 'triple' ? 3 : 2;
+      const checkStrokes = (job: typeof compiled.artifact.compiledJob) => {
+        const size = job.pieces.find(({ identity }) => identity === target.pieceId)!.sizes[0]!;
+        const strokes = size.notches.filter(({ authoredGroup }) => authoredGroup);
+        expect(strokes).toHaveLength(strokeCount);
+        expect(
+          strokes.map(({ authoredGroup }) => [authoredGroup?.shape, authoredGroup?.index]),
+        ).toEqual(Array.from({ length: strokeCount }, (_, index) => [notchKind, index]));
+        if (notchKind === 'v') expect(strokes[0]!.seg[1]).toEqual(strokes[1]!.seg[1]);
+        else expect(strokes[0]!.seg[1]).not.toEqual(strokes[1]!.seg[1]);
+      };
+      for (const dialect of ['r12', 'r2000'] as const) {
+        const written = writeDxfDetailed({ ...compiled.artifact.compiledJob, dialect });
+        const block = written.manifest.blocks.find(({ identity }) => identity === target.pieceId)!;
+        expect(block.authoredNotches).toEqual([
+          {
+            groupId: expect.any(String),
+            shape: notchKind,
+            firstStroke: expect.any(Number),
+            vertices: expect.any(Array),
+          },
+        ]);
+        expect(block.authoredNotches![0]!.vertices).toHaveLength(strokeCount * 4);
+        const raw = parseDxf(new TextEncoder().encode(written.dxfText).buffer, 'mm');
+        expect(
+          raw.dxf.blocks[block.block]!.entities.filter(
+            ({ layer, type }) => layer === '4' && type === 'LINE',
+          ),
+        ).toHaveLength(block.notches);
+        const file = new File([written.dxfText], 'native-notches.dxf', { type: 'image/vnd.dxf' });
+        const scope = (await draftThroughWizardStages(file, f.current.card, worker)).scopes[0]!;
+        expect(scope.manifest.gate?.passed).toBe(true);
+        checkStrokes(scope.writerReplay!.job);
+
+        const bytes = new TextEncoder().encode(scope.dxfText);
+        const row = {
+          ...f.current.row,
+          revision: f.current.row.revision + 1,
+          cardLockVersion: f.current.row.cardLockVersion + 1,
+          sizeBytes: bytes.length,
+          sha256: await digestFullAssemblyFixture(bytes),
+        };
+        const card = structuredClone(f.current.card);
+        card.existingPatterns![0]!.manifest = scope.manifest;
+        const reopened = await createSavedThreePanelSourceV1(
+          { ...(await createSavedThreePanelFixtureV1(2)), bytes, row, card },
+          true,
+        );
+        try {
+          expect(reopened.native.row).toEqual(row);
+          checkStrokes(reopened.native.draft.scopes[0]!.writerReplay!.job);
+        } finally {
+          reopened.dispose();
+        }
+
+        if (dialect === 'r12') {
+          const altered = readManifest(written.dxfText)!;
+          altered.blocks.find(
+            ({ identity }) => identity === target.pieceId,
+          )!.authoredNotches![0]!.vertices[0]! += 100;
+          const stale = new File([embedManifest(written.dxfText, altered)], file.name, {
+            type: file.type,
+          });
+          await expect(draftThroughWizardStages(stale, f.current.card, worker)).rejects.toThrow(
+            'saved layer-4 stroke',
+          );
+        }
+      }
+    } finally {
+      worker.dispose();
+      vi.unstubAllGlobals();
+      f.source.dispose();
+    }
+  },
+);
+
 it.each(['internal-line', 'pattern-line', 'french-curve', 'guideline', 'cross'] as const)(
   'reopens the authored %s as the same typed native layer-8 path after ordinary review',
   async (tool) => {

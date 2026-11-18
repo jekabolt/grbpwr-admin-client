@@ -5,12 +5,14 @@ import type {
   Affine,
   AllowanceDecision,
   AuthoredInternalLabel,
+  AuthoredNotchStroke,
   AuthoredPointMark,
   AuthoredTextMark,
   BoxMm,
   Feature,
   ManifestAuthoredInternalPath,
   ManifestAuthoredTextMark,
+  ManifestAuthoredNotchGroup,
   ManifestBlock,
   PathId,
   PieceCandidate,
@@ -107,6 +109,7 @@ export type DxfMeta = {
   zeroAllowanceSeamBlocks?: ReadonlyMap<string, NonNullable<ManifestBlock['contour']>>;
   authoredInternalByBlock?: ReadonlyMap<string, readonly ManifestAuthoredInternalPath[]>;
   authoredTextByBlock?: ReadonlyMap<string, readonly ManifestAuthoredTextMark[]>;
+  authoredNotchesByBlock?: ReadonlyMap<string, readonly ManifestAuthoredNotchGroup[]>;
   /** Proven by the generator's DXF marker or the system-owned card-row flag. */
   generatedFusing: boolean;
   /** Model-space `KEY: value` texts (AAMA header: STYLE NAME, SAMPLE SIZE, UNITS, AUTHOR…). */
@@ -200,6 +203,9 @@ export type DxfNotch = {
   /** Distance from `at` to that contour, mm. */
   distMm: number;
   source: 'line' | 'point' | 'derived';
+  authoredGroup?: AuthoredNotchStroke;
+  /** Exact native end for a deliberately authored angled or parallel stroke. */
+  authoredEnd?: PtMm;
   /** Every source path folded into this logical notch (twins and duplicates included). */
   paths: PathId[];
   /** For `derived` notches: the sample-size notch it was transferred from. */

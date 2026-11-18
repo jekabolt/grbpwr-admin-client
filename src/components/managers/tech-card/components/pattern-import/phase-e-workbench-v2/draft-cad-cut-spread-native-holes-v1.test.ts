@@ -228,3 +228,27 @@ it('preserves both grades and refuses the whole cut when one grade has an ambigu
   });
   expect(job).toEqual(changed);
 });
+
+it('refuses to split an authored notch group into two different pieces', async () => {
+  const { job, size, cut } = await holeFixture();
+  size.notches = [58.5, 61.5].map((x, index) => ({
+    kind: 'notch',
+    at: { x, y: 0 },
+    seg: [
+      { x, y: 0 },
+      { x, y: 3 },
+    ],
+    depthMm: 3,
+    ranges: [],
+    origin: 'operator',
+    confidence: 1,
+    authoredGroup: { groupId: 'double-one', shape: 'double', index },
+  }));
+  expect(executePatternImportDxfPhaseEDraftCadCutGeometryV1(job, cut)).toMatchObject({
+    ok: false,
+    job: null,
+    blockers: [
+      { code: 'feature-partition-ambiguous', detail: expect.stringContaining('notch group') },
+    ],
+  });
+});

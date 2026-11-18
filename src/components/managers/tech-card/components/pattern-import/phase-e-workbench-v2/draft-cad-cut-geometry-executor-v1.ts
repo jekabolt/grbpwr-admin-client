@@ -429,6 +429,7 @@ function splitSize(
     (owner.cutLoops ??= []).push(structuredClone(loop));
     owner.areaMm2 += area;
   }
+  const notchOwners = new Map<string, number>();
   for (const notch of size.notches) {
     const side = featureSide([notch.at, ...notch.seg], split.polygons);
     if (side === null)
@@ -437,6 +438,17 @@ function splitSize(
         code: 'feature-partition-ambiguous',
         detail: `A notch in size ${size.sizeToken} lies on the cut chord.`,
       };
+    const id = notch.authoredGroup?.groupId;
+    if (id) {
+      const owner = notchOwners.get(id);
+      if (owner !== undefined && owner !== side)
+        return {
+          ok: false,
+          code: 'feature-partition-ambiguous',
+          detail: `An authored notch group in size ${size.sizeToken} crosses the cut chord.`,
+        };
+      notchOwners.set(id, side);
+    }
     output[side].notches.push(structuredClone(notch));
   }
   for (const drill of size.drills) {

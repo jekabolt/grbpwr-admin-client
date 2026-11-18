@@ -408,7 +408,11 @@ function candidateOf(
     features.push({
       kind: 'notch',
       at: n.at,
-      seg: [n.at, { x: n.at.x + n.dir.x * n.depthMm, y: n.at.y + n.dir.y * n.depthMm }],
+      seg: [
+        n.at,
+        n.authoredEnd ?? { x: n.at.x + n.dir.x * n.depthMm, y: n.at.y + n.dir.y * n.depthMm },
+      ],
+      ...(n.authoredGroup ? { authoredGroup: n.authoredGroup } : {}),
       depthMm: n.depthMm,
       origin: n.source === 'derived' ? 'derived' : 'detected',
       ranges: n.paths.map(range),

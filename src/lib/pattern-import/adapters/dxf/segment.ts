@@ -4,6 +4,7 @@
 // sizes, pairs, ungraded layer 1).
 
 import { authoredInternalVertices } from '../../manifest/authored-internal';
+import { AUTHORED_NOTCH_STROKES } from '../../manifest/authored-notches';
 import { AUTHORED_TEXT_LAYER } from '../../manifest/authored-text';
 import { readAuthoredTextMarks } from './authored-text';
 import { contourSigProblem } from '../../manifest/contour-sig';
@@ -868,8 +869,60 @@ function blockPiece(
 
   // notches
   const raw: RawNotch[] = [];
+  const ownedNotches = new Map<PathId, DxfNotch>();
+  const groups = group.block ? read.meta.authoredNotchesByBlock?.get(group.block) : undefined;
+  if (groups) {
+    const { a, b, c, d, e, f } = group.transform;
+    if (!cut || read.meta.units.mmPerUnit !== 1 || a !== 1 || b !== 0 || c !== 0 || d !== 1)
+      throw new Error(`Typed CAD notches in ${group.block} require an exact millimetre cut frame.`);
+    const layer4 = paths.filter((path) => layerOfPath(path) === '4');
+    for (const { groupId, shape, firstStroke, vertices } of groups) {
+      for (let index = 0; index < AUTHORED_NOTCH_STROKES[shape]; index++) {
+        const path = layer4[firstStroke + index];
+        const coords = path ? authoredInternalVertices(path.pts, { x: e, y: f }) : [];
+        if (
+          !path ||
+          path.src.block !== group.block ||
+          read.meta.pathEntity[path.id] !== 'LINE' ||
+          path.closed ||
+          coords.length !== 4 ||
+          coords.some((value, coordinate) => value !== vertices[index * 4 + coordinate])
+        )
+          throw new Error(`The saved layer-4 stroke for ${shape} in ${group.block} changed.`);
+        const [at, end] = path.pts as [PtMm, PtMm];
+        const depthMm = Math.hypot(end.x - at.x, end.y - at.y);
+        if (
+          distToContour(at, cut) > 0.001 ||
+          depthMm < 1 - 1e-5 ||
+          depthMm > PATIMPORT.notchMaxMm + 1e-5 ||
+          !pointInPolygon(end, cut.pts)
+        )
+          throw new Error(
+            `The saved layer-4 stroke for ${shape} is outside the cut in ${group.block}.`,
+          );
+        const dir = { x: (end.x - at.x) / depthMm, y: (end.y - at.y) / depthMm };
+        ownedNotches.set(path.id, {
+          at,
+          dir,
+          depthMm,
+          angleDeg: deg(dir),
+          on: 'cut',
+          distMm: 0,
+          source: 'line',
+          paths: [path.id],
+          authoredGroup: { groupId, shape, index },
+          authoredEnd: end,
+        });
+      }
+    }
+  }
   for (const p of by('notch')) {
     roles[p.id] = 'notch';
+    const owned = ownedNotches.get(p.id);
+    if (owned) {
+      raw.push(owned);
+      continue;
+    }
     const pa = read.meta.points[p.id];
     if (p.pts.length === 1) {
       const at = p.pts[0];
@@ -984,7 +1037,8 @@ function dedupeNotches(
   staleCut: boolean,
   allowanceMm: number,
 ): void {
-  const { raw, piece } = w;
+  const { piece } = w;
+  const raw = w.raw.filter(({ authoredGroup }) => !authoredGroup);
   const live = raw.map(() => true);
   if (staleCut) {
     const graded = raw.some((n) => n.on !== 'cut');
@@ -1108,7 +1162,7 @@ function dedupeNotches(
     }
     out.push(proj);
   }
-  piece.notches = out;
+  piece.notches = [...out, ...w.raw.filter(({ authoredGroup }) => authoredGroup)];
 }
 
 /** Cumulative arc length of a closed polyline; c[i] = length up to vertex i, c[n] = perimeter. */
@@ -1195,6 +1249,7 @@ function transferNotches(sample: DxfBlockPiece, target: DxfBlockPiece): number {
   const sameDir = Math.sign(sample.seam.signedAreaMm2) === Math.sign(target.seam.signedAreaMm2);
   let n = 0;
   for (const src of sample.notches) {
+    if (src.authoredGroup) continue;
     const near = nearestOnPolyline(src.at, S0, true);
     const s0 = c0[near.seg] + near.t * (c0[near.seg + 1] - c0[near.seg]);
     let sk: number;

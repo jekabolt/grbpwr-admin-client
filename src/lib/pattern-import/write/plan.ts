@@ -73,7 +73,13 @@ export const LAYOUT_GAP_MM = 50;
 export const LAYOUT_ROW_MAX_MM = 4000;
 export const UNI_TOKEN = 'UNI';
 
-export type PlannedNotch = { a: PtMm; b: PtMm; depthMm: number; angleDeg: number };
+export type PlannedNotch = {
+  a: PtMm;
+  b: PtMm;
+  depthMm: number;
+  angleDeg: number;
+  authoredGroup?: NotchFeature['authoredGroup'];
+};
 /** A drill / button mark: a circle keeps the diameter it was drawn with; anything else is the square. */
 export type PlannedDrill = { at: PtMm; form: 'square' | 'circle' | 'point'; sizeMm: number };
 export type PlannedGrain = { tail: PtMm; tip: PtMm; barb: PtMm; u: PtMm };
@@ -267,6 +273,26 @@ function plannedNotch(cut: PtMm[], n: NotchFeature, warnings: string[], who: str
   // (build.ts). One farther off was drawn on another line (a seam-line copy the adapter did not
   // fold) and lands on top of its twin — the written count still matches, so say so here.
   const moved = dist(n.at, q);
+  if (n.authoredGroup) {
+    const {
+      seg: [a, b],
+      authoredGroup,
+    } = n;
+    const depthMm = dist(a, b);
+    if (
+      moved > 0.001 ||
+      dist(n.at, a) > 0.001 ||
+      !(depthMm >= 1 - 1e-5 && depthMm <= PATIMPORT.notchMaxMm + 1e-5)
+    )
+      throw new Error(`${who}: the authored notch stroke moved off its exact cut edge.`);
+    return {
+      a,
+      b,
+      depthMm,
+      authoredGroup,
+      angleDeg: (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI,
+    };
+  }
   if (moved > NOTCH_SNAP_WARN_MM)
     warnings.push(`${who}: notch snapped ${moved.toFixed(1)} mm onto the cut line`);
   const a = cut[seg];
@@ -431,7 +457,15 @@ export function planBlocks(
         warnings.push(
           `${who}: removed ${cutS.spikes + (seamS?.spikes ?? 0)} zero-width spike(s) from the ${cutS.spikes ? 'cut' : 'seam'} line${slits.length ? ` — ${slits.length} written as notch(es) (${slits.map((e) => `${e.depthMm.toFixed(1)} mm at ${e.at.x.toFixed(1)}, ${e.at.y.toFixed(1)}`).join('; ')})` : ''}`,
         );
-      const sNotches = slits.length ? [...s.notches, ...slits] : s.notches;
+      const sNotches = s.notches.some(({ authoredGroup }) => authoredGroup)
+        ? [
+            ...s.notches.filter(({ authoredGroup }) => !authoredGroup),
+            ...slits,
+            ...s.notches.filter(({ authoredGroup }) => authoredGroup),
+          ]
+        : slits.length
+          ? [...s.notches, ...slits]
+          : s.notches;
       if (!seam) warnings.push(`${who}: no seam line — layer 14 omitted (the gate will block)`);
       const internal = s.internal.map((f) => ({
         pts:

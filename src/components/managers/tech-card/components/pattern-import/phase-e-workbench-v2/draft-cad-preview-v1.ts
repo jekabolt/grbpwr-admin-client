@@ -1,5 +1,6 @@
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
-import type { PtMm } from 'lib/pattern-import/types';
+import { signedArea } from 'lib/pattern-import/semantics/geom';
+import type { AuthoredNotchShape, PtMm } from 'lib/pattern-import/types';
 
 import type {
   PatternImportDxfPhaseEDraftCadBoundaryAnchorV1,
@@ -69,6 +70,7 @@ export type PatternImportDxfPhaseEDraftCadPreviewPrimitiveV1 =
         indicator: 'single' | 'double' | 'triple' | 'v';
         depthMm: number;
         sourceAnchor: PatternImportDxfPhaseEDraftCadBoundaryAnchorV1;
+        strokes?: readonly (readonly [PtMm, PtMm])[];
       }>)
   | (PrimitiveBase<'dart'> &
       Readonly<{
@@ -181,13 +183,19 @@ function rectangleCorners(
   );
 }
 
-type ExactAnchorSegment = Readonly<{ fromMm: PtMm; toMm: PtMm; pointMm: PtMm }>;
+type ExactAnchorSegment = Readonly<{
+  fromMm: PtMm;
+  toMm: PtMm;
+  pointMm: PtMm;
+  cutOrientation: number;
+}>;
 
 function exactAnchorSegment(
   session: PatternImportDxfPhaseEDraftCadSessionV1,
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1,
   target: PatternImportDxfPhaseEDraftCadTargetV1,
   anchor: PatternImportDxfPhaseEDraftCadBoundaryAnchorV1,
+  includeCutOrientation = false,
 ): ExactAnchorSegment | null {
   const catalogPiece = session.source.catalog.pieces.find(
     (piece) => piece.pieceId === target.pieceId && piece.pieceLineKey === target.pieceLineKey,
@@ -220,13 +228,44 @@ function exactAnchorSegment(
   if (!from || !to || !finitePoint(from.pointMm) || !finitePoint(to.pointMm)) return null;
   const fromMm = clonePoint(from.pointMm);
   const toMm = clonePoint(to.pointMm);
+  const ordered = (indexes[0]! + 1) % catalogContour.boundaryVertices.length === indexes[1];
   return Object.freeze({
     fromMm,
     toMm,
+    cutOrientation:
+      includeCutOrientation && projectedContour?.closed && projectedContour.role === 'cut-boundary'
+        ? Math.sign(signedArea(projectedContour.vertices.map(({ pointMm }) => pointMm))) *
+          (ordered ? 1 : -1)
+        : 0,
     pointMm: clonePoint({
       x: fromMm.x + (toMm.x - fromMm.x) * anchor.progress,
       y: fromMm.y + (toMm.y - fromMm.y) * anchor.progress,
     }),
+  });
+}
+
+function compoundNotchStrokes(
+  shape: AuthoredNotchShape,
+  depthMm: number,
+  progress: number,
+  { fromMm, toMm, pointMm, cutOrientation }: ExactAnchorSegment,
+) {
+  const dx = toMm.x - fromMm.x;
+  const dy = toMm.y - fromMm.y;
+  const length = Math.hypot(dx, dy);
+  const spacingMm = 3;
+  const extent = shape === 'triple' ? spacingMm : spacingMm / 2;
+  if (!cutOrientation || Math.min(progress, 1 - progress) * length <= extent) return null;
+  const x = dx / length;
+  const y = dy / length;
+  const offsets = shape === 'triple' ? [-extent, 0, extent] : [-extent, extent];
+  return offsets.map((offset) => {
+    const at = { x: pointMm.x + offset * x, y: pointMm.y + offset * y };
+    const start = shape === 'v' ? pointMm : at;
+    return [
+      at,
+      { x: start.x - y * depthMm * cutOrientation, y: start.y + x * depthMm * cutOrientation },
+    ] as const;
   });
 }
 
@@ -422,6 +461,7 @@ export function buildPatternImportDxfPhaseEDraftCadPreviewV1(
           projection,
           command.target,
           command.payload.anchor,
+          command.payload.kind !== 'single',
         );
         if (!segment) {
           blockers.push(
@@ -433,17 +473,32 @@ export function buildPatternImportDxfPhaseEDraftCadPreviewV1(
           );
           break;
         }
+        const { kind, depthMm, anchor } = command.payload;
+        const strokes =
+          kind === 'single' ? null : compoundNotchStrokes(kind, depthMm, anchor.progress, segment);
+        if (kind !== 'single' && !strokes) {
+          blockers.push(
+            commandBlocker(
+              command,
+              'invalid-command-geometry',
+              'Choose a cut edge with room for the full notch.',
+            ),
+          );
+          break;
+        }
         primitives.push(
           deepFreeze({
             ...base,
             kind: 'notch' as const,
             pointMm: segment.pointMm,
-            indicator: command.payload.kind,
-            depthMm: command.payload.depthMm,
-            sourceAnchor: structuredClone(command.payload.anchor),
+            indicator: kind,
+            depthMm,
+            sourceAnchor: structuredClone(anchor),
+            ...(strokes ? { strokes } : {}),
           }),
         );
         bounds = extend(bounds, segment.pointMm);
+        if (strokes) bounds = extendPoints(bounds, strokes.flat());
         break;
       }
       case 'dart': {

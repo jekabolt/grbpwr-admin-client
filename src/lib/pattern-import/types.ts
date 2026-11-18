@@ -1454,12 +1454,16 @@ type FeatureBase = {
   confidence: number;
 };
 
+export type AuthoredNotchShape = 'double' | 'triple' | 'v';
+export type AuthoredNotchStroke = { groupId: string; shape: AuthoredNotchShape; index: number };
+
 export type NotchFeature = FeatureBase & {
   kind: 'notch';
   /** Point ON the contour and the short segment as drawn. */
   at: PtMm;
   seg: [PtMm, PtMm];
   depthMm: Mm;
+  authoredGroup?: AuthoredNotchStroke;
   /**
    * GRADE P1: not drawn in this size — placed from the sizes that draw it (pieces/gfit/notch-grade:
    * ≥ 2 drawn copies at a grade-consistent place on the piece's canonical topology, or the
@@ -2685,10 +2689,20 @@ export type ManifestAuthoredTextMark = {
   text: string;
 };
 
+export type ManifestAuthoredNotchGroup = {
+  groupId: string;
+  shape: AuthoredNotchShape;
+  /** First stroke among the block's native layer-4 LINE entities. */
+  firstStroke: number;
+  /** Each stroke's ordered start and end on the writer's 0.000001 mm grid. */
+  vertices: number[];
+};
+
 export type ManifestBlock = {
   protectedLineSplit?: ManifestProtectedLineSplit;
   authoredInternal?: ManifestAuthoredInternalPath[];
   authoredText?: ManifestAuthoredTextMark[];
+  authoredNotches?: ManifestAuthoredNotchGroup[];
   block: string;
   identity: PieceKey;
   sizeToken: string;

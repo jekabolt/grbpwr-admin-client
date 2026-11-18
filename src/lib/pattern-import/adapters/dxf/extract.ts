@@ -2052,6 +2052,7 @@ async function readDxfInternal(
   let zeroAllowanceSeamBlocks: DxfMeta['zeroAllowanceSeamBlocks'];
   let authoredInternalByBlock: DxfMeta['authoredInternalByBlock'];
   let authoredTextByBlock: DxfMeta['authoredTextByBlock'];
+  let authoredNotchesByBlock: DxfMeta['authoredNotchesByBlock'];
   if (manifest && dec.binary === null && !file.generatedFusing && !dec.generatedFusing) {
     try {
       const conversion = readManifestBytes(file.bytes);
@@ -2086,6 +2087,11 @@ async function readDxfInternal(
           authoredText?.length ? [[block, authoredText]] : [],
         ),
       );
+      authoredNotchesByBlock = new Map(
+        (conversion?.blocks ?? []).flatMap(({ block, authoredNotches }) =>
+          authoredNotches?.length ? [[block, authoredNotches]] : [],
+        ),
+      );
     } catch {
       // The native read follows the ordinary foreign-file rules if the manifest is invalid.
     }
@@ -2103,6 +2109,7 @@ async function readDxfInternal(
     ...(zeroAllowanceSeamBlocks?.size ? { zeroAllowanceSeamBlocks } : {}),
     ...(authoredInternalByBlock?.size ? { authoredInternalByBlock } : {}),
     ...(authoredTextByBlock?.size ? { authoredTextByBlock } : {}),
+    ...(authoredNotchesByBlock?.size ? { authoredNotchesByBlock } : {}),
     generatedFusing: dec.generatedFusing || file.generatedFusing === true,
     modelLabels,
     groups: b.groups,

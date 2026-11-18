@@ -5,6 +5,7 @@ import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/patt
 import type { DxfProductPhaseDSizeSelectionResultV1 } from 'lib/pattern-import/dxf-product-phase-d-size-selection-v1';
 import { readManifest } from 'lib/pattern-import/manifest';
 import {
+  PATIMPORT,
   PATTERN_IMPORT_DXF_PRODUCT_WRITER_REPLAY_CARRIER_V1,
   type ConversionManifest,
   type InternalFeature,
@@ -246,7 +247,7 @@ function supported(command: PatternImportDxfPhaseEDraftCadCommandV1): boolean {
       command.payload.kind === 'cross' ||
       (command.payload.kind === 'text' && normalizeAuthoredText(command.payload.text) !== null)
     );
-  if (command.tool === 'notch') return command.payload.kind === 'single';
+  if (command.tool === 'notch') return true;
   return false;
 }
 
@@ -255,8 +256,6 @@ function unsupportedDetail(command: PatternImportDxfPhaseEDraftCadCommandV1): st
     return 'Legacy rectangle intent has no stable new-piece identity or explicit grading/placement policy.';
   if (command.tool === 'circle' || command.tool === 'ellipse')
     return `Legacy ${command.tool} intent has no stable new-piece identity or explicit bounded-approximation/grading/placement policy.`;
-  if (command.tool === 'notch')
-    return `Notch kind ${command.payload.kind} has no lossless PieceSpec encoding; only a single anchored notch is compiled.`;
   if (command.tool === 'mark')
     return `Mark kind ${command.payload.kind} has no typed DXF encoding.`;
   return `Tool ${command.tool} changes topology or carries semantics the retained PieceSpec writer cannot encode losslessly.`;
@@ -363,9 +362,12 @@ function internalFeature(
   return null;
 }
 
-function dartInsideCut(dart: InternalFeature, size: PieceSizeSpec): boolean {
+function pathInsideCut(
+  path: Pick<InternalFeature, 'pts' | 'closed'>,
+  size: PieceSizeSpec,
+): boolean {
   const toleranceMm = 0.001;
-  const { pts, closed } = dart;
+  const { pts, closed } = path;
   const distance = (a: PtMm, b: PtMm) => Math.hypot(a.x - b.x, a.y - b.y);
   const holes = size.cutLoops ?? [];
   const basePoint = (index: number) => !closed && (index === 0 || index === pts.length - 1);
@@ -872,7 +874,7 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
     if (internal) {
       if (
         (command.tool === 'dart' || command.tool === 'fish-eye') &&
-        !dartInsideCut(internal, size)
+        !pathInsideCut(internal, size)
       )
         return blocked(
           'preview-blocked',
@@ -981,7 +983,50 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
           'The anchored notch edge is degenerate in the exact projection.',
           command,
         );
+      if (
+        size.notches.some(
+          ({ at, authoredGroup }) =>
+            authoredGroup && Math.hypot(at.x - notch.at.x, at.y - notch.at.y) <= 1.5,
+        )
+      )
+        return blocked('preview-blocked', 'The notch overlaps a saved notch group.', command);
       size.notches.push(notch);
+      output = 'notch';
+    } else if (
+      command.tool === 'notch' &&
+      command.payload.kind !== 'single' &&
+      primitive.kind === 'notch' &&
+      primitive.strokes
+    ) {
+      const shape = command.payload.kind;
+      const notches = primitive.strokes.map(
+        ([at, end], index): NotchFeature => ({
+          kind: 'notch',
+          at: { ...at },
+          seg: [{ ...at }, { ...end }],
+          depthMm: Math.hypot(at.x - end.x, at.y - end.y),
+          authoredGroup: { groupId: command.payload.entityId, shape, index },
+          ...featureBase(),
+        }),
+      );
+      if (
+        notches.some(
+          ({ at, seg, depthMm }) =>
+            depthMm < 1 ||
+            depthMm > PATIMPORT.notchMaxMm ||
+            !pointInPolygon(seg[1], size.cut) ||
+            !pathInsideCut({ pts: seg, closed: false }, size) ||
+            size.notches.some(
+              (existing) => Math.hypot(existing.at.x - at.x, existing.at.y - at.y) <= 1.5,
+            ),
+        )
+      )
+        return blocked(
+          'preview-blocked',
+          'Keep the full notch inside the cut with clearance from existing notches and holes.',
+          command,
+        );
+      size.notches.push(...notches);
       output = 'notch';
     } else {
       return blocked(

@@ -72,6 +72,10 @@ function nativeBlock(block: RawBlock, record: ManifestBlock) {
       text,
       anchor: [relative(anchor[0], 'x'), relative(anchor[1], 'y')],
     })),
+    authoredNotches: record.authoredNotches?.map((group) => ({
+      ...group,
+      vertices: group.vertices.map((value, index) => relative(value, index % 2 ? 'y' : 'x')),
+    })),
   });
 }
 
@@ -235,6 +239,11 @@ function grainFrame(block: RawBlock, record: ManifestBlock, reflect: boolean) {
       index,
       label,
       closed,
+    })),
+    authoredNotches: record.authoredNotches?.map(({ groupId, shape, firstStroke }) => ({
+      groupId,
+      shape,
+      firstStroke,
     })),
   });
 }

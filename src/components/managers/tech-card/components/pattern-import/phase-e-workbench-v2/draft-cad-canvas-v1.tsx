@@ -10,7 +10,7 @@ import {
   AUTHORED_TEXT_HEIGHT_MM,
   normalizeAuthoredText,
 } from 'lib/pattern-import/manifest/authored-text';
-import type { BoxMm, PtMm } from 'lib/pattern-import/types';
+import type { AuthoredNotchShape, BoxMm, PtMm } from 'lib/pattern-import/types';
 
 import { SHEET_INK, SheetViewport, ptsAttr, vy } from '../sheet-viewport';
 import {
@@ -146,6 +146,7 @@ type BoundaryPickInput = Readonly<{
   baseKey: string;
   sequence: number;
   resize?: Readonly<{ fixed: 'start' | 'end'; lengthMm: number }>;
+  notchKind?: 'single' | AuthoredNotchShape;
 }>;
 
 type PointInput = Readonly<{
@@ -461,7 +462,7 @@ export function recordPatternImportDxfPhaseEDraftCadCanvasBoundaryPickV1(
       payload: {
         entityId: ids.entityId,
         anchor: base.anchor,
-        kind: 'single',
+        kind: input.notchKind ?? 'single',
         depthMm: Math.min(3, edgeLengthMm / 4),
       },
     };
@@ -1343,6 +1344,14 @@ function PreviewPrimitive({
       );
     }
     case 'notch': {
+      if (primitive.strokes)
+        return (
+          <g {...common} data-notch-indicator={primitive.indicator}>
+            {primitive.strokes.map((stroke, index) => (
+              <polyline key={index} points={ptsAttr(stroke)} />
+            ))}
+          </g>
+        );
       const r = unit * 4;
       return (
         <path
@@ -1436,6 +1445,7 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
 }: PatternImportDxfPhaseEDraftCadCanvasPropsV1) {
   const [markKind, setMarkKind] = useState<'drill' | 'cross' | 'text'>('drill');
   const [markText, setMarkText] = useState('');
+  const [notchKind, setNotchKind] = useState<'single' | AuthoredNotchShape>('single');
   const [pendingPoints, setPendingPoints] = useState<readonly PtMm[]>([]);
   const [pendingDartBase, setPendingDartBase] =
     useState<PatternImportDxfPhaseEDraftCadCanvasDartBaseV1 | null>(null);
@@ -1618,6 +1628,7 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
                 activeTool,
                 baseKey: key,
                 sequence: sequence.current,
+                notchKind,
               });
               setPendingDartBase(null);
               setPendingPoints([]);
@@ -1978,8 +1989,31 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
                 ? 'Choose an exact highlighted vertex from the sealed projection.'
                 : activeTool === 'mark' && markKind !== 'drill'
                   ? `Click inside the piece to place the ${markKind} mark in size ${projection.sizeToken}.`
-                  : toolInstruction(activeTool, projection.sizeToken))}
+                  : activeTool === 'notch' && notchKind !== 'single'
+                    ? `Select an exact cut edge with space for the notch in size ${projection.sizeToken}.`
+                    : toolInstruction(activeTool, projection.sizeToken))}
       </div>
+      {activeTool === 'notch' && interactionEnabled ? (
+        <label className='flex items-center gap-2 text-small'>
+          Notch type
+          <select
+            value={notchKind}
+            onChange={(event) => {
+              const value = event.target.value;
+              setNotchKind(
+                value === 'double' || value === 'triple' || value === 'v' ? value : 'single',
+              );
+              setInputError(null);
+            }}
+            className='border border-borderColor bg-bgColor p-1'
+          >
+            <option value='single'>Single</option>
+            <option value='double'>Double</option>
+            <option value='triple'>Triple</option>
+            <option value='v'>V notch</option>
+          </select>
+        </label>
+      ) : null}
       {activeTool === 'mark' && interactionEnabled ? (
         <div className='flex flex-wrap items-center gap-2 text-small'>
           <label className='flex items-center gap-2'>
