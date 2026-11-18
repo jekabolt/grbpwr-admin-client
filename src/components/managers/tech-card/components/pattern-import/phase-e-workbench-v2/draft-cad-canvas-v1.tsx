@@ -138,6 +138,17 @@ export type PatternImportDxfPhaseEDraftCadExactVertexOptionV1 = Readonly<{
   pointMm: Readonly<{ x: number; y: number }>;
 }>;
 
+type MovePointDrag = {
+  sourceKey: string;
+  pointerId: number;
+  option: PatternImportDxfPhaseEDraftCadExactVertexOptionV1;
+  startClient: PtMm;
+  screenToSvg: Readonly<Pick<DOMMatrix, 'a' | 'b' | 'c' | 'd'>>;
+  moved: boolean;
+};
+
+const MOVE_POINT_DRAG_SLOP_PX = 4;
+
 type BoundaryPickInput = Readonly<{
   session: PatternImportDxfPhaseEDraftCadSessionV1;
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
@@ -1467,7 +1478,7 @@ function toolInstruction(tool: PatternImportDxfPhaseEDraftCadToolV1, sizeToken: 
   if (tool === 'ellipse')
     return 'Click the centre, major-axis point and minor-radius point to record one ellipse intent.';
   if (tool === 'move-point')
-    return `Choose an exact outline point and enter its new X and Y in millimetres for size ${sizeToken}.`;
+    return `Drag an exact outline point or click it to enter X and Y in millimetres for size ${sizeToken}.`;
   if (tool === 'edge-length') return `Choose an exact edge to set its length in size ${sizeToken}.`;
   if (tool === 'add-point')
     return 'Select an exact edge to insert its midpoint across the piece’s grade.';
@@ -1520,6 +1531,8 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
   const [resizeLength, setResizeLength] = useState('');
   const [resizeFixed, setResizeFixed] = useState<'start' | 'end'>('start');
   const [movePoint, setMovePoint] = useState<{ key: string; x: string; y: string } | null>(null);
+  const [draggedPoint, setDraggedPoint] = useState<{ key: string; pointMm: PtMm } | null>(null);
+  const movePointDrag = useRef<MovePointDrag | null>(null);
 
   const [inputError, setInputError] = useState<string | null>(null);
   const arrangeGesture = useRef<{
@@ -1555,7 +1568,8 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
       buildPatternImportDxfPhaseEDraftCadCanvasDartBasesV1(session, projection, activePieceIndex),
     [activePieceIndex, projection, session],
   );
-  const movePointActive = !activeTopologyTool && activeTool === 'move-point';
+  const movePointActive =
+    !crossScopeConnectActive && !activeTopologyTool && activeTool === 'move-point';
   const exactVertexOptions = useMemo(
     () =>
       buildPatternImportDxfPhaseEDraftCadExactVertexOptionsV1(
@@ -1579,9 +1593,11 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
   useEffect(() => {
     setPendingPoints([]);
     setPendingDartBase(null);
+    movePointDrag.current = null;
     setMovePoint(null);
+    setDraggedPoint(null);
     setInputError(null);
-  }, [arrangeActive, resetKey]);
+  }, [arrangeActive, panActive, crossScopeConnectActive, resetKey]);
 
   const unavailable = sourceMismatch
     ? 'The exact projection does not match this Draft session source.'
@@ -1619,6 +1635,93 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
     sequence.current = result.sequence;
     if (result.recorded) onSessionChange(result.session);
   };
+  const chooseMovePoint = (option: PatternImportDxfPhaseEDraftCadExactVertexOptionV1 | null) => {
+    setMovePoint(
+      option ? { key: option.key, x: String(option.pointMm.x), y: String(option.pointMm.y) } : null,
+    );
+    setInputError(null);
+  };
+  const commitMovePoint = (vertexKey: string, pointMm: PtMm) => {
+    const result = recordPatternImportDxfPhaseEDraftCadMovePointV1({
+      session,
+      projection,
+      activePieceIndex,
+      vertexKey,
+      pointMm,
+      sequence: sequence.current,
+    });
+    setInputError(result.blocker);
+    if (!result.recorded) return;
+    sequence.current = result.sequence;
+    setMovePoint(null);
+    onSessionChange(result.session);
+  };
+  const clearMovePointDrag = () => {
+    movePointDrag.current = null;
+    setDraggedPoint(null);
+  };
+  const activePointDrag = (event: ReactPointerEvent<SVGElement>) => {
+    const drag = movePointDrag.current;
+    return interactionEnabled &&
+      movePointActive &&
+      drag?.sourceKey === resetKey &&
+      drag.pointerId === event.pointerId
+      ? drag
+      : null;
+  };
+  const dragPosition = (event: ReactPointerEvent<SVGElement>, drag: MovePointDrag): PtMm | null => {
+    const dx = event.clientX - drag.startClient.x;
+    const dy = event.clientY - drag.startClient.y;
+    drag.moved ||= Math.hypot(dx, dy) >= MOVE_POINT_DRAG_SLOP_PX;
+    if (!drag.moved) return null;
+    const { a, b, c, d } = drag.screenToSvg;
+    return {
+      x: drag.option.pointMm.x + a * dx + c * dy,
+      y: drag.option.pointMm.y - (b * dx + d * dy),
+    };
+  };
+  const beginPointDrag = (
+    event: ReactPointerEvent<SVGElement>,
+    option: PatternImportDxfPhaseEDraftCadExactVertexOptionV1,
+  ) => {
+    if (event.button !== 0 || movePointDrag.current) return;
+    const screenToSvg = event.currentTarget.ownerSVGElement?.getScreenCTM()?.inverse();
+    if (
+      !screenToSvg ||
+      ![screenToSvg.a, screenToSvg.b, screenToSvg.c, screenToSvg.d].every(Number.isFinite)
+    )
+      return;
+    event.stopPropagation();
+    event.currentTarget.focus();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    movePointDrag.current = {
+      sourceKey: resetKey,
+      pointerId: event.pointerId,
+      option,
+      screenToSvg,
+      startClient: { x: event.clientX, y: event.clientY },
+      moved: false,
+    };
+  };
+  const updatePointDrag = (event: ReactPointerEvent<SVGElement>) => {
+    const drag = activePointDrag(event);
+    if (!drag) return;
+    event.stopPropagation();
+    const pointMm = dragPosition(event, drag);
+    if (pointMm) setDraggedPoint({ key: drag.option.key, pointMm });
+  };
+  const finishPointDrag = (event: ReactPointerEvent<SVGElement>) => {
+    const drag = activePointDrag(event);
+    if (!drag) return;
+    event.stopPropagation();
+    const pointMm = dragPosition(event, drag);
+    clearMovePointDrag();
+    if (pointMm) commitMovePoint(drag.option.key, pointMm);
+    else if (!drag.moved) chooseMovePoint(drag.option);
+  };
+  const cancelPointDrag = (event: ReactPointerEvent<SVGElement>) => {
+    if (activePointDrag(event)) clearMovePointDrag();
+  };
   const clearPen = () => {
     setPendingPoints([]);
     setInputError(null);
@@ -1636,10 +1739,14 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
         if (event.key === 'Escape' && activeTool === 'pen' && pendingPoints.length) {
           event.stopPropagation();
           clearPen();
-        } else if (event.key === 'Escape' && movePointActive && movePoint) {
+        } else if (
+          event.key === 'Escape' &&
+          movePointActive &&
+          (movePoint || movePointDrag.current)
+        ) {
           event.stopPropagation();
-          setMovePoint(null);
-          setInputError(null);
+          clearMovePointDrag();
+          chooseMovePoint(null);
         }
       }}
       className='flex h-full min-h-0 flex-col gap-2'
@@ -1687,13 +1794,9 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
               return;
             }
             if (movePointActive) {
-              const option = exactVertexOptions.find((candidate) => candidate.key === key);
-              setMovePoint(
-                option
-                  ? { key: option.key, x: String(option.pointMm.x), y: String(option.pointMm.y) }
-                  : null,
+              chooseMovePoint(
+                exactVertexOptions.find((candidate) => candidate.key === key) ?? null,
               );
-              setInputError(null);
               return;
             }
             if (!EXACT_EDGE_TOOLS.has(activeTool)) return;
@@ -1946,8 +2049,10 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
               {interactionEnabled && (activeTopologyTool || movePointActive) ? (
                 <g data-draft-cad-exact-vertex-options=''>
                   {exactVertexOptions.map((option) => {
+                    const isDragging = draggedPoint?.key === option.key;
+                    const marker = isDragging ? draggedPoint.pointMm : option.pointMm;
                     const selected = movePointActive
-                      ? movePoint?.key === option.key
+                      ? isDragging || movePoint?.key === option.key
                       : topologySession.pendingAnchors.some(
                           (anchor) =>
                             anchor.pieceId === option.anchor.pieceId &&
@@ -1959,8 +2064,8 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
                         <circle
                           data-draft-cad-exact-vertex-ink={option.anchor.vertexId}
                           data-screen-radius-px='4.5'
-                          cx={option.pointMm.x}
-                          cy={vy(option.pointMm.y)}
+                          cx={marker.x}
+                          cy={vy(marker.y)}
                           r={unit * 4.5}
                           fill={selected ? SHEET_INK.red : 'var(--color-bgColor)'}
                           fillOpacity={selected ? 0.35 : 0.92}
@@ -1971,6 +2076,14 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
                         />
                         <circle
                           data-key={option.key}
+                          tabIndex={movePointActive ? -1 : undefined}
+                          onPointerDown={
+                            movePointActive ? (event) => beginPointDrag(event, option) : undefined
+                          }
+                          onPointerMove={movePointActive ? updatePointDrag : undefined}
+                          onPointerUp={movePointActive ? finishPointDrag : undefined}
+                          onPointerCancel={movePointActive ? cancelPointDrag : undefined}
+                          onLostPointerCapture={movePointActive ? cancelPointDrag : undefined}
                           data-draft-cad-exact-vertex={option.anchor.vertexId}
                           data-screen-hit-radius-px='10'
                           cx={option.pointMm.x}
@@ -2180,22 +2293,9 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
             type='button'
             className='border border-borderColor px-2 py-1 text-small disabled:opacity-50'
             disabled={!movePoint.x.trim() || !movePoint.y.trim()}
-            onClick={() => {
-              const result = recordPatternImportDxfPhaseEDraftCadMovePointV1({
-                session,
-                projection,
-                activePieceIndex,
-                vertexKey: movePoint.key,
-                pointMm: { x: Number(movePoint.x), y: Number(movePoint.y) },
-                sequence: sequence.current,
-              });
-              setInputError(result.blocker);
-              if (result.recorded) {
-                sequence.current = result.sequence;
-                setMovePoint(null);
-                onSessionChange(result.session);
-              }
-            }}
+            onClick={() =>
+              commitMovePoint(movePoint.key, { x: Number(movePoint.x), y: Number(movePoint.y) })
+            }
           >
             Move point
           </button>

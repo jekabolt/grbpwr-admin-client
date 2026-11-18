@@ -428,3 +428,146 @@ it('refuses a crossing Pen outline before deterministic DXF export', async () =>
     }),
   ).toMatchObject({ ok: false, blockers: [{ code: 'pen-geometry-blocked' }] });
 });
+
+it('drags the mounted exact point once and cancels pending movement with Escape or pointer loss', async () => {
+  const [{ chromium }, { createServer }, { mkdtemp, rm }, { tmpdir }, { join }] = await Promise.all(
+    [
+      import('playwright'),
+      import('vite'),
+      import('node:fs/promises'),
+      import('node:os'),
+      import('node:path'),
+    ],
+  );
+  const { session, projection, selection, compileSource } = await setup();
+  const [original] = buildPatternImportDxfPhaseEDraftCadExactVertexOptionsV1(
+    session,
+    projection,
+    0,
+    true,
+  );
+  if (!original) throw Error('The selected piece has no exact native corner.');
+  const cacheDir = await mkdtemp(join(tmpdir(), 'draft-move-point-'));
+  const server = await createServer({
+    logLevel: 'error',
+    appType: 'custom',
+    cacheDir,
+    server: { host: '127.0.0.1', port: 0, hmr: false },
+    plugins: [
+      {
+        name: 'isolated-draft-point',
+        configureServer(active) {
+          active.middlewares.use((req, res, next) => {
+            if (req.url !== '/__draft-point') return next();
+            res.setHeader('Content-Type', 'text/html');
+            res.end(
+              '<html><head><link rel="stylesheet" href="/src/global.css"></head><body><main style="height:620px;width:850px" id="root"></main></body></html>',
+            );
+          });
+        },
+      },
+    ],
+  });
+  const browser = await chromium.launch({ headless: true, args: ['--disable-gpu'] });
+  try {
+    await server.listen();
+    const address = server.httpServer!.address();
+    if (!address || typeof address === 'string') throw Error('Missing local browser fixture.');
+    const origin = `http://127.0.0.1:${address.port}`;
+    const page = await browser.newPage();
+    await page.route('**/*', (route) =>
+      route
+        .request()
+        .url()
+        .startsWith(origin + '/')
+        ? route.continue()
+        : route.abort(),
+    );
+    await page.goto(origin + '/__draft-point');
+    type Mount = typeof import('./draft-cad-move-point.browser-fixture').mountDraftPoint;
+    const fixtureUrl =
+      '/src/components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/draft-cad-move-point.browser-fixture.tsx';
+    await page.addScriptTag({
+      type: 'module',
+      content: `import { mountDraftPoint } from '${fixtureUrl}'; window.mountDraftPoint = mountDraftPoint;`,
+    });
+    type BrowserFixtureWindow = Window & { mountDraftPoint?: Mount };
+    await page.waitForFunction(() => Boolean((window as BrowserFixtureWindow).mountDraftPoint));
+    const fixture = await page.evaluateHandle(
+      (input) => (window as BrowserFixtureWindow).mountDraftPoint!(input),
+      { session, projection },
+    );
+    const point = page.locator('[data-draft-cad-exact-vertex]').first();
+    const ink = page.locator('[data-draft-cad-exact-vertex-ink]').first();
+    await point.click();
+    expect(await page.getByRole('spinbutton', { name: 'X (mm)' }).inputValue()).toBe(
+      String(original.pointMm.x),
+    );
+    await page.getByRole('spinbutton', { name: 'X (mm)' }).press('Escape');
+    expect(await page.getByRole('spinbutton').count()).toBe(0);
+
+    const cursor = page.locator('[data-draft-cad-history-cursor]');
+    const readHistory = () => fixture.evaluate((mounted) => mounted.read());
+    const offset = { x: 29, y: -13 };
+    const drag = async () => {
+      const frame = await point.evaluate((element, offset) => {
+        const circle = element as SVGCircleElement;
+        const transform = circle.getScreenCTM()!;
+        const center = new DOMPoint(
+          circle.cx.baseVal.value,
+          circle.cy.baseVal.value,
+        ).matrixTransform(transform);
+        const delta = new DOMPoint(offset.x, offset.y, 0, 0).matrixTransform(transform.inverse());
+        return { x: Math.round(center.x), y: Math.round(center.y), dx: delta.x, dy: delta.y };
+      }, offset);
+      await page.mouse.move(frame.x, frame.y);
+      await page.mouse.down();
+      await page.mouse.move(frame.x + offset.x, frame.y + offset.y, { steps: 3 });
+      await expect
+        .poll(async () => Number(await ink.getAttribute('cx')))
+        .toBeCloseTo(original.pointMm.x + frame.dx, 6);
+      expect(await cursor.getAttribute('data-draft-cad-history-cursor')).toBe('0');
+      return frame;
+    };
+
+    await drag();
+    await page.keyboard.press('Escape');
+    await page.mouse.up();
+    expect(await readHistory()).toHaveLength(0);
+    await expect.poll(async () => Number(await ink.getAttribute('cx'))).toBe(original.pointMm.x);
+
+    await drag();
+    await point.dispatchEvent('pointercancel', { pointerId: 1, bubbles: true });
+    await page.mouse.up();
+    expect(await readHistory()).toHaveLength(0);
+    await expect.poll(async () => Number(await ink.getAttribute('cx'))).toBe(original.pointMm.x);
+
+    const frame = await drag();
+    await page.mouse.up();
+    await expect.poll(readHistory).toHaveLength(1);
+    const [transaction] = await readHistory();
+    expect(await cursor.getAttribute('data-draft-cad-history-cursor')).toBe('1');
+    const [command] = transaction!.commands;
+    if (command?.tool !== 'move-point')
+      throw Error('The mounted canvas did not issue the typed move.');
+    expect(command.payload.vertexId).toBe(original.anchor.vertexId);
+    expect(command.payload.sizeToken).toBe(projection.sizeToken);
+    expect(command.payload.pointMm.x).toBeCloseTo(original.pointMm.x + frame.dx, 6);
+    expect(command.payload.pointMm.y).toBeCloseTo(original.pointMm.y - frame.dy, 6);
+    const compiled = compilePatternImportDxfPhaseEDraftCadGeometryV1({
+      session: { ...session, history: [transaction!], cursor: 1 },
+      projection,
+      selection,
+      compileSource,
+    });
+    if (!compiled.ok) throw Error(JSON.stringify(compiled.blockers));
+    expect(compiled.artifact.compiledFeatures).toMatchObject([
+      { output: 'moved-vertex', commandId: command.commandId },
+    ]);
+    await fixture.evaluate((mounted) => mounted.unmount());
+  } finally {
+    await browser.close();
+    await server.close();
+    await rm(cacheDir, { recursive: true, force: true });
+  }
+}, 60_000);
