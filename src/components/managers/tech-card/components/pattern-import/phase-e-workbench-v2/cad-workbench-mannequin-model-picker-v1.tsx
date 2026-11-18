@@ -49,6 +49,7 @@ import type {
   PatternImportDxfPhaseECadMannequinDxfStagingSourceV1,
 } from './cad-mannequin-dxf-staging-v1';
 import type { PatternImportDxfPhaseECadMannequinSceneOverlayRendererBridgeV1 } from './cad-mannequin-scene-overlay-renderer-bridge-v1';
+import type { CadTableSavedTopstitchOverlayV1 } from './cad-table-saved-topstitch-overlay-v1';
 import type { CadWorkbenchPhysicalHostV1 } from './cad-workbench-physical-host-v1';
 
 export const PATTERN_IMPORT_DXF_PHASE_E_CAD_MANNEQUIN_MODEL_PICKER_V1 =
@@ -84,6 +85,8 @@ export const PATTERN_IMPORT_DXF_PHASE_E_CAD_MANNEQUIN_VIEW_PRESETS_V1 = Object.f
   'back',
 ] as const satisfies readonly MeasurementSurfaceViewPreset[]);
 
+type TopstitchVisibility = Readonly<{ visible: boolean; onChange: (visible: boolean) => void }>;
+
 export function PatternImportDxfPhaseECadMannequinViewToolbarV1({
   viewPreset,
   onViewPreset,
@@ -93,6 +96,7 @@ export function PatternImportDxfPhaseECadMannequinViewToolbarV1({
   poseEditing,
   poseEditingDisabled = false,
   onPoseEditingChange,
+  topstitchVisibility,
 }: Readonly<{
   viewPreset: MeasurementSurfaceViewPreset;
   onViewPreset: (preset: MeasurementSurfaceViewPreset) => void;
@@ -102,6 +106,7 @@ export function PatternImportDxfPhaseECadMannequinViewToolbarV1({
   poseEditing: boolean;
   poseEditingDisabled?: boolean;
   onPoseEditingChange: (enabled: boolean) => void;
+  topstitchVisibility?: TopstitchVisibility;
 }>) {
   return (
     <nav
@@ -141,6 +146,18 @@ export function PatternImportDxfPhaseECadMannequinViewToolbarV1({
             </Button>
           ))}
         </>
+      ) : null}
+      {topstitchVisibility ? (
+        <Button
+          type='button'
+          size='xs'
+          variant={topstitchVisibility.visible ? 'simpleReverseWithBorder' : 'underline'}
+          aria-label='Show topstitch in 3D'
+          aria-pressed={topstitchVisibility.visible}
+          onClick={() => topstitchVisibility.onChange(!topstitchVisibility.visible)}
+        >
+          Topstitch
+        </Button>
       ) : null}
       <label className='ml-auto flex min-h-7 cursor-pointer items-center gap-1.5 px-1 text-micro font-bold'>
         <CheckboxCommon
@@ -270,6 +287,8 @@ export type PatternImportDxfPhaseECadMannequinPatternPieceSceneV1 = Readonly<{
   selection?: PatternImportDxfPhaseECadMannequinDxfStagingSelectionV1 | null;
   swatchesByScope?: Readonly<Record<string, string | null | undefined>>;
   decorations?: readonly PatternImportDxfPhaseECadMannequinPatternOverlayDecorationV1[];
+  savedTopstitch?: CadTableSavedTopstitchOverlayV1;
+  topstitchVisibility?: TopstitchVisibility;
   guides?: MeasurementSurfacePatternPieceOverlayV1['guides'];
   sceneOverlay?: PatternImportDxfPhaseECadMannequinSceneOverlayCapabilityV1;
   onFocus?: (selection: PatternImportDxfPhaseECadMannequinDxfStagingSelectionV1) => void;
@@ -843,6 +862,7 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
           poseEditing={poseEditing}
           poseEditingDisabled={!poseBinding || Boolean(poseError)}
           onPoseEditingChange={setPoseEditing}
+          topstitchVisibility={patternPieceScene?.topstitchVisibility}
         />
       ) : null}
       {offsetPiece ? (

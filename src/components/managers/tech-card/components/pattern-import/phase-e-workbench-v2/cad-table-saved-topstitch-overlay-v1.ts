@@ -14,8 +14,14 @@ import type { PatternImportDxfPhaseEZeroOperationSavedCardAuthorityRuntimeV1 } f
 
 export type CadTableSavedTopstitchOverlayV1 = Readonly<{
   pieceKey: string;
+  scopeKey: string;
+  pieceId: string;
+  pieceLineKey: string;
+  sourceFileId: string;
+  sizeToken: string;
   operationNumber: number;
   lineKey: string;
+  threadBomLineKey: string;
   widthMm: number;
   pointsMm: readonly [PtMm, PtMm];
 }>;
@@ -126,8 +132,14 @@ export async function prepareCadTableSavedTopstitchOverlayV1(
     }));
     return {
       pieceKey: patternImportDxfPhaseECadTablePieceKeyV1(path.pieceId, path.pieceLineKey),
+      scopeKey: row.scopeKey,
+      pieceId: path.pieceId,
+      pieceLineKey: path.pieceLineKey,
+      sourceFileId: path.sourceFileId,
+      sizeToken: path.sizeToken,
       operationNumber,
       lineKey: display.lineKey,
+      threadBomLineKey: display.threadBomLineKey,
       widthMm: display.widthMm,
       pointsMm: [a, b],
     };

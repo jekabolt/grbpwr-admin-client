@@ -191,6 +191,9 @@ const EMPTY_SIZE_NAMES = new Map<number, string>();
 export type PatternImportDxfPhaseECadTableZeroOperationMannequinContextV1 = Readonly<{
   sources: readonly PatternImportDxfPhaseECadMannequinDxfStagingSourceV1[];
   activeScopeKey: string | null;
+  savedTopstitch?: CadTableSavedTopstitchOverlayV1;
+  topstitchVisible: boolean;
+  onTopstitchVisibilityChange: (visible: boolean) => void;
   stagingBlocked: boolean;
   acceptedCloth?: CadWorkbenchPhysicalHostV1['acceptedCloth'];
   sizeMatches: boolean;
@@ -1061,6 +1064,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
     overlay?: CadTableSavedTopstitchOverlayV1;
     error?: string;
   } | null>(null);
+  const [topstitchVisible, setTopstitchVisible] = useState(true);
   const savedTopstitchOperation = resolvedSavedCard?.techCard?.operations?.find(
     ({ operationNumber, topstitchLines }) =>
       operationNumber === selection.operationNumber && topstitchLines?.length,
@@ -1459,6 +1463,8 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
               pieceFeatures={pieceFeatures}
               savedTopstitch={currentTopstitch?.overlay}
               savedTopstitchError={currentTopstitch?.error}
+              topstitchVisible={topstitchVisible}
+              onTopstitchVisibilityChange={setTopstitchVisible}
               tableSessionOwner={tableSessionOwner}
               authoringAuthority={authoringReady ? authoringPrepared?.authoringAuthority : null}
               authoringAuthorityRefresh={authoringReady ? authoringAuthorityRefresh : null}
@@ -1471,6 +1477,9 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
       mannequin={mannequin({
         sources: mannequinSources,
         activeScopeKey: currentMannequinSource?.scopeKey ?? null,
+        savedTopstitch: currentTopstitch?.overlay,
+        topstitchVisible,
+        onTopstitchVisibilityChange: setTopstitchVisible,
         stagingBlocked: mannequinStaging?.key === mannequinStagingKey && mannequinStaging.blocked,
         acceptedCloth: selectableCloth,
         sizeMatches: tableSizeMatchesReview,
@@ -1546,7 +1555,16 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
       savedReviewSize={physicalHost?.savedReviewSize}
       defaultOperationsMode={defaultOperationsMode}
       sourceSurface={sourceSurface}
-      mannequin={({ sources, activeScopeKey, stagingBlocked, acceptedCloth, sizeMatches }) => (
+      mannequin={({
+        sources,
+        activeScopeKey,
+        savedTopstitch,
+        topstitchVisible,
+        onTopstitchVisibilityChange,
+        stagingBlocked,
+        acceptedCloth,
+        sizeMatches,
+      }) => (
         <div className='flex h-full min-h-0 flex-col'>
           {physicalHost?.panel ? (
             <div
@@ -1571,6 +1589,10 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
               patternPieceScene={{
                 sources,
                 activeScopeKey,
+                savedTopstitch: topstitchVisible ? savedTopstitch : undefined,
+                topstitchVisibility: savedTopstitch
+                  ? { visible: topstitchVisible, onChange: onTopstitchVisibilityChange }
+                  : undefined,
                 sceneOverlay:
                   PATTERN_IMPORT_DXF_PHASE_E_CAD_MANNEQUIN_PRODUCTION_SCENE_OVERLAY_BLOCKED_V1,
               }}

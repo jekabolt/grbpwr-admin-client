@@ -9,6 +9,7 @@ import type {
   PatternImportDxfPhaseECadMannequinDxfStagingSelectionV1,
   PatternImportDxfPhaseECadMannequinDxfStagingSourceV1,
 } from './cad-mannequin-dxf-staging-v1';
+import type { CadTableSavedTopstitchOverlayV1 } from './cad-table-saved-topstitch-overlay-v1';
 
 export const PATTERN_IMPORT_DXF_PHASE_E_CAD_MANNEQUIN_PATTERN_PIECE_OVERLAY_V1 =
   'pattern-import-dxf-phase-e-cad-mannequin-pattern-piece-overlay/1' as const;
@@ -99,6 +100,7 @@ export function buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1(
     swatchesByScope?: Readonly<Record<string, string | null | undefined>>;
     transformsByPieceKey?: Readonly<Record<string, MeasurementSurfacePatternPieceTransformV1>>;
     decorations?: readonly PatternImportDxfPhaseECadMannequinPatternOverlayDecorationV1[];
+    savedTopstitch?: CadTableSavedTopstitchOverlayV1;
     guides?: MeasurementSurfacePatternPieceOverlayV1['guides'];
     tool?: PatternImportDxfPhaseECadMannequinPatternOverlayToolV1;
     onFocus?: (selection: PatternImportDxfPhaseECadMannequinDxfStagingSelectionV1) => void;
@@ -165,6 +167,21 @@ export function buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1(
         (decoration) =>
           decoration.scopeKey === source.scopeKey && decoration.pieceId === piece.pieceId,
       );
+      const stitch = input.savedTopstitch;
+      const topstitch =
+        stitch?.scopeKey === source.scopeKey &&
+        stitch.sourceFileId === source.projection.sourceFileId &&
+        stitch.sizeToken === source.projection.sizeToken &&
+        stitch.pieceId === piece.pieceId &&
+        stitch.pieceLineKey === piece.pieceLineKey
+          ? {
+              lineKey: stitch.lineKey,
+              operationNumber: stitch.operationNumber,
+              widthMm: stitch.widthMm,
+              threadBomLineKey: stitch.threadBomLineKey,
+              pointsMm: stitch.pointsMm,
+            }
+          : undefined;
       const contourById = new Map(piece.contours.map((contour) => [contour.contourId, contour]));
       const seams = pieceDecorations.flatMap((decoration) => {
         const contour = contourById.get(decoration.contourId);
@@ -232,6 +249,7 @@ export function buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1(
         swatchCss: stableCssColor(input.swatchesByScope?.[source.scopeKey]),
         transform: input.transformsByPieceKey?.[pieceKey] ?? null,
         seams: Object.freeze(seams),
+        topstitch,
       });
     }),
   );

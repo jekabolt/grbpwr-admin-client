@@ -90,6 +90,13 @@ export interface MeasurementSurfacePatternPieceV1 {
   readonly swatchCss: string | null;
   readonly transform: MeasurementSurfacePatternPieceTransformV1 | null;
   readonly seams: readonly MeasurementSurfacePatternPieceSeamV1[];
+  readonly topstitch?: Readonly<{
+    lineKey: string;
+    operationNumber: number;
+    widthMm: number;
+    threadBomLineKey: string;
+    pointsMm: readonly [Readonly<{ x: number; y: number }>, Readonly<{ x: number; y: number }>];
+  }>;
 }
 
 export interface MeasurementSurfacePatternPieceGuideEndpointV1 {
@@ -1419,6 +1426,18 @@ function createPatternPieceLayerV1(
       });
     }
 
+    if (overlay.visibility.thread && piece.topstitch) {
+      const { lineKey, operationNumber, widthMm, threadBomLineKey, pointsMm } = piece.topstitch;
+      const line = patternPieceLine(
+        pointsMm.map((point) => localPoint(point, 0.0005)),
+        cssColor('--color-highlightColor'),
+      );
+      line.name = `pattern-piece-topstitch:${lineKey}`;
+      line.userData.topstitch = { lineKey, operationNumber, widthMm, threadBomLineKey };
+      line.userData.patternPieceKey = piece.pieceKey;
+      content.add(line);
+    }
+
     if (piece.selected && overlay.tool !== 'select') {
       const gizmo = new THREE.Group();
       gizmo.name = `pattern-piece-${overlay.tool}-gizmo:${piece.pieceKey}`;
@@ -1663,13 +1682,16 @@ export function MeasurementWatertightSurfaceV1Stage({
         patternPieceOverlay.tool,
         patternPieceOverlay.visibility,
         patternPieceOverlay.guides,
-        patternPieceOverlay.pieces.map(({ pieceKey, selected, swatchCss, transform, seams }) => [
-          pieceKey,
-          selected,
-          swatchCss,
-          transform,
-          seams,
-        ]),
+        patternPieceOverlay.pieces.map(
+          ({ pieceKey, selected, swatchCss, transform, seams, topstitch }) => [
+            pieceKey,
+            selected,
+            swatchCss,
+            transform,
+            seams,
+            topstitch,
+          ],
+        ),
       ])
     : '';
   const patternPieceOverlayRenderKeyRef = useRef(patternPieceOverlayRenderKey);
@@ -1953,6 +1975,23 @@ export function MeasurementWatertightSurfaceV1Stage({
       contextCanvas.dataset.patternThreadColors = [
         ...new Set(guides.flatMap(({ thread }) => (thread ? [thread.colorCss] : []))),
       ].join(',');
+      const topstitch = overlay?.pieces.find((piece) => piece.topstitch)?.topstitch;
+      const line =
+        topstitch && patternPieceLayer?.getObjectByName(`pattern-piece-topstitch:${topstitch.lineKey}`);
+      if (line instanceof THREE.Line) {
+        const positions = line.geometry.getAttribute('position');
+        const start = new THREE.Vector3(positions.getX(0), positions.getY(0), positions.getZ(0));
+        const end = new THREE.Vector3(positions.getX(1), positions.getY(1), positions.getZ(1));
+        contextCanvas.dataset.patternTopstitch = JSON.stringify({
+          ...line.userData.topstitch,
+          pieceKey: line.userData.patternPieceKey,
+          lengthMm: 1000 * start.distanceTo(end),
+          startM: line.localToWorld(start).toArray(),
+          endM: line.localToWorld(end).toArray(),
+        });
+      } else {
+        delete contextCanvas.dataset.patternTopstitch;
+      }
       contextCanvas.dataset.selectedPatternPiece =
         overlay?.pieces.find(({ selected }) => selected)?.pieceId ?? '';
       contextCanvas.dataset.patternPieceTool = overlay?.tool ?? 'off';

@@ -96,6 +96,8 @@ export type PatternImportDxfPhaseECadTableZeroConnectCanvasPropsV1 = Readonly<{
   pieceFeatures?: CadTablePieceFeaturesByKey;
   savedTopstitch?: CadTableSavedTopstitchOverlayV1;
   savedTopstitchError?: string;
+  topstitchVisible?: boolean;
+  onTopstitchVisibilityChange?: (visible: boolean) => void;
   authoringAuthority?: PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1 | null;
   authoringAuthorityRefresh?: PatternImportDxfPhaseEZeroConnectAuthoringRefreshOwnerV1 | null;
   zeroConnectAuthoringHandoff?: PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1;
@@ -385,6 +387,8 @@ function CadTableZeroCanvas({
   savedAnnotationEditControl,
   savedTopstitch,
   savedTopstitchError,
+  topstitchVisible = true,
+  onTopstitchVisibilityChange,
   owner,
 }: PatternImportDxfPhaseECadTableZeroConnectCanvasPropsV1 & { owner: CadTableZeroCanvasOwner }) {
   const authority = useMemo(
@@ -399,7 +403,6 @@ function CadTableZeroCanvas({
   const [fitRequest, setFitRequest] = useState(0);
   const [measurementsVisible, setMeasurementsVisible] = useState(true);
   const [calloutsVisible, setCalloutsVisible] = useState(true);
-  const [topstitchVisible, setTopstitchVisible] = useState(true);
   const [hiddenFeatureLayers, setHiddenFeatureLayers] = useState<
     ReadonlySet<CadTablePieceFeatureLayer>
   >(() => new Set());
@@ -623,13 +626,13 @@ function CadTableZeroCanvas({
             pressed={boundaryVisibility['sewing-boundary']}
             onClick={() => toggleBoundary('sewing-boundary')}
           />
-          {savedTopstitch ? (
+          {savedTopstitch && onTopstitchVisibilityChange ? (
             <PatternImportDxfPhaseECadWorkbenchToolButtonV1
               icon='internal-line'
               label='Show topstitch'
               active={topstitchVisible}
               pressed={topstitchVisible}
-              onClick={() => setTopstitchVisible((visible) => !visible)}
+              onClick={() => onTopstitchVisibilityChange(!topstitchVisible)}
             />
           ) : null}
           {savedAnnotationEditControl}
