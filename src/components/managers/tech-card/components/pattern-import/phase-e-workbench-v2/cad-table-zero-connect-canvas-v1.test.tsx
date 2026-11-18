@@ -20,6 +20,7 @@ import {
   proposePatternImportDxfProductPhaseEMultiseamAssemblyV2,
 } from 'lib/pattern-import/dxf-product-phase-e-multiseam-workbench-v2';
 
+import { computeDxfProductSavedSourceFileIdV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 import { SHEET_INK, vy } from '../sheet-viewport';
 import { buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1 } from './cad-mannequin-pattern-piece-overlay-v1';
 import { buildPatternImportDxfPhaseECadMannequinSceneOverlayFromExactAuthorityV2 } from './cad-mannequin-scene-overlay-adapter-v1';
@@ -35,6 +36,7 @@ import {
 } from './cad-table-piece-layout-session-v1';
 import {
   activatePatternImportDxfPhaseECadTableZeroCanvasPieceV1,
+  selectCadTableAcceptedClothPieceV1,
   createPatternImportDxfPhaseECadTableZeroCanvasSessionV1,
   fitPatternImportDxfPhaseECadTableZeroCanvasSessionV1,
   movePatternImportDxfPhaseECadTableZeroCanvasSessionV1,
@@ -53,6 +55,43 @@ const REQUIRED_FIELDS = [
   'immutable-material-revisions',
   'tolerances',
 ] as const;
+
+it('selects the exact accepted cloth occurrence in the existing table session only on its current row', () => {
+  const { projection } = fixture();
+  const row = {
+    techCardId: 6,
+    scopeKey: 'main',
+    patternLineKey: 'saved-fronts',
+    revision: 1,
+    cardLockVersion: 7,
+    url: 'https://saved.example/fixture.dxf',
+    sizeBytes: 1234,
+    sha256: 'a'.repeat(64),
+  };
+  const current = { ...projection, sourceFileId: computeDxfProductSavedSourceFileIdV1(row) };
+  const initial = createPatternImportDxfPhaseECadTableZeroCanvasSessionV1(current);
+  const hit = {
+    row,
+    sizeToken: current.sizeToken,
+    pieceId: 'closed-piece',
+    pieceLineKey: 'closed:M',
+    sourceInstancePath: ['insert-a'],
+  };
+  const selected = selectCadTableAcceptedClothPieceV1(initial, row, current, hit);
+  expect(selected.layout.selectedPieceKeys).toEqual([
+    patternImportDxfPhaseECadTablePieceKeyV1(hit.pieceId, hit.pieceLineKey),
+  ]);
+  for (const stale of [
+    { ...hit, row: { ...row, scopeKey: 'pocketing' } },
+    { ...hit, row: { ...row, patternLineKey: 'another-exact-row' } },
+    { ...hit, row: { ...row, revision: 2 } },
+    { ...hit, row: { ...row, cardLockVersion: 8 } },
+    { ...hit, sizeToken: 'XL' },
+    { ...hit, pieceLineKey: 'open:M' },
+  ])
+    expect(selectCadTableAcceptedClothPieceV1(selected, row, current, stale)).toBe(selected);
+  expect(selectCadTableAcceptedClothPieceV1(selected, row, projection, hit)).toBe(selected);
+});
 
 function fixture(): Readonly<{
   catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1;

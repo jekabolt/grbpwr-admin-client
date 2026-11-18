@@ -1,3 +1,8 @@
+import type { MeasurementSurfaceAcceptedClothPieceV1 } from 'components/shared/measurement-watertight-surface-v1-stage';
+import {
+  computeDxfProductSavedSourceFileIdV1,
+  type DxfProductSavedRowIdentityV1,
+} from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 import type { DxfGarmentObservedBoundaryEdgeV1 } from 'components/cloth-simulation-spike/dxf-garment-observed-unsewn-edges-v1';
 import type { PatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
@@ -52,6 +57,7 @@ import {
   selectPatternImportDxfPhaseECadTableZeroConnectControllerEdgeV1,
   startPatternImportDxfPhaseECadTableZeroConnectControllerV1,
 } from './cad-table-zero-connect-controller-v1';
+import { sameSavedDraftRowV1 } from './draft-cad-saved-source-selection-v1';
 import { PatternImportDxfPhaseEDraftCadGridRulersV1 } from './draft-cad-grid-rulers-v1';
 import { PatternImportDxfPhaseECadWorkbenchToolButtonV1 } from './cad-workbench-tool-button-v1';
 import { CAD_WORKBENCH_SEAM_SIDE_COLORS } from './cad-workbench-seam-colors-v1';
@@ -287,6 +293,31 @@ export function activatePatternImportDxfPhaseECadTableZeroCanvasPieceV1(
       toggle ? 'toggle' : 'replace',
     ),
   });
+}
+
+/** A rendered cloth hit may select only the same exact saved row/size in the open table. */
+export function selectCadTableAcceptedClothPieceV1(
+  session: PatternImportDxfPhaseECadTableZeroCanvasSessionV1,
+  row: DxfProductSavedRowIdentityV1,
+  projection: Pick<PatternImportDxfProductPhaseEAssemblyProjectionV1, 'sourceFileId' | 'sizeToken'>,
+  hit: MeasurementSurfaceAcceptedClothPieceV1,
+) {
+  if (
+    !sameSavedDraftRowV1(row, hit.row) ||
+    projection.sizeToken !== hit.sizeToken ||
+    projection.sourceFileId !== computeDxfProductSavedSourceFileIdV1(hit.row)
+  )
+    return session;
+  const candidates = session.layout.pieces.filter(
+    ({ identity }) =>
+      identity.pieceId === hit.pieceId && identity.pieceLineKey === hit.pieceLineKey,
+  );
+  if (candidates.length !== 1) return session;
+  return activatePatternImportDxfPhaseECadTableZeroCanvasPieceV1(
+    session,
+    candidates[0].identity.key,
+    false,
+  );
 }
 
 export function patternImportDxfPhaseECadTableZeroKeyboardMoveDeltaV1(

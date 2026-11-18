@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { Group, Mesh, MeshBasicMaterial, TorusGeometry, Vector3 } from 'three';
+import {
+  BufferAttribute,
+  BufferGeometry,
+  Group,
+  Mesh,
+  MeshBasicMaterial,
+  PerspectiveCamera,
+  Raycaster,
+  TorusGeometry,
+  Vector2,
+  Vector3,
+} from 'three';
 
 import {
   MEASUREMENT_SURFACE_JOINT_MARKER_COARSE_HIT_DIAMETER_CSS_PX_V9,
@@ -18,6 +29,7 @@ import {
   measurementSurfaceOrbitControlsEnabledV2,
   measurementSurfacePatternPieceTransformReceiptV1,
   measurementSurfaceRestoreCameraV10,
+  pickMeasurementSurfaceAcceptedClothPieceV1,
   measurementSurfaceRotationGizmoMatrixV6,
   measurementSurfaceRotationGizmoSignatureV6,
   measurementSurfaceSelectedJointOcclusionSamplesV10,
@@ -27,7 +39,74 @@ import {
   validateMeasurementSurfacePatternPieceProjectedHitReceiptV1,
   validateMeasurementSurfacePatternPieceTransformReceiptV1,
   type MeasurementSurfacePatternPieceOverlayV1,
+  type MeasurementSurfaceAcceptedClothV1,
 } from './measurement-watertight-surface-v1-stage';
+
+it('uses the existing visible accepted cloth triangle ranges and rejects occluded or revoked hits', () => {
+  const first = {
+    row: {
+      techCardId: 11,
+      scopeKey: 'main',
+      patternLineKey: 'saved-front',
+      revision: 1,
+      cardLockVersion: 7,
+      url: 'https://saved.example/fixture.dxf',
+      sizeBytes: 100,
+      sha256: 'a'.repeat(64),
+    },
+    sizeToken: 'M',
+    pieceId: 'front',
+    pieceLineKey: 'native-front',
+    sourceInstancePath: ['insert-a'],
+  };
+  const second = { ...first, pieceLineKey: 'native-back', sourceInstancePath: ['insert-b'] };
+  const positionsM = new Float32Array([-2, -1, 0, 0, -1, 0, -1, 1, 0, 0, -1, 0, 2, -1, 0, 1, 1, 0]);
+  const clothGeometry = new BufferGeometry();
+  clothGeometry.setAttribute('position', new BufferAttribute(positionsM, 3));
+  clothGeometry.addGroup(0, 3, 0);
+  clothGeometry.addGroup(3, 3, 1);
+  const cloth = new Mesh(clothGeometry, [new MeshBasicMaterial(), new MeshBasicMaterial()]);
+  const bodyGeometry = new BufferGeometry();
+  bodyGeometry.setAttribute(
+    'position',
+    new BufferAttribute(new Float32Array([-2, -1, 1, 0, -1, 1, -1, 1, 1]), 3),
+  );
+  const body = new Mesh(bodyGeometry, new MeshBasicMaterial());
+  const camera = new PerspectiveCamera(60, 1, 0.01, 100);
+  camera.position.set(0, 0, 5);
+  camera.updateMatrixWorld();
+  const ray = (x: number) => {
+    const p = new Vector3(x, 0, 0).project(camera);
+    const raycaster = new Raycaster();
+    raycaster.setFromCamera(new Vector2(p.x, p.y), camera);
+    return raycaster;
+  };
+  let current = true;
+  const accepted: MeasurementSurfaceAcceptedClothV1 = {
+    positionsM,
+    frameNumber: 32,
+    ranges: [
+      { triangleOffset: 0, triangleCount: 1, color: 0, sourcePiece: first },
+      { triangleOffset: 1, triangleCount: 1, color: 0, sourcePiece: second },
+    ],
+    isCurrent: () => current,
+  };
+  expect(pickMeasurementSurfaceAcceptedClothPieceV1(ray(-1), cloth, null, accepted)).toBe(first);
+  expect(pickMeasurementSurfaceAcceptedClothPieceV1(ray(1), cloth, body, accepted)).toBe(second);
+  expect(pickMeasurementSurfaceAcceptedClothPieceV1(ray(-1), cloth, body, accepted)).toBeNull();
+  expect(
+    pickMeasurementSurfaceAcceptedClothPieceV1(ray(1), cloth, body, {
+      ...accepted,
+      ranges: [accepted.ranges[0], { triangleOffset: 1, triangleCount: 1, color: 0 }],
+    }),
+  ).toBeNull();
+  current = false;
+  expect(pickMeasurementSurfaceAcceptedClothPieceV1(ray(1), cloth, body, accepted)).toBeNull();
+  clothGeometry.dispose();
+  cloth.material.forEach((material) => material.dispose());
+  bodyGeometry.dispose();
+  body.material.dispose();
+});
 
 describe('measurement surface active guide dataset v1', () => {
   it('publishes an explicit visual-only receipt and an off state', () => {

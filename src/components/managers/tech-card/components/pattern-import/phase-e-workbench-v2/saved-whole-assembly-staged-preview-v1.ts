@@ -266,12 +266,35 @@ export async function runSavedWholeAssemblyStagedPreviewV1(
       ]);
     const cut = snapshotGarmentStagedSourceCutCoreV1(plan.frame.material).cut;
     const surface = prepareSourceCutSurfaceProjectionV1(cut, plan.maxSurfaceTriangles);
+    const uniqueCuts = new Map<string, Source['sourceCuts'][number] | null>();
+    for (const cut of source.sourceCuts) {
+      uniqueCuts.set(cut.pieceLineKey, uniqueCuts.has(cut.pieceLineKey) ? null : cut);
+    }
     const ranges = Object.freeze(
       surface.drawRanges.map(({ pieceId, triangleOffset, triangleCount }) => {
         const color = plan.pieceColors.get(pieceId);
         if (color === undefined || !Number.isInteger(color) || color < 0 || color > 0xffffff)
           throw new Error(`The saved cloth surface has no display color for ${pieceId}.`);
-        return Object.freeze({ triangleOffset, triangleCount, color });
+        const cut =
+          surface.drawRanges.filter((range) => range.pieceId === pieceId).length === 1
+            ? uniqueCuts.get(pieceId)
+            : null;
+        const sourcePiece =
+          cut && cut.sizeToken === source.sizeToken
+            ? Object.freeze({
+                row: cut.row,
+                sizeToken: cut.sizeToken,
+                pieceId: cut.pieceId,
+                pieceLineKey: cut.pieceLineKey,
+                sourceInstancePath: cut.sourceInstancePath,
+              })
+            : undefined;
+        return Object.freeze({
+          triangleOffset,
+          triangleCount,
+          color,
+          ...(sourcePiece && { sourcePiece }),
+        });
       }),
     );
     return {

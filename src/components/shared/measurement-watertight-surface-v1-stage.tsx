@@ -4,6 +4,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { VertexNormalsHelper } from 'three/examples/jsm/helpers/VertexNormalsHelper.js';
 import { cn } from 'lib/utility';
+import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 import {
   updateMeasurementSurfaceLivePositionsV1,
   type MeasurementSurfaceLivePositionUpdateV1,
@@ -132,13 +133,47 @@ export interface MeasurementSurfacePatternPieceOverlayV1 {
   ) => void;
 }
 
+/** An original named occurrence on an exact saved cut row. */
+export type MeasurementSurfaceAcceptedClothPieceV1 = Readonly<{
+  row: DxfProductSavedRowIdentityV1;
+  sizeToken: string;
+  pieceId: string;
+  pieceLineKey: string;
+  sourceInstancePath: readonly string[];
+}>;
+
 /** An accepted frame in the displayed body's world-metre geometry. */
 export type MeasurementSurfaceAcceptedClothV1 = Readonly<{
   positionsM: Float32Array;
   frameNumber: number;
-  ranges: readonly Readonly<{ triangleOffset: number; triangleCount: number; color: number }>[];
+  ranges: readonly Readonly<{
+    triangleOffset: number;
+    triangleCount: number;
+    color: number;
+    sourcePiece?: MeasurementSurfaceAcceptedClothPieceV1;
+  }>[];
   isCurrent: () => boolean;
+  onSelectPiece?: (piece: MeasurementSurfaceAcceptedClothPieceV1) => void;
 }>;
+
+/** Resolve the frontmost accepted triangle's exact source occurrence. */
+export function pickMeasurementSurfaceAcceptedClothPieceV1(
+  raycaster: THREE.Raycaster,
+  clothMesh: THREE.Mesh,
+  bodyMesh: THREE.Mesh | null,
+  cloth: MeasurementSurfaceAcceptedClothV1,
+): MeasurementSurfaceAcceptedClothPieceV1 | null {
+  if (!cloth.isCurrent()) return null;
+  const hit = raycaster.intersectObjects(bodyMesh ? [bodyMesh, clothMesh] : [clothMesh], false)[0];
+  const triangle = hit?.faceIndex;
+  if (hit?.object !== clothMesh || triangle == null || !cloth.isCurrent()) return null;
+  return (
+    cloth.ranges.find(
+      ({ triangleOffset, triangleCount }) =>
+        triangle >= triangleOffset && triangle < triangleOffset + triangleCount,
+    )?.sourcePiece ?? null
+  );
+}
 
 export const MEASUREMENT_SURFACE_PATTERN_PIECE_PROJECTED_HIT_RECEIPT_V1 =
   'measurement-surface-pattern-piece-projected-hit-receipt-v1' as const;
@@ -1676,10 +1711,26 @@ export function MeasurementWatertightSurfaceV1Stage({
     let acceptedClothMesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial[]> | null =
       null;
     let mountedCloth: MeasurementSurfaceAcceptedClothV1 | undefined;
+    let acceptedClothPointer: {
+      id: number;
+      x: number;
+      y: number;
+      frame: MeasurementSurfaceAcceptedClothV1;
+    } | null = null;
+    const trackAcceptedClothPointer = (event: PointerEvent) => {
+      const pointer = acceptedClothPointer;
+      if (!pointer || pointer.id !== event.pointerId) return null;
+      if (Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y) > 4) {
+        acceptedClothPointer = null;
+        return null;
+      }
+      return pointer;
+    };
     const removeAcceptedCloth = () => {
       const previous = acceptedClothMesh;
       acceptedClothMesh = null;
       mountedCloth = undefined;
+      acceptedClothPointer = null;
       delete canvas.dataset.acceptedClothFrame;
       if (!previous) return;
       previous.removeFromParent();
@@ -2867,13 +2918,23 @@ export function MeasurementWatertightSurfaceV1Stage({
       document.addEventListener('visibilitychange', rotationVisibilityHandler);
 
       patternPiecePointerDownHandler = (event) => {
+        if (event.button !== 0 || !camera || patternPieceGesture) return;
         if (
-          event.button !== 0 ||
-          !camera ||
-          patternPieceGesture ||
-          mountedPatternPieceKey !== patternPieceOverlayRenderKeyRef.current
-        )
+          event.isPrimary &&
+          interactive &&
+          mountedCloth?.onSelectPiece &&
+          mountedCloth === acceptedClothRef.current &&
+          mountedCloth.isCurrent()
+        ) {
+          acceptedClothPointer = {
+            id: event.pointerId,
+            x: event.clientX,
+            y: event.clientY,
+            frame: mountedCloth,
+          };
           return;
+        }
+        if (mountedPatternPieceKey !== patternPieceOverlayRenderKeyRef.current) return;
         const binding = patternPieceHit(event);
         if (!binding) return;
         const overlay = patternPieceOverlayRef.current;
@@ -2919,6 +2980,7 @@ export function MeasurementWatertightSurfaceV1Stage({
         event.stopImmediatePropagation();
       };
       patternPiecePointerMoveHandler = (event) => {
+        trackAcceptedClothPointer(event);
         const gesture = patternPieceGesture;
         if (!gesture || gesture.pointerId !== event.pointerId || !camera) return;
         if (!isPatternPieceGestureCurrent(gesture)) {
@@ -2945,6 +3007,32 @@ export function MeasurementWatertightSurfaceV1Stage({
         scheduleRender();
       };
       patternPiecePointerFinishHandler = (event) => {
+        if (acceptedClothPointer?.id === event.pointerId) {
+          const captured = trackAcceptedClothPointer(event);
+          acceptedClothPointer = null;
+          if (
+            event.type !== 'pointerup' ||
+            !captured ||
+            !camera ||
+            !acceptedClothMesh ||
+            captured.frame !== mountedCloth ||
+            captured.frame !== acceptedClothRef.current
+          )
+            return;
+          const point = normalizedTransformPointer(event, event.button);
+          if (!point || Math.abs(point.x) > 1 || Math.abs(point.y) > 1) return;
+          camera.updateMatrixWorld();
+          const raycaster = new THREE.Raycaster();
+          raycaster.setFromCamera(new THREE.Vector2(point.x, point.y), camera);
+          const piece = pickMeasurementSurfaceAcceptedClothPieceV1(
+            raycaster,
+            acceptedClothMesh,
+            surface,
+            captured.frame,
+          );
+          if (piece) captured.frame.onSelectPiece?.(piece);
+          return;
+        }
         if (!patternPieceGesture || patternPieceGesture.pointerId !== event.pointerId) return;
         event.preventDefault();
         event.stopImmediatePropagation();

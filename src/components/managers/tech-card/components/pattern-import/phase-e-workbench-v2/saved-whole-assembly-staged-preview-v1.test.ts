@@ -59,6 +59,8 @@ function fixture() {
     sourceSha256: 'exact-complete',
     serverAssemblyRevision: 'revision',
     sizeId: 58,
+    sizeToken: 'M',
+    sourceCuts: [],
     savedCarrier: { mediaType: 'v10', sidecarSha256: 'exact-placement' },
     unavailable: [],
   } as unknown as NonNullable<Request['source']>;
@@ -99,6 +101,41 @@ beforeEach(() => {
 });
 
 describe('same Workbench staged checkpoint', () => {
+  it('publishes the native cut occurrence only for an unambiguous cut draw range', async () => {
+    const { request } = fixture();
+    const cut = {
+      row: {
+        techCardId: 11,
+        scopeKey: 'main',
+        patternLineKey: 'saved-main',
+        revision: 2,
+        cardLockVersion: 7,
+        url: 'https://saved.example/fixture.dxf',
+        sizeBytes: 1234,
+        sha256: 'a'.repeat(64),
+      },
+      pieceId: 'exact-native-dxf-piece',
+      pieceLineKey: 'piece',
+      sizeToken: 'M',
+      sourceInstancePath: ['insert-a'],
+    } as NonNullable<Request['source']>['sourceCuts'][number];
+    calls.start.mockResolvedValue(frame(1));
+    for (const sourceCuts of [[cut], [cut, { ...cut, sourceInstancePath: ['insert-b'] }], []]) {
+      const source = { ...request.source, sourceCuts };
+      request.prepare.mockResolvedValue({
+        ...(await request.prepare()),
+        source,
+      });
+      const accepted = await runSavedWholeAssemblyStagedPreviewV1(
+        { ...request, source, pauseAfterAccepted: () => true },
+        new AbortController().signal,
+      );
+      const [range] = accepted.cloth.ranges;
+      expect(range).toMatchObject({ color: 0x296dc3, triangleOffset: 0, triangleCount: 1 });
+      expect(range.sourcePiece).toEqual(sourceCuts.length === 1 ? cut : undefined);
+    }
+  });
+
   it('keeps the accepted frame after the old signal is aborted and continues on a different lease', async () => {
     const first = frame(1);
     calls.start.mockResolvedValue(first);

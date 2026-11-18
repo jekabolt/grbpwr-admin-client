@@ -135,7 +135,12 @@ describe('physical host production receivers', () => {
     expect(attribute(zero.tree, pickers[0], 'onDisplayedBodyInputV1')).toBe(
       'physicalHost?.onDisplayedBodyInputV1',
     );
-    expect(attribute(zero.tree, pickers[0], 'acceptedCloth')).toBe('physicalHost?.acceptedCloth');
+    expect(attribute(zero.tree, hosts[0], 'acceptedCloth')).toBe('physicalHost?.acceptedCloth');
+    expect(attribute(zero.tree, pickers[0], 'acceptedCloth')).toBe('acceptedCloth');
+    expect(zero.text).toContain('acceptedCloth: selectableCloth');
+    expect(zero.text).toContain(
+      'selectCadTableAcceptedClothPieceV1(session, row, prepared.projection, hit)',
+    );
     expect(zero.text).toContain('physicalHost?: CadWorkbenchPhysicalHostV1');
     expect(zero.text).not.toContain('useSavedClothPhysicalHostV1(');
     expect(zero.text).not.toMatch(/physicalHost(?:\?\.|\.)viewport\b/);

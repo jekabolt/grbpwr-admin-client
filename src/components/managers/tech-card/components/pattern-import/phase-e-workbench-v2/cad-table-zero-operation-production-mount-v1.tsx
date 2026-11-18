@@ -10,7 +10,9 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
   type ReactNode,
@@ -30,6 +32,7 @@ import {
 import {
   PatternImportDxfPhaseECadTableZeroConnectCanvasV1,
   useCadTableZeroCanvasOwner,
+  selectCadTableAcceptedClothPieceV1,
 } from './cad-table-zero-connect-canvas-v1';
 import {
   CadTablePieceSelection,
@@ -178,6 +181,7 @@ export type PatternImportDxfPhaseECadTableZeroOperationMannequinContextV1 = Read
   sources: readonly PatternImportDxfPhaseECadMannequinDxfStagingSourceV1[];
   activeScopeKey: string | null;
   stagingBlocked: boolean;
+  acceptedCloth?: CadWorkbenchPhysicalHostV1['acceptedCloth'];
 }>;
 
 type SavedFailoverResult = Readonly<{
@@ -626,6 +630,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
   savedAuthority = null,
   selection = Object.freeze({ operationNumber: null }),
   operationsPanel = null,
+  acceptedCloth,
   defaultOperationsMode = 'collapsed',
   sourceSurface,
 }: Readonly<{
@@ -640,6 +645,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
   savedAuthority?: PatternImportDxfPhaseEZeroOperationSavedCardAuthorityRuntimeV1 | null;
   selection?: PatternImportDxfPhaseECadWorkbenchSelectionV1;
   operationsPanel?: ReactNode;
+  acceptedCloth?: CadWorkbenchPhysicalHostV1['acceptedCloth'];
   defaultOperationsMode?: PatternImportDxfPhaseECadWorkbenchOperationsModeV1;
   sourceSurface?: 'explicit-native-drawn-sewing';
 }>) {
@@ -919,6 +925,38 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
       : null;
   const tableSessionOwner = useCadTableZeroCanvasOwner(prepared?.projection ?? null);
   const resolvedSource = currentPreparation?.resolvedSource ?? null;
+  type SelectClothPiece = NonNullable<
+    NonNullable<CadWorkbenchPhysicalHostV1['acceptedCloth']>['onSelectPiece']
+  >;
+  const selectClothPieceRef = useRef<SelectClothPiece | null>(null);
+  useLayoutEffect(() => {
+    if (
+      disabled ||
+      resolvedSource !== 'saved' ||
+      !tableSessionOwner ||
+      !prepared ||
+      !('authoringAuthority' in prepared)
+    )
+      return;
+    const { row } = prepared.authoringAuthority;
+    selectClothPieceRef.current = (hit) =>
+      tableSessionOwner.update((session) =>
+        selectCadTableAcceptedClothPieceV1(session, row, prepared.projection, hit),
+      );
+    return () => {
+      selectClothPieceRef.current = null;
+    };
+  }, [disabled, prepared, resolvedSource, tableSessionOwner]);
+  const selectableCloth = useMemo(
+    () =>
+      acceptedCloth?.ranges.some(({ sourcePiece }) => sourcePiece)
+        ? Object.freeze({
+            ...acceptedCloth,
+            onSelectPiece: ((hit) => selectClothPieceRef.current?.(hit)) satisfies SelectClothPiece,
+          })
+        : acceptedCloth,
+    [acceptedCloth],
+  );
   const pieceFeatures = useMemo(() => {
     if (!prepared) return undefined;
     const scopes =
@@ -1232,6 +1270,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
         sources: mannequinSources,
         activeScopeKey: currentMannequinSource?.scopeKey ?? null,
         stagingBlocked: mannequinStaging?.key === mannequinStagingKey && mannequinStaging.blocked,
+        acceptedCloth: selectableCloth,
       })}
       operationsPanel={
         operationsPanel ?? (
@@ -1297,16 +1336,17 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
       savedAuthority={savedAuthority}
       selection={selection}
       operationsPanel={operationsPanel}
+      acceptedCloth={physicalHost?.acceptedCloth}
       defaultOperationsMode={defaultOperationsMode}
       sourceSurface={sourceSurface}
-      mannequin={({ sources, activeScopeKey, stagingBlocked }) => (
+      mannequin={({ sources, activeScopeKey, stagingBlocked, acceptedCloth }) => (
         <div className='flex h-full min-h-0 flex-col'>
           {physicalHost?.panel ? <div className='shrink-0'>{physicalHost.panel}</div> : null}
           <div className='min-h-0 flex-1'>
             <PatternImportDxfPhaseECadMannequinModelPickerV1
               disabled={disabled}
               onDisplayedBodyInputV1={physicalHost?.onDisplayedBodyInputV1}
-              acceptedCloth={physicalHost?.acceptedCloth}
+              acceptedCloth={acceptedCloth}
               onSaveMannequinArrangement={physicalHost?.onSaveMannequinArrangement}
               onReadMannequinArrangement={physicalHost?.onReadMannequinArrangement}
               onReadSavedMannequinModelId={physicalHost?.onReadSavedMannequinModelId}
