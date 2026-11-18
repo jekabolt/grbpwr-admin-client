@@ -2,8 +2,19 @@ import { createElement, isValidElement, type ComponentProps, type ReactNode } fr
 import { renderToStaticMarkup } from 'react-dom/server';
 import * as sheet from '../sheet-viewport';
 import { describe, expect, it, vi } from 'vitest';
+import { adminService } from 'api/api';
+import type { LiveCard } from 'lib/pattern-import/fabrics/apply';
+import type { CardDraft } from 'lib/pattern-import/types';
+import { writeDxfDetailed } from 'lib/pattern-import/write';
+import { createCardApply } from '../card-apply';
+import { updateTechCardDocument } from 'components/managers/tech-cards/components/useTechCardQuery';
+import type { common_TechCardInsert } from 'api/proto-http/admin';
+import { createSavedThreePanelFixtureV1 } from './saved-full-assembly-compile-session-v1.test-fixture';
 
-vi.mock('api/api', () => ({ abortableAdminService: vi.fn() }));
+vi.mock('api/api', () => ({
+  abortableAdminService: vi.fn(),
+  adminService: { UploadPattern: vi.fn(), UpdateTechCard: vi.fn() },
+}));
 
 import {
   PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V3,
@@ -512,7 +523,7 @@ describe('zero-connect durable N=1 genuine production chain', () => {
     clearPatternImportDxfProductExactNSeamProductionSessionV2(savedRow.techCardId);
   });
 
-  it('persists one confirmed tuple through CAS/readback and restores it after session reload', async () => {
+  it('restores one CAS-persisted exact seam and retires it after a changed ordinary DXF Apply', async () => {
     const exactCatalog = await catalog();
     const semanticBytes = bytesOf(semanticDocument(row));
     const semanticSha256 = await sha256(semanticBytes);
@@ -635,15 +646,13 @@ describe('zero-connect durable N=1 genuine production chain', () => {
       blocker: { code: 'durable-restore-catalog-mismatch' },
     });
     expect(readPatternImportDxfProductExactNSeamProductionSessionV2(row.techCardId)).toBeNull();
-    const restored = await bridge.restore(
-      {
-        schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_DURABLE_RESTORE_REQUEST_V1,
-        row,
-        selectedOperationNumber: 7,
-        catalog: exactCatalog,
-      },
-      new AbortController().signal,
-    );
+    const restoreRequest = {
+      schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_DURABLE_RESTORE_REQUEST_V1,
+      row,
+      selectedOperationNumber: 7,
+      catalog: exactCatalog,
+    };
+    const restored = await bridge.restore(restoreRequest, new AbortController().signal);
 
     expect(restored, restored.ok ? undefined : restored.blocker.detail).toMatchObject({
       ok: true,
@@ -672,6 +681,141 @@ describe('zero-connect durable N=1 genuine production chain', () => {
         direction: 'reverse',
       },
     ]);
+
+    const fixture = await createSavedThreePanelFixtureV1(2);
+    const job = structuredClone(fixture.job);
+    const size = job.pieces[0]!.sizes[0]!;
+    size.cut[0] = { ...size.cut[0]!, x: size.cut[0]!.x + 19 };
+    const converted = writeDxfDetailed(job);
+    const target = {
+      scopeKey: row.scopeKey,
+      fabricPurpose: 'TECH_CARD_BOM_PURPOSE_MAIN',
+      bomLineKey: 'bom-main',
+      label: 'Main',
+      isInterlining: false,
+    };
+    const draft: CardDraft = {
+      techCardId: row.techCardId,
+      scopes: [
+        {
+          target,
+          filename: 'changed-pants.dxf',
+          name: 'Main',
+          dxfText: converted.dxfText,
+          manifest: converted.manifest,
+          identities: [],
+        },
+      ],
+      pieces: [],
+      aliases: [],
+      pieceUpdates: [],
+      downloads: [],
+    };
+    const oldPattern = {
+      ...target,
+      lineKey: row.patternLineKey,
+      filename: 'old-pants.dxf',
+      url: row.url,
+      sha256: row.sha256,
+    };
+    const live: LiveCard = { patterns: [oldPattern], pieces: [], aliases: [] };
+    const upload = vi.mocked(adminService.UploadPattern).mockResolvedValue({
+      filename: 'changed-pants.dxf',
+      url: 'https://media.example.invalid/changed-pants.dxf',
+      sizeBytes: converted.dxfText.length,
+    });
+    const transport = vi.mocked(adminService.UpdateTechCard);
+    transport.mockRejectedValueOnce(Object.assign(new Error('Fixture conflict.'), { status: 409 }));
+    transport.mockResolvedValueOnce({ lockVersion: row.cardLockVersion + 1 });
+    const save = vi.fn(async () => {
+      try {
+        await updateTechCardDocument({
+          id: row.techCardId,
+          techCard: { patterns: live.patterns } as unknown as common_TechCardInsert,
+          // The form stood at a lower version when Apply began, then rebased a version-only move.
+          expectedLockVersion: row.cardLockVersion,
+          snapshotReason: 'dxf-reupload',
+          saveSessionId: undefined,
+          guardedPieceRename: undefined,
+        });
+        return 'ok';
+      } catch {
+        return 'conflict';
+      }
+    });
+    const reconstruct = vi.fn();
+    const attachmentError = vi.fn();
+    const apply = createCardApply({
+      read: () => live,
+      write: (path, value) => {
+        if (path === 'patterns') live.patterns = value as LiveCard['patterns'];
+      },
+      scopeOf: () => row.scopeKey,
+      storageSizeId: 7,
+      readPreviousLockVersion: () => row.cardLockVersion - 1,
+      save,
+      afterConfirmedPatternImportSave: reconstruct,
+      onPatternSemanticAttachmentHostError: attachmentError,
+    });
+    try {
+      const unchanged = {
+        ...draft,
+        scopes: [{ ...draft.scopes[0]!, filename: oldPattern.filename }],
+      };
+      expect(await apply(unchanged)).toMatchObject({ ok: true, writes: 0 });
+      expect(upload).not.toHaveBeenCalled();
+      expect(save).not.toHaveBeenCalled();
+      expect(readPatternImportDxfProductExactNSeamProductionSessionV2(row.techCardId)).toBe(
+        reloaded,
+      );
+
+      expect(await apply(draft)).toMatchObject({ ok: false });
+      expect(readPatternImportDxfProductExactNSeamProductionSessionV2(row.techCardId)).toBe(
+        reloaded,
+      );
+      live.patterns = [oldPattern];
+
+      // This restore already read the old operation and carrier. Hold its response until the
+      // replacement commits so publication can only succeed if it retained stale authority.
+      const readerStarted = Promise.withResolvers<void>();
+      const releaseOldSidecar = Promise.withResolvers<void>();
+      get.mockImplementationOnce(async () => {
+        const preSaveCarrier = structuredClone(stored);
+        readerStarted.resolve();
+        await releaseOldSidecar.promise;
+        return { semanticSidecar: preSaveCarrier };
+      });
+      const delayedRestore = bridge.restore(restoreRequest, new AbortController().signal);
+      await readerStarted.promise;
+      try {
+        const changed = await apply(draft);
+        expect(changed).toMatchObject({
+          ok: true,
+          save: 'ok',
+          replaced: [{ lineKey: row.patternLineKey, oldUrl: row.url }],
+          commitReceiptBlockers: expect.any(Array),
+        });
+        expect(live.patterns[0]).toMatchObject({
+          lineKey: row.patternLineKey,
+          sha256: await sha256(new TextEncoder().encode(converted.dxfText)),
+        });
+        expect(live.patterns[0]?.sha256).not.toBe(row.sha256);
+        expect(reconstruct).not.toHaveBeenCalled();
+        expect(attachmentError).toHaveBeenCalledTimes(1);
+        expect(readPatternImportDxfProductExactNSeamProductionSessionV2(row.techCardId)).toBeNull();
+      } finally {
+        releaseOldSidecar.resolve();
+      }
+      expect(await delayedRestore).toMatchObject({
+        ok: false,
+        blocker: { code: 'durable-session-publication-blocked' },
+      });
+      expect(readPatternImportDxfProductExactNSeamProductionSessionV2(row.techCardId)).toBeNull();
+      expect(put).toHaveBeenCalledTimes(1);
+    } finally {
+      upload.mockReset();
+      transport.mockReset();
+    }
   });
 
   it('refuses a genuine Composite V3 exact-N2 carrier without replacing any bytes', async () => {

@@ -6,6 +6,7 @@ import {
   common_TechCardInsert,
   common_TechCardStage,
   type GuardedZeroOperationPieceRename,
+  type UpdateTechCardRequest,
 } from 'api/proto-http/admin';
 import {
   openFindingCount,
@@ -14,6 +15,7 @@ import {
 } from 'components/managers/tech-card/components/finding-seen';
 import { styleReadViewKeys } from 'components/managers/tech-card/components/useStyleReadViews';
 import { wakeSeamHints } from 'lib/seam-hints/wake';
+import { retireExactNSeamSessionsForDocumentWrite } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/exact-n-seam-production-session-store-v2';
 import { useMemo } from 'react';
 
 export type TechCardFilter = {
@@ -403,6 +405,21 @@ export function useExitTechCardGuide(id: number | undefined) {
   });
 }
 
+export async function updateTechCardDocument(request: UpdateTechCardRequest) {
+  const saved = await adminService.UpdateTechCard(request);
+  const { id, expectedLockVersion } = request;
+  // The ordinary document writer replaces pattern-row revisions and removes their sidecars. Use
+  // the lock of the accepted write, before any fresh query or semantic-session reconstruction.
+  if (
+    request.techCard &&
+    id !== undefined &&
+    expectedLockVersion !== undefined &&
+    saved.lockVersion === expectedLockVersion + 1
+  )
+    retireExactNSeamSessionsForDocumentWrite(id, expectedLockVersion);
+  return saved;
+}
+
 export function useUpdateTechCard() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -427,7 +444,7 @@ export function useUpdateTechCard() {
           guardedPieceRename: GuardedZeroOperationPieceRename;
         }
     )) =>
-      adminService.UpdateTechCard({
+      updateTechCardDocument({
         id,
         techCard,
         expectedLockVersion,
