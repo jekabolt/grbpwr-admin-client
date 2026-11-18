@@ -43,6 +43,14 @@ export type DirectedSourceCutPreviewInputV1 = Readonly<{
   assertCurrentSource: () => boolean;
 }>;
 
+export type DirectedSourceCutPiecePlacementV1 = Readonly<{
+  pieceId: string;
+  originMm: readonly [number, number];
+  centerM: readonly [number, number, number];
+  cos: number;
+  sin: number;
+}>;
+
 function requireCurrent(check: () => boolean, signal?: AbortSignal) {
   signal?.throwIfAborted();
   const current: unknown = check();
@@ -52,7 +60,7 @@ function requireCurrent(check: () => boolean, signal?: AbortSignal) {
   }
 }
 
-async function sha256(values: Float32Array | Uint32Array) {
+async function sha256(values: Float32Array | Float64Array | Uint32Array) {
   const bytes = new Uint8Array(values.byteLength);
   bytes.set(new Uint8Array(values.buffer, values.byteOffset, values.byteLength));
   return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), (byte) =>
@@ -147,11 +155,22 @@ export async function prepareDirectedSourceCutPreviewV1(
     cutTolerances,
   );
   const world = new Float32Array(mesh.restPositions2Mm.length * 2);
-  for (const [side, { vertexOffset, vertexCount }] of mesh.pieceRanges.entries()) {
+  const piecePlacements: DirectedSourceCutPiecePlacementV1[] = [];
+  for (const [side, { pieceId, vertexOffset, vertexCount }] of mesh.pieceRanges.entries()) {
     const samples = [a, b][side].samples;
     const [first, last] = [samples[0].positionMm, samples.at(-1)!.positionMm];
     const mx = (first[0] + last[0]) / 2;
     const my = (first[1] + last[1]) / 2;
+    const planeM = centerM[2] + depthOffsetsM[side];
+    piecePlacements.push(
+      Object.freeze({
+        pieceId,
+        originMm: Object.freeze([mx, my] as const),
+        centerM: Object.freeze([centerM[0], centerM[1], planeM] as const),
+        cos,
+        sin,
+      }),
+    );
     for (let i = vertexOffset; i < vertexOffset + vertexCount; i++) {
       const x = materialPositionsMm[2 * i] - mx;
       const y = materialPositionsMm[2 * i + 1] - my;
@@ -159,7 +178,7 @@ export async function prepareDirectedSourceCutPreviewV1(
         [
           centerM[0] + (cos * x + sin * y) * 0.001,
           centerM[1] + (-sin * x + cos * y) * 0.001,
-          centerM[2] + depthOffsetsM[side],
+          planeM,
           decodeParticleMassGpuV1(cutMaterial.cutParticleMassRecords, i).inverseMassKgInv,
         ],
         4 * i,
@@ -203,8 +222,21 @@ export async function prepareDirectedSourceCutPreviewV1(
   });
   const cut = snapshotGarmentStagedSourceCutCoreV1(material).cut;
   const surface = prepareSourceCutSurfaceProjectionV1(cut, 35_000);
+  const [carrierPositionsSha256, carrierTrianglesSha256, initialPositionsSha256] =
+    await Promise.all([sha256(materialPositionsMm), sha256(mesh.triangles), sha256(world)]);
   requireCurrent(input.assertCurrentSource, signal);
-  return { material, seams, surface };
+  return {
+    material,
+    seams,
+    surface,
+    placement: Object.freeze({
+      gridSha256: grid.witness.canonicalSha256,
+      pieces: Object.freeze(piecePlacements),
+      carrierMaterialPositionsFloat64LeSha256: carrierPositionsSha256,
+      carrierTrianglesUint32LeSha256: carrierTrianglesSha256,
+      positionsInvMassFloat32LeSha256: initialPositionsSha256,
+    }),
+  };
 }
 
 /** The Workbench retains its renderer lease and source authority for the entire run. */
@@ -246,10 +278,7 @@ export async function runDirectedSourceCutPreviewV1(
     sha256(body.positions),
     sha256(body.triangles),
   ]);
-  if (
-    positionsSha256 !== input.body.positionsSha256 ||
-    trianglesSha256 !== input.body.trianglesSha256
-  )
+  if (positionsSha256 !== expectedPositions || trianglesSha256 !== expectedTriangles)
     throw new RangeError('The renderer body differs from the body bound to this directed run.');
   requireCurrent(check, signal);
   const { material, seams, surface } = await prepareDirectedSourceCutPreviewV1(
