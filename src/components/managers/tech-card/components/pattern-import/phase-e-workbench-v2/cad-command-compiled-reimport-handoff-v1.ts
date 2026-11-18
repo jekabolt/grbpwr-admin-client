@@ -1,3 +1,4 @@
+import type { CopyReview } from './draft-cad-unlinked-piece-copy-review-v1';
 import type { PatternImportDxfPhaseEDraftCadGeometryCompileArtifactV1 } from './draft-cad-geometry-compile-v1';
 
 export const PATTERN_IMPORT_DXF_PHASE_E_CAD_COMMAND_COMPILED_REIMPORT_HANDOFF_V1 =
@@ -46,6 +47,7 @@ export type PatternImportDxfPhaseECadCommandCompiledReimportHandoffResultV1 =
 
 export type PatternImportDxfPhaseECadCommandCompiledReimportOwnerV1 = Readonly<{
   techCardId: number;
+  openSavedCopy?: (review: CopyReview) => void;
   request: (
     request: PatternImportDxfPhaseECadCommandCompiledReimportHandoffRequestV1,
   ) => PatternImportDxfPhaseECadCommandCompiledReimportHandoffResultV1;
@@ -256,4 +258,21 @@ export function requestPatternImportDxfPhaseECadCommandCompiledReimportV1(
   if (owner.techCardId !== techCardId)
     return blocked('reimport-card-mismatch', 'Compiled DXF belongs to another Tech Card.');
   return owner.request(request);
+}
+
+export async function openSavedCopyInPatternsReviewV1(
+  review: CopyReview,
+  isCurrent: () => boolean,
+) {
+  const owner = owners.get(review.cardId);
+  if (!owner?.openSavedCopy)
+    throw new Error('The Patterns import review is unavailable for this card.');
+  const { verifyPendingSavedCopyReviewV1 } = await import(
+    './draft-cad-unlinked-piece-copy-review-v1'
+  );
+  if (!isCurrent()) throw new Error('The copy selection closed.');
+  await verifyPendingSavedCopyReviewV1(review);
+  if (!isCurrent() || owners.get(review.cardId) !== owner)
+    throw new Error('The copy selection or card changed during review.');
+  owner.openSavedCopy(review);
 }

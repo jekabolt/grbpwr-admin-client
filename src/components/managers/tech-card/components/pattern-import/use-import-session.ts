@@ -454,7 +454,9 @@ export function useImportSession(deps: {
    * to the sheet's inferred main fabric. The operator can still change it on the fabrics step.
    */
   pinScopeKey?: string;
+  savedCopyFile?: File;
 }) {
+  const pinnedCopyFile = useRef(deps.savedCopyFile);
   const { client, namer, buildDraft, applyDraft } = deps;
   /** The LIVE card as the latest render sees it (only the freshness check reads it). */
   const cardRef = useRef(deps.card);
@@ -1057,6 +1059,13 @@ export function useImportSession(deps: {
     try {
       switch (ev.type) {
         case 'files': {
+          if (
+            pinnedCopyFile.current &&
+            (ev.files.length !== 1 || ev.files[0] !== pinnedCopyFile.current)
+          )
+            throw new Error(
+              'Review this saved copy with its original DXF. Close the review to import other files.',
+            );
           takeCard();
           patchInputs({ ...EMPTY_INPUTS, fileList: ev.files });
           baseSeeds.current = null;
@@ -1568,6 +1577,7 @@ export function useImportSession(deps: {
                     ? { ...reviewOptions, replaceMatchingFile: true }
                     : reviewOptions,
                 ),
+              pinnedCopyFile.current,
             );
           } catch (e) {
             result = {

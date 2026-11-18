@@ -1,3 +1,4 @@
+import { cancelSavedCopyReviewFileV1 } from './pattern-import/phase-e-workbench-v2/draft-cad-unlinked-piece-copy-review-v1';
 import { savedWorkbenchScopeKeyV1 } from './pattern-import/phase-e-workbench-v2/saved-workbench-scope-v1';
 import {
   buildPatternImportDxfPhaseESavedCardContextV1,
@@ -971,9 +972,24 @@ export function PatternsField({
     scopeKey: string;
     files: File[];
     requireManualApply?: boolean;
+    savedCopyFile?: File;
   } | null>(null);
   const importingRef = useRef(importing);
   importingRef.current = importing;
+  const closePatternImportReview = () => {
+    const file = importingRef.current?.savedCopyFile;
+    if (file) cancelSavedCopyReviewFileV1(file);
+    importingRef.current = null;
+    setImporting(null);
+  };
+  const activeCopyFile = importing?.savedCopyFile;
+  useEffect(
+    () => () => {
+      if (activeCopyFile) cancelSavedCopyReviewFileV1(activeCopyFile);
+    },
+    [activeCopyFile],
+  );
+
   // Direct uploads in flight, per slot.
   const [uploading, setUploading] = useState<Record<string, number>>({});
   const uploadingRef = useRef<Record<string, number>>({});
@@ -1707,11 +1723,14 @@ export function PatternsField({
         readPatternImportDxfPhaseECardSessionV1(techCardId)?.importGeneration ?? 0,
       scopeAvailable: (scopeKey) => Boolean(resolveScope(scopeKey)),
       reviewAlreadyOpen: () => importingRef.current !== null,
-      openExistingImportReview: ({ scopeKey, files, requireManualApply }) => {
+      openExistingImportReview: ({ scopeKey, files, requireManualApply, savedCopyFile }) => {
         const scope = resolveScope(scopeKey);
-        if (!scope) return;
+        if (!scope || importingRef.current)
+          throw new Error('The Patterns import review is no longer available.');
+        const next = { scopeKey: scope.key, files: [...files], requireManualApply, savedCopyFile };
+        importingRef.current = next;
         setPickedKey(scope.key);
-        setImporting({ scopeKey: scope.key, files: [...files], requireManualApply });
+        setImporting(next);
       },
     });
   }, [techCardId]);
@@ -3370,7 +3389,7 @@ export function PatternsField({
         const aimed = importScopeKey(importScopeRef.current);
         const k = keys.includes(aimed) ? aimed : keys[0];
         if (k) {
-          setImporting(null);
+          closePatternImportReview();
           setPendingView({
             scopeKey: uiImportScopeKey(k),
             urls: [
@@ -4978,6 +4997,7 @@ export function PatternsField({
           initialFiles={importing.files}
           initialScopeKey={importScopeKey(importing.scopeKey)}
           requireManualApply={importing.requireManualApply}
+          savedCopyFile={importing.savedCopyFile}
           card={buildCardContext({
             techCardId,
             orderedSizeIds: orderSizes(sizeIds),
@@ -5111,11 +5131,11 @@ export function PatternsField({
           onReviewPieces={(scopeKey) => {
             const g = scopeGroups.find((x) => importScopeKey(x.scope.key) === scopeKey);
             if (!g || g.entries.length === 0) return;
-            setImporting(null);
+            closePatternImportReview();
             setSelectedKey(g.scope.key);
             openPieces(g);
           }}
-          onClose={() => setImporting(null)}
+          onClose={closePatternImportReview}
         />
       </Suspense>
     ) : null;

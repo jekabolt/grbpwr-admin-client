@@ -24,9 +24,21 @@ import {
   type SavedAddPointCurrentV1,
 } from './draft-cad-saved-add-point-review-v1';
 
-type Current = SavedAddPointCurrentV1 &
-  Readonly<{ selectedPieceId: string; selectedPieceLineKey: string }>;
-type CopyReview = Readonly<{ kind: 'unlinked-draft-piece-copy/1' }>;
+export type SavedCopySelectionV1 = Readonly<{
+  selectedPieceId: string;
+  selectedPieceLineKey: string;
+}>;
+export type SavedCopyCurrentV1 = SavedAddPointCurrentV1 & SavedCopySelectionV1;
+export type CopyReview = Readonly<{
+  kind: 'unlinked-draft-piece-copy/1';
+  cardId: number;
+  scopeKey: string;
+  generation: number;
+  identity: string;
+}>;
+export type PrepareSavedCopyReviewV1 = (
+  readSelection: () => SavedCopySelectionV1 | null,
+) => Promise<CopyReview>;
 type State = {
   file: File;
   sha: string;
@@ -45,12 +57,12 @@ function requireCopy(ok: unknown, reason: string): asserts ok {
   if (!ok) throw new Error(`Unlinked copy review refused: ${reason}.`);
 }
 
-/** Dormant Draft command seam. Only a checked saved source and the exact current selected piece can mint a review File. */
+/** Only a checked saved source and the exact current selected piece can mint a review File. */
 export async function prepareUnlinkedDraftPieceCopyV1(input: {
   sourceOwner: DxfProductSavedNativeCompilerSourceOwnerV1;
   sourceRequest: DxfProductSavedNativeCompilerSourceRequestV1;
   savedBytes: ArrayBuffer;
-  readCurrent: () => Current | null;
+  readCurrent: () => SavedCopyCurrentV1 | null;
   readCurrentRow: (
     expected: SavedAddPointCurrentV1['row'],
   ) => Promise<SavedAddPointCurrentV1['row']>;
@@ -193,7 +205,13 @@ export async function prepareUnlinkedDraftPieceCopyV1(input: {
   const file = new File([written.dxfText], 'unlinked-draft-copy.dxf', { type: 'image/vnd.dxf' });
   const sha = await sha256Hex(await file.arrayBuffer());
   check();
-  const review = Object.freeze({ kind: 'unlinked-draft-piece-copy/1' as const });
+  const review = Object.freeze({
+    kind: 'unlinked-draft-piece-copy/1' as const,
+    cardId: row.techCardId,
+    scopeKey: row.scopeKey,
+    generation,
+    identity,
+  });
   pending.set(review, {
     file,
     sha,
@@ -212,6 +230,17 @@ export async function prepareUnlinkedDraftPieceCopyV1(input: {
     verifyGeometry,
   });
   return review;
+}
+
+export async function verifyPendingSavedCopyReviewV1(review: CopyReview) {
+  const state = pending.get(review);
+  requireCopy(state, 'review is no longer pending');
+  state.check();
+  await state.revalidate();
+  state.check();
+}
+export function cancelSavedCopyReviewFileV1(file: File) {
+  opened.delete(file);
 }
 
 export function takeUnlinkedDraftPieceCopyReviewV1(review: CopyReview) {
@@ -288,5 +317,6 @@ export async function acknowledgeUnlinkedDraftPieceCopyV1(file: File, draft: Car
   requireCopy(newPieceIntent, 'the ordinary wizard did not create one distinct provisional line');
   await state.revalidate();
   state.check();
+  requireCopy(opened.get(file) === state, 'the review closed before Apply');
   return newPieceIntent;
 }

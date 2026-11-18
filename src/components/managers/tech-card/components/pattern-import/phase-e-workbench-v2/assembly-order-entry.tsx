@@ -1,3 +1,4 @@
+import type { PrepareSavedCopyReviewV1 } from './draft-cad-unlinked-piece-copy-review-v1';
 import type { PatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import type { PatternImportDxfProductMultiseamMappingCompositionResultV2 } from 'lib/cloth/domain/pattern-import-dxf-product-multiseam-mapping-composition-v2';
 import type { PatternImportDxfProductSavedGarmentMeshIngressRequestV1 } from 'lib/cloth/domain/pattern-import-dxf-product-saved-garment-mesh-ingress-v1';
@@ -2024,26 +2025,48 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
       savedDraftMounted.current = false;
     };
   }, []);
+  const readSavedDraft = useCallback(
+    (
+      runtime: PatternImportDxfPhaseESavedRowProductionRuntimeV1,
+      captured: typeof draftCadSession,
+    ) => {
+      const now = activeSavedDraftRef.current,
+        session = draftCadSessionRef.current;
+      return savedDraftMounted.current &&
+        now?.runtime === runtime &&
+        session &&
+        session === captured &&
+        (readPatternImportDxfPhaseECardSessionV1(now.row.techCardId)?.importGeneration ?? 0) ===
+          now.generation
+        ? { row: now.row, session, sizeToken: now.sizeToken, generation: now.generation }
+        : null;
+    },
+    [],
+  );
   const prepareSavedAddPointReview =
     activeSavedDraftRef.current && savedSession?.runtime.prepareSavedAddPointReview
       ? () => {
           const runtime = savedSession.runtime,
-            row = savedSession.row,
             captured = draftCadSession;
-          return runtime.prepareSavedAddPointReview!(row, () => {
-            const now = activeSavedDraftRef.current,
-              session = draftCadSessionRef.current;
-            return savedDraftMounted.current &&
-              now?.runtime === runtime &&
-              session &&
-              session === captured &&
-              (readPatternImportDxfPhaseECardSessionV1(row.techCardId)?.importGeneration ?? 0) ===
-                now.generation
-              ? { row: now.row, session, sizeToken: now.sizeToken, generation: now.generation }
-              : null;
-          });
+          return runtime.prepareSavedAddPointReview!(savedSession.row, () =>
+            readSavedDraft(runtime, captured),
+          );
         }
       : undefined;
+  const prepareSavedPieceCopyReview = useCallback<PrepareSavedCopyReviewV1>(
+    async (readSelection) => {
+      const start = activeSavedDraftRef.current,
+        captured = draftCadSessionRef.current;
+      if (!start?.runtime.prepareSavedPieceCopyReview || !captured)
+        throw new Error('The saved Draft is no longer available.');
+      return start.runtime.prepareSavedPieceCopyReview(start.row, () => {
+        const current = readSavedDraft(start.runtime, captured),
+          selection = readSelection();
+        return current && selection ? { ...current, ...selection } : null;
+      });
+    },
+    [readSavedDraft],
+  );
   const activeDraftTopologyScopeKey =
     activePreparedMaterialScope?.scopeKey ?? prepared?.scopeKey ?? null;
   const activeDraftTopologyProjection =
@@ -2670,6 +2693,11 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
                           }
                           confirmedImportGeneration={cardSession?.importGeneration ?? 0}
                           prepareSavedAddPointReview={prepareSavedAddPointReview}
+                          prepareSavedPieceCopyReview={
+                            activeSavedDraftRef.current?.runtime.prepareSavedPieceCopyReview
+                              ? prepareSavedPieceCopyReview
+                              : undefined
+                          }
                           arrangementScope={
                             materialScopeDraftArrangements[
                               activePreparedMaterialScope?.scopeKey ?? prepared.scopeKey

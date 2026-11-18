@@ -1,3 +1,4 @@
+import { createPatternImportDxfPhaseEDraftCadCompileSourceV1 } from './draft-cad-compile-source-v1';
 import { readDxf } from 'lib/pattern-import/adapters/dxf/extract';
 import { segmentDxf } from 'lib/pattern-import/adapters/dxf/segment';
 import { dxfFastPath } from 'lib/pattern-import/adapters/dxf/stages';
@@ -155,7 +156,7 @@ async function chosen(ranks: number) {
     readCurrent: () => current,
     readCurrentRow: vi.fn(async () => f.row),
   };
-  return { f, source, current, input };
+  return { f, source, current, input, selected, catalog: catalog.catalog };
 }
 
 it.each([1, 2])(
@@ -509,3 +510,166 @@ it.each([
   const read = await decodeCutFixture(input);
   expect(() => dxfFastPath(read, segmentDxf(read))).toThrow('Native DXF cut hole');
 });
+
+it('checks the selected saved source on the mounted Duplicate piece button and refuses a cancelled or moved review', async () => {
+  const [{ chromium }, { createServer }, { mkdtemp, rm }, { tmpdir }, { join }] = await Promise.all(
+    [
+      import('playwright'),
+      import('vite'),
+      import('node:fs/promises'),
+      import('node:os'),
+      import('node:path'),
+    ],
+  );
+  const { f, source, current, selected, catalog } = await chosen(2);
+  const cacheDir = await mkdtemp(join(tmpdir(), 'ac13-vite-'));
+  const server = await createServer({
+    cacheDir,
+    appType: 'custom',
+    logLevel: 'error',
+    server: { host: '127.0.0.1', port: 0, hmr: false },
+    plugins: [
+      {
+        name: 'mounted-saved-copy-fixture',
+        configureServer(s) {
+          s.middlewares.use(async (req, res, next) => {
+            if (req.url !== '/__saved-copy') return next();
+            const html = await s.transformIndexHtml(
+              req.url,
+              '<html><head><link rel="stylesheet" href="/src/global.css" /></head><body><main id="root"></main></body></html>',
+            );
+            res.setHeader('Content-Type', 'text/html');
+            res.end(html);
+          });
+        },
+      },
+    ],
+  });
+  const browser = await chromium.launch({ headless: true, args: ['--disable-gpu'] });
+  try {
+    await server.listen();
+    const address = server.httpServer!.address();
+    if (!address || typeof address === 'string') throw Error('Missing isolated test server');
+    const origin = 'http://127.0.0.1:' + address.port;
+    const page = await browser.newPage();
+    await page.route('**/*', (route) =>
+      route
+        .request()
+        .url()
+        .startsWith(origin + '/')
+        ? route.continue()
+        : route.abort(),
+    );
+    await page.goto(origin + '/__saved-copy');
+    const url =
+      '/src/components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/draft-cad-unlinked-piece-copy-control.browser-fixture.tsx';
+    const errors: string[] = [],
+      writes: string[] = [];
+    page.on('request', (req) => {
+      if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method()))
+        writes.push(req.method() + ' ' + req.url());
+    });
+    page.on('pageerror', (err) => errors.push(err.message));
+    page.on('console', (msg) => {
+      if (msg.type() === 'error') errors.push(msg.text());
+    });
+    await page.addScriptTag({
+      type: 'module',
+      content: `import {mountSavedPieceCopyControl} from '${url}'; window.mountSavedCopyFixture=mountSavedPieceCopyControl;`,
+    });
+    await page
+      .waitForFunction(() => Boolean(window.mountSavedCopyFixture), undefined, { timeout: 15000 })
+      .catch(() => {
+        throw Error(errors.join('\n'));
+      });
+    const control = await page.evaluateHandle(
+      (json) => window.mountSavedCopyFixture(JSON.parse(json)),
+      JSON.stringify({
+        row: f.row,
+        card: f.card,
+        text: f.written.dxfText,
+        source: current.session.source,
+        selected: selected.selection,
+        catalog,
+        compileSource: createPatternImportDxfPhaseEDraftCadCompileSourceV1(source.native.draft)!,
+      }),
+    );
+    try {
+      const duplicate = page.getByText('Duplicate piece', { exact: true }),
+        review = page.getByRole('button', { name: 'Review unlinked copy' });
+      await page
+        .locator('[data-draft-cad-arrange-tool]')
+        .click({ timeout: 10000 })
+        .catch(async (error) => {
+          throw Error(
+            String(error) +
+              ' ' +
+              errors.join('\n') +
+              ' ' +
+              (await page.locator('body').innerText()),
+          );
+        });
+      const piece = page.locator('[data-cad-object-piece="FP"]');
+      if (!(await piece.isVisible()))
+        await page.getByRole('button', { name: 'Show objects sidebar' }).click();
+      await piece.click();
+      await page.locator('[data-cad-object-piece="BP"]').click({ modifiers: ['Shift'] });
+      expect(await duplicate.count()).toBe(0);
+      await piece.click();
+      await duplicate.click();
+      await page
+        .getByRole('status')
+        .filter({ hasText: 'FP_2' })
+        .waitFor({ timeout: 15000 })
+        .catch(async (error) => {
+          throw Error(String(error) + ' ' + (await page.locator('body').innerText()));
+        });
+      await review.click();
+      await expect.poll(() => control.evaluate((c) => c.state().handoffs)).toBe(1);
+      expect(await control.evaluate((c) => c.state())).toEqual({
+        manual: true,
+        writes: 0,
+        handoffs: 1,
+      });
+      const wizard = page.getByTestId('pattern-import-wizard');
+      await wizard.waitFor({ timeout: 12000 }).catch(async (error) => {
+        throw Error(String(error) + ' ' + errors.join('\n'));
+      });
+      expect(await wizard.getAttribute('data-initial-scope-key')).toBe('main');
+      expect(await wizard.getAttribute('data-initial-file-count')).toBe('1');
+      await wizard.getByTitle('close the import (the card is not changed)').click();
+      if (await page.getByText('discard and close', { exact: true }).isVisible())
+        await page.getByText('discard and close', { exact: true }).click();
+      await wizard.waitFor({ state: 'detached' });
+      expect(await control.evaluate((c) => c.verifyClosed())).toContain(
+        'original explicitly reviewed File',
+      );
+      await duplicate.click();
+      await page.getByRole('status').filter({ hasText: 'FP_2' }).waitFor();
+      await control.evaluate((c) => c.drift());
+      await review.click();
+      await page.getByRole('status').filter({ hasText: 'saved-row authority moved' }).waitFor();
+      expect(await review.isDisabled()).toBe(true);
+      expect(await wizard.count()).toBe(0);
+      expect(await control.evaluate((c) => c.state())).toEqual({
+        manual: true,
+        writes: 0,
+        handoffs: 1,
+      });
+      expect(writes).toEqual([]);
+    } finally {
+      await control.evaluate((c) => c.dispose());
+    }
+  } finally {
+    source.dispose();
+    await browser.close();
+    await server.close();
+    await rm(cacheDir, { recursive: true, force: true });
+  }
+}, 90000);
+
+declare global {
+  interface Window {
+    mountSavedCopyFixture: typeof import('./draft-cad-unlinked-piece-copy-control.browser-fixture').mountSavedPieceCopyControl;
+  }
+}

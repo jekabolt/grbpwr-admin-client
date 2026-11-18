@@ -80,7 +80,15 @@ export async function applyDirectDxfReviewedDraftV1(
   autopilotToken: number | undefined,
   isCurrent: () => boolean,
   apply: (options?: Parameters<ApplyDraftFn>[2]) => ReturnType<ApplyDraftFn>,
+  pinnedCopyFile?: File,
 ): ReturnType<ApplyDraftFn> {
+  if (
+    pinnedCopyFile &&
+    (files.length !== 1 ||
+      files[0] !== pinnedCopyFile ||
+      !unlinkedPieceCopyFiles.has(pinnedCopyFile))
+  )
+    throw new Error('The original unlinked copy File or its review is no longer available.');
   if (draft.scopes.some((scope) => scope.writerReplay?.retainedLineSplit)) {
     if (autopilotToken != null)
       throw new Error('Confirm the saved Add point with the Apply button.');

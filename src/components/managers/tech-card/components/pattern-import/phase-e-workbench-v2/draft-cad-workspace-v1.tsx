@@ -1,3 +1,8 @@
+import { SavedDraftPieceCopyControlV1 } from './draft-cad-unlinked-piece-copy-control-v1';
+import type {
+  PrepareSavedCopyReviewV1,
+  SavedCopySelectionV1,
+} from './draft-cad-unlinked-piece-copy-review-v1';
 import {
   compileDraftForOrdinaryReviewV1,
   type SavedAddPointReviewOwner,
@@ -160,6 +165,7 @@ export type PatternImportDxfPhaseEDraftCadWorkspacePropsV1 = Readonly<{
   activeMaterialScopeKey?: string;
   /** Confirmed import generation visible when this compile starts; zero for saved-only sources. */
   confirmedImportGeneration?: number;
+  prepareSavedPieceCopyReview?: PrepareSavedCopyReviewV1;
   prepareSavedAddPointReview?: () => Promise<SavedAddPointReviewOwner>;
   onSelectMaterialScope?: (scopeKey: string) => void;
   workspaceContextControl?: ReactNode;
@@ -197,6 +203,7 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
   activeMaterialScopeKey,
   confirmedImportGeneration = 0,
   prepareSavedAddPointReview,
+  prepareSavedPieceCopyReview,
   onSelectMaterialScope,
   workspaceContextControl,
   arrangementScope = null,
@@ -298,6 +305,28 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
     [arrangementKey, arrangementScope, localArrangements, pieceIds],
   );
   const selectedPieceIds = arrangement.selectedPieceIds;
+  const selectedForCopy =
+    arrangeActive && session.cursor === 0 && selectedPieceIds.length === 1
+      ? projection.pieces.find((p) => p.pieceId === selectedPieceIds[0])
+      : null;
+  const copySelection = useRef<SavedCopySelectionV1 | null>(null);
+  copySelection.current = selectedForCopy?.pieceLineKey
+    ? {
+        selectedPieceId: selectedForCopy.pieceId,
+        selectedPieceLineKey: selectedForCopy.pieceLineKey,
+      }
+    : null;
+  const copyMounted = useRef(false);
+  useEffect(() => {
+    copyMounted.current = true;
+    return () => {
+      copyMounted.current = false;
+    };
+  }, []);
+  const readCopySelection = useCallback(
+    () => (copyMounted.current ? copySelection.current : null),
+    [],
+  );
   const selectedPieceIdentity = selectedPieceIds.join('\u0000');
   useEffect(() => {
     pressSubmitLocked.current = false;
@@ -650,6 +679,23 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
                 onCrossScopeConnect && !crossScopeConnectDisabled,
               )}
             />
+            {arrangeActive && selectedPieceIds.length === 1 && (
+              <SavedDraftPieceCopyControlV1
+                key={JSON.stringify([
+                  selectedPieceIds[0],
+                  selectedForCopy?.pieceLineKey,
+                  materialScopeKey,
+                  confirmedImportGeneration,
+                ])}
+                session={session}
+                readSelection={readCopySelection}
+                prepare={
+                  compiledReimportCapability.available && copySelection.current
+                    ? prepareSavedPieceCopyReview
+                    : undefined
+                }
+              />
+            )}
             {showPatternImportDxfPhaseECadContextualPressV1(
               arrangeActive,
               selectedPieceIds,

@@ -1,4 +1,3 @@
-import { expect } from 'vitest';
 import {
   PATIMPORT,
   type StageIO,
@@ -104,12 +103,12 @@ export async function draftThroughWizardStages(
       card.scopes,
     );
     const semantics = await run('semantics', reviewedInput);
-    expect(semantics.blocked).toEqual([]);
+    if (semantics.blocked.length) throw new Error(JSON.stringify(semantics.blocked));
     const capture = await captureDirectDxfAuthoringV1([file], run);
-    expect(
-      capture.dxfNativeSewingReplay?.replayReady,
-      JSON.stringify(capture.dxfNativeSewingReplay?.blockers),
-    ).toBe(true);
+    if (!capture.dxfNativeSewingReplay?.replayReady)
+      throw new Error(
+        `The native sewing replay is unavailable. ${JSON.stringify(capture.dxfNativeSewingReplay?.blockers)}`,
+      );
     const written = await run('write', {
       techCardId: card.techCardId,
       scopes: card.scopes,

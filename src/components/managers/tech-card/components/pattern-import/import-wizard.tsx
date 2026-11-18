@@ -123,6 +123,7 @@ type WizardProps = {
   initialScopeKey?: string;
   /** Explicit review entry always requires the operator to confirm the final Apply. */
   requireManualApply?: boolean;
+  savedCopyFile?: File;
 };
 
 /**
@@ -188,6 +189,7 @@ function WizardBody({
   initialFiles,
   initialScopeKey,
   requireManualApply = false,
+  savedCopyFile,
   kit,
   onToggleStub,
 }: WizardProps & { kit: StubKit | null; onToggleStub?: () => void }) {
@@ -242,6 +244,7 @@ function WizardBody({
       applyDraft,
       pageRoles,
       pinScopeKey: initialScopeKey,
+      savedCopyFile,
     }),
   );
   latest.current = api.session;

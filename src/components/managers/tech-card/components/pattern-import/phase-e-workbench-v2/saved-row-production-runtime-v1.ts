@@ -1,3 +1,4 @@
+import type { CopyReview, SavedCopyCurrentV1 } from './draft-cad-unlinked-piece-copy-review-v1';
 import { DXF_PRODUCT_SAVED_REPROCESS_REQUEST_V1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 import {
   createDxfProductSavedNativeReprocessOwnerV1,
@@ -75,6 +76,10 @@ export type PatternImportDxfPhaseESavedRowProductionRuntimeV1 = Readonly<{
     row: DxfProductSavedRowIdentityV1,
     readCurrent: () => Omit<SavedAddPointCurrentV1, 'card'> | null,
   ) => Promise<SavedAddPointReviewOwner>;
+  prepareSavedPieceCopyReview?: (
+    row: DxfProductSavedRowIdentityV1,
+    readCurrent: () => Omit<SavedCopyCurrentV1, 'card'> | null,
+  ) => Promise<CopyReview>;
   dispose: () => void;
   snapshot: () => Readonly<{
     disposed: boolean;
@@ -188,6 +193,72 @@ export function createPatternImportDxfPhaseESavedRowRuntimeV1(
     });
   };
 
+  async function withSavedDraftSource<T>(
+    row: DxfProductSavedRowIdentityV1,
+    stablePiece: string,
+    prepare: (
+      proof: Pick<
+        Parameters<
+          typeof import('./draft-cad-saved-add-point-review-v1').prepareSavedAddPointReviewV1
+        >[0],
+        'sourceOwner' | 'sourceRequest' | 'savedBytes'
+      >,
+      card: CardContext,
+      readCurrentRow: () => Promise<DxfProductSavedRowIdentityV1>,
+    ) => Promise<T>,
+  ): Promise<T> {
+    const host = createSavedReprocessHost(stablePiece);
+    const signal = new AbortController().signal;
+    const sourceBytes: { current: Uint8Array | null } = { current: null };
+    const owner = createDxfProductSavedNativeReprocessOwnerV1({
+      ...host,
+      async readAuthoritativeRow(expected, signal, progress) {
+        const loaded = await host.readAuthoritativeRow(expected, signal, progress);
+        sourceBytes.current = loaded.bytes.slice();
+        return loaded;
+      },
+    });
+    try {
+      const card = (await resolveCard(row, signal)).card;
+      const read = await owner.run({
+        schemaVersion: DXF_PRODUCT_SAVED_REPROCESS_REQUEST_V1,
+        row,
+      });
+      if (!read.ok) throw new Error(read.blockers[0].detail);
+      if (!sourceBytes.current) throw new Error('The verified saved DXF bytes are unavailable.');
+      return await prepare(
+        {
+          sourceOwner: read.sourceOwner,
+          sourceRequest: {
+            schemaVersion: DXF_PRODUCT_SAVED_NATIVE_COMPILER_SOURCE_REQUEST_V1,
+            sourceFileId: read.sourceFileId,
+            sourceSha256: row.sha256,
+            techCardId: row.techCardId,
+            patternLineKey: row.patternLineKey,
+            cardLockVersion: row.cardLockVersion,
+            scopeKey: row.scopeKey,
+            draft: read.draft,
+          },
+          savedBytes: sourceBytes.current.buffer as ArrayBuffer,
+        },
+        card,
+        async () => {
+          if (disposed) throw new Error('The saved Draft runtime has closed.');
+          const currentHost = createSavedReprocessHost();
+          try {
+            return await currentHost.readCurrentRowIdentity(row, signal);
+          } finally {
+            currentHost.dispose();
+          }
+        },
+      );
+    } finally {
+      sourceBytes.current?.fill(0);
+      owner.dispose();
+      host.dispose();
+    }
+  }
+
   const preparationOwner = createPatternImportDxfPhaseESavedRowPreparationOwnerV1({
     createSavedReprocessHost,
     readAuthoritativeAssembly: deps.snapshot.authorityAdapter.readAuthoritativeAssembly,
@@ -208,58 +279,52 @@ export function createPatternImportDxfPhaseESavedRowRuntimeV1(
         command?.tool !== 'add-point'
       )
         throw new Error('The current saved Draft must contain one confirmed Add point.');
-      const host = createSavedReprocessHost(command.target.pieceId);
-      const signal = new AbortController().signal;
-      const sourceBytes: { current: Uint8Array | null } = { current: null };
-      const owner = createDxfProductSavedNativeReprocessOwnerV1({
-        ...host,
-        async readAuthoritativeRow(expected, signal, progress) {
-          const loaded = await host.readAuthoritativeRow(expected, signal, progress);
-          sourceBytes.current = loaded.bytes.slice();
-          return loaded;
+      return withSavedDraftSource(
+        row,
+        command.target.pieceId,
+        async (proof, card, readCurrentRow) => {
+          const { prepareSavedAddPointReviewV1 } = await import(
+            './draft-cad-saved-add-point-review-v1'
+          );
+          return prepareSavedAddPointReviewV1({
+            ...proof,
+            readCurrent: () => {
+              const current = readCurrent();
+              return !disposed && current ? { ...current, card } : null;
+            },
+            verifyCurrentRow: async () => {
+              await readCurrentRow();
+            },
+          });
         },
-      });
-      try {
-        const card = (await resolveCard(row, signal)).card;
-        const read = await owner.run({
-          schemaVersion: DXF_PRODUCT_SAVED_REPROCESS_REQUEST_V1,
-          row,
-        });
-        if (!read.ok) throw new Error(read.blockers[0].detail);
-        if (!sourceBytes.current) throw new Error('The verified saved DXF bytes are unavailable.');
-        const module = await import('./draft-cad-saved-add-point-review-v1');
-        return await module.prepareSavedAddPointReviewV1({
-          sourceOwner: read.sourceOwner,
-          sourceRequest: {
-            schemaVersion: DXF_PRODUCT_SAVED_NATIVE_COMPILER_SOURCE_REQUEST_V1,
-            sourceFileId: read.sourceFileId,
-            sourceSha256: row.sha256,
-            techCardId: row.techCardId,
-            patternLineKey: row.patternLineKey,
-            cardLockVersion: row.cardLockVersion,
-            scopeKey: row.scopeKey,
-            draft: read.draft,
-          },
-          savedBytes: sourceBytes.current.buffer as ArrayBuffer,
-          readCurrent: () => {
-            const current = readCurrent();
-            return !disposed && current ? { ...current, card } : null;
-          },
-          verifyCurrentRow: async () => {
-            if (disposed) throw new Error('The saved Draft runtime has closed.');
-            const currentHost = createSavedReprocessHost();
-            try {
-              await currentHost.readCurrentRowIdentity(row, signal);
-            } finally {
-              currentHost.dispose();
-            }
-          },
-        });
-      } finally {
-        sourceBytes.current?.fill(0);
-        owner.dispose();
-        host.dispose();
-      }
+      );
+    },
+    async prepareSavedPieceCopyReview(row, readCurrent) {
+      const opening = readCurrent();
+      if (
+        !opening ||
+        opening.session.cursor !== 0 ||
+        !opening.selectedPieceId ||
+        !opening.selectedPieceLineKey
+      )
+        throw new Error('Select one piece in an unmodified saved Draft.');
+      return withSavedDraftSource(
+        row,
+        opening.selectedPieceId,
+        async (proof, card, readCurrentRow) => {
+          const { prepareUnlinkedDraftPieceCopyV1 } = await import(
+            './draft-cad-unlinked-piece-copy-review-v1'
+          );
+          return prepareUnlinkedDraftPieceCopyV1({
+            ...proof,
+            readCurrentRow,
+            readCurrent: () => {
+              const current = readCurrent();
+              return !disposed && current ? { ...current, card } : null;
+            },
+          });
+        },
+      );
     },
     dispose() {
       if (disposed) return;
