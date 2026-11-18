@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { Button } from 'ui';
+import { type ChangeEvent, useEffect, useRef, useState } from 'react';
+import { Button, Input, Select } from 'ui';
 import type { JoinPicks, JoinReview } from './draft-cad-saved-join-review';
 import { openSavedJoinInPatterns } from './cad-command-compiled-reimport-handoff-v1';
 export type PrepareJoin = (picks: JoinPicks, isCurrent: () => boolean) => Promise<JoinReview>;
@@ -65,29 +65,28 @@ export function SavedJoinControl({
     >
       <summary className='cursor-pointer'>Join pieces</summary>
       <div className='absolute left-0 top-full z-20 grid min-w-64 gap-2 border border-hairline bg-bgColor p-2'>
-        <label>
+        <div>
           Fixed right edge
-          <select
+          <Select
+            name='join-fixed-right-edge'
+            placeholder='Fixed right edge'
+            size='sm'
             value={fixed.pieceId}
-            onChange={(e) => {
+            items={pieces.map((piece) => ({ value: piece.pieceId, label: piece.pieceId }))}
+            onValueChange={(pieceId) => {
               invalidate();
-              setReverse(e.target.value === pieces[1]?.pieceId);
+              setReverse(pieceId === pieces[1]?.pieceId);
             }}
-          >
-            {pieces.map((p) => (
-              <option key={p.pieceLineKey} value={p.pieceId}>
-                {p.pieceId}
-              </option>
-            ))}
-          </select>
-        </label>
+          />
+        </div>
         <span>Moving left edge · {moving.pieceId}</span>
         <label>
           New piece identity
-          <input
+          <Input
+            aria-label='New piece identity'
             value={identity}
             maxLength={6}
-            onChange={(e) => {
+            onChange={(e: ChangeEvent<HTMLInputElement>) => {
               invalidate();
               setIdentity(e.target.value.toUpperCase());
             }}

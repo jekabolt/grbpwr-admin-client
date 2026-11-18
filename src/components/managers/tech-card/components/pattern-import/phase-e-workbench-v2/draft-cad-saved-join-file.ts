@@ -7,10 +7,18 @@ type ReviewFile = {
   scope?: CardDraft['scopes'][number];
   text?: string;
 };
-const known = new WeakSet<File>();
+export type SavedJoinDescription = Readonly<{ fixed: string; moving: string; identity: string }>;
+const known = new WeakMap<File, SavedJoinDescription>();
+export const describeSavedJoinFile = (file: File | undefined) =>
+  file ? known.get(file) : undefined;
 const reviews = new WeakMap<File, ReviewFile>();
-export function registerSavedJoinFile(file: File, dialect: WriteJob['dialect']) {
-  known.add(file);
+export function registerSavedJoinFile(
+  file: File,
+  dialect: WriteJob['dialect'],
+  description: SavedJoinDescription,
+) {
+  const { fixed, moving, identity } = description;
+  known.set(file, Object.freeze({ fixed, moving, identity }));
   reviews.set(file, { dialect });
 }
 export const isSavedJoinFile = (file: File) => known.has(file);

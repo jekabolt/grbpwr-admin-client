@@ -207,7 +207,7 @@ export async function takeSavedJoinFile(
   state.assertDraftCurrent();
   check(pending.delete(review) && isCurrent(), 'The Join review closed or changed.');
   state.isWizardCurrent = isWizardCurrent;
-  registerSavedJoinFile(state.file, state.dialect);
+  registerSavedJoinFile(state.file, state.dialect, review);
   files.set(state.file, state);
   return state.file;
 }

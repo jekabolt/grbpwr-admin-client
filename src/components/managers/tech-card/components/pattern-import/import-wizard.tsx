@@ -6,6 +6,7 @@
 // glyph each; a stage behind is a door back (contract: `back{to}` keeps that step's inputs, drops
 // the outputs after it). The footer is three things only: ← back · the one question (a link to
 // the control that answers it, `data-ask` in ui-bits.tsx) · the one primary, named by what it does.
+import { describeSavedJoinFile } from './phase-e-workbench-v2/draft-cad-saved-join-file';
 import * as Dialog from '@radix-ui/react-dialog';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ImportSession, SeedId, WizardStep } from 'lib/pattern-import/types';
@@ -820,6 +821,7 @@ function WizardBody({
       case 'apply':
         return (
           <ApplyStep
+            join={describeSavedJoinFile(savedCopyFile)}
             api={api}
             card={card}
             stub={client.kind === 'stub'}
