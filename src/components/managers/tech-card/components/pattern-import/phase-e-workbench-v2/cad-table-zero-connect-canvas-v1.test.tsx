@@ -770,6 +770,7 @@ describe('zero-operation CAD table rendering', () => {
               Icon as Half2Icon,
               Icon as LayersIcon,
               Icon as MagicWandIcon,
+              Icon as MinusIcon,
               Icon as Pencil1Icon,
               Icon as PlusIcon,
               Icon as RulerHorizontalIcon,
