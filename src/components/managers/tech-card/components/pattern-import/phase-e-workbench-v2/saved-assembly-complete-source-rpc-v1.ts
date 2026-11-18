@@ -2,14 +2,18 @@ import type {
   AdminService,
   GetTechCardSavedAssemblySnapshotRequest,
   TechCardPatternSemanticSidecar,
+  TechCardSavedAssemblyAuthoredFoldSourceV1,
   TechCardSavedAssemblyCompleteSourceV1,
   TechCardSavedPatternRowIdentity,
   common_TechCardOperation,
 } from 'api/proto-http/admin';
 import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 
-const profile = 'TECH_CARD_SAVED_ASSEMBLY_SNAPSHOT_PROFILE_COMPLETE_SOURCE_V1';
+const completeProfile = 'TECH_CARD_SAVED_ASSEMBLY_SNAPSHOT_PROFILE_COMPLETE_SOURCE_V1';
+const authoredFoldProfile =
+  'TECH_CARD_SAVED_ASSEMBLY_SNAPSHOT_PROFILE_COMPLETE_SOURCE_WITH_AUTHORED_FOLDS_V1';
 const sourceDomain = 'tech-card-saved-assembly-complete-source/1\0';
+const authoredFoldDomain = 'tech-card-saved-assembly-authored-fold-source/1\0';
 const sha256 = /^[a-f0-9]{64}$/;
 const revisionToken = /^asm:v1:[a-f0-9]{32}:[1-9][0-9]{0,19}$/;
 const maxSourceBytes = 8 * 1024 * 1024;
@@ -19,6 +23,20 @@ const encoder = new TextEncoder();
 type ExactPatternRow = DxfProductSavedRowIdentityV1;
 
 type SourcePatternRow = ExactPatternRow & Readonly<{ patternVersion: number; downloadUrl: string }>;
+
+type FoldRow = NonNullable<TechCardSavedAssemblyAuthoredFoldSourceV1['folds']>[number];
+
+export type SavedAssemblyAuthoredFoldsV1 = Readonly<{
+  sourceSha256: string;
+  sizeId: number;
+  sizeToken: string;
+  folds: readonly Readonly<{
+    operationNumber: number;
+    operationOrder: number;
+    fold: NonNullable<FoldRow['fold']>;
+    sourceFingerprint: string;
+  }>[];
+}>;
 
 type PresentSource<T extends keyof TechCardSavedAssemblyCompleteSourceV1> = NonNullable<
   TechCardSavedAssemblyCompleteSourceV1[T]
@@ -33,6 +51,7 @@ export type CompleteSavedAssemblySourceV1 = Readonly<{
   aliases: Readonly<PresentSource<'aliases'>>;
   garmentLabels: Readonly<PresentSource<'garmentLabels'>>;
   priorCarrier: Readonly<TechCardPatternSemanticSidecar> | null;
+  authoredFolds?: SavedAssemblyAuthoredFoldsV1;
 }>;
 
 const verifiedSources = new WeakSet<CompleteSavedAssemblySourceV1>();
@@ -43,9 +62,16 @@ export function isVerifiedCompleteSavedAssemblySourceV1(
   return verifiedSources.has(value);
 }
 
+type AuthoredFoldSelection = Readonly<{
+  sizeId: number;
+  sizeToken: string;
+  expectedSourceSha256?: string;
+}>;
+
 type SourceReadOptions = Readonly<{
   expectedServerAssemblyRevision?: string;
   expectedCompleteSourceSha256?: string;
+  authoredFolds?: AuthoredFoldSelection;
 }>;
 
 export function completeSavedAssemblyRowIdentityV1(row: ExactPatternRow): ExactPatternRow {
@@ -156,6 +182,7 @@ async function readPriorCarrier(
 }
 
 async function verifySourceDigest(
+  domain: string,
   encoded: string | undefined,
   expectedSha256: string,
   wireProjection: Readonly<Record<string, unknown>>,
@@ -166,17 +193,83 @@ async function verifySourceDigest(
   const binary = atob(encoded);
   if (binary.length > maxSourceBytes || btoa(binary) !== encoded)
     throw new TypeError('Saved Assembly source seal is not canonical base64.');
-  const bytes = new Uint8Array(sourceDomain.length + binary.length);
-  bytes.set(encoder.encode(sourceDomain));
+  const bytes = new Uint8Array(domain.length + binary.length);
+  bytes.set(encoder.encode(domain));
   for (let index = 0; index < binary.length; index++)
-    bytes[sourceDomain.length + index] = binary.charCodeAt(index);
+    bytes[domain.length + index] = binary.charCodeAt(index);
   const actual = await sha256Hex(bytes, signal);
   if (actual !== expectedSha256) throw new TypeError('Saved Assembly source digest differs.');
-  const canonical = new TextDecoder('utf-8', { fatal: true }).decode(
-    bytes.subarray(sourceDomain.length),
-  );
+  const canonical = new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(domain.length));
   if (sortedJson(wireProjection) !== canonical)
     throw new TypeError('Saved Assembly source fields differ from their verified seal.');
+}
+
+async function readAuthoredFolds(
+  wire: TechCardSavedAssemblyAuthoredFoldSourceV1 | undefined,
+  selected: AuthoredFoldSelection,
+  completeSourceSha256: string,
+  operations: readonly common_TechCardOperation[],
+  signal: AbortSignal,
+): Promise<SavedAssemblyAuthoredFoldsV1> {
+  if (
+    !wire?.sourceSha256 ||
+    !sha256.test(wire.sourceSha256) ||
+    wire.completeSourceSha256 !== completeSourceSha256 ||
+    wire.selectedSizeId !== selected.sizeId ||
+    wire.selectedSizeToken !== selected.sizeToken ||
+    !Array.isArray(wire.folds) ||
+    (selected.expectedSourceSha256 !== undefined &&
+      wire.sourceSha256 !== selected.expectedSourceSha256)
+  )
+    throw new TypeError('The saved authored folds do not match the current Assembly and size.');
+  const wireFolds = wire.folds;
+  await verifySourceDigest(
+    authoredFoldDomain,
+    wire.canonicalJson,
+    wire.sourceSha256,
+    {
+      completeSourceSha256,
+      selectedSizeId: selected.sizeId,
+      selectedSizeToken: selected.sizeToken,
+      folds: wireFolds,
+    },
+    signal,
+  );
+  const links = operations.flatMap(({ operationNumber, foldKeys }, operationOrder) =>
+    (foldKeys ?? []).map((foldKey) => ({ operationNumber, operationOrder, foldKey })),
+  );
+  if (
+    links.length !== wireFolds.length ||
+    new Set(links.map(({ foldKey }) => foldKey)).size !== links.length
+  )
+    throw new TypeError('The saved folds differ from the authored Assembly Order.');
+  const folds = links.map(({ operationNumber, operationOrder, foldKey }, i) => {
+    const row = wireFolds[i];
+    if (
+      typeof operationNumber !== 'number' ||
+      row.operationNumber !== operationNumber ||
+      row.operationOrder !== operationOrder ||
+      !row.fold ||
+      row.fold.foldKey !== foldKey ||
+      !row.fold.pieceLineKey ||
+      row.fold.stale !== false ||
+      !row.sourceFingerprint ||
+      !sha256.test(row.sourceFingerprint)
+    )
+      throw new TypeError('A saved fold differs from its current Assembly Order occurrence.');
+    return {
+      operationNumber,
+      operationOrder,
+      fold: row.fold,
+      sourceFingerprint: row.sourceFingerprint,
+    };
+  });
+  return {
+    sourceSha256: wire.sourceSha256,
+    sizeId: selected.sizeId,
+    sizeToken: selected.sizeToken,
+    folds,
+  };
 }
 
 function freezeWire<T>(value: T): T {
@@ -193,7 +286,17 @@ export async function readCompleteSavedAssemblySourceV1(
 ): Promise<CompleteSavedAssemblySourceV1> {
   signal.throwIfAborted();
   const anchorRow = completeSavedAssemblyRowIdentityV1(expectedAnchor);
-  const options = { ...expectedSource };
+  const { authoredFolds, ...options } = structuredClone(expectedSource);
+  if (
+    authoredFolds &&
+    (!Number.isSafeInteger(authoredFolds.sizeId) ||
+      authoredFolds.sizeId < 1 ||
+      !authoredFolds.sizeToken ||
+      authoredFolds.sizeToken.trim() !== authoredFolds.sizeToken ||
+      (authoredFolds.expectedSourceSha256 !== undefined &&
+        !sha256.test(authoredFolds.expectedSourceSha256)))
+  )
+    throw new TypeError('An exact current size is required for the saved authored folds.');
   const request: GetTechCardSavedAssemblySnapshotRequest = {
     techCardId: anchorRow.techCardId,
     patternLineKey: anchorRow.patternLineKey,
@@ -204,8 +307,12 @@ export async function readCompleteSavedAssemblySourceV1(
     expectedSizeBytes: anchorRow.sizeBytes,
     expectedSha256: anchorRow.sha256,
     selectedOperationNumber: undefined,
-    profile,
+    profile: authoredFolds ? authoredFoldProfile : completeProfile,
     ...options,
+    ...(authoredFolds && {
+      selectedSizeId: authoredFolds.sizeId,
+      expectedAuthoredFoldSourceSha256: authoredFolds.expectedSourceSha256,
+    }),
   };
   const response = structuredClone(await admin.GetTechCardSavedAssemblySnapshot(request));
   signal.throwIfAborted();
@@ -253,7 +360,22 @@ export async function readCompleteSavedAssemblySourceV1(
     aliases: source.aliases,
     garmentLabels: source.garmentLabels,
   };
-  await verifySourceDigest(source.canonicalJson, source.sourceSha256, wireProjection, signal);
+  await verifySourceDigest(
+    sourceDomain,
+    source.canonicalJson,
+    source.sourceSha256,
+    wireProjection,
+    signal,
+  );
+  const authored = authoredFolds
+    ? await readAuthoredFolds(
+        response.authoredFoldSourceV1,
+        authoredFolds,
+        source.sourceSha256,
+        response.operations,
+        signal,
+      )
+    : undefined;
   const priorCarrier = await readPriorCarrier(response.semanticSidecar, anchor, signal);
   const verified = freezeWire({
     serverAssemblyRevision,
@@ -264,6 +386,7 @@ export async function readCompleteSavedAssemblySourceV1(
     aliases: source.aliases,
     garmentLabels: source.garmentLabels,
     priorCarrier,
+    ...(authored && { authoredFolds: authored }),
   });
   verifiedSources.add(verified);
   return verified;
