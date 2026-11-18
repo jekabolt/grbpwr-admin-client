@@ -205,7 +205,10 @@ type ExactSide = Readonly<{
   direction: 'forward' | 'reverse';
 }>;
 
-function blocked(code: string, detail: string): PatternImportDxfPhaseEZeroConnectDurableResultV1 {
+function blocked(
+  code: string,
+  detail: string,
+): Extract<PatternImportDxfPhaseEZeroConnectDurableResultV1, { ok: false }> {
   return Object.freeze({
     ok: false as const,
     session: null,
@@ -377,12 +380,13 @@ async function readCurrentSavedNativeExactN(
     topology.row.cardLockVersion !== row.cardLockVersion ||
     topology.selectedOperationNumber !== selectedOperationNumber ||
     !operation ||
+    operation.phaseEKind !== 'stitch' ||
     operation.seamKeys.length <= 2 ||
     operation.inputKeys.length !== 2
   )
     throw new DurableBridgeFailure(
       'durable-native-operation-binding-mismatch',
-      'Select a saved two-piece Assembly operation with more than two exact seams.',
+      'Select a saved two-piece stitch operation with more than two exact seams.',
     );
   const source = await deps.readCompleteSource(row, topology.serverAssemblyRevision, signal);
   const fullOperation = source.operations.find(
@@ -398,11 +402,12 @@ async function readCurrentSavedNativeExactN(
       'durable-native-operation-binding-mismatch',
       'The complete saved source and selected Assembly topology have changed.',
     );
-  const ratio = fullOperation.stitching?.fullnessRatio?.value;
-  if (typeof ratio !== 'string' || !/^1(?:\.0+)?$/.test(ratio))
+  // The saved AO schema defines an absent fullness ratio as no ease.
+  const ratio = fullOperation.stitching?.fullnessRatio;
+  if (ratio != null && (typeof ratio.value !== 'string' || !/^1(?:\.0+)?$/.test(ratio.value)))
     throw new DurableBridgeFailure(
       'durable-native-equal-ratio-unavailable',
-      'The current saved Assembly operation must explicitly record a fullness ratio of 1.',
+      'Choose an Assembly operation with no ease or a saved fullness ratio of 1.',
     );
 
   const interpreted = await resolveSavedAssemblyNativeDirectedIntervalsV1(
@@ -541,6 +546,42 @@ async function preserveComponents(
       'multiseam-placement-v3',
     ),
   });
+}
+
+async function readSavedNativeExactNSemantic(
+  deps: PatternImportDxfPhaseEZeroConnectDurableBridgeDepsV1,
+  current: ExactCurrent,
+  priorCarrierSha256: string | undefined,
+  signal: AbortSignal,
+  crypto: Pick<Crypto, 'subtle'> | undefined,
+) {
+  if (!priorCarrierSha256)
+    throw new DurableBridgeFailure(
+      'durable-native-semantic-missing',
+      'Attach verified semantic V1 to this current row before saving the exact connection.',
+    );
+  const previous = await readCurrentSidecar(deps, current.row, signal);
+  if (previous.sha256 !== priorCarrierSha256)
+    throw new DurableBridgeFailure(
+      'durable-native-carrier-moved',
+      'The semantic attachment changed after the fresh Assembly read.',
+    );
+  if (
+    previous.mediaType !== PATTERN_IMPORT_DXF_PRODUCT_SEMANTIC_SIDECAR_MEDIA_TYPE_V1 &&
+    previous.mediaType !== PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V3
+  )
+    throw new DurableBridgeFailure(
+      'durable-native-carrier-conflict',
+      'The existing exact or unsupported attachment cannot be replaced. Restore any saved exact connection.',
+    );
+  const preserved = await preserveComponents(previous, current, crypto);
+  const digest = await crypto?.subtle.digest('SHA-256', preserved.semanticV1);
+  if (!digest) throw new TypeError('Semantic V1 SHA-256 is unavailable.');
+  const semanticSha256 = Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, '0'),
+  ).join('');
+  signal.throwIfAborted();
+  return { previous, preserved, semanticSha256 };
 }
 
 async function writeDurableExactPlan(
@@ -692,6 +733,48 @@ export function createPatternImportDxfPhaseEZeroConnectDurableBridgeV1(
   const crypto = deps.crypto ?? globalThis.crypto;
   return Object.freeze({
     schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_DURABLE_COMPOSITE_V4,
+    async prepareSavedNativeExactN(
+      request: PatternImportDxfPhaseESavedNativeExactNReadV1,
+      signal: AbortSignal,
+    ) {
+      try {
+        signal.throwIfAborted();
+        const { current, receipt, priorCarrierSha256 } = await readCurrentSavedNativeExactN(
+          deps,
+          request,
+          signal,
+          crypto,
+        );
+        const { semanticSha256 } = await readSavedNativeExactNSemantic(
+          deps,
+          current,
+          priorCarrierSha256,
+          signal,
+          crypto,
+        );
+        const confirmation: PatternImportDxfPhaseESavedNativeExactNConfirmV1 = Object.freeze({
+          schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_SAVED_NATIVE_EXACT_N_CONFIRM_V1,
+          row: current.row,
+          selectedOperationNumber: receipt.operationNumber,
+          sizeToken: receipt.sizeToken,
+          replay: request.replay,
+          mapping: 'equal',
+          lengthRatio: 1,
+          expectedCatalogCanonicalSha256: receipt.catalogCanonicalSha256,
+          expectedIntervalReceiptSha256: receipt.canonicalSha256,
+          verifiedSemanticSha256: semanticSha256,
+        });
+        return { ok: true as const, confirmation };
+      } catch (error) {
+        if (signal.aborted)
+          return blocked('durable-prepare-cancelled', 'Exact native review was cancelled.');
+        if (error instanceof DurableBridgeFailure) return blocked(error.code, error.message);
+        return blocked(
+          'durable-prepare-failed',
+          error instanceof Error ? error.message : 'Exact native review failed.',
+        );
+      }
+    },
     async persistSavedNativeExactN(
       request: PatternImportDxfPhaseESavedNativeExactNConfirmV1,
       signal: AbortSignal,
@@ -728,31 +811,14 @@ export function createPatternImportDxfPhaseEZeroConnectDurableBridgeV1(
             'durable-native-confirm-source-moved',
             'The saved Assembly source or exact spans changed since the confirmation was prepared.',
           );
-        if (!priorCarrierSha256)
-          return blocked(
-            'durable-native-semantic-missing',
-            'Attach verified semantic V1 to this current row before saving the exact connection.',
-          );
-        const previous = await readCurrentSidecar(deps, current.row, signal);
-        if (previous.sha256 !== priorCarrierSha256)
-          return blocked(
-            'durable-native-carrier-moved',
-            'The semantic attachment changed after the fresh Assembly read.',
-          );
-        if (
-          previous.mediaType !== PATTERN_IMPORT_DXF_PRODUCT_SEMANTIC_SIDECAR_MEDIA_TYPE_V1 &&
-          previous.mediaType !== PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V3
-        )
-          return blocked(
-            'durable-native-carrier-conflict',
-            'The existing exact or unsupported attachment cannot be replaced. Restore any saved exact connection.',
-          );
-        const preserved = await preserveComponents(previous, current, crypto);
-        const digest = await crypto?.subtle.digest('SHA-256', preserved.semanticV1);
-        const observed =
-          digest &&
-          Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
-        if (observed !== verifiedSemanticSha256)
+        const { previous, preserved, semanticSha256 } = await readSavedNativeExactNSemantic(
+          deps,
+          current,
+          priorCarrierSha256,
+          signal,
+          crypto,
+        );
+        if (semanticSha256 !== verifiedSemanticSha256)
           return blocked(
             'durable-verified-semantic-mismatch',
             'The exact saved row no longer has the confirmed semantic V1 attachment.',

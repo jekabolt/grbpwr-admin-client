@@ -18,6 +18,8 @@ import {
 import {
   createDxfProductSavedReprocessOwnerV1,
   DXF_PRODUCT_SAVED_REPROCESS_REQUEST_V1,
+  isDxfProductSavedReprocessVerifiedV1,
+  type DxfProductSavedReprocessResultV1,
 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 import {
   projectPatternImportDxfProductPhaseEAssemblyV1,
@@ -121,6 +123,7 @@ export type PatternImportDxfPhaseECadTableZeroOperationSavedPreparationResultV1 
       projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
       draftCadCompileSource: PatternImportDxfPhaseEDraftCadCompileSourceV1;
       authoringAuthority: PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1;
+      verifiedNativeReplay?: Extract<DxfProductSavedReprocessResultV1, { ok: true }>;
       blocker: null;
       claims: typeof PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_OPERATION_SAVED_PREPARATION_CLAIMS_V1;
     }>
@@ -549,6 +552,11 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
       projection: projection.projection,
       draftCadCompileSource,
       authoringAuthority,
+      ...(request.sourceSurface &&
+      isDxfProductSavedReprocessVerifiedV1(reprocessed) &&
+      reprocessed.nativeSewingReplay?.replayReady
+        ? { verifiedNativeReplay: reprocessed }
+        : {}),
       blocker: null,
       claims: PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_OPERATION_SAVED_PREPARATION_CLAIMS_V1,
     });

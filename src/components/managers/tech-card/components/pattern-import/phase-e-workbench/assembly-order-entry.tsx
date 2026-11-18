@@ -91,6 +91,7 @@ import type { PatternImportDxfProductCompositeSidecarApplicationTransactionV4 } 
 import {
   PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_DURABLE_RESTORE_REQUEST_V1,
   createPatternImportDxfPhaseEZeroConnectProductionDurableBridgeV1,
+  type PatternImportDxfPhaseESavedNativeExactNConfirmV1,
 } from '../phase-e-workbench-v2/zero-connect-durable-composite-v4';
 import { projectPatternImportDxfPhaseECadWorkbenchColorwaysV1 } from '../phase-e-workbench-v2/cad-workbench-bom-visual-authority-v1';
 import { PatternImportDxfPhaseECadTableZeroOperationProductionMountV1 } from '../phase-e-workbench-v2/cad-table-zero-operation-production-mount-v1';
@@ -120,7 +121,10 @@ import {
   matchesPatternImportDxfProductExactNSessionSavedBindingV1,
   patternImportDxfProductExactNSessionValidationKeyV1,
 } from '../phase-e-workbench-v2/durable-exact-session-current-v1';
-import { preparePatternImportDxfPhaseECadTableZeroOperationSavedV1 } from '../phase-e-workbench-v2/cad-table-zero-operation-saved-preparation-v1';
+import {
+  preparePatternImportDxfPhaseECadTableZeroOperationSavedV1,
+  type PatternImportDxfPhaseECadTableZeroOperationSavedPreparationResultV1,
+} from '../phase-e-workbench-v2/cad-table-zero-operation-saved-preparation-v1';
 import { readPatternImportDxfPhaseEZeroConnectSavedSceneProjectionV1 } from '../phase-e-workbench-v2/cad-table-zero-connect-phase-e-authority-v1';
 import { createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1 } from '../phase-e-workbench-v2/zero-operation-saved-card-authority-v1';
 import { PatternImportDxfPhaseECadTableDraftOperationsPanelV1 } from '../phase-e-workbench-v2/cad-table-draft-operations-panel-v1';
@@ -133,6 +137,17 @@ import {
 } from './workbench';
 
 type FormOperation = NonNullable<TechCardFormData['operations']>[number];
+type SavedNativeExactNPreparation = Extract<
+  PatternImportDxfPhaseECadTableZeroOperationSavedPreparationResultV1,
+  { ok: true }
+>;
+type SavedNativeExactNReview = Readonly<{
+  key: string;
+  confirmation: PatternImportDxfPhaseESavedNativeExactNConfirmV1;
+  prepared: SavedNativeExactNPreparation;
+  status: 'ready' | 'saving' | 'blocked';
+  detail?: string;
+}>;
 
 export function routePatternImportDxfPhaseEAssemblyOrderEntryV2(
   seamKeys: readonly string[],
@@ -1839,8 +1854,11 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
       ? savedBindingExactNSession
       : null;
   const durableReloadBinding = useMemo(() => {
+    const nativeExactN = selectedSeamKeys.length > 2;
     if (
-      selectedSeamKeys.length !== 1 ||
+      (selectedSeamKeys.length !== 1 && !nativeExactN) ||
+      (nativeExactN &&
+        !resolvePatternImportDxfPhaseEWorkbenchRequestedV1(workbenchOpen, autoOpen)) ||
       !savedOperationSeamsMatch ||
       !savedProjection.ok ||
       !savedCard.data ||
@@ -1860,17 +1878,33 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
       savedProjection.row.revision,
       savedProjection.row.cardLockVersion,
       savedProjection.selectedOperationNumber,
-      seamKey,
+      nativeExactN ? JSON.stringify(selectedSeamKeys) : seamKey,
     ].join(':');
-    return Object.freeze({ key, seamKey, sizeToken });
+    return Object.freeze({ key, sizeToken, nativeExactN });
   }, [
+    autoOpen,
     exactNApplicationOwner,
     exactPersistenceCapabilities,
     savedCard.data,
     savedOperationSeamsMatch,
     savedProjection,
     selectedSeamKeys,
+    workbenchOpen,
   ]);
+  const [savedNativeReview, setSavedNativeReview] = useState<SavedNativeExactNReview | null>(null);
+  const currentNativeReview =
+    savedNativeReview?.key === durableReloadBinding?.key ? savedNativeReview : null;
+  const nativeWriteAttempt = useRef<AbortController | null>(null);
+  const durableBindingKeyRef = useRef(durableReloadBinding?.key);
+  durableBindingKeyRef.current = durableReloadBinding?.key;
+  useEffect(() => {
+    const key = durableReloadBinding?.key;
+    setSavedNativeReview((review) => (review?.key === key ? review : null));
+    return () => {
+      nativeWriteAttempt.current?.abort();
+      nativeWriteAttempt.current = null;
+    };
+  }, [durableReloadBinding?.key]);
   const [durableDesktop, setDurableDesktop] = useState<Readonly<{
     key: string;
     geometry: PatternImportDxfProductExactNDesktopGeometryV2;
@@ -1882,6 +1916,45 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
       exactNBoundarySession?.current.catalogCanonicalSha256
       ? durableDesktop.geometry
       : null;
+  const publishDurableDesktop = useCallback(
+    (
+      key: string,
+      prepared: SavedNativeExactNPreparation,
+      session: PatternImportDxfPhaseEExactNAssemblyOrderSessionV2,
+    ) => {
+      const restoredValidationKey = patternImportDxfProductExactNSessionValidationKeyV1(session);
+      const savedSceneProjection =
+        session.current.selectedOperation.seamIds.length === 1 &&
+        prepared.choices.length === 1 &&
+        prepared.choices[0]?.scopeKey === prepared.scopeKey
+          ? readPatternImportDxfPhaseEZeroConnectSavedSceneProjectionV1(prepared.authoringAuthority)
+          : null;
+      const projection = savedSceneProjection ?? prepared.projection;
+      setDurableDesktop({
+        key,
+        geometry: {
+          catalog: prepared.catalog,
+          projection,
+          ...(savedSceneProjection && { savedSceneAuthority: prepared.authoringAuthority }),
+          annotationSource: bindPatternImportDxfPhaseECadMannequinAnnotationSourceV1(
+            prepared.selection,
+            prepared.catalog,
+            projection,
+            session.current.row.revision,
+          ),
+          pieceFeatures: projectCadTablePieceFeatures(
+            prepared.catalog,
+            projection,
+            prepared.draftCadCompileSource.scopes,
+            prepared.choices.find(({ scopeKey }) => scopeKey === prepared.scopeKey)?.label,
+          ),
+        },
+      });
+      durableRestoredValidationKeyRef.current = restoredValidationKey;
+      setValidatedExactNSessionKey(restoredValidationKey);
+    },
+    [],
+  );
   const readSavedTopologyAnnotations = useMemo(
     () =>
       exactPersistenceCapabilities && exactNApplicationOwner
@@ -1940,7 +2013,10 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
     if (!ticket) return;
     const controller = ticket.controller;
     const generationOwner = createPatternImportDxfPhaseECadTableZeroOperationGenerationOwnerV1();
-    const generation = generationOwner.beginSaved(`durable-n1-restore:${attemptKey}`);
+    const restoreScope = durableReloadBinding.nativeExactN
+      ? 'durable-saved-native-exact-n-restore'
+      : 'durable-n1-restore';
+    const generation = generationOwner.beginSaved(`${restoreScope}:${attemptKey}`);
     const publishBlocker = (blocker: PatternImportDxfPhaseEDurableReloadBlockerV1) => {
       const current = durableReloadRetryRef.current;
       const next = blockPatternImportDxfPhaseEDurableReloadRetryV1(
@@ -1982,6 +2058,23 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
       exactPersistenceCapabilities.authorityAdapter,
     );
     const reload = async () => {
+      if (durableReloadBinding.nativeExactN) {
+        const prepared = await prepare('explicit-native-drawn-sewing');
+        if (!prepared.ok || !prepared.verifiedNativeReplay)
+          return { prepared, restored: null, nativeReview: null };
+        const request = {
+          row: savedProjection.row,
+          selectedOperationNumber: savedProjection.selectedOperationNumber,
+          sizeToken: durableReloadBinding.sizeToken,
+          replay: prepared.verifiedNativeReplay,
+        };
+        const restored = await durable.restoreSavedNativeExactN(request, controller.signal);
+        const nativeReview =
+          !restored.ok && restored.blocker.code === 'durable-restore-sidecar-missing'
+            ? await durable.prepareSavedNativeExactN(request, controller.signal)
+            : null;
+        return { prepared, restored, nativeReview };
+      }
       let prepared = await prepare();
       const restore = (catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1) =>
         durable.restore(
@@ -2001,12 +2094,12 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
         restored = prepared.ok ? await restore(prepared.catalog) : null;
       }
       if (controller.signal.aborted) return;
-      return { prepared, restored };
+      return { prepared, restored, nativeReview: null };
     };
     void reload()
       .then((result) => {
-        if (!result) return;
-        const { prepared, restored } = result;
+        if (!result || controller.signal.aborted) return;
+        const { prepared, restored, nativeReview } = result;
         if (!prepared.ok) {
           publishBlocker({
             code: 'durable-restore-prepare-blocked',
@@ -2015,41 +2108,38 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
           });
           return;
         }
-        if (restored?.ok) {
-          const restoredValidationKey = patternImportDxfProductExactNSessionValidationKeyV1(
-            restored.session,
-          );
-          const savedSceneProjection =
-            restored.session.current.selectedOperation.seamIds.length === 1 &&
-            prepared.choices.length === 1 &&
-            prepared.choices[0]?.scopeKey === prepared.scopeKey
-              ? readPatternImportDxfPhaseEZeroConnectSavedSceneProjectionV1(
-                  prepared.authoringAuthority,
-                )
-              : null;
-          const projection = savedSceneProjection ?? prepared.projection;
-          setDurableDesktop({
-            key: durableReloadBinding.key,
-            geometry: {
-              catalog: prepared.catalog,
-              projection,
-              ...(savedSceneProjection && { savedSceneAuthority: prepared.authoringAuthority }),
-              annotationSource: bindPatternImportDxfPhaseECadMannequinAnnotationSourceV1(
-                prepared.selection,
-                prepared.catalog,
-                projection,
-                savedProjection.row.revision,
-              ),
-              pieceFeatures: projectCadTablePieceFeatures(
-                prepared.catalog,
-                projection,
-                prepared.draftCadCompileSource.scopes,
-                prepared.choices.find(({ scopeKey }) => scopeKey === prepared.scopeKey)?.label,
-              ),
-            },
+        if (durableReloadBinding.nativeExactN && !prepared.verifiedNativeReplay) {
+          publishBlocker({
+            code: 'durable-native-replay-required',
+            detail: 'A current pattern with exact native sewing boundaries is required.',
+            retryable: false,
           });
-          durableRestoredValidationKeyRef.current = restoredValidationKey;
-          setValidatedExactNSessionKey(restoredValidationKey);
+          return;
+        }
+        if (nativeReview) {
+          if (nativeReview.ok) {
+            setSavedNativeReview({
+              key: durableReloadBinding.key,
+              confirmation: nativeReview.confirmation,
+              prepared,
+              status: 'ready',
+            });
+            publishBlocker({
+              code: 'durable-native-confirm-required',
+              detail: 'Confirm the saved exact seams to open the Workbench.',
+              retryable: true,
+            });
+          } else {
+            publishBlocker({
+              code: nativeReview.blocker.code,
+              detail: nativeReview.blocker.detail,
+              retryable: nativeReview.blocker.code === 'durable-prepare-failed',
+            });
+          }
+          return;
+        }
+        if (restored?.ok) {
+          publishDurableDesktop(durableReloadBinding.key, prepared, restored.session);
           completePatternImportDxfPhaseEDurableRestoreAttemptV1(
             durableRestoreAttemptRef.current,
             ticket,
@@ -2091,6 +2181,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
     durableReloadBinding,
     durableReloadRetry,
     orderSizeIds,
+    publishDurableDesktop,
     savedAllScopeAuthority,
     savedCard.data,
     savedProjection,
@@ -2104,6 +2195,48 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
       return next;
     });
   }, []);
+  const confirmSavedNativeExactN = async () => {
+    if (
+      frozen ||
+      currentNativeReview?.status !== 'ready' ||
+      !exactNApplicationOwner ||
+      !exactPersistenceCapabilities ||
+      nativeWriteAttempt.current
+    )
+      return;
+    const controller = new AbortController();
+    nativeWriteAttempt.current = controller;
+    setSavedNativeReview({ ...currentNativeReview, status: 'saving' });
+    const durable = createPatternImportDxfPhaseEZeroConnectProductionDurableBridgeV1(
+      currentNativeReview.confirmation.selectedOperationNumber,
+      exactNApplicationOwner,
+      exactPersistenceCapabilities.authorityAdapter,
+    );
+    try {
+      const result = await durable.persistSavedNativeExactN(
+        currentNativeReview.confirmation,
+        controller.signal,
+      );
+      if (controller.signal.aborted || durableBindingKeyRef.current !== currentNativeReview.key)
+        return;
+      if (result.ok) {
+        publishDurableDesktop(
+          currentNativeReview.key,
+          currentNativeReview.prepared,
+          result.session,
+        );
+        setSavedNativeReview(null);
+      } else {
+        setSavedNativeReview({
+          ...currentNativeReview,
+          status: 'blocked',
+          detail: result.blocker.detail,
+        });
+      }
+    } finally {
+      if (nativeWriteAttempt.current === controller) nativeWriteAttempt.current = null;
+    }
+  };
   const savedConfirm = useMemo<PatternImportDxfPhaseEMultiseamSavedConfirmV2 | undefined>(
     () =>
       savedProjection.ok && exactPersistenceCapabilities
@@ -2386,6 +2519,52 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
     durableReloadRetry.status === 'blocked'
       ? durableReloadRetry.blocker
       : null;
+  const savedNativeExactNActions =
+    durableReloadBinding?.nativeExactN && !exactNBoundarySession ? (
+      <CalloutBox
+        tone={
+          currentNativeReview?.status === 'blocked' ||
+          (durableReloadBlocker && !currentNativeReview)
+            ? 'error'
+            : 'note'
+        }
+        data-saved-native-exact-n-review={
+          currentNativeReview?.status ?? (durableReloadBlocker ? 'blocked' : 'loading')
+        }
+      >
+        <div className='flex flex-wrap items-center justify-between gap-2'>
+          <Text component='p' size='micro' className='min-w-0 flex-1' role='status'>
+            {currentNativeReview
+              ? currentNativeReview.detail ??
+                `Save ${selectedSeamKeys.length} linked seams with Equal mapping to open the exact Workbench.`
+              : durableReloadBlocker?.detail ?? 'Checking the saved exact seams…'}
+          </Text>
+          {currentNativeReview && currentNativeReview.status !== 'blocked' ? (
+            <Button
+              type='button'
+              variant='main'
+              size='xs'
+              disabled={frozen || currentNativeReview.status === 'saving'}
+              onClick={() => void confirmSavedNativeExactN()}
+            >
+              {currentNativeReview.status === 'saving' ? 'Saving…' : 'Save equal seams'}
+            </Button>
+          ) : currentNativeReview || durableReloadBlocker?.retryable ? (
+            <Button
+              type='button'
+              variant='secondary'
+              size='xs'
+              onClick={() => {
+                setSavedNativeReview(null);
+                retryDurableReload();
+              }}
+            >
+              Reload saved seams
+            </Button>
+          ) : null}
+        </div>
+      </CalloutBox>
+    ) : null;
   const sessionResolution = useMemo(
     () =>
       source && cardSession && selectedSeamKeys.length === 1
@@ -2518,6 +2697,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
         exactNDesktop={currentDurableDesktop}
         readSavedTopologyAnnotations={readSavedTopologyAnnotations}
         exactNApplicationOwner={exactNApplicationOwner}
+        savedNativeExactNActions={savedNativeExactNActions}
         operationRouteBlocker={
           selectedSeamKeys.length > 2 && !exactNBoundarySession
             ? {
