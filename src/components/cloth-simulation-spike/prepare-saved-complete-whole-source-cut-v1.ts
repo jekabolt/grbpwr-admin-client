@@ -1,5 +1,9 @@
-import type { SavedCompleteNativeStitchAnchorV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-complete-assembly-native-stitch-anchors-v1';
+import type {
+  SavedCompleteGarmentLabelAnchorV1,
+  SavedCompleteNativeStitchAnchorV1,
+} from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-complete-assembly-native-stitch-anchors-v1';
 import {
+  projectSavedLabelStitchRegistrationV1,
   projectSavedNativeStitchRegistrationV1,
   type SavedNativeStitchRegistrationV1,
 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-native-stitch-registration-v1';
@@ -32,12 +36,7 @@ export type SavedCompleteWholeSourceCutV1 = Readonly<{
   }>[];
   operations: readonly Readonly<{ operationNumber: number }>[];
   spans: readonly SavedCompleteNativeStitchAnchorV1[];
-  labelAnchors: readonly Readonly<{
-    operationOrder: number;
-    operationNumber: number;
-    pieceLineKey: string;
-    geometry?: Readonly<{ outlineMm: readonly (readonly [number, number])[] }> | null;
-  }>[];
+  labelAnchors: readonly SavedCompleteGarmentLabelAnchorV1[];
   unavailable: readonly unknown[];
 }>;
 
@@ -55,6 +54,7 @@ type SealedWholeSourceCutFixtureV1 = Readonly<{
   exactFabricStitchRegistrations?: Readonly<{
     sampling: Parameters<typeof compileSourceCutRegisteredStitchPairsV1>[1];
     seams: readonly SavedNativeStitchRegistrationV1[];
+    labelSeamKeys?: readonly string[];
   }>;
 }>;
 
@@ -141,7 +141,7 @@ function replayRegisteredMaterialPairs(
   signal?: AbortSignal,
 ) {
   if (!manifest) return candidatePairs;
-  if (!manifest.seams.length)
+  if (!manifest.seams.length && !manifest.labelSeamKeys?.length)
     throw new RangeError('The diagnostic carrier has an empty fabric stitch registration.');
   const stitches = manifest.seams.map((registration) => {
     const projected = projectSavedNativeStitchRegistrationV1(source.spans, registration);
@@ -152,6 +152,12 @@ function replayRegisteredMaterialPairs(
     // The staged solver labels the ordered stages with the saved operation numbers.
     return { ...projected, operationOrder: registration.operationNumber };
   });
+  for (const seamKey of manifest.labelSeamKeys ?? []) {
+    const label = projectSavedLabelStitchRegistrationV1(source.spans, source.labelAnchors, seamKey);
+    const operation = source.operations[label.operationOrder];
+    if (!operation) throw new RangeError('The label reference no longer has a saved operation.');
+    stitches.push({ ...label, operationOrder: operation.operationNumber });
+  }
   stitches.sort((a, b) => a.operationOrder - b.operationOrder);
   const compiled = compileSourceCutRegisteredStitchPairsV1(stitches, manifest.sampling, signal);
   const keys = new Set(stitches.map(({ seamId }) => seamId));

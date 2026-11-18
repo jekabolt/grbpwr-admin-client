@@ -1,5 +1,8 @@
 import type { RegisteredSourceCutStitchV1 } from 'lib/cloth/compiler/source-cut-registered-stitch-pairs-v1';
-import type { SavedCompleteNativeStitchAnchorV1 } from './saved-complete-assembly-native-stitch-anchors-v1';
+import type {
+  SavedCompleteGarmentLabelAnchorV1,
+  SavedCompleteNativeStitchAnchorV1,
+} from './saved-complete-assembly-native-stitch-anchors-v1';
 import type { SavedNativeCurveIntervalV1 } from './saved-legacy-native-stitch-run-v8';
 
 type CurveStation = Readonly<{
@@ -125,4 +128,55 @@ export function projectSavedNativeStitchRegistrationV1(
       throw new RangeError('The registration leaves part of a saved native seam unbound.');
   }
   return { operationOrder, seamId: seamKey, sections: materialSections };
+}
+
+/** Bind one explicitly directed, full generated label edge and its single saved native counterpart. */
+export function projectSavedLabelStitchRegistrationV1(
+  spans: readonly SavedCompleteNativeStitchAnchorV1[],
+  labelAnchors: readonly SavedCompleteGarmentLabelAnchorV1[],
+  seamKey: string,
+): RegisteredSourceCutStitchV1 {
+  const native = spans.filter((span) => span.seamKey === seamKey);
+  const labels = labelAnchors.filter((anchor) => anchor.seamKey === seamKey);
+  const [cloth] = native;
+  const [label] = labels;
+  if (
+    native.length !== 1 ||
+    labels.length !== 1 ||
+    cloth.sideIndex === label.sideIndex ||
+    cloth.partOrdinal !== 0 ||
+    label.partOrdinal !== 0 ||
+    cloth.operationOrder !== label.operationOrder ||
+    cloth.operationNumber !== label.operationNumber ||
+    cloth.direction !== label.direction ||
+    (label.direction !== 'TECH_CARD_SEAM_DIRECTION_SAME' &&
+      label.direction !== 'TECH_CARD_SEAM_DIRECTION_REVERSED') ||
+    label.geometry?.fraction[0] !== 0 ||
+    label.geometry.fraction[1] !== 1 ||
+    label.geometry.edgeMm.length < 2
+  )
+    throw new RangeError(
+      'The label must have one exact complete edge and an explicitly directed saved counterpart.',
+    );
+
+  const reversed = label.direction === 'TECH_CARD_SEAM_DIRECTION_REVERSED';
+  const clothRun = materialRun(cloth, {
+    partOrdinal: 0,
+    direction: reversed && cloth.sideIndex === 1 ? 'native-reversed' : 'native-forward',
+  }).run;
+  const edge =
+    reversed && label.sideIndex === 1 ? label.geometry.edgeMm.toReversed() : label.geometry.edgeMm;
+  const labelRun = {
+    pieceId: label.pieceLineKey,
+    intervals: edge.slice(1).map((endMm, i) => ({ startMm: edge[i], endMm })),
+  };
+  return {
+    operationOrder: label.operationOrder,
+    seamId: seamKey,
+    sections: [
+      label.sideIndex === 0
+        ? { sideA: labelRun, sideB: clothRun }
+        : { sideA: clothRun, sideB: labelRun },
+    ],
+  };
 }
