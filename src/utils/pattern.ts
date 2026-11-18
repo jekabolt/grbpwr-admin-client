@@ -60,6 +60,11 @@ export function clampPatternName(s: string): string {
   return clampUtf8Bytes(s.trim(), MAX_PATTERN_NAME);
 }
 
+export function normalizeTechCardPieceRename(value: string): string {
+  // The server caps the stored piece name at 255 UTF-8 bytes.
+  return clampUtf8Bytes(value.trim(), 255).trimEnd();
+}
+
 // Pre-flight check shared by the pick and drop paths. Returns a user-facing error, or
 // null when the file may be offered to the naming modal / upload.
 //

@@ -1,4 +1,4 @@
-import { clampUtf8Bytes } from 'utils/pattern';
+import { normalizeTechCardPieceRename } from 'utils/pattern';
 import { calloutPartsOut, type TechCardFormData } from './schema';
 
 type Piece = Pick<TechCardFormData['pieces'][number], 'lineKey' | 'name' | 'calloutNumber'>;
@@ -37,10 +37,7 @@ type RenamePlan =
   | Readonly<{ ok: true; writes: readonly RenameWrite[] }>
   | Readonly<{ ok: false; detail: string }>;
 
-export function normalizeTechCardPieceRename(value: string): string {
-  // The server caps the stored piece name at 255 UTF-8 bytes.
-  return clampUtf8Bytes(value.trim(), 255).trimEnd();
-}
+export { normalizeTechCardPieceRename } from 'utils/pattern';
 
 const normalizedName = (name: string) => name.trim().toLowerCase();
 

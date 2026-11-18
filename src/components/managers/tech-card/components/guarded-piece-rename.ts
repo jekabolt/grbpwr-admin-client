@@ -2,7 +2,7 @@ import { createContext, useContext } from 'react';
 import type { common_TechCard, GuardedZeroOperationPieceRename } from 'api/proto-http/admin';
 import { bindingScopes } from './bom-purpose';
 import { rollGoodsScopes } from './piece-block-refs';
-import { normalizeTechCardPieceRename } from './piece-rename-plan';
+import { normalizeTechCardPieceRename } from 'utils/pattern';
 import { savedWorkbenchBindingScopeKeyV1 } from './pattern-import/phase-e-workbench-v2/saved-workbench-scope-v1';
 import { assertExactZeroOperationSavedPatternRowV1 } from './pattern-import/phase-e-workbench-v2/zero-operation-saved-card-authority-v1';
 import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';

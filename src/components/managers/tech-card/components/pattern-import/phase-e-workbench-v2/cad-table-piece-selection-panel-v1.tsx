@@ -1,6 +1,6 @@
 import { useState, type KeyboardEvent } from 'react';
 import type { GuardedSavedPieceRename } from '../../guarded-piece-rename';
-import { normalizeTechCardPieceRename } from '../../piece-rename-plan';
+import { normalizeTechCardPieceRename } from 'utils/pattern';
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 import { areaOf, perimeter } from 'lib/pattern-import/semantics/geom';
 
