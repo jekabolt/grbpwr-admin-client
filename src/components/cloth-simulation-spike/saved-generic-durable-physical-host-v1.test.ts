@@ -1507,6 +1507,85 @@ describe('mounted exact annotation Save and remount', () => {
     );
     expect(view.put).toHaveBeenCalledTimes(1);
   });
+
+  it('cancels a mounted V7 annotation save when the route closes during final currentness approval', async () => {
+    const view = await mountedFixture('v7');
+    await view.typeCallout('Edit from the dismissed route');
+    const approvalStarted = deferredSessionValue<void>();
+    const finishApproval = deferredSessionValue<void>();
+    cleanup.push(() => finishApproval.resolve());
+    // The existing CAS writer has read the sealed current carrier. Hold its independent final
+    // Assembly approval response to simulate an already in-flight transport during teardown.
+    view.get.mockImplementationOnce(async () => {
+      beforeWireRead = async () => {
+        approvalStarted.resolve();
+        await finishApproval.promise;
+      };
+      return { semanticSidecar: view.current };
+    });
+    const click = view.button('Save annotations').onClick as () => void;
+    await act(async () => click());
+    await approvalStarted.promise;
+    expect(view.put).not.toHaveBeenCalled();
+
+    await view.editor.unmount();
+    await view.control.unmount();
+    await view.route.unmount();
+    expect(view.save.mock.calls[0][1].aborted).toBe(true);
+    beforeWireRead = null;
+    finishApproval.resolve();
+    expect(await view.save.mock.results[0].value).toMatchObject({
+      ok: false,
+      writeOutcome: 'not-attempted',
+    });
+    expect(view.put).not.toHaveBeenCalled();
+    expect(outer?.sidecarSha256).toBe(view.current.sidecarSha256);
+
+    const session = await openExactAnnotationFixture(view.storage, 'v7', outer);
+    const fresh = mountAnnotationFixtureView(PatternImportDxfProductExactNSeamProductionMountV2);
+    await fresh.render({ ...view.routeProps, session });
+    await act(async () => {
+      await view.read.mock.results.at(-1)!.value;
+    });
+    expect(view.desktopOf(fresh.output()).props.savedAnnotations?.callouts[0].text).toBe(
+      'Controllo cucitura',
+    );
+    expect(view.put).not.toHaveBeenCalled();
+  });
+
+  it('keeps saved annotation dialog shortcuts from changing the shared Table selection', async () => {
+    const view = await mountedFixture('v7');
+    const dialog = visitMountedTree(view.control.output(), (props) => !!props.onEscapeKeyDown);
+    const table = visitMountedTree(view.route.output(), (props) => !!props.onContentKeyDown);
+    expect(dialog && table).toBeTruthy();
+    const selectedPieceKeys = () =>
+      view.desktopOf(view.route.output()).props.tableSessionOwner!.session.layout.selectedPieceKeys;
+    class ButtonTarget {
+      closest() {
+        return null;
+      }
+    }
+    vi.stubGlobal('Element', ButtonTarget);
+    const shortcut = {
+      key: 'a',
+      ctrlKey: true,
+      target: new ButtonTarget(),
+      defaultPrevented: false,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+    const before = selectedPieceKeys();
+    await act(async () => {
+      (dialog!.onKeyDown as ((event: typeof shortcut) => void) | undefined)?.(shortcut);
+      if (!shortcut.stopPropagation.mock.calls.length)
+        (table!.onContentKeyDown as (event: typeof shortcut) => void)(shortcut);
+    });
+    expect(selectedPieceKeys()).toEqual(before);
+    expect(shortcut.stopPropagation).toHaveBeenCalledOnce();
+    await act(async () => (table!.onContentKeyDown as (event: typeof shortcut) => void)(shortcut));
+    expect(selectedPieceKeys()).toHaveLength(2);
+    expect(view.put).not.toHaveBeenCalled();
+  });
 });
 
 describe('exact saved annotations in durable Composite envelopes', () => {

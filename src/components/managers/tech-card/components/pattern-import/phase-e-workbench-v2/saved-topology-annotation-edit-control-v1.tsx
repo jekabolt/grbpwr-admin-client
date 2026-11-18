@@ -139,6 +139,7 @@ export function PatternImportDxfPhaseESavedTopologyAnnotationEditControlV1({
           <Dialog.Content
             className='fixed left-1/2 top-1/2 z-[211] max-h-[90vh] w-[min(46rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-auto border border-borderColor bg-bgColor shadow-xl'
             aria-describedby={undefined}
+            onKeyDown={(event) => event.stopPropagation()}
             onEscapeKeyDown={(event) => {
               if (pendingRef.current || editorRef.current?.cancelReanchor()) event.preventDefault();
             }}
