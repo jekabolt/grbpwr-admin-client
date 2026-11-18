@@ -406,12 +406,14 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
         <div
           className='space-y-1'
           data-whole-assembly-frame={wholeProgress.cloth.frameNumber}
+          data-whole-assembly-action={wholeProgress.action}
           data-whole-assembly-seams={JSON.stringify(wholeProgress.activeSeams)}
           data-whole-assembly-maximum-gap-mm={wholeProgress.maximumGapMm}
           data-whole-assembly-refused-operation={wholeProgress.stopped?.operationNumber}
         >
           <Text component='p' size='micro' role='status'>
-            Frame {wholeProgress.cloth.frameNumber} · {wholeProgress.activeSeams.length} of{' '}
+            {wholeProgress.action === 'activate' ? 'Activation' : 'Stitch contraction'} · frame{' '}
+            {wholeProgress.cloth.frameNumber} · {wholeProgress.activeSeams.length} of{' '}
             {wholeProgress.totalStages} stages active · maximum gap{' '}
             {wholeProgress.maximumGapMm.toFixed(2)} mm
           </Text>

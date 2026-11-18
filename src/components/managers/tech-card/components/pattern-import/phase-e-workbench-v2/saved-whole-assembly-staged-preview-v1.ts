@@ -43,6 +43,7 @@ export type PrepareSavedWholeAssemblyPreviewV1 = (
 
 export type SavedWholeAssemblyPreviewProgressV1 = Readonly<{
   cloth: MeasurementSurfaceAcceptedClothV1;
+  action: Command['action'];
   activeSeams: ActiveSeams;
   maximumGapMm: number;
   totalStages: number;
@@ -125,7 +126,10 @@ export async function runSavedWholeAssemblyStagedPreviewV1(
     },
     signal,
   );
-  async function publish(frameReceipt: Receipt): Promise<SavedWholeAssemblyPreviewProgressV1> {
+  async function publish(
+    frameReceipt: Receipt,
+    action: Command['action'],
+  ): Promise<SavedWholeAssemblyPreviewProgressV1> {
     const frame = frameReceipt.validated.at(-1);
     if (!frame) throw new Error('The whole-assembly run did not accept a display frame.');
     const positionsM = surface.project(frameReceipt.positionsMInvMass);
@@ -133,6 +137,7 @@ export async function runSavedWholeAssemblyStagedPreviewV1(
     requireCurrent();
     const progress = Object.freeze({
       cloth: Object.freeze({ positionsM, frameNumber: frame.frame, ranges, isCurrent }),
+      action,
       activeSeams: frame.activeSeams,
       maximumGapMm: frame.activeSeams.reduce(
         (maximum, seam) => Math.max(maximum, seam.maximumGapM * 1000),
@@ -144,7 +149,7 @@ export async function runSavedWholeAssemblyStagedPreviewV1(
     return progress;
   }
 
-  let last = await publish(receipt);
+  let last = await publish(receipt, first.action);
   for (const command of following) {
     try {
       receipt = await advance(receipt, command, signal);
@@ -161,7 +166,7 @@ export async function runSavedWholeAssemblyStagedPreviewV1(
       };
       return Object.freeze({ ...last, stopped });
     }
-    last = await publish(receipt);
+    last = await publish(receipt, command.action);
   }
   return last;
 }
