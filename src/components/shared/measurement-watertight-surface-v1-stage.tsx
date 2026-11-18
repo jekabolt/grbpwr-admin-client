@@ -1170,8 +1170,7 @@ function createPatternPieceLayerV1(
   if (!Number.isFinite(largestDimensionMm) || largestDimensionMm <= 0) {
     return Object.freeze({ layer: null, bindings: new Map(), guides: Object.freeze([]) });
   }
-  // One shared scale retains real relative piece dimensions while placement remains presentation-only.
-  const scaleMPerMm = (bodyRadiusM * 1.1) / largestDimensionMm;
+  const scaleMPerMm = 0.001;
   const layer = new THREE.Group();
   layer.name = 'measurement-surface-pattern-pieces-v1';
   const bindings = new Map<string, MeasurementSurfacePatternPieceSceneBindingV1>();
@@ -1656,6 +1655,7 @@ export function MeasurementWatertightSurfaceV1Stage({
     let camera: THREE.PerspectiveCamera | null = null;
     let bodyCenter: THREE.Vector3 | null = null;
     let bodyRadius = 0;
+    let cameraFitRadius = 0;
     let patternPieceLayer: THREE.Group | null = null;
     let measurementGuideLayer: THREE.Group | null = null;
     let measurementGuideBindings: readonly MeasurementSurfaceGuideSceneBindingV1[] = Object.freeze(
@@ -2128,13 +2128,14 @@ export function MeasurementWatertightSurfaceV1Stage({
     }
 
     function snapshotStageCamera(): MeasurementSurfaceCameraStateV10 | null {
-      if (!camera || !controls || !bodyCenter || bodyRadius <= 0 || !contextCanvas) return null;
+      if (!camera || !controls || !bodyCenter || cameraFitRadius <= 0 || !contextCanvas)
+        return null;
       return measurementSurfaceSnapshotCameraV10({
         positionM: camera.position.toArray() as [number, number, number],
         targetM: controls.target.toArray() as [number, number, number],
         centerM: bodyCenter.toArray() as [number, number, number],
         up: camera.up.toArray() as [number, number, number],
-        radiusM: bodyRadius,
+        radiusM: cameraFitRadius,
         viewPreset:
           contextCanvas.dataset.viewPreset === 'side' || contextCanvas.dataset.viewPreset === 'back'
             ? contextCanvas.dataset.viewPreset
@@ -2432,7 +2433,15 @@ export function MeasurementWatertightSurfaceV1Stage({
       );
       patternPieceLayer = patternPieceScene.layer;
       if (patternPieceLayer) scene.add(patternPieceLayer);
-      const radius = patternPieceLayer ? bodyGeometryRadius * 1.68 : bodyGeometryRadius;
+      let radius = bodyGeometryRadius;
+      if (patternPieceLayer) {
+        const patternSphere = new THREE.Box3()
+          .setFromObject(patternPieceLayer)
+          .getBoundingSphere(new THREE.Sphere());
+        if (!patternSphere.isEmpty())
+          radius = Math.max(radius, patternSphere.center.distanceTo(center) + patternSphere.radius);
+      }
+      cameraFitRadius = radius;
 
       landmarks = createLandmarks(frame);
       sectionPlanes = createSectionPlanes(frame, box);
