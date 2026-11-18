@@ -474,6 +474,27 @@ describe('mounted Workbench mannequin model selection', () => {
     expect(tree.props.modelId).toBe(43);
   });
 
+  it('restores the newly saved placement model when the carrier changes on the same row', async () => {
+    const oldPlacement = deferred<number>();
+    const newPlacement = deferred<number>();
+    const readOld = vi.fn((_signal: AbortSignal) => oldPlacement.promise);
+    input = { arrangementSourceKey: 'row-3:prior-carrier', onReadSavedMannequinModelId: readOld };
+    await render();
+    await choose(43);
+    expect(tree.props.modelId).toBe(43);
+
+    input = {
+      arrangementSourceKey: 'row-3:new-carrier',
+      onReadSavedMannequinModelId: () => newPlacement.promise,
+    };
+    await render();
+    expect(readOld.mock.calls[0][0].aborted).toBe(true);
+    await act(async () => newPlacement.resolve(44));
+    await act(async () => oldPlacement.resolve(42));
+    expect(tree.props.modelId).toBe(44);
+    expect(cardModel.setValue).not.toHaveBeenCalled();
+  });
+
   it('keeps the ordinary TechCard picker on its form writer', async () => {
     cardModel.id = 42;
     await render();

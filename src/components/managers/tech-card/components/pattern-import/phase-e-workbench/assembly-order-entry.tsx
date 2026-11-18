@@ -2429,7 +2429,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
     arrangementSourceKey: JSON.stringify([
       physicalRow,
       savedProjection.ok ? savedProjection.selectedOperationNumber : null,
-      activeCrossMaterialReview?.placement ? activeCrossMaterialReview.sha256 : null,
+      savedCrossMaterialModelId === undefined ? null : activeCrossMaterialReview?.sha256,
     ]),
     onReadSavedMannequinModelId: readActiveMannequinModelId,
     onSaveMannequinArrangement: saveMannequinArrangement,
