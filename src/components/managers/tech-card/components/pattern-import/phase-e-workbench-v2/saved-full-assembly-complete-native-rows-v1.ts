@@ -20,7 +20,10 @@ import {
   type CompleteSavedAssemblySourceV1,
 } from './saved-assembly-complete-source-rpc-v1';
 import { bindSavedAssemblyOperationAnchorsV1 } from './saved-assembly-operation-anchors-v1';
-import { bindSavedFullAssemblyNativeCutPathsV1 } from './saved-full-assembly-cut-bindings-v1';
+import {
+  bindSavedFullAssemblyNativeCutPathsV1,
+  bindSavedFullAssemblyNativeSewingPathsV1,
+} from './saved-full-assembly-native-boundaries-v1';
 import { createSavedFullAssemblyCompleteDxfHostsV1 } from './saved-full-assembly-complete-dxf-host-v1';
 import { replaySavedFullAssemblyGeneratedFusingV1 } from './saved-full-assembly-generated-fusing-v1';
 import type { PatternImportDxfPhaseESavedRowCardProjectionV1 } from './saved-row-production-runtime-v1';
@@ -113,6 +116,7 @@ export async function prepareSavedFullAssemblyCompleteNativeRowsV1(
         sourceOwner: replay.sourceOwner,
         sourceRequest,
         nativeSewingAvailable: replay.nativeSewingReplay?.replayReady === true,
+        sewingCarrier: replay.nativeSewingReplay?.replay?.carrier ?? null,
       }),
     );
   }
@@ -158,19 +162,23 @@ export async function prepareSavedFullAssemblyCompleteNativeRowsV1(
     : undefined;
   if (fusingInput && !selectedSize)
     throw new Error('The current card does not contain the selected size.');
-  const originalCutPaths = selectedSize
-    ? (
-        await Promise.all(
-          members.map(({ row, sourceRequest }) =>
-            bindSavedFullAssemblyNativeCutPathsV1(
-              source,
-              { row, draft: sourceRequest.draft },
-              selectedSize.token,
-              signal,
-            ),
-          ),
-        )
-      ).flat()
+  const nativeBoundaries = selectedSize
+    ? await Promise.all(
+        members.map(async ({ row, sourceRequest, sewingCarrier }) => {
+          const cuts = await bindSavedFullAssemblyNativeCutPathsV1(
+            source,
+            { row, draft: sourceRequest.draft },
+            selectedSize.token,
+            signal,
+          );
+          return {
+            cuts,
+            sewing: sewingCarrier
+              ? bindSavedFullAssemblyNativeSewingPathsV1(sewingCarrier, cuts)
+              : [],
+          };
+        }),
+      )
     : [];
   await readCompleteSavedAssemblySourceV1(
     abortableAdminService(signal),
@@ -185,9 +193,12 @@ export async function prepareSavedFullAssemblyCompleteNativeRowsV1(
   return Object.freeze({
     sourceSha256: source.sourceSha256,
     serverAssemblyRevision: source.serverAssemblyRevision,
-    nativeRows: Object.freeze(members),
+    nativeRows: Object.freeze(
+      members.map(({ sewingCarrier: _sewingCarrier, ...member }) => Object.freeze(member)),
+    ),
     fusingLayers: Object.freeze(fusingLayers),
-    originalCutPaths: Object.freeze(originalCutPaths),
+    originalCutPaths: Object.freeze(nativeBoundaries.flatMap(({ cuts }) => cuts)),
+    originalSewingPaths: Object.freeze(nativeBoundaries.flatMap(({ sewing }) => sewing)),
     operationAnchors: bindSavedAssemblyOperationAnchorsV1(
       source,
       new Set(fusingLayers.map(({ fusingRow }) => fusingRow.scopeKey)),

@@ -1,5 +1,9 @@
 import { buildPatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
-import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
+import type { DxfProductPhaseDReplayCarrierV1 } from 'lib/pattern-import/dxf-product-phase-d-replay-v1';
+import {
+  computeDxfProductSavedSourceFileIdV1,
+  type DxfProductSavedRowIdentityV1,
+} from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 import type { CardDraft } from 'lib/pattern-import/types';
 
 import {
@@ -72,6 +76,54 @@ export async function bindSavedFullAssemblyNativeCutPathsV1(
         nativePathId: path.pathId,
         sourceInstancePath: path.provenance.instancePath,
         nativePointsMm: path.pointsMm,
+      });
+    }),
+  );
+}
+
+type SavedCut = Awaited<ReturnType<typeof bindSavedFullAssemblyNativeCutPathsV1>>[number];
+
+/** Joins the exact native L14 carrier by its owning row and existing cut-piece identity. */
+export function bindSavedFullAssemblyNativeSewingPathsV1(
+  carrier: DxfProductPhaseDReplayCarrierV1,
+  cuts: readonly SavedCut[],
+) {
+  const paths = new Map(carrier.source.paths.map((path) => [path.pathId, path]));
+  return Object.freeze(
+    cuts.map((cut) => {
+      if (
+        carrier.sourceSha256 !== cut.row.sha256 ||
+        carrier.source.sourceFileId !== carrier.sourceFileId ||
+        carrier.sourceFileId !== computeDxfProductSavedSourceFileIdV1(cut.row)
+      )
+        throw new Error('The sewing contour comes from a different saved pattern row.');
+      const contours = carrier.contours.filter(
+        ({ pieceId, role, sizeToken }) =>
+          pieceId === cut.pieceId && role === 'sewing-boundary' && sizeToken === cut.sizeToken,
+      );
+      const [contour] = contours;
+      const sourcePaths = contour?.lineage.sourcePathIds;
+      const path = sourcePaths?.length === 1 ? paths.get(sourcePaths[0]!) : undefined;
+      if (
+        contours.length !== 1 ||
+        !contour?.closed ||
+        !path?.closed ||
+        path.pathId === cut.nativePathId ||
+        path.pointsMm.length !== path.provenance.samples.length
+      )
+        throw new Error(`No independent original sewing path is bound to ${cut.blockName}.`);
+      return Object.freeze({
+        row: cut.row,
+        sizeToken: cut.sizeToken,
+        pieceId: cut.pieceId,
+        pieceLineKey: cut.pieceLineKey,
+        blockName: cut.blockName,
+        contourId: contour.contourId,
+        nativePathId: path.pathId,
+        sourceInstancePath: path.provenance.instancePath,
+        nativePointsMm: path.pointsMm,
+        vertexIds: Object.freeze(path.provenance.samples.map(({ vertexId }) => vertexId)),
+        lineage: contour.lineage,
       });
     }),
   );
