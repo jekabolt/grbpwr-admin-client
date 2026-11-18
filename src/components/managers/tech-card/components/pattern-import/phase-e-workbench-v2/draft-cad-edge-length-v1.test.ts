@@ -15,11 +15,15 @@ import {
   buildPatternImportDxfPhaseEDraftCadExactVertexOptionsV1,
   recordPatternImportDxfPhaseEDraftCadCanvasBoundaryPickV1,
   recordPatternImportDxfPhaseEDraftCadCanvasPointV1,
+  recordPatternImportDxfPhaseEDraftCadDeletePointV1,
   recordPatternImportDxfPhaseEDraftCadMovePointV1,
 } from './draft-cad-canvas-v1';
 import { createPatternImportDxfPhaseEDraftCadCompileSourceV1 } from './draft-cad-compile-source-v1';
 import { compilePatternImportDxfPhaseEDraftCadGeometryV1 } from './draft-cad-geometry-compile-v1';
-import { resizeDraftCadSelectedSizeEdgeV1 } from './draft-cad-edge-length-geometry-v1';
+import {
+  editDraftCadSelectedSizeVertexV1,
+  resizeDraftCadSelectedSizeEdgeV1,
+} from './draft-cad-edge-length-geometry-v1';
 import {
   redoPatternImportDxfPhaseEDraftCadSessionV1,
   undoPatternImportDxfPhaseEDraftCadSessionV1,
@@ -237,6 +241,98 @@ it('moves one verified point in the selected size and writes its exact native co
   });
 });
 
+it('deletes one original outline vertex and joins only its exact native neighbours', async () => {
+  const { session, projection, selection, compileSource, draft } = await setup();
+  const options = buildPatternImportDxfPhaseEDraftCadExactVertexOptionsV1(
+    session,
+    projection,
+    0,
+    true,
+  );
+  const [point] = options;
+  if (!point) throw Error('No selected native outline.');
+  const input = { session, projection, sequence: 0, activePieceIndex: 0 };
+  expect(
+    recordPatternImportDxfPhaseEDraftCadDeletePointV1({ ...input, vertexKey: 'stale' }),
+  ).toMatchObject({ session, recorded: false });
+  const edit = recordPatternImportDxfPhaseEDraftCadDeletePointV1({
+    ...input,
+    vertexKey: point.key,
+  });
+  expect(edit.recorded, edit.blocker ?? '').toBe(true);
+  const [command] = edit.session.history[0]!.commands;
+  if (command?.tool !== 'delete-point') throw Error('Invalid outline deletion.');
+  expect(command.payload).toMatchObject({
+    vertexId: point.anchor.vertexId,
+    contourId: point.anchor.contourId,
+    sizeToken: 'M',
+  });
+
+  const compiled = compilePatternImportDxfPhaseEDraftCadGeometryV1({
+    session: edit.session,
+    projection,
+    selection,
+    compileSource,
+  });
+  if (!compiled.ok) throw Error(JSON.stringify(compiled.blockers));
+  const { artifact } = compiled;
+  expect(artifact.compiledFeatures).toMatchObject([{ output: 'deleted-vertex' }]);
+  const original = draft.scopes[0]!.writerReplay!.job.pieces;
+  const output = artifact.compiledJob.pieces;
+  const pieceId = point.anchor.pieceId;
+  expect(output.filter(({ identity }) => identity !== pieceId)).toEqual(
+    original.filter(({ identity }) => identity !== pieceId),
+  );
+  const source = original
+    .find(({ identity }) => identity === pieceId)!
+    .sizes.find(({ sizeToken }) => sizeToken === 'M')!;
+  const updated = output
+    .find(({ identity }) => identity === pieceId)!
+    .sizes.find(({ sizeToken }) => sizeToken === 'M')!;
+  const expected = source.cut.filter(({ x, y }) => x !== point.pointMm.x || y !== point.pointMm.y);
+  expect(updated.cut).toEqual(expected);
+  expect(updated.seam).toEqual(expected);
+  expect(updated.areaMm2).toBe(Math.abs(signedArea(expected)));
+
+  const block = artifact.manifest.blocks.find(
+    ({ identity, sizeToken }) => identity === pieceId && sizeToken === 'M',
+  )!;
+  const layout = writeDxfDetailed(artifact.compiledJob).transforms[block.block]!;
+  const raw = parseDxf(new TextEncoder().encode(artifact.dxfText).buffer, 'mm');
+  for (const layer of ['1', '14']) {
+    const native = raw.dxf.blocks[block.block]!.entities.find(
+      (entity) =>
+        entity.layer === layer && (entity.type === 'POLYLINE' || entity.type === 'LWPOLYLINE'),
+    );
+    expect(native).toBeDefined();
+    expect(entityToChain(native!, 1, 0.001)!.pts).toEqual(
+      expected.map((vertex) => applyAffine(layout, vertex)),
+    );
+  }
+  const removedCorner = point.pointMm;
+  const cutCenter = {
+    x: source.cut.reduce((sum, vertex) => sum + vertex.x, 0) / source.cut.length,
+    y: source.cut.reduce((sum, vertex) => sum + vertex.y, 0) / source.cut.length,
+  };
+  const drill = {
+    kind: 'drill',
+    origin: 'operator',
+    confidence: 1,
+    ranges: [],
+    at: { x: (3 * removedCorner.x + cutCenter.x) / 4, y: (3 * removedCorner.y + cutCenter.y) / 4 },
+  } as const;
+  const refused = editDraftCadSelectedSizeVertexV1(
+    { ...source, drills: [{ ...drill, ranges: [] }] },
+    command,
+    projection,
+    selection.phaseD,
+  );
+  expect(refused).toEqual({
+    ok: false,
+    detail: 'The joined edge would cut through a retained drill or internal line.',
+  });
+});
+
 it('refuses a missing exact edge or a collapsed length before recording anything', async () => {
   const { session, projection, edge } = await setup();
   const input = {
@@ -429,7 +525,7 @@ it('refuses a crossing Pen outline before deterministic DXF export', async () =>
   ).toMatchObject({ ok: false, blockers: [{ code: 'pen-geometry-blocked' }] });
 });
 
-it('drags the mounted exact point once and cancels pending movement with Escape or pointer loss', async () => {
+it('drags one point, cancels pending movement, and requires a separate Delete point confirmation', async () => {
   const [{ chromium }, { createServer }, { mkdtemp, rm }, { tmpdir }, { join }] = await Promise.all(
     [
       import('playwright'),
@@ -510,6 +606,7 @@ it('drags the mounted exact point once and cancels pending movement with Escape 
     const readHistory = () => fixture.evaluate((mounted) => mounted.read());
     const offset = { x: 29, y: -13 };
     const drag = async () => {
+      await point.hover();
       const frame = await point.evaluate((element, offset) => {
         const circle = element as SVGCircleElement;
         const transform = circle.getScreenCTM()!;
@@ -565,6 +662,19 @@ it('drags the mounted exact point once and cancels pending movement with Escape 
       { output: 'moved-vertex', commandId: command.commandId },
     ]);
     await fixture.evaluate((mounted) => mounted.unmount());
+
+    const deletion = await page.evaluateHandle(
+      (input) => (window as BrowserFixtureWindow).mountDraftPoint!(input),
+      { session, projection, activeTool: 'delete-point' as const },
+    );
+    await point.click();
+    expect(await deletion.evaluate((mounted) => mounted.read())).toHaveLength(0);
+    await page.getByRole('button', { name: 'Delete point', exact: true }).click();
+    const [removal] = await deletion.evaluate((mounted) => mounted.read());
+    expect(removal?.commands).toMatchObject([
+      { tool: 'delete-point', payload: { vertexId: original.anchor.vertexId } },
+    ]);
+    await deletion.evaluate((mounted) => mounted.unmount());
   } finally {
     await browser.close();
     await server.close();

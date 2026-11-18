@@ -1854,7 +1854,7 @@ it('reopens a native text mark without turning it into size, fold or quantity me
   }
 });
 
-it('reopens a numeric outline move from both native paths after ordinary Wizard Apply', async () => {
+async function checkNativeOutlinePointEdit(tool: 'move-point' | 'delete-point') {
   const f = await fixture(true, false);
   vi.stubGlobal('Worker', InProcessTransport);
   const worker = new ImportWorkerClient();
@@ -1870,6 +1870,7 @@ it('reopens a numeric outline move from both native paths after ordinary Wizard 
     const {
       buildPatternImportDxfPhaseEDraftCadExactVertexOptionsV1,
       recordPatternImportDxfPhaseEDraftCadMovePointV1,
+      recordPatternImportDxfPhaseEDraftCadDeletePointV1,
     } = await import('./draft-cad-canvas-v1');
     const { compilePatternImportDxfPhaseEDraftCadGeometryV1 } = await import(
       './draft-cad-geometry-compile-v1'
@@ -1891,14 +1892,17 @@ it('reopens a numeric outline move from both native paths after ordinary Wizard 
       y: (next.pointMm.y - point.pointMm.y) * 0.15,
     };
     const pointMm = { x: point.pointMm.x + shift.x, y: point.pointMm.y + shift.y };
-    const edit = recordPatternImportDxfPhaseEDraftCadMovePointV1({
+    const input = {
       session: f.initial,
       projection,
       activePieceIndex: 0,
       sequence: 0,
       vertexKey: point.key,
-      pointMm,
-    });
+    };
+    const edit =
+      tool === 'move-point'
+        ? recordPatternImportDxfPhaseEDraftCadMovePointV1({ ...input, pointMm })
+        : recordPatternImportDxfPhaseEDraftCadDeletePointV1(input);
     expect(edit.recorded, edit.blocker ?? '').toBe(true);
     const compiled = compilePatternImportDxfPhaseEDraftCadGeometryV1({
       ...f.compileInput,
@@ -1982,7 +1986,10 @@ it('reopens a numeric outline move from both native paths after ordinary Wizard 
           .map(({ x, y }) => [Math.round((x - minX) * 1e6), Math.round((y - minY) * 1e6)].join(','))
           .sort();
       };
-      const expected = vertices.map((vertex) => (vertex === point ? pointMm : vertex.pointMm));
+      const expected =
+        tool === 'move-point'
+          ? vertices.map((vertex) => (vertex === point ? pointMm : vertex.pointMm))
+          : vertices.filter((vertex) => vertex !== point).map(({ pointMm }) => pointMm);
       const block = scope.manifest.blocks.find(
         ({ identity }) => identity === point.anchor.pieceId,
       )!;
@@ -2009,4 +2016,9 @@ it('reopens a numeric outline move from both native paths after ordinary Wizard 
     vi.unstubAllGlobals();
     f.source.dispose();
   }
-});
+}
+
+it.each(['move-point', 'delete-point'] as const)(
+  'reopens %s from both native paths after ordinary Wizard Apply',
+  checkNativeOutlinePointEdit,
+);

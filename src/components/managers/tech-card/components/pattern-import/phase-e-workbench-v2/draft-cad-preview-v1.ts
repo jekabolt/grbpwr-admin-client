@@ -565,8 +565,10 @@ export function buildPatternImportDxfPhaseEDraftCadPreviewV1(
         bounds = extendPoints(bounds, [baseLeftMm, baseRightMm, apexMm]);
         break;
       }
-      case 'move-point': {
-        const { contourId, vertexId, pointMm, sizeToken } = command.payload;
+      case 'move-point':
+      case 'delete-point': {
+        const { contourId, vertexId, sizeToken } = command.payload;
+        const destination = command.tool === 'move-point' ? command.payload.pointMm : null;
         const piece = projection.pieces.find(
           ({ pieceId, pieceLineKey }) =>
             pieceId === command.target.pieceId && pieceLineKey === command.target.pieceLineKey,
@@ -578,7 +580,7 @@ export function buildPatternImportDxfPhaseEDraftCadPreviewV1(
           contour.role === 'hole' ||
           index < 0 ||
           projection.sizeToken !== sizeToken ||
-          !finitePoint(pointMm)
+          (destination && !finitePoint(destination))
         ) {
           blockers.push(
             commandBlocker(
@@ -592,7 +594,7 @@ export function buildPatternImportDxfPhaseEDraftCadPreviewV1(
         const count = contour.vertices.length;
         const pointsMm = [
           contour.vertices[(index + count - 1) % count]!.pointMm,
-          pointMm,
+          ...(destination ? [destination] : []),
           contour.vertices[(index + 1) % count]!.pointMm,
         ].map(clonePoint);
         primitives.push(

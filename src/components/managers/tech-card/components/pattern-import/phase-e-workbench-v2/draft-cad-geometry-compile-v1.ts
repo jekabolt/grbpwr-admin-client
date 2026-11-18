@@ -21,7 +21,7 @@ import {
   type PatternImportDxfPhaseEDraftCadPreviewPrimitiveV1,
 } from './draft-cad-preview-v1';
 import {
-  moveDraftCadSelectedSizeVertexV1,
+  editDraftCadSelectedSizeVertexV1,
   resizeDraftCadSelectedSizeEdgeV1,
 } from './draft-cad-edge-length-geometry-v1';
 import { executePatternImportDxfPhaseEDraftCadAddPointGeometryV1 } from './draft-cad-add-point-geometry-executor-v1';
@@ -59,6 +59,7 @@ export type PatternImportDxfPhaseEDraftCadGeometryCompileBlockerCodeV1 =
   | 'preview-blocked'
   | 'edge-length-geometry-blocked'
   | 'move-point-geometry-blocked'
+  | 'delete-point-geometry-blocked'
   | 'add-point-geometry-blocked'
   | 'rectangle-geometry-blocked'
   | 'pen-geometry-blocked'
@@ -91,6 +92,7 @@ export type PatternImportDxfPhaseEDraftCadCompiledFeatureV1 = Readonly<{
     | 'notch'
     | 'boundary-point'
     | 'moved-vertex'
+    | 'deleted-vertex'
     | 'edge-length'
     | 'piece-create'
     | 'split'
@@ -243,7 +245,12 @@ function supported(command: PatternImportDxfPhaseEDraftCadCommandV1): boolean {
   if (INTERNAL_TOOLS.has(command.tool)) return true;
   if (command.tool === 'draft-point' || command.tool === 'point-only') return true;
   if (command.tool === 'add-point') return Boolean(command.payload.edge);
-  if (command.tool === 'edge-length' || command.tool === 'move-point') return true;
+  if (
+    command.tool === 'edge-length' ||
+    command.tool === 'move-point' ||
+    command.tool === 'delete-point'
+  )
+    return true;
   if (command.tool === 'cut') return command.payload.keepSide === 'both';
   if (command.tool === 'spread') return command.payload.amountMm > 0;
   if (command.tool === 'mark')
@@ -827,19 +834,16 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
       continue;
     }
 
-    if (command.tool === 'edge-length' || command.tool === 'move-point') {
+    if (
+      command.tool === 'edge-length' ||
+      command.tool === 'move-point' ||
+      command.tool === 'delete-point'
+    ) {
       const edited =
         command.tool === 'edge-length'
           ? resizeDraftCadSelectedSizeEdgeV1(size, command, projection, selection.phaseD)
-          : moveDraftCadSelectedSizeVertexV1(size, command, projection, selection.phaseD);
-      if (!edited.ok)
-        return blocked(
-          command.tool === 'edge-length'
-            ? 'edge-length-geometry-blocked'
-            : 'move-point-geometry-blocked',
-          edited.detail,
-          command,
-        );
+          : editDraftCadSelectedSizeVertexV1(size, command, projection, selection.phaseD);
+      if (!edited.ok) return blocked(`${command.tool}-geometry-blocked`, edited.detail, command);
       Object.assign(size, edited.size);
       compiledFeatures.push({
         commandId: command.commandId,
@@ -847,7 +851,12 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
         tool: command.tool,
         pieceId: command.target.pieceId,
         sizeToken: selected.sizeToken,
-        output: command.tool === 'edge-length' ? 'edge-length' : 'moved-vertex',
+        output:
+          command.tool === 'edge-length'
+            ? 'edge-length'
+            : command.tool === 'move-point'
+              ? 'moved-vertex'
+              : 'deleted-vertex',
       });
       continue;
     }
@@ -1071,7 +1080,7 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
   }
 
   for (const command of compileCommands) {
-    if (command.tool !== 'move-point') continue;
+    if (command.tool !== 'move-point' && command.tool !== 'delete-point') continue;
     const matches = written.plan.blocks.filter(
       ({ identity, labelSize }) =>
         identity === command.target.pieceId && labelSize === command.payload.sizeToken,
@@ -1079,17 +1088,55 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
     const [block] = matches;
     if (!block || matches.length !== 1)
       return blocked(
-        'move-point-geometry-blocked',
-        'The moved point lost its exact writer block.',
+        `${command.tool}-geometry-blocked`,
+        'The edited outline lost its exact writer block.',
         command,
       );
-    const target = applyAffine(block.transform, command.payload.pointMm);
-    const retainsPoint = (ring: readonly PtMm[]) =>
-      ring.some(({ x, y }) => Math.hypot(x - target.x, y - target.y) <= 1e-7);
-    if (!retainsPoint(block.cut) || (block.seam && !retainsPoint(block.seam)))
+    const holds = (x: PtMm, y: PtMm) => Math.hypot(x.x - y.x, x.y - y.y) <= 1e-7;
+    const rings = block.seam ? [block.cut, block.seam] : [block.cut];
+    if (command.tool === 'move-point') {
+      const target = applyAffine(block.transform, command.payload.pointMm);
+      if (rings.some((ring) => !ring.some((point) => holds(point, target))))
+        return blocked(
+          'move-point-geometry-blocked',
+          'The DXF writer would omit the moved outline point.',
+          command,
+        );
+      continue;
+    }
+    const { contourId, vertexId } = command.payload;
+    const sourcePiece = projection.pieces.find(
+      ({ pieceId, pieceLineKey }) =>
+        pieceId === command.target.pieceId && pieceLineKey === command.target.pieceLineKey,
+    );
+    const vertices = sourcePiece?.contours.find(
+      (contour) => contour.contourId === contourId,
+    )?.vertices;
+    const index = vertices?.findIndex((vertex) => vertex.vertexId === vertexId) ?? -1;
+    if (!vertices || index < 0)
       return blocked(
-        'move-point-geometry-blocked',
-        'The DXF writer would omit the moved outline point.',
+        'delete-point-geometry-blocked',
+        'The exact original outline point is unavailable.',
+        command,
+      );
+    const [deleted, before, after] = [
+      vertices[index]!,
+      vertices[(index + vertices.length - 1) % vertices.length]!,
+      vertices[(index + 1) % vertices.length]!,
+    ].map(({ pointMm }) => applyAffine(block.transform, pointMm));
+    const keepsBridge = (ring: readonly PtMm[]) =>
+      !ring.some((point) => holds(point, deleted!)) &&
+      ring.some((first, index) => {
+        const second = ring[(index + 1) % ring.length]!;
+        return (
+          (holds(first, before!) && holds(second, after!)) ||
+          (holds(first, after!) && holds(second, before!))
+        );
+      });
+    if (rings.some((ring) => !keepsBridge(ring)))
+      return blocked(
+        'delete-point-geometry-blocked',
+        'The DXF writer would change the exact joined edge.',
         command,
       );
   }

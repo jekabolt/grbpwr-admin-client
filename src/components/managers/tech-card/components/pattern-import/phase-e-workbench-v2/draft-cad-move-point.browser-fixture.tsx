@@ -7,9 +7,14 @@ import { createPatternImportDxfPhaseEDraftCadTopologySessionV1 } from './draft-c
 type Input = Pick<
   ComponentProps<typeof PatternImportDxfPhaseEDraftCadCanvasV1>,
   'projection' | 'session'
->;
+> &
+  Readonly<{ activeTool?: 'move-point' | 'delete-point' }>;
 
-export function mountDraftPoint({ session: initial, projection }: Input) {
+export function mountDraftPoint({
+  session: initial,
+  projection,
+  activeTool = 'move-point',
+}: Input) {
   const root = createRoot(document.getElementById('root')!);
   const topologySession = createPatternImportDxfPhaseEDraftCadTopologySessionV1(
     initial.source.catalog.canonicalSha256,
@@ -22,7 +27,7 @@ export function mountDraftPoint({ session: initial, projection }: Input) {
         session={session}
         projection={projection}
         activePieceIndex={0}
-        activeTool='move-point'
+        activeTool={activeTool}
         activeTopologyTool={null}
         topologySession={topologySession}
         onTopologyAnchor={() => {}}

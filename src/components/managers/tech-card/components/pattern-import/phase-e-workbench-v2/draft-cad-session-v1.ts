@@ -13,6 +13,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_TOOLS_V1 = Object.freeze([
   'ellipse',
   'add-point',
   'move-point',
+  'delete-point',
   'edge-length',
   'internal-line',
   'french-curve',
@@ -53,6 +54,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_PRODUCTIVE_TOOLS_V1 = Object.f
   'point-only',
   'add-point',
   'move-point',
+  'delete-point',
   'edge-length',
   'dart',
   'fish-eye',
@@ -176,6 +178,10 @@ export type PatternImportDxfPhaseEDraftCadCommandV1 =
   | Command<
       'move-point',
       { entityId: string; contourId: string; vertexId: string; pointMm: PtMm; sizeToken: string }
+    >
+  | Command<
+      'delete-point',
+      { entityId: string; contourId: string; vertexId: string; sizeToken: string }
     >
   | Command<
       'edge-length',
@@ -478,10 +484,11 @@ function validCommand(value: unknown): value is PatternImportDxfPhaseEDraftCadCo
               .boundaryVertexIds[0] === payload.afterVertexId))
       );
     case 'move-point':
+    case 'delete-point':
       return (
         stableId(payload.contourId) &&
         stableId(payload.vertexId) &&
-        point(payload.pointMm) &&
+        (value.tool === 'delete-point' || point(payload.pointMm)) &&
         stableId(payload.sizeToken)
       );
     case 'edge-length':

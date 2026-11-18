@@ -356,9 +356,27 @@ function nextIds(session: PatternImportDxfPhaseEDraftCadSessionV1, sequence: num
   } as const;
 }
 
+type OutlinePointEditInput = Pick<
+  PointInput,
+  'session' | 'projection' | 'activePieceIndex' | 'sequence'
+> &
+  Readonly<{ vertexKey: string }>;
+
 export function recordPatternImportDxfPhaseEDraftCadMovePointV1(
-  input: Pick<PointInput, 'session' | 'projection' | 'activePieceIndex' | 'sequence' | 'pointMm'> &
-    Readonly<{ vertexKey: string }>,
+  input: OutlinePointEditInput & Readonly<{ pointMm: PtMm }>,
+): PatternImportDxfPhaseEDraftCadCanvasPointResultV1 {
+  return recordOutlinePointEdit(input, { tool: 'move-point', pointMm: input.pointMm });
+}
+
+export function recordPatternImportDxfPhaseEDraftCadDeletePointV1(
+  input: OutlinePointEditInput,
+): PatternImportDxfPhaseEDraftCadCanvasPointResultV1 {
+  return recordOutlinePointEdit(input, { tool: 'delete-point' });
+}
+
+function recordOutlinePointEdit(
+  input: OutlinePointEditInput,
+  edit: Readonly<{ tool: 'move-point'; pointMm: PtMm }> | Readonly<{ tool: 'delete-point' }>,
 ): PatternImportDxfPhaseEDraftCadCanvasPointResultV1 {
   const { session, projection, activePieceIndex, sequence } = input;
   const fail = (blocker: string) => ({
@@ -377,33 +395,32 @@ export function recordPatternImportDxfPhaseEDraftCadMovePointV1(
   ).find(({ key }) => key === input.vertexKey);
   if (!option) return fail('Choose one exact outline point from the current size.');
 
-  const pointMm = { x: input.pointMm.x + 0, y: input.pointMm.y + 0 };
-  if (
-    !Number.isFinite(pointMm.x) ||
-    !Number.isFinite(pointMm.y) ||
-    (pointMm.x === option.pointMm.x && pointMm.y === option.pointMm.y)
-  )
-    return fail('Enter a different finite X and Y in millimetres.');
-
   const ids = nextIds(session, sequence);
   const { pieceId, pieceLineKey, contourId, vertexId } = option.anchor;
+  const target = { pieceId, pieceLineKey };
+  const payload = { entityId: ids.entityId, contourId, vertexId, sizeToken: projection.sizeToken };
+  let command: PatternImportDxfPhaseEDraftCadCommandV1;
+  if (edit.tool === 'move-point') {
+    const pointMm = { x: edit.pointMm.x + 0, y: edit.pointMm.y + 0 };
+    if (
+      !Number.isFinite(pointMm.x) ||
+      !Number.isFinite(pointMm.y) ||
+      (pointMm.x === option.pointMm.x && pointMm.y === option.pointMm.y)
+    )
+      return fail('Enter a different finite X and Y in millimetres.');
+    command = {
+      commandId: ids.commandId,
+      tool: 'move-point',
+      target,
+      payload: { ...payload, pointMm },
+    };
+  } else {
+    command = { commandId: ids.commandId, tool: 'delete-point', target, payload };
+  }
   const result = recordPatternImportDxfPhaseEDraftCadTransactionV1(session, {
     transactionId: ids.transactionId,
-    label: 'Move outline point',
-    commands: [
-      {
-        commandId: ids.commandId,
-        tool: 'move-point',
-        target: { pieceId, pieceLineKey },
-        payload: {
-          entityId: ids.entityId,
-          contourId,
-          vertexId,
-          pointMm,
-          sizeToken: projection.sizeToken,
-        },
-      },
-    ],
+    label: edit.tool === 'move-point' ? 'Move outline point' : 'Delete outline point',
+    commands: [command],
   });
   return result.ok
     ? {
@@ -1477,6 +1494,8 @@ function toolInstruction(tool: PatternImportDxfPhaseEDraftCadToolV1, sizeToken: 
     return `Click the start, control and end points to add a French curve in size ${sizeToken}.`;
   if (tool === 'ellipse')
     return 'Click the centre, major-axis point and minor-radius point to record one ellipse intent.';
+  if (tool === 'delete-point')
+    return `Choose an exact outline point in size ${sizeToken} and confirm Delete point.`;
   if (tool === 'move-point')
     return `Drag an exact outline point or click it to enter X and Y in millimetres for size ${sizeToken}.`;
   if (tool === 'edge-length') return `Choose an exact edge to set its length in size ${sizeToken}.`;
@@ -1530,7 +1549,11 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
     useState<PatternImportDxfPhaseEDraftCadCanvasDartBaseV1 | null>(null);
   const [resizeLength, setResizeLength] = useState('');
   const [resizeFixed, setResizeFixed] = useState<'start' | 'end'>('start');
-  const [movePoint, setMovePoint] = useState<{ key: string; x: string; y: string } | null>(null);
+  const [outlinePointInput, setOutlinePointInput] = useState<{
+    key: string;
+    x: string;
+    y: string;
+  } | null>(null);
   const [draggedPoint, setDraggedPoint] = useState<{ key: string; pointMm: PtMm } | null>(null);
   const movePointDrag = useRef<MovePointDrag | null>(null);
 
@@ -1568,23 +1591,26 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
       buildPatternImportDxfPhaseEDraftCadCanvasDartBasesV1(session, projection, activePieceIndex),
     [activePieceIndex, projection, session],
   );
-  const movePointActive =
-    !crossScopeConnectActive && !activeTopologyTool && activeTool === 'move-point';
+  const outlineEditActive =
+    !crossScopeConnectActive &&
+    !activeTopologyTool &&
+    (activeTool === 'move-point' || activeTool === 'delete-point');
+  const movePointActive = outlineEditActive && activeTool === 'move-point';
   const exactVertexOptions = useMemo(
     () =>
       buildPatternImportDxfPhaseEDraftCadExactVertexOptionsV1(
         session,
         projection,
         activePieceIndex,
-        movePointActive,
+        outlineEditActive,
       ),
-    [activePieceIndex, movePointActive, projection, session],
+    [activePieceIndex, outlineEditActive, projection, session],
   );
   const canUseActiveTool = activeDraftPieceId
     ? Boolean(draftPiece) && !activeTopologyTool && permitsDraftCadLocalPieceEditV1(activeTool)
     : crossScopeConnectActive ||
       !!activeTopologyTool ||
-      movePointActive ||
+      outlineEditActive ||
       INPUT_TOOLS.has(activeTool);
   const interactionEnabled =
     !arrangeActive && !panActive && canUseActiveTool && !!projectedPiece && !sourceMismatch;
@@ -1594,7 +1620,7 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
     setPendingPoints([]);
     setPendingDartBase(null);
     movePointDrag.current = null;
-    setMovePoint(null);
+    setOutlinePointInput(null);
     setDraggedPoint(null);
     setInputError(null);
   }, [arrangeActive, panActive, crossScopeConnectActive, resetKey]);
@@ -1635,25 +1661,21 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
     sequence.current = result.sequence;
     if (result.recorded) onSessionChange(result.session);
   };
-  const chooseMovePoint = (option: PatternImportDxfPhaseEDraftCadExactVertexOptionV1 | null) => {
-    setMovePoint(
+  const chooseOutlinePoint = (option: PatternImportDxfPhaseEDraftCadExactVertexOptionV1 | null) => {
+    setOutlinePointInput(
       option ? { key: option.key, x: String(option.pointMm.x), y: String(option.pointMm.y) } : null,
     );
     setInputError(null);
   };
-  const commitMovePoint = (vertexKey: string, pointMm: PtMm) => {
-    const result = recordPatternImportDxfPhaseEDraftCadMovePointV1({
-      session,
-      projection,
-      activePieceIndex,
-      vertexKey,
-      pointMm,
-      sequence: sequence.current,
-    });
+  const commitOutlinePointEdit = (vertexKey: string, pointMm?: PtMm) => {
+    const input = { session, projection, activePieceIndex, vertexKey, sequence: sequence.current };
+    const result = pointMm
+      ? recordPatternImportDxfPhaseEDraftCadMovePointV1({ ...input, pointMm })
+      : recordPatternImportDxfPhaseEDraftCadDeletePointV1(input);
     setInputError(result.blocker);
     if (!result.recorded) return;
     sequence.current = result.sequence;
-    setMovePoint(null);
+    setOutlinePointInput(null);
     onSessionChange(result.session);
   };
   const clearMovePointDrag = () => {
@@ -1716,8 +1738,8 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
     event.stopPropagation();
     const pointMm = dragPosition(event, drag);
     clearMovePointDrag();
-    if (pointMm) commitMovePoint(drag.option.key, pointMm);
-    else if (!drag.moved) chooseMovePoint(drag.option);
+    if (pointMm) commitOutlinePointEdit(drag.option.key, pointMm);
+    else if (!drag.moved) chooseOutlinePoint(drag.option);
   };
   const cancelPointDrag = (event: ReactPointerEvent<SVGElement>) => {
     if (activePointDrag(event)) clearMovePointDrag();
@@ -1741,12 +1763,12 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
           clearPen();
         } else if (
           event.key === 'Escape' &&
-          movePointActive &&
-          (movePoint || movePointDrag.current)
+          outlineEditActive &&
+          (outlinePointInput || movePointDrag.current)
         ) {
           event.stopPropagation();
           clearMovePointDrag();
-          chooseMovePoint(null);
+          chooseOutlinePoint(null);
         }
       }}
       className='flex h-full min-h-0 flex-col gap-2'
@@ -1793,8 +1815,8 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
               if (option) onTopologyAnchor(option.anchor);
               return;
             }
-            if (movePointActive) {
-              chooseMovePoint(
+            if (outlineEditActive) {
+              chooseOutlinePoint(
                 exactVertexOptions.find((candidate) => candidate.key === key) ?? null,
               );
               return;
@@ -1836,7 +1858,7 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
             );
           }}
           onPoint={(pointMm) => {
-            if (!interactionEnabled || activeTopologyTool || movePointActive) return;
+            if (!interactionEnabled || activeTopologyTool || outlineEditActive) return;
             drawPoint(pointMm);
           }}
         >
@@ -2046,13 +2068,13 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
                     })}
                   </g>
                 )}
-              {interactionEnabled && (activeTopologyTool || movePointActive) ? (
+              {interactionEnabled && (activeTopologyTool || outlineEditActive) ? (
                 <g data-draft-cad-exact-vertex-options=''>
                   {exactVertexOptions.map((option) => {
                     const isDragging = draggedPoint?.key === option.key;
                     const marker = isDragging ? draggedPoint.pointMm : option.pointMm;
-                    const selected = movePointActive
-                      ? isDragging || movePoint?.key === option.key
+                    const selected = outlineEditActive
+                      ? isDragging || outlinePointInput?.key === option.key
                       : topologySession.pendingAnchors.some(
                           (anchor) =>
                             anchor.pieceId === option.anchor.pieceId &&
@@ -2272,7 +2294,7 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
           </button>
         </div>
       )}
-      {movePointActive && movePoint && interactionEnabled && (
+      {movePointActive && outlinePointInput && interactionEnabled && (
         <div className='flex flex-wrap items-end gap-2'>
           {(['x', 'y'] as const).map((axis) => (
             <label key={axis} className='grid gap-1 text-small'>
@@ -2281,9 +2303,9 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
                 className='w-28 border border-borderColor bg-bgColor p-1'
                 type='number'
                 step='any'
-                value={movePoint[axis]}
+                value={outlinePointInput[axis]}
                 onChange={(event) => {
-                  setMovePoint({ ...movePoint, [axis]: event.target.value });
+                  setOutlinePointInput({ ...outlinePointInput, [axis]: event.target.value });
                   setInputError(null);
                 }}
               />
@@ -2292,12 +2314,26 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
           <button
             type='button'
             className='border border-borderColor px-2 py-1 text-small disabled:opacity-50'
-            disabled={!movePoint.x.trim() || !movePoint.y.trim()}
+            disabled={!outlinePointInput.x.trim() || !outlinePointInput.y.trim()}
             onClick={() =>
-              commitMovePoint(movePoint.key, { x: Number(movePoint.x), y: Number(movePoint.y) })
+              commitOutlinePointEdit(outlinePointInput.key, {
+                x: Number(outlinePointInput.x),
+                y: Number(outlinePointInput.y),
+              })
             }
           >
             Move point
+          </button>
+        </div>
+      )}
+      {activeTool === 'delete-point' && outlinePointInput && interactionEnabled && (
+        <div className='flex gap-2'>
+          <button
+            type='button'
+            className='border border-borderColor px-2 py-1 text-small'
+            onClick={() => commitOutlinePointEdit(outlinePointInput.key)}
+          >
+            Delete point
           </button>
         </div>
       )}

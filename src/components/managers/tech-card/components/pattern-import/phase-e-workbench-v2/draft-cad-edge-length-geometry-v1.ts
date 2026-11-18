@@ -5,15 +5,18 @@ import {
   bboxOf,
   footOnSegment,
   pointInPolygon,
-  selfIntersects,
   signedArea,
 } from 'lib/pattern-import/semantics/geom';
+import { segIntersect } from 'lib/pattern-import/pieces/geom';
 import type { PieceSizeSpec, PtMm } from 'lib/pattern-import/types';
 
 import type { PatternImportDxfPhaseEDraftCadCommandV1 } from './draft-cad-session-v1';
 
 type Command = Extract<PatternImportDxfPhaseEDraftCadCommandV1, { tool: 'edge-length' }>;
-type MovePoint = Extract<PatternImportDxfPhaseEDraftCadCommandV1, { tool: 'move-point' }>;
+type VertexEdit = Extract<
+  PatternImportDxfPhaseEDraftCadCommandV1,
+  { tool: 'move-point' | 'delete-point' }
+>;
 type SelectedSizePhaseD = Extract<DxfProductPhaseDSizeSelectionResultV1, { ok: true }>['phaseD'];
 type Result = { ok: true; size: PieceSizeSpec } | { ok: false; detail: string };
 
@@ -51,9 +54,9 @@ export function resizeDraftCadSelectedSizeEdgeV1(
   return editExactOutlineVertex(source, command, projection, phaseD);
 }
 
-export function moveDraftCadSelectedSizeVertexV1(
+export function editDraftCadSelectedSizeVertexV1(
   source: PieceSizeSpec,
-  command: MovePoint,
+  command: VertexEdit,
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1,
   phaseD: SelectedSizePhaseD,
 ): Result {
@@ -62,7 +65,7 @@ export function moveDraftCadSelectedSizeVertexV1(
 
 function editExactOutlineVertex(
   source: PieceSizeSpec,
-  command: Command | MovePoint,
+  command: Command | VertexEdit,
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1,
   phaseD: SelectedSizePhaseD,
 ): Result {
@@ -161,7 +164,7 @@ function editExactOutlineVertex(
     return { ok: false, detail: 'The selected vertices do not match the retained writer outline.' };
   const index = matching[0]!;
   let moving = index;
-  let movedPoint: PtMm;
+  let movedPoint: PtMm | null = null;
   if (command.tool === 'edge-length') {
     const { fixed, lengthMm } = command.payload;
     const resized = resizeDraftStraightEdgeV1(from, to, fixed, lengthMm);
@@ -169,7 +172,7 @@ function editExactOutlineVertex(
       return { ok: false, detail: 'Enter a positive length for one nondegenerate straight edge.' };
     moving = fixed === 'start' ? (index + 1) % vertices.length : index;
     movedPoint = resized[fixed === 'start' ? 1 : 0];
-  } else {
+  } else if (command.tool === 'move-point') {
     movedPoint = command.payload.pointMm;
     if (
       !Number.isFinite(movedPoint.x) ||
@@ -178,6 +181,8 @@ function editExactOutlineVertex(
     )
       return { ok: false, detail: 'Enter a different finite X and Y for the selected point.' };
   }
+  if (!movedPoint && vertices.length <= 3)
+    return { ok: false, detail: 'Keep at least three vertices in a closed outline.' };
   const oldPoint = vertices[moving]!;
   const before = vertices[(moving + vertices.length - 1) % vertices.length]!;
   const after = vertices[(moving + 1) % vertices.length]!;
@@ -190,25 +195,48 @@ function editExactOutlineVertex(
   )
     return {
       ok: false,
-      detail: 'A fold or attached notch must be rebound before moving this vertex.',
+      detail: 'A fold or attached notch must be rebound before changing this vertex.',
     };
 
-  const nextRing = vertices.map((point, i) => (i === moving ? movedPoint : point));
+  const nextRing = movedPoint
+    ? vertices.map((point, i) => (i === moving ? movedPoint : point))
+    : vertices.filter((_, i) => i !== moving);
   const area = signedArea(nextRing);
   if (
     !Number.isFinite(area) ||
     Math.abs(area) <= EPS ||
     Math.sign(area) !== Math.sign(signedArea(vertices)) ||
-    vertices.some((point, i) => i !== moving && samePoint(point, movedPoint)) ||
-    selfIntersects(nextRing) ||
-    footOnSegment(movedPoint, before, after).d <= EPS
+    ringSelfIntersects(nextRing) ||
+    (movedPoint &&
+      (vertices.some((point, i) => i !== moving && samePoint(point, movedPoint)) ||
+        footOnSegment(movedPoint, before, after).d <= EPS))
   )
-    return { ok: false, detail: 'The vertex move would collapse or cross the outline.' };
+    return { ok: false, detail: 'This edit would collapse, touch or cross the outline.' };
 
   if (source.textMarks?.some(({ at }) => !pointInPolygon(at, nextRing)))
     return { ok: false, detail: 'Move the text anchor inside the resized outline.' };
   if (source.pointMarks?.some(({ at }) => !pointInPolygon(at, nextRing)))
     return { ok: false, detail: 'Move the construction point inside the resized outline.' };
+  if (
+    command.tool === 'delete-point' &&
+    (source.drills.some(
+      ({ at }) => !pointInPolygon(at, nextRing) || footOnSegment(at, before, after).d <= EPS,
+    ) ||
+      source.internal.some(({ pts, closed }) =>
+        pts.some((point, index) => {
+          const next = pts[index + 1] ?? (closed ? pts[0] : undefined);
+          return (
+            !pointInPolygon(point, nextRing) ||
+            footOnSegment(point, before, after).d <= EPS ||
+            (next && segIntersect(point, next, before, after) !== null)
+          );
+        }),
+      ))
+  )
+    return {
+      ok: false,
+      detail: 'The joined edge would cut through a retained drill or internal line.',
+    };
   if (holes.some((hole) => !ringStrictlyInside(hole, nextRing)))
     return { ok: false, detail: 'The resized outline would cross or touch a retained cut hole.' };
 
