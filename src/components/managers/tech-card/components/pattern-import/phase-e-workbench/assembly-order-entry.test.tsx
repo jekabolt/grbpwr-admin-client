@@ -299,7 +299,7 @@ describe('V1 selected durable physical source handoff', () => {
       blocker: { code: 'zero-connect-authoring-write-refused' },
     });
     expect(attribute(fallbackMount, 'sourceSurface')).toContain(
-      "savedLinkedN1 ? 'explicit-native-drawn-sewing' : undefined",
+      "useSavedSewingEdges ? 'explicit-native-drawn-sewing' : undefined",
     );
     expect(tree.getFullText()).toContain("data-legacy-n1-rebuild-required=''");
     expect(tree.getFullText()).not.toContain('data-empty-operation-rebuild-required');

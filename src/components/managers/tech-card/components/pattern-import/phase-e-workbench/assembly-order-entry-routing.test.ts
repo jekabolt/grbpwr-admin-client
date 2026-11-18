@@ -69,13 +69,18 @@ describe('saved Assembly Order workbench routing', () => {
     ).toBe(false);
   });
 
-  it('mounts the proven linked target on the native sewing source and the existing handoff', () => {
+  it('uses native sewing for the proven linked target and explicitly opted-in empty operation', () => {
     expect(assemblyOrderEntrySource).toContain(
-      "sourceSurface={savedLinkedN1 ? 'explicit-native-drawn-sewing' : undefined}",
+      "sourceSurface={useSavedSewingEdges ? 'explicit-native-drawn-sewing' : undefined}",
     );
     expect(assemblyOrderEntrySource).toContain(
       '(savedEmptyOperation || savedLinkedN1) && zeroConnectAuthoringHandoff',
     );
+    expect(assemblyOrderEntrySource).toContain('savedLinkedN1 || emptyOperationSewingSource');
+    expect(assemblyOrderEntrySource).toContain(
+      'savedEmptyOperation && emptyOperationSewingSourceKey === emptyOperationKey',
+    );
+    expect(assemblyOrderEntrySource).toContain('disabled={emptyOperationConnectionPending}');
     expect(assemblyOrderEntrySource).toContain(
       'resolvePatternImportDxfPhaseEZeroConnectExistingLinkedN1TargetV1',
     );

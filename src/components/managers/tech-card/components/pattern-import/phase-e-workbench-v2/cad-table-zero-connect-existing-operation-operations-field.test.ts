@@ -66,7 +66,9 @@ describe('existing empty operation OperationsField owner', () => {
     );
     expect(owner).toContain('verifyPatternImportDxfPhaseEZeroConnectExistingOperationReadbackV1');
     expect(owner).toContain("accepted.outcome === 'not-attempted'");
-    expect(owner).toContain('expectedSeam: prepared.receipt.storedSeam');
+    expect(owner).toContain('expectedSeam: prepared.storedSeam');
+    expect(owner).toContain('preparePatternImportDxfPhaseEZeroConnectStoredSeamV1');
+    expect(owner).not.toContain('same-session-saved-draft-operation');
     expect(owner).not.toContain('append(');
     expect(owner).not.toContain('upsertWithReceipt(');
   });

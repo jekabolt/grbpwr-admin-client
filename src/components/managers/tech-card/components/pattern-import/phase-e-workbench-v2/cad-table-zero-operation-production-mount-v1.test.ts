@@ -20,6 +20,10 @@ import type { PatternImportDxfPhaseECadTableZeroOperationFreshPreparationResultV
 import { createPatternImportDxfPhaseECadTableZeroOperationGenerationOwnerV1 } from './cad-table-zero-operation-generation-owner-v1';
 import { createPatternImportDxfPhaseEZeroConnectPendingHandoffV1 } from './cad-table-zero-connect-post-save-owner-v1';
 import {
+  preparePatternImportDxfPhaseEZeroConnectPostSaveSeamLinkV1,
+  preparePatternImportDxfPhaseEZeroConnectStoredSeamV1,
+} from './cad-table-zero-connect-post-save-seam-link-v1';
+import {
   capturePatternImportDxfPhaseEZeroConnectExistingOperationPendingV1,
   executePatternImportDxfPhaseEZeroConnectExistingOperationAttachOnceV1,
   readPatternImportDxfPhaseEZeroConnectExistingOperationAttachOnceV1,
@@ -556,6 +560,52 @@ async function genuineZeroConnectRequest() {
 }
 
 describe('existing saved empty operation zero-connect attach', () => {
+  it('preserves the existing AO history key and prepares exact anchors from the gesture', async () => {
+    const { prepared, request } = await genuineZeroConnectRequest();
+    const inputKeys = request.candidate.connection.sides.map(({ pieceLineKey }) => pieceLineKey);
+    const savedCard = savedCardWithRow(prepared);
+    savedCard.techCard!.operations = [{ operationNumber: 41, inputKeys, seamKeys: [] } as never];
+    const captured = capturePatternImportDxfPhaseEZeroConnectExistingOperationPendingV1({
+      request,
+      techCardId: prepared.techCardId,
+      selectedIndex: 0,
+      liveOperations: [{ historyKey: 'existing-op', operationNumber: 41, inputKeys, seamKeys: [] }],
+      savedCard,
+      seamWriterCardId: prepared.techCardId,
+      seamWriterLockVersion: savedCard.lockVersion,
+    });
+    if (!captured.ok) throw new Error(captured.blocker.detail);
+    expect(captured.pending.historyKey).not.toBe(request.candidate.operation.sessionOperationId);
+    const geometry = {
+      candidate: request.candidate,
+      catalog: request.catalog,
+      projection: request.projection,
+      direction: 'reversed' as const,
+      nameOf: (lineKey: string) => lineKey,
+      grainDeg: null,
+    };
+    expect(
+      preparePatternImportDxfPhaseEZeroConnectPostSaveSeamLinkV1({
+        ...geometry,
+        savedOperation: {
+          status: 'same-session-saved-draft-operation',
+          historyKey: captured.pending.historyKey,
+          operationNumber: 41,
+        },
+      }),
+    ).toMatchObject({ ok: false, blocker: { code: 'saved-operation-correlation-mismatch' } });
+    const result = preparePatternImportDxfPhaseEZeroConnectStoredSeamV1(geometry);
+    expect(result).toMatchObject({
+      ok: true,
+      storedSeam: {
+        direction: 'reversed',
+        anchoredSize: prepared.sizeToken,
+        sideA: [{ piece: inputKeys[0] }],
+        sideB: [{ piece: inputKeys[1] }],
+      },
+    });
+  });
+
   it('captures only the exact empty saved operation and rejects live or saved drift', async () => {
     const { prepared, request } = await genuineZeroConnectRequest();
     const inputKeys = request.candidate.connection.sides.map(({ pieceLineKey }) => pieceLineKey);

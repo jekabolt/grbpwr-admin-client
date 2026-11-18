@@ -458,6 +458,7 @@ import {
 import {
   executePatternImportDxfPhaseEZeroConnectStrictSeamWriteOnceV1,
   preparePatternImportDxfPhaseEZeroConnectPostSaveSeamLinkV1,
+  preparePatternImportDxfPhaseEZeroConnectStoredSeamV1,
 } from './pattern-import/phase-e-workbench-v2/cad-table-zero-connect-post-save-seam-link-v1';
 import {
   matchesPatternImportDxfPhaseEZeroConnectFreshSavedOperationInputsV1,
@@ -8871,12 +8872,7 @@ export function OperationsField({
                   seamWriterCardId: stepSeams.cardId,
                   seamWriterLockVersion: useSeamsStore.getState().serverVersion,
                 });
-              const prepared = preparePatternImportDxfPhaseEZeroConnectPostSaveSeamLinkV1({
-                savedOperation: {
-                  status: 'same-session-saved-draft-operation',
-                  historyKey: pending.historyKey,
-                  operationNumber: pending.operationNumber,
-                },
+              const prepared = preparePatternImportDxfPhaseEZeroConnectStoredSeamV1({
                 candidate: pending.request.candidate,
                 catalog: pending.request.catalog,
                 projection: pending.request.projection,
@@ -8929,7 +8925,7 @@ export function OperationsField({
                     direction,
                     () =>
                       stepSeams.writes.acceptSeamStrict(
-                        prepared.receipt.storedSeam,
+                        prepared.storedSeam,
                         { historyKey: pending.historyKey },
                         {
                           expectedLockVersion: pending.capturedCardLockVersion,
@@ -8979,7 +8975,7 @@ export function OperationsField({
                 accepted: accepted.ok
                   ? { ok: true, key: accepted.seamKey }
                   : { ok: false, why: accepted.blocker.detail },
-                expectedSeam: prepared.receipt.storedSeam,
+                expectedSeam: prepared.storedSeam,
                 freshCard: fresh.techCard,
               });
               if (!readback.ok) return refuse(readback.blocker);
@@ -11865,6 +11861,7 @@ export function OperationsField({
               onSelectOperation={setSelected}
               cadCommandAuthoringHandoff={cadCommandAuthoringHandoff}
               zeroConnectAuthoringHandoff={zeroConnectAuthoringHandoff}
+              emptyOperationConnectionPending={Boolean(selectedZeroConnectExistingOperationPending)}
               crossScopeAuthoringHandoff={crossScopeAuthoringHandoff}
               pressAuthoringHandoff={pressAuthoringHandoff}
               stitchEditCapabilities={stitchEditCapabilities ?? undefined}

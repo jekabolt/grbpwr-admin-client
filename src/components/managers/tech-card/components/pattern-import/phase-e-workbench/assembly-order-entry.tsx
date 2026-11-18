@@ -1601,6 +1601,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
   onSelectOperation,
   cadCommandAuthoringHandoff,
   zeroConnectAuthoringHandoff,
+  emptyOperationConnectionPending = false,
   crossScopeAuthoringHandoff,
   pressAuthoringHandoff,
   stitchEditCapabilities,
@@ -1620,6 +1621,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
   onSelectOperation?: (index: number) => void;
   cadCommandAuthoringHandoff?: PatternImportDxfPhaseECadCommandAuthoringHandoffOwnerV1;
   zeroConnectAuthoringHandoff?: PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1;
+  emptyOperationConnectionPending?: boolean;
   crossScopeAuthoringHandoff?: PatternImportDxfPhaseECadTableCrossScopeAuthoringHandoffOwnerV1;
   pressAuthoringHandoff?: PatternImportDxfPhaseECadTablePressAuthoringOwnerV1;
   /** Exact targets currently exposed by the one selected OperationsField editor. */
@@ -1638,6 +1640,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
   frozen?: boolean;
 }) {
   const savedCard = useTechCard(techCardId);
+  const [emptyOperationSewingSourceKey, setEmptyOperationSewingSourceKey] = useState('');
   const sizeNameById = useSizeNames();
   const orderSizeIds = useSizeOrdering();
   const savedAllScopeAuthority = useMemo(
@@ -2723,6 +2726,10 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
       !savedProjection.ok &&
       savedProjection.blockers[0]?.code === 'saved-operation-not-two-seam';
     const savedLinkedN1 = exactSavedLinkedN1Target.ok;
+    const emptyOperationKey = `${techCardId}:${savedCard.data?.lockVersion}:${selectedOperationNumber}`;
+    const emptyOperationSewingSource =
+      savedEmptyOperation && emptyOperationSewingSourceKey === emptyOperationKey;
+    const useSavedSewingEdges = savedLinkedN1 || emptyOperationSewingSource;
     const fallbackResult: PatternImportDxfPhaseECadTableDraftOperationSessionBridgeResultV1 = {
       ok: false,
       plan: null,
@@ -2741,7 +2748,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
       <PatternImportDxfPhaseECadTableZeroOperationProductionMountV1
         techCardId={techCardId}
         physicalHost={physicalHost}
-        sourceSurface={savedLinkedN1 ? 'explicit-native-drawn-sewing' : undefined}
+        sourceSurface={useSavedSewingEdges ? 'explicit-native-drawn-sewing' : undefined}
         zeroConnectAuthoringHandoff={
           (savedEmptyOperation || savedLinkedN1) && zeroConnectAuthoringHandoff
             ? zeroConnectAuthoringHandoff
@@ -2753,6 +2760,24 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
         operationsPanel={
           <>
             {savedCrossMaterialActions}
+            {savedEmptyOperation &&
+            !frozen &&
+            zeroConnectAuthoringHandoff?.status === 'available' ? (
+              <Button
+                type='button'
+                size='xs'
+                variant='secondary'
+                disabled={emptyOperationConnectionPending}
+                aria-pressed={emptyOperationSewingSource}
+                onClick={() =>
+                  setEmptyOperationSewingSourceKey(
+                    emptyOperationSewingSource ? '' : emptyOperationKey,
+                  )
+                }
+              >
+                Use saved sewing edges
+              </Button>
+            ) : null}
             {!savedCrossMaterialActions && !savedEmptyOperation && !savedLinkedN1 ? (
               <CalloutBox
                 tone='note'
