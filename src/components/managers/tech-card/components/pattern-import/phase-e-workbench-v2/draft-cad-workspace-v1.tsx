@@ -1,3 +1,5 @@
+import { SavedDartTipControlV1 } from './draft-cad-saved-dart-tip-control-v1';
+import { recordSavedDartTipV1, selectSavedDartTipV1 } from './draft-cad-saved-dart-tip-v1';
 import { SavedDraftPieceCopyControlV1 } from './draft-cad-unlinked-piece-copy-control-v1';
 import type {
   PrepareSavedCopyReviewV1,
@@ -168,6 +170,9 @@ export type PatternImportDxfPhaseEDraftCadWorkspacePropsV1 = Readonly<{
   confirmedImportGeneration?: number;
   prepareSavedPieceCopyReview?: PrepareSavedCopyReviewV1;
   prepareSavedAddPointReview?: () => Promise<SavedAddPointReviewOwner>;
+  prepareSavedDartTip?: () => ReturnType<
+    typeof import('./draft-cad-saved-dart-tip-review-v1').compileSavedDartTipReviewV1
+  >;
   prepareSavedPairedAllowance?: () => Promise<SavedDraftPairedAllowanceAuthorityV1>;
   onSelectMaterialScope?: (scopeKey: string) => void;
   workspaceContextControl?: ReactNode;
@@ -206,6 +211,7 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
   confirmedImportGeneration = 0,
   prepareSavedAddPointReview,
   prepareSavedPairedAllowance,
+  prepareSavedDartTip,
   prepareSavedPieceCopyReview,
   onSelectMaterialScope,
   workspaceContextControl,
@@ -311,6 +317,11 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
   const selectedForCopy =
     arrangeActive && session.cursor === 0 && selectedPieceIds.length === 1
       ? projection.pieces.find((p) => p.pieceId === selectedPieceIds[0])
+      : null;
+  const dartInput = { session, projection, selection, compileSource };
+  const savedDart =
+    selectedForCopy && prepareSavedDartTip && compiledReimportCapability.available
+      ? selectSavedDartTipV1(dartInput, selectedForCopy)
       : null;
   const copySelection = useRef<SavedCopySelectionV1 | null>(null);
   copySelection.current = selectedForCopy?.pieceLineKey
@@ -495,6 +506,7 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
       input,
       prepareSavedAddPointReview,
       prepareSavedPairedAllowance,
+      prepareSavedDartTip,
     );
     if (compiledReimportEpoch.current !== epoch) return;
     setCompileState(executePatternImportDxfPhaseEDraftCadCompileUiActionV1(input, () => result));
@@ -686,6 +698,22 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
                 onCrossScopeConnect && !crossScopeConnectDisabled,
               )}
             />
+            {savedDart && selectedForCopy && (
+              <SavedDartTipControlV1
+                key={JSON.stringify([
+                  savedDart.savedTip.sourceSha256,
+                  savedDart.savedTip.scopeKey,
+                  savedDart.savedTip.sizeToken,
+                  selectedForCopy.pieceLineKey,
+                  confirmedImportGeneration,
+                ])}
+                apexMm={savedDart.apexMm}
+                onMove={(point) => {
+                  const edit = recordSavedDartTipV1(dartInput, selectedForCopy, point);
+                  if (edit?.ok) publishSession(edit.session);
+                }}
+              />
+            )}
             {arrangeActive &&
               selectedPieceIds.length === 1 &&
               (['duplicate', 'mirror-across-grain'] as const).map((mode) => (

@@ -1,3 +1,7 @@
+import {
+  cancelSavedDartTipReviewV1,
+  isSavedDartTipReviewFileV1,
+} from './pattern-import/phase-e-workbench-v2/draft-cad-saved-dart-tip-file-v1';
 import { cancelSavedCopyReviewFileV1 } from './pattern-import/phase-e-workbench-v2/draft-cad-unlinked-piece-copy-review-v1';
 import { savedWorkbenchScopeKeyV1 } from './pattern-import/phase-e-workbench-v2/saved-workbench-scope-v1';
 import {
@@ -977,17 +981,22 @@ export function PatternsField({
   const importingRef = useRef(importing);
   importingRef.current = importing;
   const closePatternImportReview = () => {
+    cancelSavedDartTipReviewV1(importingRef.current?.files[0]);
     const file = importingRef.current?.savedCopyFile;
     if (file) cancelSavedCopyReviewFileV1(file);
     importingRef.current = null;
     setImporting(null);
   };
   const activeCopyFile = importing?.savedCopyFile;
+  const firstReviewFile = importing?.files[0];
+  const activeDartFile =
+    firstReviewFile && isSavedDartTipReviewFileV1(firstReviewFile) ? firstReviewFile : undefined;
   useEffect(
     () => () => {
+      cancelSavedDartTipReviewV1(activeDartFile);
       if (activeCopyFile) cancelSavedCopyReviewFileV1(activeCopyFile);
     },
-    [activeCopyFile],
+    [activeCopyFile, activeDartFile],
   );
 
   // Direct uploads in flight, per slot.

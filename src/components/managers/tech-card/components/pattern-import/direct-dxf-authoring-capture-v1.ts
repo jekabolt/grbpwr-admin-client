@@ -1,3 +1,8 @@
+import {
+  isSavedDartTipReviewFileV1,
+  bindSavedDartTipWizardScopeV1,
+  verifySavedDartTipApplyV1,
+} from './phase-e-workbench-v2/draft-cad-saved-dart-tip-file-v1';
 import { acceptCurrentFindings } from './steps/accepted-findings';
 import type { ApplyDraftFn, DraftBuilder } from './client';
 import {
@@ -66,6 +71,8 @@ export function buildOrdinaryWizardReviewV1(
     accepted.draft.scopes.length === 1
   )
     reviewedCopyScopes.set(accepted.draft.scopes[0]!, files[0]!);
+  if (files.length === 1 && accepted.draft.scopes.length === 1)
+    bindSavedDartTipWizardScopeV1(files[0]!, accepted.draft.scopes[0]!);
   return accepted;
 }
 
@@ -80,15 +87,21 @@ export async function applyDirectDxfReviewedDraftV1(
   autopilotToken: number | undefined,
   isCurrent: () => boolean,
   apply: (options?: Parameters<ApplyDraftFn>[2]) => ReturnType<ApplyDraftFn>,
-  pinnedCopyFile?: File,
+  pinnedSavedFile?: File,
 ): ReturnType<ApplyDraftFn> {
   if (
-    pinnedCopyFile &&
+    pinnedSavedFile &&
     (files.length !== 1 ||
-      files[0] !== pinnedCopyFile ||
-      !unlinkedPieceCopyFiles.has(pinnedCopyFile))
+      files[0] !== pinnedSavedFile ||
+      (!unlinkedPieceCopyFiles.has(pinnedSavedFile) &&
+        !isSavedDartTipReviewFileV1(pinnedSavedFile)))
   )
-    throw new Error('The original unlinked copy File or its review is no longer available.');
+    throw new Error(
+      pinnedSavedFile && isSavedDartTipReviewFileV1(pinnedSavedFile)
+        ? 'The original saved dart review File is no longer available.'
+        : 'The original unlinked copy File or its review is no longer available.',
+    );
+  await verifySavedDartTipApplyV1(draft, files, autopilotToken != null, isCurrent);
   if (draft.scopes.some((scope) => scope.writerReplay?.retainedLineSplit)) {
     if (autopilotToken != null)
       throw new Error('Confirm the saved Add point with the Apply button.');

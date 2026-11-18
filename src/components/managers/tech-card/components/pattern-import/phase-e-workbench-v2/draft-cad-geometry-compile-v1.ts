@@ -1,3 +1,5 @@
+import { hasSavedDartTipSourceV1 } from './draft-cad-saved-dart-tip-review-v1';
+import { sameDartVertices } from './draft-cad-saved-dart-tip-v1';
 import { applyAffine, closestOnPolyline, pointInPolygon } from 'lib/pattern-import/semantics/geom';
 import { normalizeAuthoredText } from 'lib/pattern-import/manifest/authored-text';
 import { segIntersect } from 'lib/pattern-import/pieces/geom';
@@ -98,6 +100,7 @@ export type PatternImportDxfPhaseEDraftCadCompiledFeatureV1 = Readonly<{
     | 'drill'
     | 'notch'
     | 'boundary-point'
+    | 'moved-dart-tip'
     | 'moved-vertex'
     | 'deleted-vertex'
     | 'edge-length'
@@ -955,8 +958,34 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
           'Keep the complete dart inside the selected cut and outside its holes.',
           command,
         );
-      size.internal.push(internal);
-      output = 'internal';
+      if (command.tool === 'dart' && command.payload.savedTip) {
+        const tip = command.payload.savedTip,
+          dart = size.internal[tip.index];
+        if (
+          !hasSavedDartTipSourceV1(input) ||
+          commands.length !== 1 ||
+          dart?.label !== 'draft-cad:dart' ||
+          dart.closed ||
+          !sameDartVertices(dart.pts, tip.original)
+        )
+          return blocked(
+            'source-binding-mismatch',
+            'Review the original saved dart on its exact piece and size.',
+            command,
+          );
+        const feet = [dart.pts[0]!, dart.pts[2]!],
+          previewFeet = [internal.pts[0]!, internal.pts[2]!];
+        if (
+          !sameDartVertices(feet, previewFeet) &&
+          !sameDartVertices(feet, [...previewFeet].reverse())
+        )
+          return blocked('source-binding-mismatch', 'The original dart feet changed.', command);
+        dart.pts[1] = { ...command.payload.apexMm };
+        output = 'moved-dart-tip';
+      } else {
+        size.internal.push(internal);
+        output = 'internal';
+      }
     } else if (
       (command.tool === 'draft-point' || command.tool === 'point-only') &&
       primitive.kind === 'point' &&

@@ -1,3 +1,4 @@
+import { openSavedDartTipReviewFileV1 } from './draft-cad-saved-dart-tip-review-v1';
 import {
   takeUnlinkedDraftPieceCopyReviewV1,
   type CopyReview,
@@ -55,7 +56,9 @@ export function registerPatternImportDxfPhaseEPatternsFieldCompiledReimportOwner
     openExistingImportReview: (artifact) => {
       const addPoint = artifact.compiledFeatures.some((feature) => feature.tool === 'add-point');
       const pairedAllowance = requiresCurrentPairedAllowanceReviewV1(artifact);
+      const movedDart = artifact.compiledFeatures.some((f) => f.output === 'moved-dart-tip');
       const manualApply =
+        movedDart ||
         addPoint ||
         pairedAllowance ||
         artifact.compiledFeatures.some(
@@ -64,7 +67,9 @@ export function registerPatternImportDxfPhaseEPatternsFieldCompiledReimportOwner
         );
       const file = addPoint
         ? takeCompiledSavedAddPointFileV1(artifact)
-        : new File([artifact.dxfText], compiledFileName(artifact), { type: 'image/vnd.dxf' });
+        : movedDart
+          ? openSavedDartTipReviewFileV1(artifact, compiledFileName(artifact))
+          : new File([artifact.dxfText], compiledFileName(artifact), { type: 'image/vnd.dxf' });
       input.openExistingImportReview(
         Object.freeze({
           scopeKey: artifact.scope.scopeKey,

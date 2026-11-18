@@ -1,3 +1,6 @@
+import { cancelSavedDartTipReviewV1 } from './draft-cad-saved-dart-tip-file-v1';
+import { compileSavedDartTipReviewV1 } from './draft-cad-saved-dart-tip-review-v1';
+import { recordSavedDartTipV1, selectSavedDartTipV1 } from './draft-cad-saved-dart-tip-v1';
 import { expect, it, vi } from 'vitest';
 import {
   createSavedThreePanelFixtureV1,
@@ -27,7 +30,13 @@ import {
 
 const garmentRanks = ['XS', 'S', 'M', 'L', 'XL'] as const;
 
-async function fixture(stable = false, separateAllowance = true, fiveRanks = false) {
+async function fixture(
+  stable = false,
+  separateAllowance = true,
+  fiveRanks = false,
+  nativeDarts: boolean | 'orphan' | 'ambiguous' = false,
+  sourceDialect: 'r12' | 'r2000' = 'r12',
+) {
   const seed = await createSavedThreePanelFixtureV1(2);
   if (stable) {
     const ids: Record<string, string> = { FRONT: 'FP', BACK: 'BP' };
@@ -79,6 +88,52 @@ async function fixture(stable = false, separateAllowance = true, fiveRanks = fal
       });
     }
   }
+  seed.job.dialect = sourceDialect;
+  if (nativeDarts) {
+    for (const piece of seed.job.pieces)
+      for (const size of piece.sizes) {
+        const a = size.cut[0]!,
+          b = size.cut[1]!,
+          center = {
+            x: size.cut.reduce((v, p) => v + p.x, 0) / size.cut.length,
+            y: size.cut.reduce((v, p) => v + p.y, 0) / size.cut.length,
+          };
+        const foot = (t: number) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+        const common = {
+          kind: 'internal' as const,
+          origin: 'operator' as const,
+          confidence: 1,
+          ranges: [],
+        };
+        size.internal.push(
+          {
+            ...common,
+            label: 'draft-cad:dart',
+            closed: false,
+            pts: [
+              nativeDarts === 'orphan' ? { x: center.x - 8, y: center.y - 9 } : foot(0.4),
+              center,
+              foot(0.6),
+            ],
+          },
+          {
+            ...common,
+            label: 'draft-cad:fish-eye',
+            closed: true,
+            pts: [
+              { x: center.x - 3, y: center.y },
+              { x: center.x, y: center.y + 2 },
+              { x: center.x + 3, y: center.y },
+              { x: center.x, y: center.y - 2 },
+            ],
+          },
+        );
+        if (nativeDarts === 'ambiguous')
+          size.internal.push(
+            structuredClone(size.internal.find((p) => p.label === 'draft-cad:dart')!),
+          );
+      }
+  }
   seed.written = writeDxfDetailed(seed.job, { now: () => new Date('2026-11-17T00:00:00.000Z') });
   if (fiveRanks) {
     const client = new ImportWorkerClient();
@@ -88,6 +143,9 @@ async function fixture(stable = false, separateAllowance = true, fiveRanks = fal
         new File([seed.written.dxfText], 'five-original-ranks.dxf', { type: 'image/vnd.dxf' }),
         seed.card,
         client,
+        undefined,
+        undefined,
+        sourceDialect,
       );
       const saved = prior.scopes[0]!;
       expect(saved.manifest.gate?.passed).toBe(true);
@@ -1997,9 +2055,13 @@ it('reopens a native text mark without turning it into size, fold or quantity me
   }
 });
 
-async function checkNativeOutlinePointEdit(tool: 'move-point' | 'delete-point', fiveRanks = false) {
+async function checkNativeOutlinePointEdit(
+  tool: 'move-point' | 'delete-point' | 'dart-tip',
+  fiveRanks = false,
+  sourceDialect: 'r12' | 'r2000' = 'r12',
+) {
   vi.stubGlobal('Worker', InProcessTransport);
-  const f = await fixture(true, false, fiveRanks);
+  const f = await fixture(true, false, fiveRanks, tool === 'dart-tip', sourceDialect);
   const worker = new ImportWorkerClient();
   const reviewFiles: File[] = [];
   const unregister = registerPatternImportDxfPhaseEPatternsFieldCompiledReimportOwnerV1({
@@ -2050,21 +2112,42 @@ async function checkNativeOutlinePointEdit(tool: 'move-point' | 'delete-point', 
       sequence: 0,
       vertexKey: point.key,
     };
+    const targetPiece = projection.pieces[0]!;
+    const emptyInput = { ...f.compileInput, session: f.initial };
+    const savedDart = tool === 'dart-tip' ? selectSavedDartTipV1(emptyInput, targetPiece) : null;
+    const nextTip = savedDart ? { x: savedDart.apexMm.x + 3, y: savedDart.apexMm.y - 4 } : null;
+    const movedDart = nextTip && recordSavedDartTipV1(emptyInput, targetPiece, nextTip);
     const edit =
-      tool === 'move-point'
-        ? recordPatternImportDxfPhaseEDraftCadMovePointV1({ ...input, pointMm })
-        : recordPatternImportDxfPhaseEDraftCadDeletePointV1(input);
+      tool === 'dart-tip'
+        ? {
+            recorded: movedDart?.ok,
+            blocker: movedDart?.blocker?.detail,
+            session: movedDart?.session ?? f.initial,
+          }
+        : tool === 'move-point'
+          ? recordPatternImportDxfPhaseEDraftCadMovePointV1({ ...input, pointMm })
+          : recordPatternImportDxfPhaseEDraftCadDeletePointV1(input);
     expect(edit.recorded, edit.blocker ?? '').toBe(true);
-    const compiled = await compileDraftForOrdinaryReviewV1({
-      ...f.compileInput,
-      session: edit.session,
-    });
+    f.current.session = edit.session;
+    const verifyRow = vi.fn(async () => {});
+    const compiled = await compileDraftForOrdinaryReviewV1(
+      { ...f.compileInput, session: edit.session },
+      undefined,
+      undefined,
+      tool === 'dart-tip' ? () => compileSavedDartTipReviewV1(f.request, verifyRow) : undefined,
+    );
     if (!compiled.ok) throw Error(JSON.stringify(compiled.blockers));
     expect(
       await stagePatternImportDxfPhaseECadSemanticCompiledArtifactV1(compiled.artifact, {
         confirmedImportGenerationAtCompile: f.current.generation,
       }),
     ).toBe(true);
+    if (tool === 'dart-tip') {
+      expect(f.source.native.draft.scopes[0]!.writerReplay!.job.dialect).toBe(sourceDialect);
+      expect(compiled.artifact.compiledJob.dialect).toBe(sourceDialect);
+      for (const text of [new TextDecoder().decode(f.seed.bytes), compiled.artifact.dxfText])
+        expect(text).toContain(sourceDialect === 'r12' ? 'AC1009' : 'AC1015');
+    }
     const handoff = {
       schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_CAD_COMMAND_COMPILED_REIMPORT_HANDOFF_V1,
       artifact: compiled.artifact,
@@ -2081,6 +2164,48 @@ async function checkNativeOutlinePointEdit(tool: 'move-point' | 'delete-point', 
     const scope = reviewed.scopes[0]!;
     expect(scope.manifest.gate?.passed).toBe(true);
     expect(upload).not.toHaveBeenCalled();
+    if (tool === 'dart-tip') {
+      const noWrite = vi.fn();
+      await expect(
+        applyDirectDxfReviewedDraftV1(reviewed, [file], 1, () => true, noWrite),
+      ).rejects.toThrow('Apply');
+      const copy = new File([await file.text()], 'copied.dxf');
+      await expect(
+        applyDirectDxfReviewedDraftV1(reviewed, [copy], undefined, () => true, noWrite),
+      ).rejects.toThrow('Apply');
+      await expect(
+        applyDirectDxfReviewedDraftV1(
+          structuredClone(reviewed),
+          [copy],
+          undefined,
+          () => true,
+          noWrite,
+          file,
+        ),
+      ).rejects.toThrow('original saved dart');
+      const originalText = scope.dxfText;
+      scope.dxfText += '\n';
+      await expect(
+        applyDirectDxfReviewedDraftV1(reviewed, [file], undefined, () => true, noWrite, file),
+      ).rejects.toThrow('Apply');
+      scope.dxfText = originalText;
+      const otherSize = scope.writerReplay!.job.pieces[0]!.sizes.find(
+        (size) => size.sizeToken === 'XL',
+      )!;
+      const oldCut = otherSize.cut;
+      otherSize.cut = oldCut.map((p, i) => (i === 0 ? { ...p, x: p.x + 1 } : p));
+      await expect(
+        applyDirectDxfReviewedDraftV1(reviewed, [file], undefined, () => true, noWrite, file),
+      ).rejects.toThrow('size blocks changed');
+      otherSize.cut = oldCut;
+      const before = f.current.row;
+      f.current.row = { ...before, revision: before.revision + 1 };
+      await expect(
+        applyDirectDxfReviewedDraftV1(reviewed, [file], undefined, () => true, noWrite),
+      ).rejects.toThrow('changed');
+      f.current.row = before;
+      expect(noWrite).not.toHaveBeenCalled();
+    }
     const prior = f.current.row;
     const card = structuredClone(f.current.card);
     const target = card.scopes[0]!;
@@ -2158,6 +2283,51 @@ async function checkNativeOutlinePointEdit(tool: 'move-point' | 'delete-point', 
     const reopened = await createSavedThreePanelSourceV1({ ...f.seed, bytes, row, card }, true);
     try {
       expect(reopened.native.row).toEqual(row);
+      if (tool === 'dart-tip') {
+        cancelSavedDartTipReviewV1(file);
+        const closedWrite = vi.fn();
+        await expect(
+          applyDirectDxfReviewedDraftV1(reviewed, [file], undefined, () => true, closedWrite, file),
+        ).rejects.toThrow('Apply');
+        expect(closedWrite).not.toHaveBeenCalled();
+        expect(verifyRow).toHaveBeenCalledTimes(2);
+        const before = f.source.native.draft.scopes[0]!,
+          after = reopened.native.draft.scopes[0]!;
+        const expected = structuredClone(before.manifest.blocks);
+        expect(expected).toHaveLength(10);
+        const changed = expected.find(
+          (b) => b.identity === targetPiece.pieceId && b.sizeToken === 'M',
+        )!;
+        const marker = changed.authoredInternal!.find((m) => m.label === 'draft-cad:dart')!;
+        marker.vertices[2]! += 3_000_000;
+        marker.vertices[3]! -= 4_000_000;
+        const signature = (blocks: typeof expected) =>
+          blocks
+            .map((b) => [b.block, b.identity, b.sizeId, b.sizeToken, b.authoredInternal])
+            .sort();
+        expect(signature(after.manifest.blocks)).toEqual(signature(expected));
+        expect(after.manifest.sizes).toEqual(before.manifest.sizes);
+        for (const p of before.writerReplay!.job.pieces) {
+          const restored = after.writerReplay!.job.pieces.find((q) => q.identity === p.identity)!;
+          expect(restored.sizes.map((s) => s.sizeToken)).toEqual(garmentRanks);
+          for (const size of p.sizes) {
+            const decoded = restored.sizes.find((s) => s.sizeToken === size.sizeToken)!;
+            const previous = structuredClone(size.internal);
+            if (p.identity === targetPiece.pieceId && size.sizeToken === 'M')
+              previous.find((p) => p.label === 'draft-cad:dart')!.pts[1] = nextTip!;
+            // Source path ids are issued by each fresh reader and differ between dialects.
+            const geometry = (items: typeof previous) =>
+              items.map(({ ranges, ...feature }) => ({
+                ...feature,
+                ranges: ranges.map(({ from, to }) => ({ from, to })),
+              }));
+            expect(geometry(decoded.internal)).toEqual(geometry(previous));
+            expect(decoded.cut).toEqual(size.cut);
+            expect(decoded.seam).toEqual(size.seam);
+          }
+        }
+        return;
+      }
       const normalize = (points: readonly { x: number; y: number }[]) => {
         const { minX, minY } = bboxOf(points);
         return points
@@ -2265,3 +2435,90 @@ it.each(['move-point', 'delete-point'] as const)(
 
 it('reopens one M Move with all four other ranks and the sibling piece intact after one ordinary Apply', () =>
   checkNativeOutlinePointEdit('move-point', true));
+
+it.each(['r12', 'r2000'] as const)(
+  'moves only the saved %s M dart tip through manual Apply and fresh native replay across five ranks',
+  (dialect) => checkNativeOutlinePointEdit('dart-tip', true, dialect),
+);
+
+it('rejects cross-piece, cross-rank, changed tip, feet and alias during saved dart verification', async () => {
+  vi.stubGlobal('Worker', InProcessTransport);
+  const f = await fixture(true, false, true, true);
+  try {
+    const input = { ...f.compileInput, session: f.initial },
+      piece = input.projection.pieces[0]!;
+    const dart = selectSavedDartTipV1(input, piece)!;
+    const record = recordSavedDartTipV1(input, piece, {
+      x: dart.apexMm.x + 3,
+      y: dart.apexMm.y + 2,
+    });
+    if (!record?.ok) throw Error('Fixture dart unavailable');
+    const command = record.session.history[0]!.commands[0]!;
+    if (command.tool !== 'dart' || !command.payload.savedTip)
+      throw Error('Fixture lacks original path');
+    const tip = command.payload.savedTip;
+    const invalid = [
+      { ...tip, pieceLineKey: input.projection.pieces[1]!.pieceLineKey },
+      { ...tip, rank: 1 },
+      { ...tip, sizeId: 8 },
+      { ...tip, sizeToken: 'L' },
+      { ...tip, index: 1 },
+      { ...tip, sourceSha256: 'a'.repeat(64) },
+      { ...tip, original: tip.original.map((p, i) => (i === 1 ? { ...p, y: p.y + 1 } : p)) },
+    ];
+    for (const savedTip of invalid) {
+      const corrupt = recordPatternImportDxfPhaseEDraftCadTransactionV1(f.initial, {
+        transactionId: 'changed',
+        label: 'Move dart',
+        commands: [{ ...command, payload: { ...command.payload, savedTip } }],
+      });
+      if (!corrupt.ok) throw Error(corrupt.blocker.detail);
+      f.current.session = corrupt.session;
+      const fresh = await createSavedThreePanelSourceV1(f.seed);
+      try {
+        await expect(
+          compileSavedDartTipReviewV1(
+            {
+              ...f.request,
+              sourceOwner: fresh.native.sourceOwner,
+              sourceRequest: { ...f.request.sourceRequest, draft: fresh.native.draft },
+            },
+            async () => {},
+          ),
+        ).rejects.toThrow(/saved dart/i);
+      } finally {
+        fresh.dispose();
+      }
+    }
+    f.current.session = record.session;
+    f.current.card.existingAliases!.push({
+      ...f.current.card.existingAliases!.find((a) => a.blockName === piece.pieceId)!,
+      pieceLineKey: 'wrong-line',
+    });
+    await expect(compileSavedDartTipReviewV1(f.request, async () => {})).rejects.toThrow(
+      /saved dart/i,
+    );
+    expect((await compileDraftForOrdinaryReviewV1({ ...input, session: record.session })).ok).toBe(
+      false,
+    );
+  } finally {
+    f.source.dispose();
+    vi.unstubAllGlobals();
+  }
+});
+
+it.each(['orphan', 'ambiguous'] as const)(
+  'refuses a saved %s dart with no unique original cut attachment',
+  async (mode) => {
+    vi.stubGlobal('Worker', InProcessTransport);
+    const f = await fixture(true, false, true, mode);
+    try {
+      const input = { ...f.compileInput, session: f.initial };
+      expect(selectSavedDartTipV1(input, input.projection.pieces[0]!)).toBeNull();
+      expect(recordSavedDartTipV1(input, input.projection.pieces[0]!, { x: 40, y: 20 })).toBeNull();
+    } finally {
+      f.source.dispose();
+      vi.unstubAllGlobals();
+    }
+  },
+);

@@ -78,6 +78,12 @@ export type PatternImportDxfPhaseESavedRowProductionRuntimeV1 = Readonly<{
     row: DxfProductSavedRowIdentityV1,
     readCurrent: () => Omit<SavedAddPointCurrentV1, 'card'> | null,
   ) => Promise<SavedAddPointReviewOwner>;
+  prepareSavedDartTip?: (
+    row: DxfProductSavedRowIdentityV1,
+    readCurrent: () => Omit<SavedAddPointCurrentV1, 'card'> | null,
+  ) => ReturnType<
+    typeof import('./draft-cad-saved-dart-tip-review-v1').compileSavedDartTipReviewV1
+  >;
   prepareSavedPairedAllowance?: (
     row: DxfProductSavedRowIdentityV1,
     readCurrent: () => Omit<SavedAddPointCurrentV1, 'card'> | null,
@@ -303,6 +309,33 @@ export function createPatternImportDxfPhaseESavedRowRuntimeV1(
               await readCurrentRow();
             },
           });
+        },
+      );
+    },
+    async prepareSavedDartTip(row, readCurrent) {
+      const opening = readCurrent(),
+        command = opening?.session.history[0]?.commands[0];
+      if (command?.tool !== 'dart' || !command.payload.savedTip)
+        throw new Error('Select the original saved dart.');
+      return withSavedDraftSource(
+        row,
+        command.target.pieceId,
+        async (proof, card, readCurrentRow) => {
+          const { compileSavedDartTipReviewV1 } = await import(
+            './draft-cad-saved-dart-tip-review-v1'
+          );
+          return compileSavedDartTipReviewV1(
+            {
+              ...proof,
+              readCurrent: () => {
+                const current = readCurrent();
+                return !disposed && current ? { ...current, card } : null;
+              },
+            },
+            async () => {
+              await readCurrentRow();
+            },
+          );
         },
       );
     },

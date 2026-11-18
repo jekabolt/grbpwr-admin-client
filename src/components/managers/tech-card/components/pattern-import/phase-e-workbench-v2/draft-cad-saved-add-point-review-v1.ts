@@ -329,10 +329,32 @@ export async function compileDraftForOrdinaryReviewV1(
   input: PatternImportDxfPhaseEDraftCadGeometryCompileInputV1,
   prepare?: () => Promise<SavedAddPointReviewOwner>,
   prepareAllowance?: () => Promise<SavedDraftPairedAllowanceAuthorityV1>,
+  prepareDart?: () => Promise<PatternImportDxfPhaseEDraftCadGeometryCompileResultV1>,
 ): Promise<PatternImportDxfPhaseEDraftCadGeometryCompileResultV1> {
   const commands = input.session.history
     .slice(0, input.session.cursor)
     .flatMap((tx) => tx.commands);
+  if (
+    commands.some((command) => command.tool === 'dart' && command.payload.savedTip) &&
+    prepareDart
+  ) {
+    try {
+      return await prepareDart();
+    } catch (error) {
+      return {
+        ok: false,
+        artifact: null,
+        blockers: [
+          {
+            code: 'source-binding-mismatch',
+            tool: 'dart',
+            commandId: commands[0]?.commandId ?? null,
+            detail: error instanceof Error ? error.message : 'The saved dart changed.',
+          },
+        ],
+      };
+    }
+  }
   const point = commands.find((command) => command.tool === 'add-point');
   if (!point) {
     const ordinary = compilePatternImportDxfPhaseEDraftCadGeometryV1(input);

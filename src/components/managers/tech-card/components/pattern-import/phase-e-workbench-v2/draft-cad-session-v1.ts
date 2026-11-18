@@ -204,6 +204,17 @@ export type PatternImportDxfPhaseEDraftCadCommandV1 =
       {
         entityId: string;
         base: PatternImportDxfPhaseEDraftCadBoundaryAnchorV1;
+        savedTip?: Readonly<{
+          pieceId: string;
+          pieceLineKey: string;
+          sourceSha256: string;
+          scopeKey: string;
+          sizeToken: string;
+          sizeId: number;
+          rank: number;
+          index: number;
+          original: readonly PtMm[];
+        }>;
         apexMm: PtMm;
         intakeMm: number;
       }
@@ -359,6 +370,24 @@ function target(value: unknown): value is PatternImportDxfPhaseEDraftCadTargetV1
   return stableId(candidate.pieceId) && stableId(candidate.pieceLineKey);
 }
 
+function validSavedDartTip(value: unknown) {
+  if (!value || typeof value !== 'object') return false;
+  const p = value as Record<string, unknown>;
+  return (
+    typeof p.sourceSha256 === 'string' &&
+    SHA256.test(p.sourceSha256) &&
+    stableId(p.pieceId) &&
+    stableId(p.pieceLineKey) &&
+    stableId(p.scopeKey) &&
+    stableId(p.sizeToken) &&
+    [p.rank, p.index, p.sizeId].every(
+      (n) => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0,
+    ) &&
+    points(p.original, 3) &&
+    p.original.length === 3
+  );
+}
+
 function boundaryAnchor(value: unknown): value is PatternImportDxfPhaseEDraftCadBoundaryAnchorV1 {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const candidate = value as Partial<PatternImportDxfPhaseEDraftCadBoundaryAnchorV1>;
@@ -509,7 +538,10 @@ function validCommand(value: unknown): value is PatternImportDxfPhaseEDraftCadCo
       return point(payload.fromMm) && point(payload.toMm);
     case 'dart':
       return (
-        boundaryAnchor(payload.base) && point(payload.apexMm) && finitePositive(payload.intakeMm)
+        boundaryAnchor(payload.base) &&
+        point(payload.apexMm) &&
+        finitePositive(payload.intakeMm) &&
+        (payload.savedTip === undefined || validSavedDartTip(payload.savedTip))
       );
     case 'fish-eye':
       return (

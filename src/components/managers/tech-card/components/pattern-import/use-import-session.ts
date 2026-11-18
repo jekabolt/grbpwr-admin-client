@@ -1,3 +1,4 @@
+import { isSavedDartTipReviewFileV1 } from './phase-e-workbench-v2/draft-cad-saved-dart-tip-file-v1';
 import {
   directDxfAuthoringOpenFileV1,
   applyDirectDxfReviewedDraftV1,
@@ -456,7 +457,7 @@ export function useImportSession(deps: {
   pinScopeKey?: string;
   savedCopyFile?: File;
 }) {
-  const pinnedCopyFile = useRef(deps.savedCopyFile);
+  const pinnedSavedFile = useRef(deps.savedCopyFile);
   const { client, namer, buildDraft, applyDraft } = deps;
   /** The LIVE card as the latest render sees it (only the freshness check reads it). */
   const cardRef = useRef(deps.card);
@@ -1060,11 +1061,19 @@ export function useImportSession(deps: {
       switch (ev.type) {
         case 'files': {
           if (
-            pinnedCopyFile.current &&
-            (ev.files.length !== 1 || ev.files[0] !== pinnedCopyFile.current)
+            !pinnedSavedFile.current &&
+            ev.files.length === 1 &&
+            isSavedDartTipReviewFileV1(ev.files[0]!)
+          )
+            pinnedSavedFile.current = ev.files[0];
+          if (
+            pinnedSavedFile.current &&
+            (ev.files.length !== 1 || ev.files[0] !== pinnedSavedFile.current)
           )
             throw new Error(
-              'Review this saved copy with its original DXF. Close the review to import other files.',
+              isSavedDartTipReviewFileV1(pinnedSavedFile.current)
+                ? 'Review this saved dart with its original DXF. Close the review to import other files.'
+                : 'Review this saved copy with its original DXF. Close the review to import other files.',
             );
           takeCard();
           patchInputs({ ...EMPTY_INPUTS, fileList: ev.files });
@@ -1577,7 +1586,7 @@ export function useImportSession(deps: {
                     ? { ...reviewOptions, replaceMatchingFile: true }
                     : reviewOptions,
                 ),
-              pinnedCopyFile.current,
+              pinnedSavedFile.current,
             );
           } catch (e) {
             result = {

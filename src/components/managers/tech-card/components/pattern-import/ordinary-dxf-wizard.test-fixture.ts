@@ -60,6 +60,7 @@ export async function draftThroughWizardStages(
   client: ImportClient = new DirectClient(),
   open?: PatternImportOpenFile,
   resolveDetails?: (initial: StageIO['semantics']['out']) => Partial<StageIO['semantics']['in']>,
+  dialect: 'r12' | 'r2000' = 'r12',
 ) {
   const { sessionId } = await client.open([open ?? (await directDxfAuthoringOpenFileV1(file, 0))]);
   const run = <S extends StageName>(stage: S, input: StageIO[S]['in']) =>
@@ -126,7 +127,7 @@ export async function draftThroughWizardStages(
             ]
           : [],
       ),
-      dialect: 'r12',
+      dialect,
       generator: 'grbpwr-admin pattern-import (worker)',
     });
     return buildOrdinaryWizardReviewV1([file], cardBuildDraft, written, {
