@@ -22,6 +22,7 @@ export function CadTablePieceFeatureMarks({
     grain,
     internal,
     fold,
+    savedFoldAxes,
     notches,
     drills,
     pointMarks,
@@ -30,6 +31,10 @@ export function CadTablePieceFeatureMarks({
     materialLabel,
   } = features;
   const firstRing = materialRings[0];
+  const foldAxes = [
+    ...(fold ? [{ foldKey: undefined, a: fold.a, b: fold.b }] : []),
+    ...(savedFoldAxes ?? []),
+  ];
   const showName = !hiddenLayers.has('pieceLabel') && !!pieceLabel;
   const showMaterial = !hiddenLayers.has('materialLabel') && !!materialLabel;
   const anchor = firstRing && (showName || showMaterial) ? labelAnchor(firstRing) : null;
@@ -60,19 +65,22 @@ export function CadTablePieceFeatureMarks({
             vectorEffect='non-scaling-stroke'
           />
         ))}
-      {!hiddenLayers.has('fold') && fold ? (
-        <line
-          data-cad-zero-connect-fold=''
-          x1={fold.a.x}
-          y1={vy(fold.a.y)}
-          x2={fold.b.x}
-          y2={vy(fold.b.y)}
-          stroke={SHEET_INK.green}
-          strokeDasharray='7 3 2 3'
-          strokeWidth='1.5'
-          vectorEffect='non-scaling-stroke'
-        />
-      ) : null}
+      {!hiddenLayers.has('fold') &&
+        foldAxes.map(({ foldKey, a, b }) => (
+          <line
+            key={foldKey ?? 'pattern-fold'}
+            data-cad-zero-connect-fold=''
+            data-cad-saved-fold-key={foldKey}
+            x1={a.x}
+            y1={vy(a.y)}
+            x2={b.x}
+            y2={vy(b.y)}
+            stroke={SHEET_INK.green}
+            strokeDasharray='7 3 2 3'
+            strokeWidth='1.5'
+            vectorEffect='non-scaling-stroke'
+          />
+        ))}
       {!hiddenLayers.has('notches') &&
         notches.map(({ seg }, index) => (
           <polyline

@@ -1041,6 +1041,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
         prepared.projection,
         scopes,
         selectedScope?.label,
+        'savedFoldAxes' in prepared ? prepared.savedFoldAxes : undefined,
       )
     );
   }, [cardSession, prepared, selectedScope?.label]);

@@ -8,6 +8,10 @@ import {
 
 import type { PatternImportDxfPhaseECadWorkbenchIconV1 } from './cad-workbench-tool-button-v1';
 import { patternImportDxfPhaseECadTablePieceKeyV1 } from './cad-table-piece-layout-session-v1';
+import type {
+  CadTableSavedFoldAxesByPieceV1,
+  CadTableSavedFoldAxisV1,
+} from './cad-table-saved-piece-folds-v1';
 
 export type CadTablePieceFeatures = Readonly<
   Pick<
@@ -17,9 +21,13 @@ export type CadTablePieceFeatures = Readonly<
     pieceLabel: string;
     materialLabel: string | null;
     quantity: number;
+    savedFoldAxes?: readonly CadTableSavedFoldAxisV1[];
   }
 >;
-export type CadTablePieceFeatureLayer = Exclude<keyof CadTablePieceFeatures, 'quantity'>;
+export type CadTablePieceFeatureLayer = Exclude<
+  keyof CadTablePieceFeatures,
+  'quantity' | 'savedFoldAxes'
+>;
 export type CadTablePieceFeaturesByKey = ReadonlyMap<string, CadTablePieceFeatures>;
 
 export const CAD_TABLE_PIECE_FEATURE_LAYERS = [
@@ -42,6 +50,7 @@ export function hasCadTablePieceFeature(
   features: CadTablePieceFeatures,
   layer: CadTablePieceFeatureLayer,
 ): boolean {
+  if (layer === 'fold' && features.savedFoldAxes?.length) return true;
   const value = features[layer];
   return Array.isArray(value) ? value.length > 0 : value != null;
 }
@@ -52,6 +61,7 @@ export function projectCadTablePieceFeatures(
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1,
   scopes: readonly Readonly<Pick<DraftScope, 'target' | 'writerReplay'>>[],
   materialLabel?: string,
+  savedFoldAxes?: CadTableSavedFoldAxesByPieceV1,
 ): CadTablePieceFeaturesByKey {
   const features = new Map<string, CadTablePieceFeatures>();
   const matchingScopes = scopes.filter(({ target }) => target.scopeKey === catalog.scopeKey);
@@ -97,27 +107,29 @@ export function projectCadTablePieceFeatures(
     });
     if (!frameMatches) continue;
     const { grain, internal, fold, notches, drills, pointMarks, textMarks } = size;
-    features.set(
-      patternImportDxfPhaseECadTablePieceKeyV1(projected.pieceId, projected.pieceLineKey),
-      {
-        grain:
-          grain &&
-          grain.origin !== 'proposed' &&
-          [grain.a.x, grain.a.y, grain.b.x, grain.b.y].every(Number.isFinite) &&
-          (grain.a.x !== grain.b.x || grain.a.y !== grain.b.y)
-            ? grain
-            : null,
-        internal,
-        fold,
-        notches,
-        drills,
-        pointMarks,
-        textMarks,
-        pieceLabel: writerPiece.displayName?.trim() || writerPiece.identity,
-        materialLabel: materialLabel?.trim() || null,
-        quantity: writerPiece.piecesPerGarment,
-      },
+    const pieceKey = patternImportDxfPhaseECadTablePieceKeyV1(
+      projected.pieceId,
+      projected.pieceLineKey,
     );
+    features.set(pieceKey, {
+      grain:
+        grain &&
+        grain.origin !== 'proposed' &&
+        [grain.a.x, grain.a.y, grain.b.x, grain.b.y].every(Number.isFinite) &&
+        (grain.a.x !== grain.b.x || grain.a.y !== grain.b.y)
+          ? grain
+          : null,
+      internal,
+      fold,
+      notches,
+      drills,
+      pointMarks,
+      textMarks,
+      pieceLabel: writerPiece.displayName?.trim() || writerPiece.identity,
+      materialLabel: materialLabel?.trim() || null,
+      quantity: writerPiece.piecesPerGarment,
+      savedFoldAxes: savedFoldAxes?.get(pieceKey),
+    });
   }
   return features;
 }

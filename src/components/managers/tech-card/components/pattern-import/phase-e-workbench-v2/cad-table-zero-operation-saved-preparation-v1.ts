@@ -10,6 +10,7 @@ import {
 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import { selectPatternImportDxfProductDraftPhaseDSizeV1 } from 'lib/cloth/domain/pattern-import-dxf-product-draft-phase-d-selection-v1';
 import { capturePatternImportDxfProductCurrentSavedReplayV1 } from 'lib/cloth/domain/pattern-import-dxf-product-commit-replay-v1';
+import type { PieceDTO } from 'lib/nesting/types';
 import type { DxfProductPhaseDSizeSelectionResultV1 } from 'lib/pattern-import/dxf-product-phase-d-size-selection-v1';
 import {
   createDxfProductSavedForeignReprocessOwnerV1,
@@ -19,6 +20,7 @@ import {
   createDxfProductSavedReprocessOwnerV1,
   DXF_PRODUCT_SAVED_REPROCESS_REQUEST_V1,
   isDxfProductSavedReprocessVerifiedV1,
+  type DxfProductSavedReprocessHostV1,
   type DxfProductSavedReprocessResultV1,
 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 import {
@@ -45,6 +47,7 @@ import {
   createPatternImportDxfPhaseEDraftCadCompileSourceV1,
   type PatternImportDxfPhaseEDraftCadCompileSourceV1,
 } from './draft-cad-compile-source-v1';
+import type { CadTableSavedFoldAxesByPieceV1 } from './cad-table-saved-piece-folds-v1';
 
 export const PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_OPERATION_SAVED_PREPARATION_V1 =
   'pattern-import-dxf-phase-e-cad-table-zero-operation-saved-preparation/1' as const;
@@ -122,6 +125,7 @@ export type PatternImportDxfPhaseECadTableZeroOperationSavedPreparationResultV1 
       catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1;
       projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
       draftCadCompileSource: PatternImportDxfPhaseEDraftCadCompileSourceV1;
+      savedFoldAxes?: CadTableSavedFoldAxesByPieceV1;
       authoringAuthority: PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1;
       verifiedNativeReplay?: Extract<DxfProductSavedReprocessResultV1, { ok: true }>;
       blocker: null;
@@ -342,8 +346,43 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
     resolveCard: request.authority.resolveCard,
     readAuthoritativeRow: capability.authority.readAuthoritativeRow,
   };
+  // Read the ordinary layer geometry while the current reprocess owner still holds the verified
+  // original bytes. Keep only its detached geometry and leave the ordinary read unchanged.
+  const needsFoldGeometry = request.techCard.pieceFolds?.some(
+    ({ anchoredSize, stale }) => anchoredSize === request.sizeToken && !stale,
+  );
+  let readFoldGeometry: readonly PieceDTO[] | undefined;
+  const withFoldGeometry = (
+    host: DxfProductSavedReprocessHostV1,
+  ): DxfProductSavedReprocessHostV1 =>
+    !needsFoldGeometry
+      ? host
+      : {
+          ...host,
+          async reprocess(input, hostSignal, progress) {
+            readFoldGeometry = undefined;
+            // The regular worker takes ownership of input.bytes when opened.
+            const bytes = Uint8Array.from(input.bytes);
+            try {
+              const result = await host.reprocess(input, hostSignal, progress);
+              try {
+                const { parseSavedNativeStitchRowV1 } = await import(
+                  './saved-legacy-native-stitch-run-v8'
+                );
+                hostSignal.throwIfAborted();
+                const parsed = await parseSavedNativeStitchRowV1(bytes, input.syntheticFilename);
+                if (!hostSignal.aborted && !parsed.failedFiles) readFoldGeometry = parsed.pieces;
+              } catch {
+                // An unsupported mark or CAD profile cannot block the regular saved pattern table.
+              }
+              return result;
+            } finally {
+              bytes.fill(0);
+            }
+          },
+        };
   const exactOwner = createDxfProductSavedReprocessOwnerV1(
-    createPatternImportDxfPhaseESavedDxfReprocessHostV1(hostDeps),
+    withFoldGeometry(createPatternImportDxfPhaseESavedDxfReprocessHostV1(hostDeps)),
   );
   let foreignOwner: ReturnType<typeof createDxfProductSavedForeignReprocessOwnerV1> | null = null;
   const cancel = () => {
@@ -382,7 +421,7 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
       nativeSewingReplay = reprocessed.nativeSewingReplay;
     } else if (reprocessed.blockers[0]?.code === 'foreign-saved-dxf-detected') {
       foreignOwner = createDxfProductSavedForeignReprocessOwnerV1(
-        createPatternImportDxfPhaseEForeignSavedDxfReprocessHostV1(hostDeps),
+        withFoldGeometry(createPatternImportDxfPhaseEForeignSavedDxfReprocessHostV1(hostDeps)),
       );
       const foreign = await foreignOwner.run({
         schemaVersion: DXF_PRODUCT_SAVED_FOREIGN_REPROCESS_REQUEST_V1,
@@ -490,6 +529,27 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
           'The verified saved DXF has no detached raw-free Draft CAD compile source.',
         ),
       );
+    let savedFoldAxes: CadTableSavedFoldAxesByPieceV1 | undefined;
+    if (readFoldGeometry) {
+      try {
+        const current = await request.authority.resolveExactCurrentCard(
+          authoritative.row,
+          signal ?? new AbortController().signal,
+        );
+        const { projectCadTableSavedPieceFoldAxesV1 } = await import(
+          './cad-table-saved-piece-folds-v1'
+        );
+        savedFoldAxes = projectCadTableSavedPieceFoldAxesV1(
+          current.techCard.pieceFolds ?? [],
+          projection.projection,
+          readFoldGeometry,
+          scope.sizes.map(({ sizeToken }) => sizeToken),
+        );
+      } catch {
+        // Fold rows and their drawing must both be current to enrich this projection.
+      }
+    }
+    signal?.throwIfAborted();
     if (!isPatternImportDxfPhaseECadTableZeroOperationGenerationTicketCurrentV1(request.generation))
       return blockedPreparation(
         request,
@@ -552,6 +612,7 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
       catalog: catalogResult.catalog,
       projection: projection.projection,
       draftCadCompileSource,
+      ...(savedFoldAxes?.size ? { savedFoldAxes } : {}),
       authoringAuthority,
       ...(request.sourceSurface &&
       isDxfProductSavedReprocessVerifiedV1(reprocessed) &&
