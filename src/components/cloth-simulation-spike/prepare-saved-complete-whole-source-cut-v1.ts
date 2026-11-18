@@ -274,10 +274,28 @@ export async function prepareSavedCompleteWholeSourceCutV1(
   )
     throw new RangeError('The generated label differs from the current original pattern.');
   const stages = new Map<number, number>();
+  const seamOperations = new Map<string, number>();
   for (const span of [...source.spans, ...source.labelAnchors]) {
-    if (source.operations[span.operationOrder]?.operationNumber !== span.operationNumber)
+    const knownOperation = seamOperations.get(span.seamKey);
+    if (
+      source.operations[span.operationOrder]?.operationNumber !== span.operationNumber ||
+      (knownOperation !== undefined && knownOperation !== span.operationNumber)
+    )
       throw new RangeError('The persisted sewing operation order differs.');
     stages.set(span.operationOrder, span.operationNumber);
+    seamOperations.set(span.seamKey, span.operationNumber);
+  }
+  const coveredSeams = new Set<string>();
+  for (const pair of pairs) {
+    if (seamOperations.get(pair.seamId) !== pair.operationOrder)
+      throw new RangeError(`Station ${pair.seamId} does not belong to the saved operation.`);
+    coveredSeams.add(pair.seamId);
+  }
+  for (const [seamId, operationNumber] of seamOperations) {
+    if (!coveredSeams.has(seamId))
+      throw new RangeError(
+        `The diagnostic layout omits a saved seam in operation ${operationNumber}.`,
+      );
   }
   const operationNumbers = [...stages].sort(([a], [b]) => a - b).map(([, operation]) => operation);
   if (
