@@ -1,8 +1,10 @@
+import * as Dialog from '@radix-ui/react-dialog';
 import type {
   SavedGenericDurablePhysicalPreviewScopeV1,
   SavedGenericDurablePhysicalPreviewSeamV1,
 } from 'components/cloth-simulation-spike/saved-generic-durable-physical-host-v1';
 import type { ReactNode } from 'react';
+import { Button, Close, Pencil1Icon } from 'ui';
 import type { PatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 import type { CadTablePieceFeaturesByKey } from './cad-table-piece-features-v1';
@@ -201,6 +203,49 @@ export function resolvePatternImportDxfProductExactNSeamProductionMountV2(
   });
 }
 
+function DeferredTopologyAnnotationAuthoring({
+  children,
+  onClose,
+}: Readonly<{ children: ReactNode; onClose: () => void }>) {
+  return (
+    <Dialog.Root
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
+      <Dialog.Trigger asChild>
+        <Button
+          type='button'
+          size='xs'
+          variant='default'
+          aria-label='Edit annotations'
+          title='Edit annotations'
+          className='flex h-10 w-10 flex-none items-center justify-center p-0 hover:bg-pageBg'
+        >
+          <Pencil1Icon aria-hidden width={16} height={16} />
+        </Button>
+      </Dialog.Trigger>
+      <Dialog.Portal>
+        <Dialog.Overlay className='fixed inset-0 z-[210] bg-black/50' />
+        <Dialog.Content
+          className='fixed left-1/2 top-1/2 z-[211] max-h-[90vh] w-[min(46rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-auto border border-borderColor bg-bgColor shadow-xl'
+          aria-describedby={undefined}
+          onKeyDown={(event) => event.stopPropagation()}
+          onInteractOutside={(event) => event.preventDefault()}
+        >
+          <header className='flex items-center justify-between px-3 py-2'>
+            <Dialog.Title className='text-sm font-bold'>Edit annotations</Dialog.Title>
+            <Dialog.Close asChild>
+              <Close />
+            </Dialog.Close>
+          </header>
+          {children}
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
 /**
  * Mounts the already verified Exact-N selection. The optional annotation readback supplies only
  * the saved presentation layer for its matching desktop geometry.
@@ -225,7 +270,6 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
   );
   const exactDesktop =
     resolved.ok &&
-    !topologyAnnotationAuthoring &&
     resolved.model.seamCount === 1 &&
     matchesPatternImportDxfProductExactNDesktopGeometryV2(desktopGeometry, session)
       ? desktopGeometry
@@ -427,6 +471,10 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
                   onReadback={annotationRead.publish}
                   onReload={annotationRead.reload}
                 />
+              ) : topologyAnnotationAuthoring ? (
+                <DeferredTopologyAnnotationAuthoring onClose={annotationRead.reload}>
+                  {topologyAnnotationAuthoring}
+                </DeferredTopologyAnnotationAuthoring>
               ) : null
             }
             savedSeam={{

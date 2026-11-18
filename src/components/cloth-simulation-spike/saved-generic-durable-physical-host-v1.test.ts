@@ -83,10 +83,15 @@ import {
 import { persistCurrentSavedGenericObservedPhysicalHostV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-full-assembly-physical-document-production-v1';
 import {
   PATTERN_IMPORT_DXF_PRODUCT_PHASE_E_AUTHORING_CATALOG_V1,
+  buildPatternImportDxfProductPhaseEAuthoringCatalogV1,
   computePatternImportDxfProductPhaseEAuthoringCatalogSha256V1,
   type PatternImportDxfProductPhaseEAuthoringCatalogV1,
 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
-import { PATTERN_IMPORT_DXF_PRODUCT_PHASE_E_ASSEMBLY_PROJECTION_V1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
+import {
+  PATTERN_IMPORT_DXF_PRODUCT_PHASE_E_ASSEMBLY_PROJECTION_V1,
+  projectPatternImportDxfProductPhaseEAssemblyV1,
+} from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
+import { selectPatternImportDxfProductDraftPhaseDSizeV1 } from 'lib/cloth/domain/pattern-import-dxf-product-draft-phase-d-selection-v1';
 import {
   PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_DURABLE_RESTORE_REQUEST_V4,
   restorePatternImportDxfProductCompositeSidecarDurableV4,
@@ -109,7 +114,9 @@ import { PATTERN_IMPORT_DXF_PHASE_E_CALLOUT_SESSION_V1 } from 'components/manage
 import {
   PatternImportDxfProductExactNSeamProductionMountV2,
   type PatternImportDxfProductExactNDesktopGeometryV2,
+  type PatternImportDxfProductExactNSeamProductionMannequinContextV2,
 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/exact-n-seam-production-mount-v2';
+import type { PatternImportDxfPhaseECadWorkbenchSplitShellPropsV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/cad-workbench-split-shell-v1';
 import {
   PatternImportDxfPhaseECadTableZeroConnectCanvasV1,
   type PatternImportDxfPhaseECadTableZeroConnectCanvasPropsV1,
@@ -340,6 +347,7 @@ async function encodedStorage(
     { ok: true }
   >['context'],
   withAnnotations: boolean,
+  nativeDraft?: Parameters<typeof buildPatternImportDxfProductPhaseEAuthoringCatalogV1>[0],
 ) {
   const fullReceipt = await snapshotApi.readSavedFullAssemblySnapshotV1({
     row: seed.row,
@@ -371,6 +379,18 @@ async function encodedStorage(
   );
   const e3 = requireOk(V3.encodePatternImportDxfProductCompositeSidecarV3(v3.owner));
   const exactCandidate = candidate(1);
+  const graphOperation = context.graph.operations.find(
+    ({ sourceOperationNumber }) => sourceOperationNumber === selectedOperationNumber,
+  )!;
+  const graphSeam = context.graph.seams.find(({ id }) => id === graphOperation.seamIds[0])!;
+  const exactSides = nativeDraft
+    ? graphSeam.sides.map(({ anchors, ...side }, index) => ({
+        ...side,
+        seamId: graphSeam.sourceSeamKey,
+        sideIndex: index as 0 | 1,
+        boundaryVertexIds: anchors,
+      }))
+    : exactCandidate.sides;
   const unsignedCatalog = {
     schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_PHASE_E_AUTHORING_CATALOG_V1,
     techCardId: seed.row.techCardId,
@@ -417,7 +437,29 @@ async function encodedStorage(
     globalThis.crypto,
   );
   if (!canonicalSha256) throw new Error('Could not bind the storage fixture catalog');
-  const catalog = { ...unsignedCatalog, canonicalSha256 };
+  const catalog = nativeDraft
+    ? requireOk(
+        await buildPatternImportDxfProductPhaseEAuthoringCatalogV1(
+          nativeDraft,
+          seed.row.scopeKey,
+          context.graph.source.sizeToken,
+        ),
+      ).catalog
+    : { ...unsignedCatalog, canonicalSha256 };
+  const nativeProjection = nativeDraft
+    ? requireOk(
+        projectPatternImportDxfProductPhaseEAssemblyV1(
+          catalog,
+          requireOk(
+            await selectPatternImportDxfProductDraftPhaseDSizeV1(
+              nativeDraft,
+              seed.row.scopeKey,
+              context.graph.source.sizeToken,
+            ),
+          ).selection,
+        ),
+      ).projection
+    : null;
   const exact = requireOk(
     await buildPatternImportDxfPhaseEExactNSeamConsistencyCarrierV2({
       ...exactCandidate,
@@ -430,7 +472,7 @@ async function encodedStorage(
           ({ operationNumber }) => operationNumber === selectedOperationNumber,
         )!.seamKeys,
       },
-      sides: exactCandidate.sides.map((side) => ({
+      sides: exactSides.map((side) => ({
         ...side,
         seamId: seed.operations.find(
           ({ operationNumber }) => operationNumber === selectedOperationNumber,
@@ -458,7 +500,7 @@ async function encodedStorage(
     identity: 'declared-storage-anchor',
     revision: String(seed.row.revision),
     sha256: seed.row.sha256,
-    projection: {
+    projection: nativeProjection ?? {
       schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_PHASE_E_ASSEMBLY_PROJECTION_V1,
       expectedCatalogCanonicalSha256: catalog.canonicalSha256,
       sourceFileId: catalog.sourceFileId,
@@ -618,6 +660,7 @@ async function encodedStorage(
     v7: stored(V7.PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7, e7),
     v7TopologySha256: v7.document.bindings.assemblyTopologySha256,
     catalog,
+    exactSides,
     source,
     current: exact.carrier.bindings,
   };
@@ -653,9 +696,9 @@ async function compiledObservedFixture(
   };
   requireOk(await pre.consume({ ...raw, intent }));
   const author = requireOk(await pre.projectAuthoringContext(1));
-  return { pre, author };
+  return { pre, author, native };
 }
-async function fixture(withAnnotations = false) {
+async function fixture(withAnnotations = false, options?: { nativeExactDesktop: boolean }) {
   const observed = await sessionFixture();
   cleanup.push(() => observed.input.dispose());
   const body = createSavedModelDisplayedTriangleBodySessionV2(async () =>
@@ -663,7 +706,7 @@ async function fixture(withAnnotations = false) {
   );
   await body.observe(observed.input);
   cleanup.push(() => body.dispose());
-  const { pre, author } = await compiledObservedFixture(body);
+  const { pre, author, native } = await compiledObservedFixture(body);
   const doc: DxfGarmentPhysicalInitializationV1 = {
     schemaVersion: DXF_GARMENT_PHYSICAL_INITIALIZATION_V1,
     graphCanonicalSha256: author.graphCanonicalSha256,
@@ -683,7 +726,11 @@ async function fixture(withAnnotations = false) {
   const context = requireOk(
     await projectSavedGenericObservedPhysicalHostPersistenceContextV1(pre, 1),
   ).context;
-  const storage = await encodedStorage(context, withAnnotations);
+  const storage = await encodedStorage(
+    context,
+    withAnnotations,
+    options?.nativeExactDesktop ? native.native.draft : undefined,
+  );
   outer = storage.v7;
   // Real persisted outer changes the full snapshot; old source is correctly no longer usable.
   expect((await pre.projectAuthoringContext(1)).ok).toBe(false);
@@ -788,7 +835,7 @@ async function openExactAnnotationFixture(
         seams: [
           {
             seamId: current.selectedOperation.seamIds[0],
-            sides: candidate(1).sides.map(({ pieceId, pieceLineKey, direction }) => ({
+            sides: storage.exactSides.map(({ pieceId, pieceLineKey, direction }) => ({
               pieceId,
               pieceLineKey,
               requiredDirection: direction,
@@ -2373,6 +2420,174 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
     expect(f.host.getSnapshot().binding).toBe(binding);
     expect((await f.host.run16(lease)).ok).toBe(true);
   }, 120000);
+
+  it('keeps the exact Workbench selection on the admitted preview when annotation authoring becomes available', async () => {
+    const f = await fixture(false, { nativeExactDesktop: true });
+    const session = await openExactAnnotationFixture(f.storage, 'v7');
+    const geometry = {
+      catalog: f.storage.catalog,
+      projection: f.storage.source.projection,
+      annotationSource: f.storage.source,
+    };
+    requireOk(await f.host.restore(f.request));
+    const { lease } = await borrowedLease();
+    ports.finalValidationFrame = 32;
+    requireOk(await f.host.run16(lease));
+    requireOk(await f.host.run32(lease));
+    const canvas = {} as HTMLCanvasElement;
+    const mounted = requireOk(await f.host.mountPreview(canvas, new AbortController().signal));
+    const saved = physicalReader.projectSavedFullAssemblyPhysicalSnapshotV1(f.reader)!;
+    const { graph } = saved;
+    const operationNumber = session.current.selectedOperation.sourceOperationNumber;
+    const operation = graph.operations.find(
+      (value) => value.sourceOperationNumber === operationNumber,
+    )!;
+    const seam = graph.seams.find(({ id }) => id === operation.seamIds[0])!;
+    const { pieceId, pieceLineKey } = seam.sides[1];
+    const pick = vi.fn(() => ({
+      kind: 'garment' as const,
+      frameReportSha256: mounted.receipt.frameReportSha256,
+      triangleIndex: 7,
+      pieceId,
+      seamSide: { runtimeSeamId: seam.id, sideIndex: 1 as const },
+    }));
+    ports.previewPick = pick;
+    const selectOutline = vi.fn(() => true);
+    ports.previewSelect = selectOutline;
+
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    vi.stubGlobal('window', { event: undefined });
+    cleanup.push(() => vi.unstubAllGlobals());
+    const route = mountAnnotationFixtureView(PatternImportDxfProductExactNSeamProductionMountV2);
+    const mannequin = vi.fn(
+      (context: PatternImportDxfProductExactNSeamProductionMannequinContextV2) => {
+        return bindCadWorkbenchPhysicalPreviewSelectionV1(
+          context.previewScope,
+          operationNumber,
+          context.focusSelection,
+          context.selection,
+          context.previewSeam,
+        );
+      },
+    );
+    const props = {
+      session,
+      desktopGeometry: geometry,
+      activeSeamIndex: 0,
+      onActiveSeamIndexChange: vi.fn(),
+      mannequin: (context: PatternImportDxfProductExactNSeamProductionMannequinContextV2) => {
+        mannequin(context);
+        return null;
+      },
+      operationsPanel: null,
+    };
+    const topologyAnnotationAuthoring = createElement(
+      PatternImportDxfPhaseEExactNTopologyAnnotationEditorV1,
+      {
+        source: f.storage.source,
+        draft: { measurements: [], callouts: [] },
+        onDraftChange: vi.fn(),
+      },
+    );
+    function shell() {
+      const view = route.output();
+      if (!isValidElement<PatternImportDxfPhaseECadWorkbenchSplitShellPropsV1>(view))
+        throw new Error('Saved exact Workbench shell did not mount.');
+      return view.props;
+    }
+    function previewInteraction() {
+      const { mannequin: slot, selection, onSelectionFocus } = shell();
+      if (typeof slot !== 'function')
+        throw new Error('Saved Workbench preview slot did not mount.');
+      slot({
+        source: 'mannequin',
+        selection: selection ?? null,
+        focusSelection: (next = selection ?? null) =>
+          onSelectionFocus?.({ source: 'mannequin', selection: next }),
+      });
+      return mannequin.mock.results.at(-1)!.value;
+    }
+    await route.render(props);
+    const desktop = shell().desktop;
+    if (!isValidElement<PatternImportDxfPhaseECadTableZeroConnectCanvasPropsV1>(desktop))
+      throw new Error('Saved 2D canvas did not mount.');
+    const selectSide = desktop.props.savedSeam?.onFocusSide;
+    if (!selectSide) throw new Error('Exact saved seam has no 2D selection owner.');
+    await act(async () => selectSide(0));
+
+    await route.render({ ...props, topologyAnnotationAuthoring });
+    const currentDesktop = shell().desktop;
+    if (!isValidElement<PatternImportDxfPhaseECadTableZeroConnectCanvasPropsV1>(currentDesktop))
+      throw new Error('Saved 2D canvas did not mount with annotation authoring.');
+    expect(currentDesktop.type).toBe(PatternImportDxfPhaseECadTableZeroConnectCanvasV1);
+    expect(currentDesktop.props.savedSeam?.focusedSideIndex).toBe(0);
+    expect(
+      visitMountedTree(
+        currentDesktop.props.savedAnnotationEditControl,
+        ({ children }) => children === topologyAnnotationAuthoring,
+      ),
+    ).not.toBeNull();
+    const interaction = previewInteraction();
+    if (!interaction) throw new Error('The current physical preview interaction is absent.');
+    expect(interaction?.scope).toEqual({
+      row: saved.row,
+      sourceFileId: graph.source.sourceFileId,
+      sizeToken: graph.source.sizeToken,
+    });
+    const hit = f.host.pickPreview(canvas, interaction.scope, 100, 200, interaction.savedSeam);
+    if (hit?.kind !== 'garment') throw new Error('The admitted face has no garment identity.');
+    expect(hit).toMatchObject({
+      scopeKey: saved.row.scopeKey,
+      pieceId,
+      pieceLineKey,
+      seamSide: { sideIndex: 1 },
+    });
+    await act(async () => interaction.onPick(hit));
+    expect(shell().selection).toMatchObject({ pieceId, pieceLineKey, seamSideIndex: 1 });
+    const reverse = previewInteraction()!;
+    expect(
+      f.host.setPreviewSelectedPiece(
+        canvas,
+        reverse.scope,
+        reverse.selectedPiece,
+        reverse.selectedSide,
+      ),
+    ).toBe(true);
+    expect(selectOutline).toHaveBeenLastCalledWith(
+      pieceId,
+      { runtimeSeamId: seam.id, sideIndex: 1 },
+      undefined,
+    );
+    props.onActiveSeamIndexChange.mockClear();
+    const sideA = seam.sides[0];
+    const anotherPiece = {
+      ...hit,
+      pieceId: sideA.pieceId,
+      pieceLineKey: sideA.pieceLineKey,
+      seamSide: undefined,
+    };
+    for (const wrongPick of [
+      { ...anotherPiece, scopeKey: 'foreign-scope' },
+      { ...anotherPiece, pieceLineKey: 'foreign-line' },
+    ]) {
+      await act(async () => reverse.onPick(wrongPick));
+      expect(shell().selection).toMatchObject({ pieceId, pieceLineKey, seamSideIndex: 1 });
+    }
+    for (const projection of [
+      { ...geometry.projection, sizeToken: 'foreign-size' },
+      { ...geometry.projection, sourceFileId: 'foreign-source' },
+    ]) {
+      await route.render({
+        ...props,
+        topologyAnnotationAuthoring,
+        desktopGeometry: { ...geometry, projection },
+      });
+      expect(previewInteraction()).toBeNull();
+      expect(shell().desktop).toHaveProperty('props.operationWindow', topologyAnnotationAuthoring);
+    }
+    expect(props.onActiveSeamIndexChange).not.toHaveBeenCalled();
+    expect(pick).toHaveBeenCalledTimes(1);
+  });
 
   it('routes current preview face identity through the saved graph and refuses stale or mismatched views', async () => {
     const f = await fixture();
