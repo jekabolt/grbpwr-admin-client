@@ -1,4 +1,6 @@
 import { reportApiError } from 'lib/observability';
+import { emitWorkspaceSignal, signalOf } from 'lib/workspace/events';
+import { authHeaders } from './auth-headers';
 import { createAdminServiceClient } from './proto-http/admin';
 import { createAuthServiceClient } from './proto-http/auth';
 import { createFrontendServiceClient } from './proto-http/frontend';
@@ -30,13 +32,14 @@ const send = async (
   signal?: AbortSignal,
   meta?: ProtoMetaParams,
 ) => {
-  const authToken = localStorage.getItem('authToken');
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
+    ...authHeaders(),
   };
 
-  if (authToken) {
-    headers['Grpc-Metadata-Authorization'] = `Bearer ${authToken}`;
+  if (import.meta.env.DEV && import.meta.env.VITE_AUTH_STUB && meta) {
+    const { stubAnswer } = await import('components/auth/dev-stub');
+    return stubAnswer(meta.method, body);
   }
 
   try {
@@ -77,6 +80,8 @@ const send = async (
       const err = new Error(msg) as Error & { status?: number; details?: unknown[] };
       err.status = response.status;
       err.details = details;
+      const signal = signalOf(msg);
+      if (signal) emitWorkspaceSignal(signal);
       reportApiError(err, {
         route: meta ? `${meta.service}.${meta.method}` : path.split('?')[0],
         status: response.status,

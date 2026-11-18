@@ -1,3 +1,5 @@
+import { FEATURE, type FeatureKey } from 'lib/workspace/features';
+
 export const BASE_PATH = process.env.NODE_ENV === 'production' ? '/grbpwr-admin-client' : '';
 
 // A single navigation destination. `section` (from AdminService.ListAccountSections)
@@ -11,6 +13,9 @@ export type NavItem = {
   // gates on `is_super` itself (rbac SuperOnly) rather than on a section: a section key would
   // fail open for a scoped account and hand it a menu entry whose every read is refused.
   superOnly?: boolean;
+  // The team switch the item lives under (design §8). Hidden when the team has it off; `core`
+  // is never off. No workspace (a backend before teams) leaves every item on.
+  feature?: FeatureKey;
 };
 
 // A labeled group of destinations. On desktop each group is a dropdown in the top
@@ -197,6 +202,14 @@ export enum ROUTES {
   accountingPeriods = '/accounting/periods',
   accountingEvents = '/accounting/events',
   employees = '/employees',
+  // Team members and invites (lane C2). On team hosts only.
+  people = '/people',
+  // lekalo hosts: the root sheet and the team host's own entry points (design §5).
+  signIn = '/login',
+  confirm = '/confirm',
+  reset = '/reset',
+  handoff = '/auth',
+  join = '/join',
 }
 
 // Primary navigation, grouped by domain. Desktop renders each group as a top-bar
@@ -206,46 +219,131 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: 'operations',
     items: [
-      { label: 'analytics', route: ROUTES.main, section: SECTION.analytics },
-      { label: 'opex', route: ROUTES.opex, section: SECTION.analytics },
-      { label: 'employees', route: ROUTES.employees, section: SECTION.analytics },
-      { label: 'accounting', route: ROUTES.accounting, section: SECTION.accounting },
-      { label: 'orders', route: ROUTES.orders, section: SECTION.orders },
-      { label: 'fulfillment', route: ROUTES.fulfillment, section: SECTION.fulfillment },
-      { label: 'tasks', route: ROUTES.tasks, section: SECTION.tasks },
-      { label: 'files', route: ROUTES.files, section: SECTION.files },
+      {
+        label: 'analytics',
+        route: ROUTES.main,
+        section: SECTION.analytics,
+        feature: FEATURE.analytics,
+      },
+      { label: 'opex', route: ROUTES.opex, section: SECTION.analytics, feature: FEATURE.analytics },
+      {
+        label: 'employees',
+        route: ROUTES.employees,
+        section: SECTION.analytics,
+        feature: FEATURE.analytics,
+      },
+      {
+        label: 'accounting',
+        route: ROUTES.accounting,
+        section: SECTION.accounting,
+        feature: FEATURE.accounting,
+      },
+      { label: 'orders', route: ROUTES.orders, section: SECTION.orders, feature: FEATURE.orders },
+      {
+        label: 'fulfillment',
+        route: ROUTES.fulfillment,
+        section: SECTION.fulfillment,
+        feature: FEATURE.fulfillment,
+      },
+      { label: 'tasks', route: ROUTES.tasks, section: SECTION.tasks, feature: FEATURE.tasks },
+      { label: 'files', route: ROUTES.files, section: SECTION.files, feature: FEATURE.files },
     ],
   },
   {
     label: 'catalog',
     items: [
-      { label: 'products', route: ROUTES.product, section: SECTION.products },
-      { label: 'waitlist', route: ROUTES.waitlist, section: SECTION.products },
-      { label: 'media', route: ROUTES.media, section: SECTION.media },
-      { label: 'hero', route: ROUTES.hero, section: SECTION.hero },
-      { label: 'promo', route: ROUTES.promo, section: SECTION.promo },
-      { label: 'email', route: ROUTES.emailCampaigns, section: SECTION.marketing },
-      { label: 'timeline', route: ROUTES.archives, section: SECTION.archive },
+      {
+        label: 'products',
+        route: ROUTES.product,
+        section: SECTION.products,
+        feature: FEATURE.products,
+      },
+      {
+        label: 'waitlist',
+        route: ROUTES.waitlist,
+        section: SECTION.products,
+        feature: FEATURE.products,
+      },
+      { label: 'media', route: ROUTES.media, section: SECTION.media, feature: FEATURE.media },
+      { label: 'hero', route: ROUTES.hero, section: SECTION.hero, feature: FEATURE.hero },
+      { label: 'promo', route: ROUTES.promo, section: SECTION.promo, feature: FEATURE.promo },
+      {
+        label: 'email',
+        route: ROUTES.emailCampaigns,
+        section: SECTION.marketing,
+        feature: FEATURE.emailCampaigns,
+      },
+      {
+        label: 'timeline',
+        route: ROUTES.archives,
+        section: SECTION.archive,
+        feature: FEATURE.archive,
+      },
     ],
   },
   {
     label: 'production',
     items: [
-      { label: 'models', route: ROUTES.models, section: SECTION.models },
-      { label: 'fittings', route: ROUTES.fittings, section: SECTION.fittings },
-      { label: 'tech cards', route: ROUTES.techCards, section: SECTION.techCards },
-      { label: 'materials', route: ROUTES.materials, section: SECTION.techCards },
-      { label: 'production', route: ROUTES.productionRuns, section: SECTION.production },
+      { label: 'models', route: ROUTES.models, section: SECTION.models, feature: FEATURE.models },
+      {
+        label: 'fittings',
+        route: ROUTES.fittings,
+        section: SECTION.fittings,
+        feature: FEATURE.fittings,
+      },
+      {
+        label: 'tech cards',
+        route: ROUTES.techCards,
+        section: SECTION.techCards,
+        feature: FEATURE.techCards,
+      },
+      {
+        label: 'materials',
+        route: ROUTES.materials,
+        section: SECTION.techCards,
+        feature: FEATURE.materials,
+      },
+      {
+        label: 'production',
+        route: ROUTES.productionRuns,
+        section: SECTION.production,
+        feature: FEATURE.production,
+      },
     ],
   },
   {
     label: 'members',
     items: [
-      { label: 'members', route: ROUTES.members, section: SECTION.members },
-      { label: 'tier config', route: ROUTES.tierConfig, section: SECTION.members },
-      { label: 'tier audit', route: ROUTES.tierAudit, section: SECTION.members },
-      { label: 'hacker', route: ROUTES.hacker, section: SECTION.members },
-      { label: 'support', route: ROUTES.customerSupport, section: SECTION.support },
+      {
+        label: 'members',
+        route: ROUTES.members,
+        section: SECTION.members,
+        feature: FEATURE.membership,
+      },
+      {
+        label: 'tier config',
+        route: ROUTES.tierConfig,
+        section: SECTION.members,
+        feature: FEATURE.membership,
+      },
+      {
+        label: 'tier audit',
+        route: ROUTES.tierAudit,
+        section: SECTION.members,
+        feature: FEATURE.membership,
+      },
+      {
+        label: 'hacker',
+        route: ROUTES.hacker,
+        section: SECTION.members,
+        feature: FEATURE.membership,
+      },
+      {
+        label: 'support',
+        route: ROUTES.customerSupport,
+        section: SECTION.support,
+        feature: FEATURE.support,
+      },
     ],
   },
 ];
@@ -255,15 +353,35 @@ export const NAV_GROUPS: NavGroup[] = [
 export const ADMIN_GROUP: NavGroup = {
   label: 'admin',
   items: [
-    { label: 'settings', route: ROUTES.settings, section: SECTION.settings },
-    { label: 'dictionaries', route: ROUTES.dictionaries, section: SECTION.settings },
-    { label: 'shipping', route: ROUTES.shipping, section: SECTION.shipping },
-    { label: 'accounts', route: ROUTES.accounts, section: SECTION.accounts },
+    {
+      label: 'settings',
+      route: ROUTES.settings,
+      section: SECTION.settings,
+      feature: FEATURE.settings,
+    },
+    {
+      label: 'dictionaries',
+      route: ROUTES.dictionaries,
+      section: SECTION.settings,
+      feature: FEATURE.dictionaries,
+    },
+    {
+      label: 'shipping',
+      route: ROUTES.shipping,
+      section: SECTION.shipping,
+      feature: FEATURE.settings,
+    },
+    { label: 'accounts', route: ROUTES.accounts, section: SECTION.accounts, feature: FEATURE.core },
     // Keys, routes and the spend report are money: every AiProviders RPC is SuperOnly on the
     // server (no section, owner decision D-03), so the entry is drawn for super accounts only.
     // Last in the last group, and skipped by `homeRoute` for everyone else, so it can never
     // become a scoped account's landing page.
-    { label: 'ai providers', route: ROUTES.aiProviders, superOnly: true },
+    {
+      label: 'ai providers',
+      route: ROUTES.aiProviders,
+      superOnly: true,
+      feature: FEATURE.aiProviders,
+    },
   ],
 };
 

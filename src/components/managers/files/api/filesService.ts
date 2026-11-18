@@ -1,4 +1,5 @@
 import { adminService } from 'api/api';
+import { authHeaders } from 'api/auth-headers';
 import type {
   common_OrderFactor,
   LibraryFileSort,
@@ -19,11 +20,6 @@ import type {
  * picker rather than after minutes of uploading. */
 export const MAX_UPLOAD_BYTES = 95 * 1024 * 1024;
 
-function authHeader(): string {
-  const token = localStorage.getItem('authToken') ?? '';
-  return token ? `Bearer ${token}` : '';
-}
-
 function apiUrl(path: string): string {
   const base = (import.meta.env.VITE_SERVER_URL ?? '').replace(/\/+$/, '');
   return `${base}${path}`;
@@ -43,7 +39,7 @@ export async function uploadLibraryPreview(id: number, preview: Blob): Promise<v
   try {
     res = await fetch(apiUrl(`/api/files/${id}/preview`), {
       method: 'POST',
-      headers: { 'Grpc-Metadata-Authorization': authHeader() },
+      headers: authHeaders(),
       body: form,
     });
   } catch {

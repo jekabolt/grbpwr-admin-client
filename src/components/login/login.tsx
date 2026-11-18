@@ -1,4 +1,5 @@
 import { authService } from 'api/api';
+import { readAuthToken, writeAuthToken } from 'api/auth-headers';
 import { ROUTES } from 'constants/routes';
 import { Field, Formik } from 'formik';
 import { FC, useEffect, useState } from 'react';
@@ -17,7 +18,7 @@ export const LoginBlock: FC = () => {
   const [generalError, setGeneralError] = useState<string | null>(null);
 
   useEffect(() => {
-    const authToken = localStorage.getItem('authToken');
+    const authToken = readAuthToken();
     if (authToken && !isTokenExpired(authToken)) {
       navigate(ROUTES.main, { replace: true });
     }
@@ -27,7 +28,7 @@ export const LoginBlock: FC = () => {
     try {
       const response = await authService.Login(values);
       if (!response.authToken) throw new Error('Invalid credentials');
-      localStorage.setItem('authToken', response.authToken);
+      writeAuthToken(response.authToken);
       navigate(ROUTES.main, { replace: true });
     } catch (e) {
       const msg =

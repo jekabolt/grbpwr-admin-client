@@ -1,0 +1,37 @@
+# The lekalo beta SPA on DigitalOcean App Platform: one static site for beta.lekalo.studio and
+# every team below it (*.beta.lekalo.studio). The same bundle tells the hosts apart at runtime
+# (src/lib/host.ts). Applied by hand: doctl apps update <app-id> --spec .do/lekalo-web-beta.yaml
+name: lekalo-web-beta
+region: fra
+domains:
+  # One entry: the name itself + every subdomain one level below it (*.beta.lekalo.studio).
+  # zone = lekalo.studio → App Platform writes and validates the DNS records itself.
+  - domain: beta.lekalo.studio
+    type: PRIMARY
+    wildcard: true
+    zone: lekalo.studio
+static_sites:
+  - name: web
+    github:
+      repo: jekabolt/grbpwr-admin-client
+      branch: beta
+      deploy_on_push: true
+    environment_slug: node-js
+    build_command: yarn build:check
+    output_dir: dist
+    catchall_document: index.html
+    envs:
+      - key: VITE_SERVER_URL
+        scope: BUILD_TIME
+        value: https://backend-beta.grbpwr.com
+      - key: NODE_OPTIONS
+        scope: BUILD_TIME
+        value: --max-old-space-size=6144
+      # The root of the multi-team hosts; a team is <slug>.beta.lekalo.studio.
+      - key: VITE_BASE_DOMAIN
+        scope: BUILD_TIME
+        value: beta.lekalo.studio
+      # Any other host (e.g. the App Platform default *.ondigitalocean.app) acts as this team.
+      - key: VITE_DEFAULT_TEAM
+        scope: BUILD_TIME
+        value: grbpwr

@@ -1,3 +1,4 @@
+import { readAuthToken as readStoredAuthToken, teamHeaders } from 'api/auth-headers';
 import { readManifestBytes } from 'lib/pattern-import/manifest';
 import {
   DXF_PIPELINE_PROVENANCE_REQUEST_V1,
@@ -185,11 +186,7 @@ async function fetchSavedDxfBytes(
 }
 
 function readBrowserAuthToken(): string | null {
-  try {
-    return globalThis.localStorage?.getItem('authToken') ?? null;
-  } catch {
-    return null;
-  }
+  return readStoredAuthToken();
 }
 
 function backendDownloadAuthHeaders(
@@ -207,7 +204,7 @@ function backendDownloadAuthHeaders(
   }
   if (downloadOrigin !== backendOrigin) return undefined;
   const token = readAuthToken()?.trim();
-  return token ? { 'Grpc-Metadata-Authorization': `Bearer ${token}` } : undefined;
+  return token ? { 'Grpc-Metadata-Authorization': `Bearer ${token}`, ...teamHeaders() } : undefined;
 }
 
 function backendPatternCapabilityJsonUrl(resolvedUrl: string, serverUrl: string): string | null {

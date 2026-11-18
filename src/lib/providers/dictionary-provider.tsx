@@ -1,4 +1,5 @@
 import { adminService } from 'api/api';
+import { readAuthToken } from 'api/auth-headers';
 import { common_Dictionary } from 'api/proto-http/admin';
 import { isTokenExpired } from 'components/login/protectedRoute';
 
@@ -32,7 +33,7 @@ export const DictionaryProvider: FC<Props> = ({ children }) => {
     // Don't attempt without a valid token: the request would 401 and leave the
     // dictionary empty with no recovery. It will run once the provider mounts
     // inside the authenticated area (after login).
-    if (isTokenExpired(localStorage.getItem('authToken'))) {
+    if (isTokenExpired(readAuthToken())) {
       setLoading(false);
       return;
     }

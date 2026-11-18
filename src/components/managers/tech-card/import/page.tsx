@@ -10,6 +10,7 @@
  */
 import { useMutation } from '@tanstack/react-query';
 import { adminService } from 'api/api';
+import { authHeaders } from 'api/auth-headers';
 import { TechCardImportReport } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
@@ -29,13 +30,6 @@ import {
 import { ImportReportCounters, ImportReportTable } from './import-report-table';
 
 const UPLOAD_PATH = '/api/techcard-archive/upload';
-
-/** Заголовок авторизации ровно тот же, что у всего api-слоя (`src/api/api.ts`) и у заливки
- *  файлов (`files/upload/transport.ts`): грпц-шлюз читает метаданные из `Grpc-Metadata-*`. */
-function authHeaders(): Record<string, string> {
-  const token = localStorage.getItem('authToken');
-  return token ? { 'Grpc-Metadata-Authorization': `Bearer ${token}` } : {};
-}
 
 function endpoint(): string {
   const base = (import.meta.env.VITE_SERVER_URL ?? '').replace(/\/+$/, '');

@@ -1,4 +1,5 @@
 import { adminService } from 'api/api';
+import { authHeaders } from 'api/auth-headers';
 import type {
   CreateLibraryNoteResponse,
   GetLibraryNoteContentResponse,
@@ -199,11 +200,6 @@ function apiBase(): string {
   return (import.meta.env.VITE_SERVER_URL ?? '').replace(/\/+$/, '');
 }
 
-function authHeader(): string {
-  const token = localStorage.getItem('authToken') ?? '';
-  return token ? `Bearer ${token}` : '';
-}
-
 /**
  * ФОРМАТИРОВАНИЕ ИДЁТ МИМО `adminService`, и обе причины существенные.
  *
@@ -227,7 +223,7 @@ export async function formatNoteMarkdown(content: string, signal: AbortSignal): 
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Grpc-Metadata-Authorization': authHeader(),
+        ...authHeaders(),
       },
       body: JSON.stringify({ content }),
       signal,

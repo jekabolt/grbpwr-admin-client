@@ -14,6 +14,7 @@
  * отличается от отказа сервера (`fail`). Восстанавливать его разбором текста было бы
  * договором с чужим файлом, который никто не проверяет.
  */
+import { authHeaders } from 'api/auth-headers';
 import { buildPreview } from '../utils/preview';
 import { UploadError, type UploadTransport } from './engine';
 
@@ -40,11 +41,6 @@ const HARD_TIMEOUT_MS = 60 * 60 * 1000;
 function endpoint(): string {
   const base = (import.meta.env.VITE_SERVER_URL ?? '').replace(/\/+$/, '');
   return `${base}${UPLOAD_PATH}`;
-}
-
-function authHeader(): string {
-  const token = localStorage.getItem('authToken') ?? '';
-  return token ? `Bearer ${token}` : '';
 }
 
 interface UploadResponse {
@@ -82,7 +78,7 @@ export const browserUploadTransport: UploadTransport<File, Blob> = {
       // Раньше `ontimeout` стоял, а `timeout` не выставлялся — обработчик был мёртвым кодом,
       // и зависший запрос держал единственный канал очереди столько, сколько открыта вкладка.
       xhr.timeout = HARD_TIMEOUT_MS;
-      xhr.setRequestHeader('Grpc-Metadata-Authorization', authHeader());
+      Object.entries(authHeaders()).forEach(([k, v]) => xhr.setRequestHeader(k, v));
 
       // Сторож молчания. Взводится на отправке и перевзводится каждым куском; как только
       // тело ушло целиком — снимается: ожидание ответа сервера идёт без прогресса и под

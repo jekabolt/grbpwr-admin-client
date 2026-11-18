@@ -1,5 +1,8 @@
 import { AccessLevel } from 'api/proto-http/admin';
 import { SECTION, SIDE_BAR_ITEMS } from 'constants/routes';
+import { isLekaloHost } from 'lib/host';
+import { BACKEND_SECTION, featureOn } from 'lib/workspace/features';
+import { useWorkspace } from 'lib/workspace/use-workspace';
 import { useMemo } from 'react';
 import { ACCESS, accessSatisfies, useAccountSections, useCurrentAccount } from './hooks';
 
@@ -12,9 +15,16 @@ import { ACCESS, accessSatisfies, useAccountSections, useCurrentAccount } from '
 // key is one the backend actually publishes in ListAccountSections. Wrong key guesses
 // therefore fail open rather than hiding legitimate navigation. The backend remains the
 // real enforcement boundary; this only tidies the UI.
+//
+// Teams (design §8): once the backend answers with a workspace, gating closes — an unknown key
+// is refused, the client's old key names are mapped to the backend's (BACKEND_SECTION), and a
+// nav item whose team feature is off is not a landing page. With no workspace (a backend before
+// teams) everything above stays exactly as it was.
 export function usePermissions() {
   const { data: accountData, isLoading: accountLoading } = useCurrentAccount();
   const { data: sectionsData } = useAccountSections();
+  const { workspace, gate } = useWorkspace();
+  const closed = gate === 'gated';
 
   const account = accountData?.account;
   const isSuper = account?.isSuper ?? false;
@@ -44,11 +54,13 @@ export function usePermissions() {
       (section?: string, level: AccessLevel = ACCESS.READ): boolean => {
         if (!section) return true;
         if (!resolved || isSuper) return true;
-        // Only gate keys the backend recognises; unknown keys fail open.
-        if (catalog.size > 0 && !catalog.has(section)) return true;
-        return accessSatisfies(grants.get(section), level);
+        const key = closed ? (BACKEND_SECTION[section] ?? section) : section;
+        // Legacy: only gate keys the backend recognises; unknown keys fail open.
+        // A workspace: unknown keys fail closed.
+        if (catalog.size > 0 && !catalog.has(key)) return closed ? false : true;
+        return accessSatisfies(grants.get(key), level);
       },
-    [resolved, isSuper, catalog, grants],
+    [resolved, isSuper, catalog, grants, closed],
   );
 
   // First navigable section the account can read, in sidebar order. Used to land
@@ -57,10 +69,13 @@ export function usePermissions() {
   // account with no other grant on a page that bounces it to /me; it counts for supers only.
   const homeRoute = useMemo(() => {
     const item = SIDE_BAR_ITEMS.find(
-      (it) => (isSuper || !it.superOnly) && hasSection(it.section, ACCESS.READ),
+      (it) =>
+        (isSuper || !it.superOnly) &&
+        featureOn(workspace, it.feature) &&
+        hasSection(it.section, ACCESS.READ),
     );
     return item?.route ?? null;
-  }, [hasSection, isSuper]);
+  }, [hasSection, isSuper, workspace]);
 
   return {
     account,
@@ -70,6 +85,14 @@ export function usePermissions() {
     hasSection,
     homeRoute,
     canRead: (section?: string) => hasSection(section, ACCESS.READ),
+    /** Is a nav item drawn: super-only rule, team feature, and read access. */
+    canSee: (item: { section?: string; superOnly?: boolean; feature?: string }) =>
+      gate !== 'missing' &&
+      !(gate === 'loading' && isLekaloHost()) &&
+      (isSuper || !item.superOnly) &&
+      featureOn(workspace, item.feature) &&
+      hasSection(item.section, ACCESS.READ),
+    workspaceGate: gate,
     canWrite: (section?: string) => hasSection(section, ACCESS.WRITE),
     canManageAccounts: hasSection(SECTION.accounts, ACCESS.READ),
     canManageAccountsWrite: hasSection(SECTION.accounts, ACCESS.WRITE),
