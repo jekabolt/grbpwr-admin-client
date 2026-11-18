@@ -19,6 +19,25 @@ type Run = Parameters<typeof runStagedSourceCutFramesV1>[0];
 type Command = Parameters<typeof continueStagedSourceCutFramesV1>[1];
 type Receipt = Awaited<ReturnType<typeof runStagedSourceCutFramesV1>>;
 type ActiveSeams = Receipt['validated'][number]['activeSeams'];
+type SafeguardedStep = Receipt['safeguardedSteps'][number];
+type FrameWork = Readonly<{
+  safeguard?: Readonly<
+    Pick<
+      SafeguardedStep,
+      'scale' | 'trialCount' | 'proposedDisplacementM' | 'acceptedDisplacementM'
+    > & {
+      heldParticleCount: number;
+      repairedCutPairCount: number;
+      firstCappedTrial?: Readonly<
+        Pick<
+          NonNullable<SafeguardedStep['firstCappedTrialContact']>,
+          'bodyIntersections' | 'bodyPairsWithoutClearance' | 'clothIntersections'
+        >
+      >;
+    }
+  >;
+  bodyQuery?: Readonly<NonNullable<Receipt['bodyQueryWork']>[number]>;
+}>;
 type Source = SavedCompleteAssemblyNativeStitchAnchorsV1;
 type DisplayedBody = ModelDisplayedTriangleBodyInputProjectionV1;
 
@@ -55,6 +74,7 @@ export type SavedWholeAssemblyPreviewProgressV1 = Readonly<{
   activeSeams: ActiveSeams;
   maximumGapMm: number;
   totalStages: number;
+  frameWork: FrameWork;
   paused?: SavedWholeAssemblyResumeV1;
   stopped?: Readonly<{ operationNumber: number; detail: string }>;
 }>;
@@ -313,8 +333,33 @@ export async function runSavedWholeAssemblyStagedPreviewV1(
     const positionsM = surface.project(receipt.positionsMInvMass);
     await verifySource(source, signal);
     requireCurrent();
+    const step = receipt.safeguardedSteps.at(-1);
+    const bodyQuery = receipt.bodyQueryWork?.at(-1);
+    const first = step?.firstCappedTrialContact;
+    const frameWork: FrameWork = Object.freeze({
+      safeguard:
+        step?.frame === frame.frame
+          ? Object.freeze({
+              scale: step.scale,
+              trialCount: step.trialCount,
+              proposedDisplacementM: step.proposedDisplacementM,
+              acceptedDisplacementM: step.acceptedDisplacementM,
+              heldParticleCount: step.heldParticleCount ?? 0,
+              repairedCutPairCount: step.repairedCutPairs?.length ?? 0,
+              firstCappedTrial:
+                first &&
+                Object.freeze({
+                  bodyIntersections: first.bodyIntersections,
+                  bodyPairsWithoutClearance: first.bodyPairsWithoutClearance,
+                  clothIntersections: first.clothIntersections,
+                }),
+            })
+          : undefined,
+      bodyQuery: bodyQuery?.frame === frame.frame ? Object.freeze({ ...bodyQuery }) : undefined,
+    });
     last = Object.freeze({
       cloth: Object.freeze({ positionsM, frameNumber: frame.frame, ranges, isCurrent }),
+      frameWork,
       action: command.action,
       activeSeams: frame.activeSeams,
       maximumGapMm: frame.activeSeams.reduce(

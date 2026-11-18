@@ -503,6 +503,7 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
           data-whole-assembly-frame={wholeProgress.cloth.frameNumber}
           data-whole-assembly-action={wholeProgress.action}
           data-whole-assembly-seams={JSON.stringify(wholeProgress.activeSeams)}
+          data-whole-assembly-frame-work={JSON.stringify(wholeProgress.frameWork)}
           data-whole-assembly-maximum-gap-mm={wholeProgress.maximumGapMm}
           data-whole-assembly-refused-operation={wholeProgress.stopped?.operationNumber}
         >

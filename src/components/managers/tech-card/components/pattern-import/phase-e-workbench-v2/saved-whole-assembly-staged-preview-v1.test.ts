@@ -34,6 +34,24 @@ const hashes = {
 const frame = (number: number) => ({
   positionsMInvMass: new Float32Array([number, 0, 0, 1]),
   validated: [{ frame: number, activeSeams: [{ maximumGapM: number / 1000 }] }],
+  safeguardedSteps: [
+    {
+      frame: number,
+      trialCount: 2,
+      scale: 0.5,
+      proposedDisplacementM: 0.0005,
+      acceptedDisplacementM: 0.00025,
+      heldParticleCount: 2,
+      repairedCutPairs: [[1, 2]],
+      firstCappedTrialContact: {
+        bodyIntersections: 0,
+        bodyPairsWithoutClearance: 0,
+        clothIntersections: 1,
+        contactWitnesses: ['private solver detail'],
+      },
+    },
+  ],
+  bodyQueryWork: [{ frame: number, visits: 7, maximumVisitsPerQuery: 3 }],
 });
 
 function fixture() {
@@ -116,6 +134,22 @@ describe('same Workbench staged checkpoint', () => {
     expect(calls.advance).toHaveBeenCalledTimes(1);
     expect(final.cloth.frameNumber).toBe(3);
     expect(final.action).toBe('contract-active');
+    expect(final.frameWork).toEqual({
+      safeguard: {
+        scale: 0.5,
+        trialCount: 2,
+        proposedDisplacementM: 0.0005,
+        acceptedDisplacementM: 0.00025,
+        heldParticleCount: 2,
+        repairedCutPairCount: 1,
+        firstCappedTrial: {
+          bodyIntersections: 0,
+          bodyPairsWithoutClearance: 0,
+          clothIntersections: 1,
+        },
+      },
+      bodyQuery: { frame: 3, visits: 7, maximumVisitsPerQuery: 3 },
+    });
     await expect(
       runSavedWholeAssemblyStagedPreviewV1(
         { ...request, ownedLease: freshLease, resume: paused.paused },
