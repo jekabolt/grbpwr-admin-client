@@ -178,7 +178,7 @@ async function generatorInput() {
     parsed.pieces,
     cardPieces,
     cardAliases,
-    new Map(bomItems.map((bom) => [bom.lineKey, bom])),
+    new Map(bomItems.map((bom) => [bom.lineKey!, bom])),
     dictionary,
     [1, 2],
     2,
