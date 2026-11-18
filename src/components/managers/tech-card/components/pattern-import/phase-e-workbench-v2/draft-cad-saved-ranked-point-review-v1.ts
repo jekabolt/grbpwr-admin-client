@@ -9,7 +9,6 @@ import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-produc
 import type { Affine, PtMm } from 'lib/pattern-import/types';
 import { writeDxfWithRetainedRankedDraftPointV1 } from 'lib/pattern-import/write';
 import type { CardContext } from '../client';
-import { sameDraftAllowanceRingV1 } from './draft-cad-paired-allowance-authority-v1';
 import type {
   prepareSavedAddPointReviewV1,
   SavedAddPointCurrentV1,
@@ -48,6 +47,22 @@ function isIdentity(t: Affine): boolean {
 }
 
 const samePoint = (a: PtMm, b: PtMm) => a.x === b.x && a.y === b.y;
+
+/** A ring may have another start or winding. Every actual native vertex must remain exact. */
+function sameExactRing(a: readonly PtMm[], b: readonly PtMm[]): boolean {
+  const open = (points: readonly PtMm[]) =>
+    points.length > 1 && samePoint(points[0]!, points.at(-1)!) ? points.slice(0, -1) : points;
+  const [left, right] = [open(a), open(b)];
+  const count = left.length;
+  if (count !== right.length || count < 3) return false;
+  const start = right.findIndex((point) => samePoint(left[0]!, point));
+  return (
+    start >= 0 &&
+    !right.slice(start + 1).some((point) => samePoint(left[0]!, point)) &&
+    (left.every((point, index) => samePoint(point, right[(start + index) % count]!)) ||
+      left.every((point, index) => samePoint(point, right[(start - index + count) % count]!)))
+  );
+}
 
 export function readSavedRankedPointReviewV1(token: SavedRankedPointReviewV1): Review {
   const review = reviews.get(token);
@@ -166,12 +181,11 @@ export async function prepareSavedRankedPointReviewV1(
       isIdentity(group.transform) &&
       meta.units.mmPerUnit === 1 &&
       meta.units.source !== 'guess' &&
-      sameDraftAllowanceRingV1(path.pts, selectedPath.pointsMm, samePoint) &&
-      sameDraftAllowanceRingV1(path.pts, cut.pointsMm, samePoint) &&
-      sameDraftAllowanceRingV1(
+      sameExactRing(path.pts, selectedPath.pointsMm) &&
+      sameExactRing(path.pts, cut.pointsMm) &&
+      sameExactRing(
         path.pts,
         projectedCut.vertices.map((vertex) => vertex.pointMm),
-        samePoint,
       ),
     'the Draft is not in the original untransformed L1 millimeter frame',
   );
