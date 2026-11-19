@@ -84,7 +84,7 @@ it('keeps the cut quantity on native readback but refuses using one authored gra
     source.dispose();
   }
 });
-it('exposes one native source identity per block and shows when V6-relative offsets move with input order', async () => {
+it('keeps legacy V6 offsets on their exact single-catalog lanes even if the view reorders them', async () => {
   const f = await cutQuantityFixture(),
     owner = await createSavedThreePanelSourceV1(f);
   try {
@@ -138,23 +138,55 @@ it('exposes one native source identity per block and shows when V6-relative offs
     expect(() =>
       arrange({ bindings, pieces: [rows[0]!, { ...rows[0]!, pieceKey: rows[1]!.pieceKey }] }),
     ).toThrow('Duplicate piece source identity');
+    const reversed = { ...source.projection, pieces: [...source.projection.pieces].reverse() };
+    const transformsByPieceKey = Object.fromEntries(
+      restored.pieces.map((p) => [p.pieceKey, p.transform]),
+    );
     const reorder = overlay({
-      sources: [
-        {
-          ...source,
-          projection: { ...source.projection, pieces: [...source.projection.pieces].reverse() },
-        },
-      ],
-      transformsByPieceKey: Object.fromEntries(
-        restored.pieces.map((p) => [p.pieceKey, p.transform]),
-      ),
+      sources: [{ ...source, projection: reversed }],
+      transformsByPieceKey,
     });
     if (!reorder.ok) throw Error(reorder.blocker.detail);
+    expect(reorder.overlay.pieces.map((p) => p.pieceId)).toEqual(
+      reversed.pieces.map((p) => p.pieceId),
+    );
     const after = reorder.overlay.pieces.find((p) => p.pieceKey === front[0]!.pieceKey)!;
     expect(after.transform).toEqual(transform);
     const laneOffset = (p: typeof after) =>
       measurementSurfacePatternPieceLaneOffsetV1({ ...p, bodyRadiusM: 0.4 });
-    expect(laneOffset(after)).not.toEqual(laneOffset(front[0]!));
+    expect(laneOffset(after)).toEqual(laneOffset(front[0]!));
+
+    const copiedCatalog = projectPatternImportDxfProductPhaseEAssemblyV1(
+      { ...catalog.catalog },
+      selected.selection,
+    );
+    if (!copiedCatalog.ok) throw Error(copiedCatalog.blockers[0].detail);
+    const withoutPreparedOrder = [
+      [{ ...source, projection: structuredClone(reversed) }],
+      [{ ...source, projection: { ...reversed, sourceFileId: 'foreign' } }],
+      [{ ...source, projection: { ...reversed, pieces: reversed.pieces.map((p) => ({ ...p })) } }],
+      [
+        {
+          ...source,
+          projection: {
+            ...copiedCatalog.projection,
+            pieces: [...copiedCatalog.projection.pieces].reverse(),
+          },
+        },
+      ],
+      [
+        { ...source, projection: reversed },
+        { ...source, scopeKey: 'lining' },
+      ],
+    ];
+    for (const sources of withoutPreparedOrder) {
+      const historical = overlay({ sources, transformsByPieceKey });
+      if (!historical.ok) throw Error(historical.blocker.detail);
+      expect(historical.overlay.pieces[0]?.lane).toBe('left');
+      const historicalFront = historical.overlay.pieces.find((p) => p.pieceKey === after.pieceKey)!;
+      expect(historicalFront.transform).toEqual(transform);
+      expect(laneOffset(historicalFront)).not.toEqual(laneOffset(front[0]!));
+    }
   } finally {
     owner.dispose();
   }

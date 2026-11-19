@@ -4,6 +4,7 @@ import type {
   MeasurementSurfacePatternPieceTransformV1,
   MeasurementSurfacePatternPieceV1,
 } from 'components/shared/measurement-watertight-surface-v1-stage';
+import { readPatternImportDxfProductPhaseEPreparedPieceOrdinalsV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 
 import type {
   PatternImportDxfPhaseECadMannequinDxfStagingSelectionV1,
@@ -118,7 +119,7 @@ export function buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1(
   }
 
   const pieces = input.sources.flatMap((source) =>
-    source.projection.pieces.map((piece, index) => ({ source, piece, sourcePieceIndex: index })),
+    source.projection.pieces.map((piece) => ({ source, piece })),
   );
   const pieceKeys = pieces.map(
     ({ source, piece }) => `${source.scopeKey}:${piece.pieceId}:${piece.pieceLineKey}`,
@@ -162,9 +163,19 @@ export function buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1(
       (input.selection.pieceLineKey == null || input.selection.pieceLineKey === piece.pieceLineKey),
   );
   const selectedPiece = selectedPieces.length === 1 ? selectedPieces[0] : null;
+  // V6 offsets are relative to historical staged lanes. A single exact catalog can recover
+  // its lanes; multiple material scopes need an independently known historical scope order.
+  const ordinals =
+    input.sources.length === 1
+      ? readPatternImportDxfProductPhaseEPreparedPieceOrdinalsV1(
+          input.sources[0].projection,
+          input.sources[0].scopeKey,
+        )
+      : null;
   const overlayPieces: MeasurementSurfacePatternPieceOverlayV1['pieces'] = Object.freeze(
     pieces.map(({ source, piece }, index) => {
       const pieceKey = `${source.scopeKey}:${piece.pieceId}:${piece.pieceLineKey}`;
+      const ordinal = ordinals?.[index] ?? index;
       const selected = selectedPiece?.source === source && selectedPiece.piece === piece;
       const pieceDecorations = (input.decorations ?? []).filter(
         (decoration) =>
@@ -230,8 +241,8 @@ export function buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1(
         scopeKey: source.scopeKey,
         pieceId: piece.pieceId,
         pieceLineKey: piece.pieceLineKey,
-        lane: (['left', 'right', 'front', 'back'] as const)[index % 4],
-        laneIndex: Math.floor(index / 4),
+        lane: (['left', 'right', 'front', 'back'] as const)[ordinal % 4],
+        laneIndex: Math.floor(ordinal / 4),
         contours: Object.freeze(
           piece.contours.map((contour) =>
             Object.freeze({
