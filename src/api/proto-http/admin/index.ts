@@ -32109,7 +32109,8 @@ export function createAdminServiceClient(
 export type PlatformTeam = {
   slug: string | undefined;
   name: string | undefined;
-  // status is active, read_only, provisioning, pending or review (waits for approval).
+  // status is active, read_only, provisioning, pending, review (waits for approval)
+  // or deleted (hidden; data is wiped at purge_at).
   status: string | undefined;
   people: number | undefined;
   createdAt: wellKnownTimestamp | undefined;
@@ -32119,6 +32120,8 @@ export type PlatformTeam = {
   aiSpendMonthUsd: string | undefined;
   aiUnpricedCallsMonth: number | undefined;
   schemaOk: boolean | undefined;
+  // purge_at is set only while status is deleted: the moment the team's data is wiped.
+  purgeAt: wellKnownTimestamp | undefined;
 };
 
 // PlatformMember is one member of a team as the console sees it.
@@ -32216,10 +32219,29 @@ export type EnterTeamResponse = {
   handoffCode: string | undefined;
 };
 
+export type DeleteTeamRequest = {
+  teamSlug: string | undefined;
+  // password is the calling operator's own console password.
+  password: string | undefined;
+};
+
+export type DeleteTeamResponse = {
+  team: PlatformTeam | undefined;
+};
+
+export type RestoreTeamRequest = {
+  teamSlug: string | undefined;
+};
+
+export type RestoreTeamResponse = {
+  team: PlatformTeam | undefined;
+};
+
 // PlatformService is the operator console over the control plane. A team is
 // addressed by slug, never by id.
 export interface PlatformService {
   // ListTeams returns every team with its people, features and AI spend.
+  // Deleted teams whose data is not wiped yet are listed too (status deleted).
   ListTeams(request: ListTeamsRequest): Promise<ListTeamsResponse>;
   // GetTeam returns one team and its members.
   GetTeam(request: GetTeamRequest): Promise<GetTeamResponse>;
@@ -32237,6 +32259,11 @@ export interface PlatformService {
   DeclineTeam(request: DeclineTeamRequest): Promise<DeclineTeamResponse>;
   // EnterTeam issues a hand-off code that opens the team's workspace for the operator.
   EnterTeam(request: EnterTeamRequest): Promise<EnterTeamResponse>;
+  // DeleteTeam hides the team at once; its data is wiped when purge_at passes;
+  // until then RestoreTeam brings it back.
+  DeleteTeam(request: DeleteTeamRequest): Promise<DeleteTeamResponse>;
+  // RestoreTeam brings back a deleted team whose data is not wiped yet.
+  RestoreTeam(request: RestoreTeamRequest): Promise<RestoreTeamResponse>;
 }
 
 export function createPlatformServiceClient(
@@ -32419,6 +32446,46 @@ export function createPlatformServiceClient(
         service: "PlatformService",
         method: "EnterTeam",
       }) as Promise<EnterTeamResponse>;
+    },
+    DeleteTeam(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.teamSlug) {
+        throw new Error("missing required field request.team_slug");
+      }
+      const path = `api/platform/teams/${request.teamSlug}/delete`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "PlatformService",
+        method: "DeleteTeam",
+      }) as Promise<DeleteTeamResponse>;
+    },
+    RestoreTeam(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.teamSlug) {
+        throw new Error("missing required field request.team_slug");
+      }
+      const path = `api/platform/teams/${request.teamSlug}/restore`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "PlatformService",
+        method: "RestoreTeam",
+      }) as Promise<RestoreTeamResponse>;
     },
   };
 }

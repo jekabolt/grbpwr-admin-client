@@ -33,6 +33,7 @@ const t = (slug: string, extra: Partial<PlatformTeam> = {}): PlatformTeam => ({
   aiSpendMonthUsd: '0',
   aiUnpricedCallsMonth: 0,
   schemaOk: true,
+  purgeAt: undefined,
   ...extra,
 });
 

@@ -90,6 +90,7 @@ function team(
     aiSpendMonthUsd: spend,
     aiUnpricedCallsMonth: 0,
     schemaOk: true,
+    purgeAt: undefined,
     members: members.map(([handle, email, role, seenMin]) => ({
       handle,
       email,
