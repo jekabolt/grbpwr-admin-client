@@ -71,7 +71,8 @@ type Review = {
     | 'saved corner'
     | 'saved outline points'
     | 'saved shared outline'
-    | 'saved allowance offset';
+    | 'saved allowance offset'
+    | 'saved edge length';
   current: () => boolean;
   verifyCurrentRow: () => Promise<void>;
   manifest: ConversionManifest;
@@ -709,16 +710,18 @@ export async function compileSavedDraftGeometryReviewV1(
 
 export const compileSavedDartTipReviewV1 = compileSavedDraftGeometryReviewV1;
 
-function readOffsetReview(artifact: Artifact): Review | undefined {
+function readPairedAllowanceReview(artifact: Artifact): Review | undefined {
+  const output = artifact.compiledFeatures[0]?.output;
   if (
     artifact.compiledFeatures.length !== 1 ||
-    artifact.compiledFeatures[0]?.output !== 'allowance-offset'
+    (output !== 'allowance-offset' && output !== 'edge-length')
   )
     return undefined;
   const proof = readCompiledPairedAllowanceReviewV1(artifact);
-  if (!proof?.verifyCurrentRow) return undefined;
+  if (!proof?.verifyCurrentRow || (output === 'edge-length' && !proof.fixedEndReplacement))
+    return undefined;
   return {
-    kind: 'saved allowance offset',
+    kind: output === 'edge-length' ? 'saved edge length' : 'saved allowance offset',
     current: proof.current,
     verifyCurrentRow: proof.verifyCurrentRow,
     ...(proof.fixedEndReplacement && { fixedEndReplacement: proof.fixedEndReplacement }),
@@ -730,11 +733,13 @@ function readOffsetReview(artifact: Artifact): Review | undefined {
 }
 
 export function openSavedDraftGeometryFileV1(artifact: Artifact, name: string) {
-  const review = artifacts.get(artifact) ?? readOffsetReview(artifact);
+  const review = artifacts.get(artifact) ?? readPairedAllowanceReview(artifact);
   requireSavedEdit(review && review.current(), 'Compile the current saved geometry again.');
   const file = new File([artifact.dxfText], name, { type: 'image/vnd.dxf' });
+  const pairedAllowance =
+    review.kind === 'saved allowance offset' || review.kind === 'saved edge length';
   const preserveHeadings =
-    review.kind === 'saved allowance offset' ||
+    pairedAllowance ||
     review.kind === 'saved outline points' ||
     review.kind === 'saved shared outline';
   registerSavedDartTipFileV1(
@@ -748,7 +753,7 @@ export function openSavedDraftGeometryFileV1(artifact: Artifact, name: string) {
           markers(scope.manifest) === markers(review.manifest) &&
           (!preserveHeadings || headings(scope.manifest) === headings(review.manifest)) &&
           scope.writerReplay &&
-          (review.kind === 'saved allowance offset'
+          (pairedAllowance
             ? openingGeometry(scope.writerReplay.job, 'grade')
             : review.kind === 'parallel opening'
               ? openingGeometry(scope.writerReplay.job)

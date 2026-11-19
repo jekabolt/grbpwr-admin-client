@@ -6,6 +6,7 @@ import {
 import { takeCompiledSavedAddPointFileV1 } from './draft-cad-saved-add-point-review-v1';
 import { readSavedRankedPointReviewV1 } from './draft-cad-saved-ranked-point-review-v1';
 import {
+  readCompiledPairedAllowanceReviewV1,
   requiresCurrentPairedAllowanceReviewV1,
   type PatternImportDxfPhaseEDraftCadGeometryCompileArtifactV1,
 } from './draft-cad-geometry-compile-v1';
@@ -58,18 +59,25 @@ export function registerPatternImportDxfPhaseEPatternsFieldCompiledReimportOwner
     openExistingImportReview: (artifact) => {
       const addPoint = artifact.compiledFeatures.some((feature) => feature.tool === 'add-point');
       const pairedAllowance = requiresCurrentPairedAllowanceReviewV1(artifact);
-      const savedGeometry = artifact.compiledFeatures.some(
-        ({ output }) =>
-          output === 'moved-dart-tip' ||
-          output === 'adjusted-dart-intake' ||
-          output === 'moved-fish-eye' ||
-          output === 'moved-french-curve' ||
-          output === 'parallel-spread' ||
-          output === 'allowance-offset' ||
-          output === 'sharpened-corner' ||
-          output === 'rounded-outline-corner' ||
-          output === 'moved-saved-vertex',
-      );
+      const guardedEdgeLength =
+        pairedAllowance &&
+        artifact.compiledFeatures.length === 1 &&
+        artifact.compiledFeatures[0]?.output === 'edge-length' &&
+        !!readCompiledPairedAllowanceReviewV1(artifact)?.fixedEndReplacement;
+      const savedGeometry =
+        guardedEdgeLength ||
+        artifact.compiledFeatures.some(
+          ({ output }) =>
+            output === 'moved-dart-tip' ||
+            output === 'adjusted-dart-intake' ||
+            output === 'moved-fish-eye' ||
+            output === 'moved-french-curve' ||
+            output === 'parallel-spread' ||
+            output === 'allowance-offset' ||
+            output === 'sharpened-corner' ||
+            output === 'rounded-outline-corner' ||
+            output === 'moved-saved-vertex',
+        );
       const manualApply =
         savedGeometry ||
         addPoint ||

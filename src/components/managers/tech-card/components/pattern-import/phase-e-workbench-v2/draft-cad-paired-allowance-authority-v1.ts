@@ -154,7 +154,7 @@ export async function prepareSavedDraftPairedAllowanceAuthorityV1(
     savedBytes: ArrayBuffer;
     readCurrent: () => SavedAddPointCurrentV1 | null;
     verifyCurrentRow?: () => Promise<void>;
-    turnAuthority?: SavedFixedEndAuthorityV1;
+    guardedAuthority?: SavedFixedEndAuthorityV1;
   }>,
 ): Promise<SavedDraftPairedAllowanceAuthorityV1> {
   const opening = input.readCurrent();
@@ -176,16 +176,17 @@ export async function prepareSavedDraftPairedAllowanceAuthorityV1(
   );
   const { pieceId, pieceLineKey } = command.target;
   const turn = command.tool === 'allowance-offset' && command.payload.turnAllowance;
-  const turnAuthority = turn ? input.turnAuthority : undefined;
-  if (turn)
+  const guardedAuthority =
+    turn || command.tool === 'edge-length' ? input.guardedAuthority : undefined;
+  if (turn || guardedAuthority)
     requirePair(
-      isSavedFixedEndAuthorityV1(turnAuthority, row, pieceLineKey),
-      'an authored turn requires a guarded Assembly review',
+      isSavedFixedEndAuthorityV1(guardedAuthority, row, pieceLineKey),
+      'the saved allowance edit requires a current guarded Assembly review',
     );
-  const verifyCurrentRow = turnAuthority
+  const verifyCurrentRow = guardedAuthority
     ? async () => {
         await input.verifyCurrentRow?.();
-        await turnAuthority.verify(new AbortController().signal);
+        await guardedAuthority.verify(new AbortController().signal);
       }
     : input.verifyCurrentRow;
   requirePair(
@@ -358,7 +359,7 @@ export async function prepareSavedDraftPairedAllowanceAuthorityV1(
       seam: points(size.seam),
       current,
       verifyCurrentRow,
-      ...(turnAuthority && { fixedEndReplacement: turnAuthority.replacement }),
+      ...(guardedAuthority && { fixedEndReplacement: guardedAuthority.replacement }),
     }),
   );
   return owner;

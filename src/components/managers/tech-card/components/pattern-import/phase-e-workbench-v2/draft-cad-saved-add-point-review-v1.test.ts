@@ -1,3 +1,4 @@
+import { captureSavedFixedEndAuthorityV1 } from './saved-fixed-end-outline-authority-v1';
 import { authoredInternalVertices } from 'lib/pattern-import/manifest/authored-internal';
 import {
   recordSavedFrenchCurveHandleV1,
@@ -712,95 +713,149 @@ function savedUiRuntime(
     fetch: async () => new Response(f.request.savedBytes.slice(0)),
   });
 }
-it('opens the paired native cut edge through the ordinary saved Draft review and refuses a revoked turn', async () => {
-  const f = await fixture(true);
-  vi.stubGlobal('Worker', InProcessTransport);
-  const runtime = savedUiRuntime(f, () => f.current.row);
-  const worker = new ImportWorkerClient();
-  const reviews: File[] = [];
-  const unregister = registerPatternImportDxfPhaseEPatternsFieldCompiledReimportOwnerV1({
-    techCardId: f.current.card.techCardId,
-    readConfirmedImportGeneration: () => f.current.generation,
-    scopeAvailable: (key) => key === f.current.row.scopeKey,
-    reviewAlreadyOpen: () => false,
-    openExistingImportReview: (review) => {
-      expect(review.requireManualApply).toBe(true);
-      reviews.push(...review.files);
-    },
-  });
-  try {
-    const visualPiece = f.compileInput.projection.pieces.find(({ pieceId }) => pieceId === 'BP')!;
-    const cut = visualPiece.contours.find(({ role }) => role === 'cut-boundary')!;
-    const [a, b] = cut.vertices;
-    const command: PatternImportDxfPhaseEDraftCadCommandV1 = {
-      commandId: 'paired-edge-test',
-      tool: 'edge-length',
-      target: { pieceId: visualPiece.pieceId, pieceLineKey: visualPiece.pieceLineKey },
-      payload: {
-        entityId: 'paired-edge-test',
-        edge: {
-          contourId: cut.contourId,
-          boundaryVertexIds: [a!.vertexId, b!.vertexId],
-          progress: 0.5,
-        },
-        sizeToken: 'M',
-        fixed: 'end',
-        lengthMm: 94,
+it.each([false, true])(
+  'reviews the paired native cut edge with Assembly guard %s',
+  async (guarded) => {
+    const f = await fixture(true);
+    vi.stubGlobal('Worker', InProcessTransport);
+    const runtime = savedUiRuntime(f, () => f.current.row);
+    const worker = new ImportWorkerClient();
+    const reviews: File[] = [];
+    const unregister = registerPatternImportDxfPhaseEPatternsFieldCompiledReimportOwnerV1({
+      techCardId: f.current.card.techCardId,
+      readConfirmedImportGeneration: () => f.current.generation,
+      scopeAvailable: (key) => key === f.current.row.scopeKey,
+      reviewAlreadyOpen: () => false,
+      openExistingImportReview: (review) => {
+        expect(review.requireManualApply).toBe(true);
+        reviews.push(...review.files);
       },
-    };
-    const recorded = recordPatternImportDxfPhaseEDraftCadTransactionV1(f.initial, {
-      transactionId: 'paired-edge-tx',
-      label: 'Edge length',
-      commands: [command],
     });
-    if (!recorded.ok) throw Error(JSON.stringify(recorded.blocker));
-    const current = { ...f.current, session: recorded.session };
-    const input = { ...f.compileInput, session: recorded.session };
-    let active = true;
-    const prepare = () =>
-      runtime.prepareSavedPairedAllowance!(current.row, () => (active ? current : null));
-    const compiled = await compileDraftForOrdinaryReviewV1(input, undefined, prepare);
-    if (!compiled.ok) throw Error(JSON.stringify(compiled.blockers));
-    expect(
-      await stagePatternImportDxfPhaseECadSemanticCompiledArtifactV1(compiled.artifact, {
+    try {
+      const visualPiece = f.compileInput.projection.pieces.find(({ pieceId }) => pieceId === 'BP')!;
+      const cut = visualPiece.contours.find(({ role }) => role === 'cut-boundary')!;
+      const [a, b] = cut.vertices;
+      const command: PatternImportDxfPhaseEDraftCadCommandV1 = {
+        commandId: 'paired-edge-test',
+        tool: 'edge-length',
+        target: { pieceId: visualPiece.pieceId, pieceLineKey: visualPiece.pieceLineKey },
+        payload: {
+          entityId: 'paired-edge-test',
+          edge: {
+            contourId: cut.contourId,
+            boundaryVertexIds: [a!.vertexId, b!.vertexId],
+            progress: 0.5,
+          },
+          sizeToken: 'M',
+          fixed: 'end',
+          lengthMm: 94,
+        },
+      };
+      const recorded = recordPatternImportDxfPhaseEDraftCadTransactionV1(f.initial, {
+        transactionId: 'paired-edge-tx',
+        label: 'Edge length',
+        commands: [command],
+      });
+      if (!recorded.ok) throw Error(JSON.stringify(recorded.blocker));
+      const current = { ...f.current, session: recorded.session };
+      const input = { ...f.compileInput, session: recorded.session };
+      let active = true;
+      const reviewedClock = 'asm:v1:paired-edge:1';
+      let clock = reviewedClock;
+      const authority = guarded
+        ? await captureSavedFixedEndAuthorityV1(
+            current.row,
+            visualPiece.pieceLineKey,
+            async () => ({
+              row: current.row,
+              techCard: {
+                id: current.row.techCardId,
+                lockVersion: current.row.cardLockVersion,
+                techCard: { pieces: [{ lineKey: visualPiece.pieceLineKey }] },
+              },
+            }),
+            new AbortController().signal,
+            async (_admin, row, options) => {
+              expect(row).toEqual(current.row);
+              expect(options.sourceOnly).toBe(true);
+              if (
+                options.expectedServerAssemblyRevision &&
+                options.expectedServerAssemblyRevision !== clock
+              )
+                throw new Error('The reviewed Assembly clock changed.');
+              return {
+                serverAssemblyRevision: clock,
+                sourceSha256: row.sha256,
+                rows: [],
+                operations: [],
+                ownedSeams: [],
+                aliases: [],
+                garmentLabels: [],
+                sourceOnly: true,
+                priorCarrier: null,
+              };
+            },
+          )
+        : undefined;
+      const prepare = () =>
+        runtime.prepareSavedPairedAllowance!(
+          current.row,
+          () => (active ? current : null),
+          authority,
+        );
+      const compiled = await compileDraftForOrdinaryReviewV1(input, undefined, prepare);
+      if (!compiled.ok) throw Error(JSON.stringify(compiled.blockers));
+      expect(
+        await stagePatternImportDxfPhaseECadSemanticCompiledArtifactV1(compiled.artifact, {
+          confirmedImportGenerationAtCompile: current.generation,
+        }),
+      ).toBe(true);
+      const handoff = {
+        schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_CAD_COMMAND_COMPILED_REIMPORT_HANDOFF_V1,
+        artifact: compiled.artifact,
         confirmedImportGenerationAtCompile: current.generation,
-      }),
-    ).toBe(true);
-    const handoff = {
-      schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_CAD_COMMAND_COMPILED_REIMPORT_HANDOFF_V1,
-      artifact: compiled.artifact,
-      confirmedImportGenerationAtCompile: current.generation,
-      cadSessionCursorAtCompile: current.session.cursor,
-    };
-    const opened = requestPatternImportDxfPhaseECadCommandCompiledReimportV1(handoff);
-    if (!opened.ok) throw Error(JSON.stringify(opened.blocker));
-    expect(reviews).toHaveLength(1);
-    const draft = await draftThroughWizardStages(reviews[0]!, current.card, worker);
-    const piece = draft.scopes[0]!.writerReplay!.job.pieces.find(
-      ({ identity }) => identity === 'BP',
-    )!;
-    expect(piece.allowance.allowanceMm).toBe(10);
-    expect(piece.sizes[0]!.cut).toHaveLength(4);
-    expect(piece.sizes[0]!.seam).toHaveLength(4);
-    const stale = await compileDraftForOrdinaryReviewV1(input, undefined, async () => {
-      const owner = await prepare();
-      active = false;
-      return owner;
-    });
-    expect(stale).toMatchObject({ ok: false, blockers: [{ code: 'source-binding-mismatch' }] });
-    expect(requestPatternImportDxfPhaseECadCommandCompiledReimportV1(handoff)).toMatchObject({
-      ok: false,
-      blocker: { code: 'reimport-request-invalid' },
-    });
-    expect(reviews).toHaveLength(1);
-  } finally {
-    worker.dispose();
-    unregister();
-    runtime.dispose();
-    f.source.dispose();
-    vi.unstubAllGlobals();
-  }
-});
+        cadSessionCursorAtCompile: current.session.cursor,
+      };
+      const opened = requestPatternImportDxfPhaseECadCommandCompiledReimportV1(handoff);
+      if (!opened.ok) throw Error(JSON.stringify(opened.blocker));
+      expect(reviews).toHaveLength(1);
+      const draft = await draftThroughWizardStages(reviews[0]!, current.card, worker);
+      const piece = draft.scopes[0]!.writerReplay!.job.pieces.find(
+        ({ identity }) => identity === 'BP',
+      )!;
+      expect(piece.allowance.allowanceMm).toBe(10);
+      expect(piece.sizes[0]!.cut).toHaveLength(4);
+      expect(piece.sizes[0]!.seam).toHaveLength(4);
+      if (guarded) {
+        clock = 'asm:v1:paired-edge:2';
+        await expect(verifySavedDartTipApplyV1(draft, reviews, false, () => true)).rejects.toThrow(
+          /reviewed Assembly clock changed/,
+        );
+        clock = reviewedClock;
+      }
+      await expect(verifySavedDartTipApplyV1(draft, reviews, false, () => true)).resolves.toEqual(
+        authority?.replacement,
+      );
+      const stale = await compileDraftForOrdinaryReviewV1(input, undefined, async () => {
+        const owner = await prepare();
+        active = false;
+        return owner;
+      });
+      expect(stale).toMatchObject({ ok: false, blockers: [{ code: 'source-binding-mismatch' }] });
+      expect(requestPatternImportDxfPhaseECadCommandCompiledReimportV1(handoff)).toMatchObject({
+        ok: false,
+        blocker: { code: 'reimport-request-invalid' },
+      });
+      expect(reviews).toHaveLength(1);
+    } finally {
+      worker.dispose();
+      unregister();
+      runtime.dispose();
+      f.source.dispose();
+      vi.unstubAllGlobals();
+    }
+  },
+);
 
 it('reopens the protected saved row through the normal worker and rejects stale or foreign evidence', async () => {
   const f = await fixture(true);

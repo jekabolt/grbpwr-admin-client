@@ -3,7 +3,7 @@ import {
   type SavedFixedEndAuthorityV1,
 } from './saved-fixed-end-outline-authority-v1';
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Button, CalloutBox } from 'ui';
+import { Button, CalloutBox, Selector } from 'ui';
 import { readPatternImportDxfPhaseECardSessionV1 } from '../phase-e-workbench-card-session-v1';
 import {
   PATTERN_IMPORT_DXF_PHASE_E_CAD_COMMAND_COMPILED_REIMPORT_HANDOFF_V1,
@@ -66,6 +66,9 @@ export default function CadTableSavedAllowanceEditV1({
     [catalog],
   );
   const [session, setSession] = useState(initial.session);
+  const [activeTool, setActiveTool] = useState<'allowance-offset' | 'edge-length'>(
+    'allowance-offset',
+  );
   const sessionRef = useRef(session);
   const pending = useRef(false);
   const capture = useRef<AbortController | null>(null);
@@ -104,7 +107,7 @@ export default function CadTableSavedAllowanceEditV1({
       sessionRef.current?.cursor !== 0 ||
       next.cursor !== 1 ||
       next.history[0].commands.length !== 1 ||
-      command?.tool !== 'allowance-offset' ||
+      command?.tool !== activeTool ||
       command.target.pieceId !== piece.pieceId ||
       command.target.pieceLineKey !== piece.pieceLineKey
     )
@@ -130,11 +133,14 @@ export default function CadTableSavedAllowanceEditV1({
     setError('');
     try {
       const command = captured.history[0]?.commands[0];
-      let turnAuthority: SavedFixedEndAuthorityV1 | undefined;
-      if (command?.tool === 'allowance-offset' && command.payload.turnAllowance) {
+      let guardedAuthority: SavedFixedEndAuthorityV1 | undefined;
+      if (
+        command?.tool === 'edge-length' ||
+        (command?.tool === 'allowance-offset' && command.payload.turnAllowance)
+      ) {
         const controller = new AbortController();
         capture.current = controller;
-        turnAuthority = await captureSavedFixedEndAuthorityV1(
+        guardedAuthority = await captureSavedFixedEndAuthorityV1(
           row,
           command.target.pieceLineKey,
           authority.resolveExactCurrentCard,
@@ -145,7 +151,7 @@ export default function CadTableSavedAllowanceEditV1({
       const result = await compileDraftForOrdinaryReviewV1(
         { session: captured, projection, selection, compileSource: prepared.draftCadCompileSource },
         undefined,
-        () => runtime.prepareSavedPairedAllowance(row, readCurrent, turnAuthority),
+        () => runtime.prepareSavedPairedAllowance(row, readCurrent, guardedAuthority),
       );
       if (!readCurrent()) return;
       if (!result.ok)
@@ -185,6 +191,24 @@ export default function CadTableSavedAllowanceEditV1({
     >
       <div className='border-b border-borderColor'>
         <div className='flex flex-wrap items-center gap-2 px-2 py-1'>
+          {!savedTurn && (
+            <div role='group' aria-label='Allowance edit'>
+              <Selector
+                label='Allowance edit'
+                compact
+                disabled={preparing || session.cursor !== 0}
+                value={activeTool}
+                onChange={(value: string) => {
+                  setActiveTool(value === 'edge-length' ? 'edge-length' : 'allowance-offset');
+                  setError('');
+                }}
+                options={[
+                  { value: 'allowance-offset', label: 'Offset' },
+                  { value: 'edge-length', label: 'Edge length' },
+                ]}
+              />
+            </div>
+          )}
           <Button
             type='button'
             variant='main'
@@ -206,7 +230,7 @@ export default function CadTableSavedAllowanceEditV1({
                 setError('');
               }}
             >
-              Undo allowance offset
+              {activeTool === 'edge-length' ? 'Undo edge length' : 'Undo allowance offset'}
             </Button>
           )}
           {savedTurn && (
@@ -225,11 +249,12 @@ export default function CadTableSavedAllowanceEditV1({
         )}
       </div>
       <PatternImportDxfPhaseEDraftCadCanvasV1
+        key={activeTool}
         session={session}
         projection={projection}
         scopeKey={scopeKey}
         activePieceIndex={pieceIndex}
-        activeTool='allowance-offset'
+        activeTool={activeTool}
         savedTurnAllowance={!savedTurn}
         panActive={session.cursor === 1}
         topologySession={topology}
