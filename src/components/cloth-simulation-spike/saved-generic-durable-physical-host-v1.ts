@@ -10,6 +10,7 @@ import {
 } from 'lib/cloth/runtime/webgpu/xpbd-device-session';
 import type { SavedFullAssemblyPhysicalDocumentPersistenceResultV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-full-assembly-physical-document-production-v1';
 import type { SavedFullAssemblyCompileIntentV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-full-assembly-compile-session-v1';
+import type { SavedFullAssemblyRegisteredCutSourceV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-full-assembly-registered-cut-source-v1';
 import {
   readSavedFullAssemblyPhysicalSnapshotV1,
   projectSavedFullAssemblyPhysicalSnapshotV1,
@@ -33,6 +34,10 @@ import type {
 } from './dxf-garment-observed-strain-heatmap-preview-v1';
 
 import type { DxfGarmentObservedBoundaryEdgeV1 } from './dxf-garment-observed-unsewn-edges-v1';
+import {
+  projectCurrentModelDisplayedTriangleBodyInputV1,
+  type ModelDisplayedTriangleBodyOwnedInputV1,
+} from './model-displayed-triangle-body-input-v1';
 
 export type SavedGenericDurablePhysicalPreviewScopeV1 = Readonly<{
   row: DxfProductSavedRowIdentityV1;
@@ -412,6 +417,7 @@ export function createSavedGenericDurablePhysicalHostV1(
     epoch: number;
     sourceLife: AbortController;
     publicBinding: SavedGenericDurablePhysicalBindingV1;
+    registeredCut?: SavedFullAssemblyRegisteredCutSourceV1;
   };
   type Operation = {
     id: number;
@@ -800,8 +806,85 @@ export function createSavedGenericDurablePhysicalHostV1(
       throw new Error('A freshly restored saved V7 with no active preview is required.');
     return admission;
   };
+  const prepareRegisteredCut = async (
+    scope: SavedGenericDurablePhysicalPreviewScopeV1 | null,
+    body: ModelDisplayedTriangleBodyOwnedInputV1,
+    signal: AbortSignal,
+    lease?: XpbdDeviceLease,
+    checkedPlacement?: Readonly<{ sourceFingerprint: string; initialPositionsSha256: string }>,
+  ) => {
+    let ticket: Operation | null = null;
+    try {
+      const done = await work(signal, async (op) => {
+        ticket = op;
+        const a = editableAdmission();
+        if (!a.registeredCut || !matchesPreviewScope(scope, a.durable))
+          throw new Error('Select the saved pattern size to preview its complete cut.');
+        const observedTarget = await verify(a, op);
+        const observed = projectCurrentModelDisplayedTriangleBodyInputV1(body);
+        if (!observed) throw new Error('The displayed mannequin is no longer current.');
+        const isCurrent = () =>
+          !disposed &&
+          admission === a &&
+          snapshot.binding === a.publicBinding &&
+          !signal.aborted &&
+          body.isCurrent() &&
+          isCurrentSavedModelGenericObservedTargetV1(bodySession, observedTarget, signal);
+        const isCurrentDuringRun = () => {
+          bound(op, a);
+          return isCurrent();
+        };
+        const { prepareSavedV7RegisteredCutPreviewV1, SAVED_REGISTERED_CUT_ACTIVATION_V1 } =
+          await import('./saved-v7-registered-cut-preview-v1');
+        const prepared = await prepareSavedV7RegisteredCutPreviewV1(
+          a.durable,
+          a.registeredCut,
+          observed,
+          isCurrentDuringRun,
+          op.controller.signal,
+        );
+        let frame: Awaited<
+          ReturnType<
+            typeof import('./run-directed-source-cut-preview-v1').runRegisteredSourceCutPreviewV1
+          >
+        > | null = null;
+        if (lease) {
+          if (
+            !checkedPlacement ||
+            prepared.proof.sourceFingerprint !== checkedPlacement.sourceFingerprint ||
+            prepared.proof.initialPositionsSha256 !== checkedPlacement.initialPositionsSha256
+          )
+            throw new Error('The prepared full-cut placement changed. Check the placement again.');
+          const { runRegisteredSourceCutPreviewV1 } = await import(
+            './run-directed-source-cut-preview-v1'
+          );
+          frame = await runRegisteredSourceCutPreviewV1(
+            {
+              source: prepared.source,
+              body: prepared.body,
+              ownedLease: lease,
+              schedule: SAVED_REGISTERED_CUT_ACTIVATION_V1,
+              expectedInitialPositionsSha256: checkedPlacement.initialPositionsSha256,
+            },
+            op.controller.signal,
+          );
+        }
+        await localWait(fresh(a.durable, op), op.controller.signal);
+        terminal(a, op, observedTarget);
+        return { proof: prepared.proof, initial: prepared.initial, frame, isCurrent };
+      });
+      if (!done.value.isCurrent()) throw new Error('The saved cut or mannequin changed.');
+      return { ok: true as const, ...done.value };
+    } catch (error) {
+      return blocked(error);
+    } finally {
+      releaseReads(ticket);
+    }
+  };
   return Object.freeze({
     getSnapshot: () => snapshot,
+    hasRegisteredCut: () => Boolean(admission?.registeredCut),
+    prepareRegisteredCut,
     subscribe(listener: () => void) {
       if (disposed) return () => {};
       listeners.add(listener);
@@ -895,7 +978,16 @@ export function createSavedGenericDurablePhysicalHostV1(
               outerSha256: durable.outer.sha256,
               freshSnapshotSha256: durable.freshSnapshotSha256,
             });
-            a = { durable, generation, epoch: expectedEpoch, sourceLife: ownedLife, publicBinding };
+            a = {
+              durable,
+              generation,
+              epoch: expectedEpoch,
+              sourceLife: ownedLife,
+              publicBinding,
+              ...(compiled.result.registeredCut && {
+                registeredCut: structuredClone(compiled.result.registeredCut),
+              }),
+            };
             admission = a;
             const t = await verify(a, op);
             terminal(a, op, t);

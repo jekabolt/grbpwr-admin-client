@@ -256,7 +256,9 @@ export async function fingerprintDxfExactAssemblyGraphV1(
     claims: DXF_GARMENT_PHYSICAL_INITIALIZATION_CLAIMS_V1,
   });
 }
-function rigid(p: DxfGarmentExplicitPiecePlacementV1): void {
+export function assertDxfGarmentExplicitRigidPlacementV1(
+  p: DxfGarmentExplicitPiecePlacementV1,
+): void {
   exact(p, ['pieceId', 'sourceOriginM', 'rotationRowMajor', 'translationM']);
   const vector = (v: readonly number[], n: number, bound: number) =>
     Array.isArray(v) &&
@@ -329,7 +331,7 @@ async function validateCaptured(
     new Set(document.placements.map((p) => p.pieceId)).size !== document.placements.length
   )
     fail('piece-coverage', 'One explicit placement per exact cutCount1 piece is required.');
-  document.placements.forEach(rigid);
+  document.placements.forEach(assertDxfGarmentExplicitRigidPlacementV1);
   if (
     identity.graph.pieces.some(
       (p) => p.cutCount !== 1 || !document.placements.some((x) => x.pieceId === p.pieceId),

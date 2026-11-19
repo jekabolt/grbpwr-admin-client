@@ -2376,6 +2376,8 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
   const [displayedBodyInput, setDisplayedBodyInput] =
     useState<Parameters<CadWorkbenchPhysicalHostV1['onDisplayedBodyInputV1']>[0]>(null);
   const [acceptedCloth, setAcceptedCloth] = useState<CadWorkbenchPhysicalHostV1['acceptedCloth']>();
+  const [registeredCutCloth, setRegisteredCutCloth] =
+    useState<CadWorkbenchPhysicalHostV1['acceptedCloth']>();
   const onDisplayedBodyInputV1 = useCallback<CadWorkbenchPhysicalHostV1['onDisplayedBodyInputV1']>(
     (body) => {
       setDisplayedBodyInput(body);
@@ -2423,7 +2425,11 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
   const physicalHost: CadWorkbenchPhysicalHostV1 = {
     onDisplayedBodyInputV1,
     acceptedCloth:
-      activeCrossMaterialReview && acceptedCloth?.isCurrent() ? acceptedCloth : undefined,
+      activeCrossMaterialReview && acceptedCloth?.isCurrent()
+        ? acceptedCloth
+        : registeredCutCloth?.isCurrent()
+          ? registeredCutCloth
+          : undefined,
     savedReviewSize: activeCrossMaterialReview?.patternSize,
     panel: crossMaterialPreviewControls,
     arrangementSourceKey: JSON.stringify([
@@ -2449,6 +2455,8 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
         state={savedClothPhysicalHost}
         disabled={frozen}
         interaction={interaction}
+        displayedInput={displayedBodyInput}
+        onAcceptedRegisteredCloth={setRegisteredCutCloth}
       />
     ),
   };

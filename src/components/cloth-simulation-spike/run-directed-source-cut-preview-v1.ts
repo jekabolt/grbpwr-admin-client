@@ -12,6 +12,10 @@ import {
 } from 'lib/cloth/runtime/webgpu/garment-staged-source-cut-core-v1';
 
 import {
+  prepareRegisteredSourceCutPreviewV1,
+  type RegisteredSourceCutPreviewInputV1,
+} from './prepare-registered-source-cut-preview-v1';
+import {
   continueStagedSourceCutFramesV1,
   runStagedSourceCutFramesV1,
 } from './run-staged-source-cut-frames-v1';
@@ -232,31 +236,34 @@ export async function prepareDirectedSourceCutPreviewV1(
   };
 }
 
-/** The Workbench retains its renderer lease and source authority for the entire run. */
-export async function runDirectedSourceCutPreviewV1(
-  input: Readonly<{
-    source: DirectedSourceCutPreviewInputV1;
-    ownedLease: Parameters<typeof runStagedSourceCutFramesV1>[0]['ownedLease'];
-    body: Readonly<{
-      positionsM: Float32Array;
-      triangles: Uint32Array;
-      positionsSha256: string;
-      trianglesSha256: string;
-      outwardSign: 1 | -1;
-    }>;
-    schedule: readonly Readonly<{
-      requestedReductionM: number;
-      maximumReductionM: number;
-    }>[];
-  }>,
+type SourceCutPreviewRunV1 = Readonly<{
+  ownedLease: Parameters<typeof runStagedSourceCutFramesV1>[0]['ownedLease'];
+  body: Readonly<{
+    positionsM: Float32Array;
+    triangles: Uint32Array;
+    positionsSha256: string;
+    trianglesSha256: string;
+    outwardSign: 1 | -1;
+  }>;
+  schedule: readonly Readonly<{
+    requestedReductionM: number;
+    maximumReductionM: number;
+  }>[];
+}>;
+type PreparedCutPreview = ReturnType<typeof prepareRegisteredSourceCutPreviewV1>;
+type PreparedPhysics = Pick<PreparedCutPreview, 'material' | 'seams' | 'surface'> &
+  Partial<Pick<PreparedCutPreview, 'derivedPlacement'>>;
+
+async function runPreparedSourceCutPreviewV1(
+  input: SourceCutPreviewRunV1,
+  operationOrder: number,
+  check: () => boolean,
+  prepare: (
+    body: ReturnType<typeof captureActualBodyTriangleGeometryV1>,
+    active?: AbortSignal,
+  ) => PreparedPhysics | Promise<PreparedPhysics>,
   signal?: AbortSignal,
 ) {
-  const {
-    sourceFingerprint,
-    expectedGridSha256,
-    operationOrder,
-    assertCurrentSource: check,
-  } = input.source;
   requireCurrent(check, signal);
   const schedule = input.schedule.map((command) => ({ ...command }));
   if (schedule.length < 1 || schedule.length > 40)
@@ -274,10 +281,10 @@ export async function runDirectedSourceCutPreviewV1(
   if (positionsSha256 !== expectedPositions || trianglesSha256 !== expectedTriangles)
     throw new RangeError('The renderer body differs from the body bound to this directed run.');
   requireCurrent(check, signal);
-  const { material, seams, surface } = await prepareDirectedSourceCutPreviewV1(
-    input.source,
-    signal,
-  );
+  const { material, seams, surface, derivedPlacement } = await prepare(body, signal);
+  requireCurrent(check, signal);
+  if (seams.stages.length !== 1 || seams.stages[0].operationOrder !== operationOrder)
+    throw new RangeError('The directed preview requires a single operation stage.');
   const command = (index: number) => ({
     ...schedule[index],
     operationOrder,
@@ -316,6 +323,60 @@ export async function runDirectedSourceCutPreviewV1(
     deviceIdentity: receipt.deviceIdentity,
     shaderIdentities: receipt.shaderIdentities,
     body: { positionsSha256, trianglesSha256 },
+    ...(derivedPlacement ? { derivedPlacement } : {}),
+  };
+}
+
+/** The Workbench retains its renderer lease and source authority for the entire run. */
+export async function runDirectedSourceCutPreviewV1(
+  input: SourceCutPreviewRunV1 & Readonly<{ source: DirectedSourceCutPreviewInputV1 }>,
+  signal?: AbortSignal,
+) {
+  const { sourceFingerprint, expectedGridSha256, operationOrder, assertCurrentSource } =
+    input.source;
+  const result = await runPreparedSourceCutPreviewV1(
+    input,
+    operationOrder,
+    assertCurrentSource,
+    (_, active) => prepareDirectedSourceCutPreviewV1(input.source, active),
+    signal,
+  );
+  return {
+    ...result,
     source: { sourceFingerprint, gridSha256: expectedGridSha256, operationOrder },
   };
+}
+
+/** Run one saved AO step on its complete cut and the current displayed body. */
+export async function runRegisteredSourceCutPreviewV1(
+  input: SourceCutPreviewRunV1 &
+    Readonly<{
+      source: RegisteredSourceCutPreviewInputV1;
+      expectedInitialPositionsSha256?: string;
+    }>,
+  signal?: AbortSignal,
+) {
+  const { sourceFingerprint, stitches, assertCurrentSource } = input.source;
+  const operationOrder = stitches[0]?.operationOrder;
+  if (operationOrder === undefined)
+    throw new RangeError('A registered cut preview requires a saved seam operation.');
+  const result = await runPreparedSourceCutPreviewV1(
+    input,
+    operationOrder,
+    assertCurrentSource,
+    async (body, active) => {
+      const prepared = prepareRegisteredSourceCutPreviewV1(input.source, active, {
+        positionsM: body.positions,
+        triangles: body.triangles,
+      });
+      if (input.expectedInitialPositionsSha256) {
+        const { uploads } = snapshotGarmentStagedSourceCutCoreV1(prepared.material);
+        if ((await sha256(uploads.positions)) !== input.expectedInitialPositionsSha256)
+          throw new Error('The full-cut starting placement changed since the last check.');
+      }
+      return prepared;
+    },
+    signal,
+  );
+  return { ...result, source: { sourceFingerprint, operationOrder } };
 }

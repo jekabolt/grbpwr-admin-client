@@ -2555,6 +2555,7 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
               <div className='relative min-h-0 flex-1'>
                 <PatternImportDxfPhaseECadMannequinModelPickerV1
                   disabled={frozen}
+                  acceptedCloth={previewScope ? physicalHost?.acceptedCloth : undefined}
                   onDisplayedBodyInputV1={physicalHost?.onDisplayedBodyInputV1}
                   onSaveMannequinArrangement={physicalHost?.onSaveMannequinArrangement}
                   onReadMannequinArrangement={physicalHost?.onReadMannequinArrangement}
@@ -2846,6 +2847,11 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
                   {(sceneOverlay) => (
                     <PatternImportDxfPhaseECadMannequinModelPickerV1
                       disabled={frozen}
+                      acceptedCloth={
+                        effectiveDesktopMode === 'assembly'
+                          ? physicalHost?.acceptedCloth
+                          : undefined
+                      }
                       onDisplayedBodyInputV1={physicalHost?.onDisplayedBodyInputV1}
                       onSaveMannequinArrangement={physicalHost?.onSaveMannequinArrangement}
                       onReadMannequinArrangement={physicalHost?.onReadMannequinArrangement}

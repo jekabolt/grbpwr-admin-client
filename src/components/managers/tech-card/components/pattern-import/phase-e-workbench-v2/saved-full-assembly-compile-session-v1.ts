@@ -56,6 +56,11 @@ import {
   type SavedFullAssemblySnapshotProjectionV1,
   SavedFullAssemblySnapshotErrorV1,
 } from './saved-full-assembly-snapshot-production-v1';
+import {
+  projectSavedFullAssemblyRegisteredCutSourceV1,
+  supportsSavedFullAssemblyRegisteredCutV1,
+  type SavedFullAssemblyRegisteredCutSourceV1,
+} from './saved-full-assembly-registered-cut-source-v1';
 
 export const SAVED_FULL_ASSEMBLY_COMPILE_SESSION_V1 =
   'saved-full-assembly-compile-session/1' as const;
@@ -126,6 +131,7 @@ export type SavedFullAssemblyCompileResultV1 = Readonly<{
   compileResult: DxfGarmentAssemblyMaterialCompileStageResultV1 | null;
   /** Exact content-only request consumed by the real compiler; not an authority capability. */
   compileRequest: DxfGarmentAssemblyMaterialCompileStageRequestV1 | null;
+  registeredCut?: SavedFullAssemblyRegisteredCutSourceV1;
   graph: DxfExactAssemblyGraphV1 | null;
   evidence: SavedFullAssemblyCompileEvidenceV1 | null;
   blockers: readonly Readonly<{ code: string; detail: string }>[];
@@ -950,6 +956,26 @@ export function createSavedFullAssemblyCompileSessionV1(): SavedFullAssemblyComp
         const compileResult = await stage(() =>
           compileDxfGarmentAssemblyMaterialStageV1(projection.request, ticket.controller.signal),
         );
+        let registeredCut: SavedFullAssemblyRegisteredCutSourceV1 | null = null;
+        if (
+          nativeSewing &&
+          compileResult.compiled &&
+          supportsSavedFullAssemblyRegisteredCutV1(graph)
+        ) {
+          try {
+            registeredCut = await projectSavedFullAssemblyRegisteredCutSourceV1(
+              source,
+              graph,
+              projection.request,
+              native,
+              ticket.controller.signal,
+            );
+          } catch {
+            // This optional projection never changes the historical sewing-surface compile.
+            check();
+          }
+          if (registeredCut) await read();
+        }
         check();
         const result: SavedFullAssemblyCompileResultV1 = {
           generation: ticket.generation,
@@ -957,6 +983,7 @@ export function createSavedFullAssemblyCompileSessionV1(): SavedFullAssemblyComp
           sealed: compileResult.sealed,
           compileResult,
           compileRequest: projection.request,
+          ...(registeredCut ? { registeredCut } : {}),
           graph,
           evidence: {
             row: source.row,

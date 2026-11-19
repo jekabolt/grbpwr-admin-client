@@ -1,7 +1,9 @@
-import { useLayoutEffect, useRef, useState, type PointerEvent } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 import { BETA_SKIRT_STRAIN_UTILIZATION_COLOR_LUT_V1 } from 'components/cloth-simulation-spike/beta-skirt-strain-utilization-legend-v1';
 import type { DxfGarmentObservedPreviewSurfacePointV1 } from 'components/cloth-simulation-spike/dxf-garment-observed-strain-heatmap-preview-v1';
 import type { SavedModelDisplayedTriangleBodySessionSnapshotV2 } from 'components/managers/models/components/saved-model-displayed-triangle-body-session-v2';
+import type { ModelDisplayedTriangleBodyOwnedInputV1 } from 'components/cloth-simulation-spike/model-displayed-triangle-body-input-v1';
+import type { MeasurementSurfaceAcceptedClothV1 } from 'components/shared/measurement-watertight-surface-v1-stage';
 import { Button, Text } from 'ui';
 
 import type { CadWorkbenchPhysicalPreviewInteractionV1 } from './cad-workbench-physical-host-v1';
@@ -17,10 +19,35 @@ import {
 } from './cad-workbench-first-physical-authoring-v1';
 import {
   createCadWorkbenchPreviewLifecycleV1,
+  type CadWorkbenchBoundedClothPreviewHostV1,
   type CadWorkbenchPreviewStatusV1,
 } from './cad-workbench-preview-lifecycle-v1';
 
 type HostState = ReturnType<typeof useSavedClothPhysicalHostV1>;
+type CutProof = Extract<
+  Awaited<ReturnType<NonNullable<HostState['host']>['prepareRegisteredCut']>>,
+  { ok: true }
+>['proof'];
+type CutGeometry = Readonly<{
+  positionsM: Float32Array;
+  drawRanges: readonly Readonly<{ triangleOffset: number; triangleCount: number }>[];
+}>;
+function displayedFullCut(
+  geometry: CutGeometry,
+  frameNumber: number,
+  isCurrent: () => boolean,
+): MeasurementSurfaceAcceptedClothV1 {
+  return {
+    positionsM: geometry.positionsM,
+    frameNumber,
+    ranges: geometry.drawRanges.map(({ triangleOffset, triangleCount }, index) => ({
+      triangleOffset,
+      triangleCount,
+      color: index === 0 ? 0x8ba2b1 : 0xb3a287,
+    })),
+    isCurrent,
+  };
+}
 const strainScale = BETA_SKIRT_STRAIN_UTILIZATION_COLOR_LUT_V1;
 
 function currentPreviewFrame(
@@ -127,10 +154,14 @@ export function CadWorkbenchPhysicalHostControlsV1({
   state,
   disabled = false,
   interaction = null,
+  displayedInput,
+  onAcceptedRegisteredCloth,
 }: Readonly<{
   state: HostState;
   disabled?: boolean;
   interaction?: CadWorkbenchPhysicalPreviewInteractionV1 | null;
+  displayedInput?: ModelDisplayedTriangleBodyOwnedInputV1 | null;
+  onAcceptedRegisteredCloth?: (cloth: MeasurementSurfaceAcceptedClothV1 | undefined) => void;
 }>) {
   const computeCanvas = useRef<HTMLCanvasElement>(null);
   const previewCanvas = useRef<HTMLCanvasElement>(null);
@@ -143,6 +174,94 @@ export function CadWorkbenchPhysicalHostControlsV1({
   const pending = localStatus?.pending ?? false;
   const localError = localStatus?.error;
   const editingPlacement = state.isEditingSavedPlacement?.() ?? false;
+  const scopeKey = interaction ? measurementScopeKey(interaction.scope) : null;
+  const selectedScope = useRef(interaction?.scope ?? null);
+  selectedScope.current = interaction?.scope ?? null;
+  const cutCheck = useRef<AbortController | null>(null);
+  const [cutProof, setCutProof] = useState<CutProof | null>(null);
+  const checkedCut = useRef<CutProof | null>(null);
+  const [checkingCut, setCheckingCut] = useState(false);
+  const [cutStatus, setCutStatus] = useState<CadWorkbenchPreviewStatusV1>({
+    pending: false,
+    error: null,
+  });
+  const [cutFrame, setCutFrame] = useState<number | null>(null);
+  const registeredHost = useMemo<CadWorkbenchBoundedClothPreviewHostV1 | null>(() => {
+    if (!host || !displayedInput || !scopeKey || !onAcceptedRegisteredCloth) return null;
+    return {
+      async runBounded(lease, signal) {
+        const result = await host.prepareRegisteredCut(
+          selectedScope.current,
+          displayedInput,
+          signal,
+          lease,
+          checkedCut.current ?? undefined,
+        );
+        if (!result.ok) return result;
+        if (!result.frame || !result.isCurrent())
+          return { ok: false, detail: 'No current full-cut frame was accepted.' };
+        const { frame } = result.frame;
+        onAcceptedRegisteredCloth(displayedFullCut(result.frame, frame.frame, result.isCurrent));
+        setCutFrame(frame.frame);
+        return { ok: true, releaseDevice: true };
+      },
+      async stopPreview() {
+        onAcceptedRegisteredCloth(undefined);
+        setCutFrame(null);
+        await host.stopPreview();
+      },
+    };
+  }, [displayedInput, host, onAcceptedRegisteredCloth, scopeKey]);
+
+  const clearCheckedCut = () => {
+    cutCheck.current?.abort();
+    cutCheck.current = null;
+    checkedCut.current = null;
+    setCutProof(null);
+    setCheckingCut(false);
+    onAcceptedRegisteredCloth?.(undefined);
+  };
+  useLayoutEffect(() => {
+    checkedCut.current = null;
+    setCutProof(null);
+    setCheckingCut(false);
+    setCutStatus({ pending: false, error: null });
+    return () => {
+      cutCheck.current?.abort();
+      cutCheck.current = null;
+      onAcceptedRegisteredCloth?.(undefined);
+      void lifecycle.cancel(registeredHost);
+    };
+  }, [disabled, lifecycle, onAcceptedRegisteredCloth, registeredHost]);
+
+  const preflightFullCut = async () => {
+    if (!host || !displayedInput || !lifecycle.isIdle() || cutCheck.current) return;
+    const controller = new AbortController();
+    cutCheck.current = controller;
+    setCheckingCut(true);
+    setCutStatus({ pending: false, error: null });
+    try {
+      const result = await host.prepareRegisteredCut(
+        selectedScope.current,
+        displayedInput,
+        controller.signal,
+      );
+      if (controller.signal.aborted) return;
+      checkedCut.current = result.ok ? result.proof : null;
+      setCutProof(checkedCut.current);
+      if (result.ok) {
+        onAcceptedRegisteredCloth?.(displayedFullCut(result.initial, 0, result.isCurrent));
+      } else {
+        setCutStatus({ pending: false, error: result.detail });
+      }
+    } finally {
+      if (cutCheck.current === controller) {
+        if (!checkedCut.current) cutCheck.current = null;
+        setCheckingCut(false);
+      }
+    }
+  };
+  const registeredBusy = checkingCut || cutStatus.pending;
 
   useLayoutEffect(
     () => () => {
@@ -155,11 +274,13 @@ export function CadWorkbenchPhysicalHostControlsV1({
     if (
       disabled ||
       state.isEditingSavedPlacement?.() ||
+      registeredBusy ||
       !host ||
       !computeCanvas.current ||
       !previewCanvas.current
     )
       return;
+    clearCheckedCut();
     void lifecycle.start(host, computeCanvas.current, previewCanvas.current, (status) => {
       if (status.pending) retainPreview(true);
       setPreviewStatus({ ...status, host });
@@ -175,11 +296,10 @@ export function CadWorkbenchPhysicalHostControlsV1({
   const receipt = currentFrame?.receipt ?? null;
   const previewReady = receipt !== null;
   const retainPreview = useCadWorkbenchRetainMannequinPreviewV1(
-    !disabled && (pending || previewReady),
+    !disabled && (pending || previewReady || cutStatus.pending || cutFrame !== null),
   );
   const measurements = currentFrame ? frameMeasurements(currentFrame) : [];
   const unit = usePatternImportDxfPhaseECadWorkbenchMeasurementUnitV1()?.unit ?? 'mm';
-  const scopeKey = interaction ? measurementScopeKey(interaction.scope) : null;
   const [measurement, setMeasurement] = useState<{
     host: NonNullable<HostState['host']>;
     receipt: NonNullable<typeof receipt>;
@@ -325,13 +445,13 @@ export function CadWorkbenchPhysicalHostControlsV1({
         onPointerCancel={cancelPick}
         onLostPointerCapture={cancelPick}
       />
-      <div className='pointer-events-auto absolute top-2 right-2 flex max-w-[min(24rem,calc(100%-1rem))] items-center gap-2 border border-borderColor bg-bgColor/95 px-2 py-1'>
+      <div className='pointer-events-auto absolute top-2 right-2 flex max-w-[min(26rem,calc(100%-1rem))] flex-wrap items-center gap-2 border border-borderColor bg-bgColor/95 px-2 py-1'>
         {ready && !restoreRequired ? (
           <Button
             type='button'
             size='xs'
             variant='main'
-            disabled={disabled || pending || editingPlacement}
+            disabled={disabled || pending || editingPlacement || registeredBusy}
             onClick={preview}
           >
             {pending ? 'Preparing…' : previewReady ? 'Refresh preview' : 'Preview'}
@@ -359,8 +479,83 @@ export function CadWorkbenchPhysicalHostControlsV1({
             Retry
           </Button>
         ) : null}
+        {ready && registeredHost && host?.hasRegisteredCut() && !restoreRequired && (
+          <div
+            className='flex flex-wrap items-center gap-2'
+            data-cad-registered-cut-preview={
+              cutFrame !== null
+                ? 'accepted'
+                : cutProof
+                  ? 'ready'
+                  : checkingCut
+                    ? 'checking'
+                    : 'idle'
+            }
+            data-cad-registered-cut-source={cutProof?.sourceFingerprint}
+            data-cad-registered-cut-initial={cutProof?.initialPositionsSha256}
+            data-cad-registered-cut-placement={cutProof?.placementSha256}
+            data-cad-registered-cut-body={cutProof?.bodyPositionsSha256}
+            data-cad-registered-cut-triangles={cutProof?.triangles}
+          >
+            <Button
+              type='button'
+              size='xs'
+              variant='secondary'
+              disabled={
+                disabled ||
+                pending ||
+                registeredBusy ||
+                editingPlacement ||
+                (!cutProof && !lifecycle.isIdle())
+              }
+              onClick={() => {
+                if (cutFrame !== null) {
+                  void lifecycle.cancel(registeredHost);
+                } else if (cutProof && computeCanvas.current) {
+                  retainPreview(true);
+                  void lifecycle.start(registeredHost, computeCanvas.current, null, setCutStatus);
+                } else {
+                  void preflightFullCut();
+                }
+              }}
+            >
+              {cutFrame !== null
+                ? 'Stop full-cut preview'
+                : cutProof
+                  ? cutStatus.pending
+                    ? 'Simulating…'
+                    : 'Preview with allowances'
+                  : checkingCut
+                    ? 'Checking placement…'
+                    : 'Check full cut'}
+            </Button>
+            {cutStatus.error && (
+              <Text component='span' size='micro' role='alert'>
+                {cutStatus.error}
+              </Text>
+            )}
+            {cutProof && cutFrame === null && !cutStatus.pending && (
+              <>
+                <Text component='span' size='micro' role='status'>
+                  {cutProof.derivedPlacement
+                    ? `Prepared placement · ${cutProof.derivedPlacement.gapMm} mm layer spacing · ${cutProof.derivedPlacement.outwardMm} mm shift`
+                    : 'Prepared placement · saved coordinates'}
+                </Text>
+                <Button type='button' size='xs' variant='secondary' onClick={clearCheckedCut}>
+                  Return to saved placement
+                </Button>
+              </>
+            )}
+            {cutFrame !== null && (
+              <Text component='span' size='micro' role='status'>
+                Full cut · frame {cutFrame}
+              </Text>
+            )}
+          </div>
+        )}
         {state.canEditSavedPlacement &&
         !pending &&
+        !registeredBusy &&
         !previewReady &&
         lifecycle.isIdle() &&
         !editingPlacement ? (
@@ -370,7 +565,10 @@ export function CadWorkbenchPhysicalHostControlsV1({
             variant='secondary'
             disabled={disabled}
             onClick={() => {
-              if (!disabled) void state.startSavedPlacementEdit(lifecycle.isIdle);
+              if (!disabled) {
+                clearCheckedCut();
+                void state.startSavedPlacementEdit(lifecycle.isIdle);
+              }
             }}
           >
             Edit placement
