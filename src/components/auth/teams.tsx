@@ -224,6 +224,7 @@ export function NewTeam({ session }: { session: RootSession }) {
         teamSlug: slug,
         termsAccepted: termsNeeded ? draft.agreed : undefined,
         logo: withLogo ? logo?.base64 : undefined,
+        brand: undefined,
       });
       const team = r.team;
       if (team) {

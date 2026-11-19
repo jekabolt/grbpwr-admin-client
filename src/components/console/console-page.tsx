@@ -1,5 +1,7 @@
+import type { PlatformTeam } from 'api/proto-http/admin';
 import { type ChangeEvent, useMemo, useState } from 'react';
 import {
+  Button,
   Input,
   Loader,
   Placeholder,
@@ -7,21 +9,21 @@ import {
   SectionStack,
   Text,
   Toolbar,
-  ToolbarSpacer,
-  Button,
 } from 'ui';
 import { Matrix } from './matrix';
 import {
+  keptWord,
+  shownTab,
   type Sort,
   splitBoard,
   type Tab,
   tabCounts,
   teamOneSlug,
-  usd,
   visibleDeleted,
+  visibleRequests,
   visibleTeams,
 } from './model';
-import { useConsoleData } from './use-console';
+import { useConsoleActions, useConsoleData } from './use-console';
 
 const SORTS: { value: Sort; label: string }[] = [
   { value: 'newest', label: 'newest' },
@@ -66,88 +68,139 @@ function Words<T extends string>({
 
 /** The console's home: every team as one row of feature switches. */
 export default function ConsolePage() {
-  const { rows, total, catalog, loading, error } = useConsoleData();
+  const { rows, catalog, loading, error } = useConsoleData();
   const [q, setQ] = useState('');
-  const [tab, setTab] = useState<Tab>('all');
+  const [picked, setTab] = useState<Tab>('all');
   const [sort, setSort] = useState<Sort>('newest');
   const [open, setOpen] = useState('');
 
   const board = useMemo(() => splitBoard(rows), [rows]);
-  const counts = tabCounts(board.teams);
+  const counts = tabCounts(board);
+  const tab = shownTab(picked, counts);
   const list = useMemo(
     () => visibleTeams(board.teams, { q, tab, sort }),
     [board.teams, q, tab, sort],
   );
-  const deleted = useMemo(() => visibleDeleted(board.deleted, { q, tab }), [board.deleted, q, tab]);
+  const deleted = useMemo(() => visibleDeleted(board.deleted, q), [board.deleted, q]);
+  const requests = visibleRequests(board.requests, tab);
   const teamOne = teamOneSlug(board.teams, catalog);
-  // sign-ups wait above the teams, only on the unfiltered view
-  const requests = tab === 'all' && !q.trim() ? board.requests : [];
   const empty = !board.teams.length && !board.requests.length && !board.deleted.length;
 
   const tabs: { value: Tab; label: string }[] = [
     { value: 'all', label: `all ${counts.all}` },
     { value: 'active', label: `active ${counts.active}` },
     { value: 'read_only', label: `read only ${counts.read_only}` },
+    ...(counts.requests
+      ? [{ value: 'requests' as const, label: `requests ${counts.requests}` }]
+      : []),
+    { value: 'deleted', label: `deleted ${counts.deleted}` },
   ];
+  const pickTab = (v: Tab) => {
+    setTab(v);
+    setOpen('');
+  };
+
+  if (loading) return <Loader />;
+  if (error)
+    return (
+      <Section>
+        <Placeholder label='not loaded' tone='error' />
+      </Section>
+    );
+  if (empty)
+    return (
+      <Section>
+        <Placeholder label='no teams yet' />
+      </Section>
+    );
 
   return (
-    <SectionStack>
-      <div className='flex flex-wrap items-baseline gap-x-3 gap-y-1.5 border-b border-borderColor pb-3'>
-        <Text component='h1' size='large'>
-          teams · {board.teams.length}
-        </Text>
-        <Text variant='label' className='tabular-nums'>
-          ai spend {usd(total)}
-        </Text>
-      </div>
-
-      {loading ? (
-        <Loader />
-      ) : error ? (
-        <Section>
-          <Placeholder label='not loaded' tone='error' />
-        </Section>
-      ) : empty ? (
-        <Section>
-          <Placeholder label='no teams yet' />
+    <SectionStack className='gap-4 md:gap-gutter'>
+      <Toolbar className='gap-x-3.5'>
+        <div className='w-full md:w-[17.5rem]'>
+          <Input
+            name='team-search'
+            type='text'
+            placeholder='search'
+            autoComplete='off'
+            aria-label='search teams'
+            value={q}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => setQ(e.target.value)}
+          />
+        </div>
+        <Words label='team status' value={tab} options={tabs} onChange={pickTab} />
+        {tab !== 'deleted' && (
+          <div className='md:ml-auto'>
+            <Words label='team order' value={sort} options={SORTS} onChange={setSort} />
+          </div>
+        )}
+      </Toolbar>
+      {tab === 'deleted' ? (
+        <DeletedList teams={deleted} anyDeleted={board.deleted.length > 0} />
+      ) : list.length || requests.length ? (
+        <Section className='p-0!'>
+          <Matrix
+            teams={list}
+            requests={requests}
+            withTeams={tab !== 'requests'}
+            catalog={catalog}
+            teamOne={teamOne}
+            open={open}
+            onOpen={(slug) => setOpen((cur) => (cur === slug ? '' : slug))}
+          />
         </Section>
       ) : (
-        <>
-          <Toolbar className='gap-x-3.5'>
-            <div className='w-56 max-w-full'>
-              <Input
-                name='team-search'
-                type='text'
-                placeholder='search'
-                autoComplete='off'
-                aria-label='search teams'
-                value={q}
-                onChange={(e: ChangeEvent<HTMLInputElement>) => setQ(e.target.value)}
-              />
-            </div>
-            <Words label='team status' value={tab} options={tabs} onChange={setTab} />
-            <ToolbarSpacer />
-            <Words label='team order' value={sort} options={SORTS} onChange={setSort} />
-          </Toolbar>
-          <Section className='p-0'>
-            {list.length || requests.length || deleted.length ? (
-              <Matrix
-                teams={list}
-                requests={requests}
-                deleted={deleted}
-                catalog={catalog}
-                teamOne={teamOne}
-                open={open}
-                onOpen={(slug) => setOpen((cur) => (cur === slug ? '' : slug))}
-              />
-            ) : (
-              <div className='p-4'>
-                <Placeholder label='no match' />
-              </div>
-            )}
-          </Section>
-        </>
+        <Section>
+          <Placeholder label='no match' />
+        </Section>
       )}
     </SectionStack>
+  );
+}
+
+/** The `deleted` tab: quiet rows, the wipe date as words, `restore` in one click. */
+function DeletedList({ teams, anyDeleted }: { teams: PlatformTeam[]; anyDeleted: boolean }) {
+  const act = useConsoleActions();
+  if (!teams.length)
+    return (
+      <Section>
+        <Placeholder label={anyDeleted ? 'no match' : 'nothing deleted'} />
+      </Section>
+    );
+  return (
+    <Section className='px-3! py-0! md:px-4!'>
+      {teams.map((t) => {
+        const slug = t.slug ?? '';
+        const name = t.name || slug;
+        return (
+          <div
+            key={slug}
+            className='grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-4 gap-y-0.5 border-b border-hairline py-2.5 last:border-b-0 md:grid-cols-[minmax(0,1fr)_auto_auto] md:gap-x-6'
+          >
+            <Text variant='label' component='span' className='break-words [overflow-wrap:anywhere]'>
+              {name}
+            </Text>
+            <Text
+              variant='label'
+              size='micro'
+              tracking='label'
+              component='span'
+              className='col-start-1 row-start-2 md:col-start-auto md:row-start-auto'
+            >
+              {keptWord(t.purgeAt)}
+            </Text>
+            <Button
+              variant='underline'
+              className='col-start-2 row-span-2 row-start-1 self-center md:col-start-auto md:row-span-1 md:row-start-auto'
+              aria-label={`restore ${name}`}
+              disabled={act.restoring(slug)}
+              onClick={() => act.restore(slug)}
+            >
+              restore
+            </Button>
+          </div>
+        );
+      })}
+    </Section>
   );
 }

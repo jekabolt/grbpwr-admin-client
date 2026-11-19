@@ -1,33 +1,15 @@
-import type { PlatformTeam } from 'api/proto-http/admin';
-import { teamUrl } from 'lib/host';
+import type { FeatureInfo, PlatformTeam } from 'api/proto-http/admin';
 import { type ChangeEvent, type KeyboardEvent, useRef, useState } from 'react';
-import {
-  Avatar,
-  Button,
-  ConfirmationModal,
-  GroupLabel,
-  Input,
-  Loader,
-  Pill,
-  Text,
-  ToggleSwitch,
-} from 'ui';
-import { canDelete, isReadOnly, seenWord, shortDate, usd } from './model';
-import { addressOf, useDeleteTeam, useTeamDetail } from './use-console';
+import { Avatar, Button, ConfirmationModal, Input, Loader, Text } from 'ui';
+import { FeatureSquare } from './feature-square';
+import { canDelete, featureGroups, isReadOnly, keptTillIfDeleted, seenWord } from './model';
+import { useDeleteTeam, useTeamDetail } from './use-console';
 
 /**
  * The `delete team` sheet: the operator's own password confirms it. The password lives only in this
  * component's state; the sheet is mounted while open, so closing it drops the password with it.
  */
-function DeleteTeamSheet({
-  team,
-  people,
-  onClose,
-}: {
-  team: PlatformTeam;
-  people: number;
-  onClose: () => void;
-}) {
+function DeleteTeamSheet({ team, onClose }: { team: PlatformTeam; onClose: () => void }) {
   const slug = team.slug ?? '';
   const run = useDeleteTeam();
   const field = useRef<HTMLInputElement>(null);
@@ -56,7 +38,9 @@ function DeleteTeamSheet({
     <ConfirmationModal
       open
       width='sm'
-      title='delete team'
+      lowercase
+      sheet
+      title={`delete ${team.name || slug}`}
       confirmLabel='delete'
       cancelLabel='cancel'
       confirmDisabled={!password || busy}
@@ -73,7 +57,10 @@ function DeleteTeamSheet({
     >
       <div className='flex flex-col gap-3'>
         <div>
-          {slug} · {people} people
+          <Text variant='label' component='span'>
+            kept till{' '}
+          </Text>
+          {keptTillIfDeleted()}
         </div>
         <div className='flex flex-col gap-1'>
           <Text
@@ -81,7 +68,6 @@ function DeleteTeamSheet({
             size='micro'
             tracking='label'
             component='label'
-            className='uppercase'
             htmlFor='console-delete-password'
           >
             password
@@ -112,83 +98,97 @@ function DeleteTeamSheet({
   );
 }
 
-/** The unfolded team row: workspace facts, the read-only switch and who is in the team. */
+/** The unfolded team row: on the phone the team's switches, then read only, delete and the people. */
 export function TeamDetail({
   team,
+  catalog,
   teamOne,
+  onFeature,
   onReadOnly,
 }: {
   team: PlatformTeam;
+  catalog: FeatureInfo[];
   /** Team #1 can never go read-only or be deleted (the server refuses `team_one`). */
   teamOne: boolean;
+  onFeature: (key: string, on: boolean) => void;
   onReadOnly: (on: boolean) => void;
 }) {
   const slug = team.slug ?? '';
   const detail = useTeamDetail(slug);
   const people = detail.data?.members ?? [];
   const ro = isReadOnly(team);
+  const on = new Set(team.features ?? []);
   const [deleting, setDeleting] = useState(false);
-  const count = detail.data ? people.length : team.people ?? 0;
 
   return (
-    <div className='sticky left-0 flex w-[min(68.75rem,100cqw)] flex-col gap-1.5 px-3 pb-3.5 pt-2.5'>
-      <div className='flex flex-wrap items-baseline gap-x-4 gap-y-1'>
-        <span className='whitespace-nowrap'>
-          <Text variant='label' component='span'>
-            workspace{' '}
-          </Text>
-          <a className='underline' href={teamUrl(slug, '/')}>
-            {addressOf(slug)}
-          </a>
-        </span>
-        <span className='whitespace-nowrap'>
-          <Text variant='label' component='span'>
-            since{' '}
-          </Text>
-          {shortDate(team.createdAt)}
-        </span>
-        <span className='whitespace-nowrap tabular-nums'>
-          <Text variant='label' component='span'>
-            ai spend{' '}
-          </Text>
-          {usd(team.aiSpendMonthUsd)}
-        </span>
-        {ro && <Pill tone='warn'>read only</Pill>}
-        <ToggleSwitch
-          label='read only'
+    <div className='sticky left-0 flex w-[100cqw] flex-col gap-1.5 px-3 pb-3.5 pt-2.5'>
+      <div className='md:hidden'>
+        {featureGroups(catalog).map((g) => (
+          <div key={g.group} className='border-b border-hairline py-1'>
+            <div className='pt-1.5 text-micro font-bold tracking-group text-labelColor'>
+              {g.group}
+            </div>
+            <div className='flex flex-wrap gap-x-4'>
+              {g.items.map((f) => {
+                const key = f.key ?? '';
+                return (
+                  <FeatureSquare
+                    key={key}
+                    name={`fp-${slug}-${key}`}
+                    checked={on.has(key)}
+                    locked={!!f.teamOneOnly}
+                    onChange={(v) => onFeature(key, v)}
+                  >
+                    {f.title}
+                  </FeatureSquare>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className='flex min-h-8 items-center gap-4 border-b border-borderColor pb-1 md:gap-5'>
+        <span className='mr-auto text-micro font-bold tracking-group text-labelColor'>people</span>
+        <FeatureSquare
+          name={`ro-${slug}`}
           checked={ro}
-          disabled={teamOne}
-          onCheckedChange={onReadOnly}
-        />
+          locked={teamOne}
+          onChange={onReadOnly}
+        >
+          read only
+        </FeatureSquare>
         {canDelete(team, teamOne) && (
           <Button variant='underline' onClick={() => setDeleting(true)}>
             delete
           </Button>
         )}
       </div>
-      {deleting && (
-        <DeleteTeamSheet team={team} people={count} onClose={() => setDeleting(false)} />
-      )}
-      <GroupLabel>people {count}</GroupLabel>
+      {deleting && <DeleteTeamSheet team={team} onClose={() => setDeleting(false)} />}
       {detail.isLoading ? (
         <Loader />
       ) : (
-        <div className='grid grid-cols-[repeat(auto-fill,minmax(15.625rem,1fr))] gap-x-6'>
-          {people.map((p) => (
-            <div
-              key={p.handle || p.email}
-              className='flex min-w-0 items-center gap-2 border-b border-hairline py-1'
-            >
-              <Avatar name={p.handle || p.email || ''} size={20} />
-              <span className='min-w-0 flex-1 truncate'>{p.handle || p.email}</span>
-              <Text variant='label' size='micro' className='whitespace-nowrap'>
-                {p.role}
-              </Text>
-              <Text variant='label' size='micro' className='whitespace-nowrap'>
-                {seenWord(p.lastSeenAt)}
-              </Text>
-            </div>
-          ))}
+        <div className='grid grid-cols-1 gap-x-8 md:grid-cols-[repeat(auto-fill,minmax(16.25rem,1fr))]'>
+          {people.map((p) => {
+            const who = p.handle || p.email || '';
+            const seen = seenWord(p.lastSeenAt);
+            return (
+              <div
+                key={who}
+                className='flex min-h-9 min-w-0 items-center gap-2 border-b border-hairline py-1'
+              >
+                <Avatar name={who} size={20} />
+                <span className='min-w-0 flex-1 truncate'>{who}</span>
+                <Text variant='label' size='micro' className='whitespace-nowrap'>
+                  {p.role}
+                </Text>
+                {seen !== '—' && (
+                  <Text variant='label' size='micro' className='whitespace-nowrap'>
+                    seen {seen}
+                  </Text>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

@@ -93,6 +93,7 @@ export function SignUp() {
         teamSlug: slug,
         termsAccepted: true,
         logo: withLogo ? logo?.base64 : undefined,
+        brand: undefined,
       });
       rememberEmail(draft.email.trim());
       setStep('code');

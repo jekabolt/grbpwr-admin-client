@@ -14,7 +14,7 @@ export const STATUS = {
   deleted: 'deleted',
 } as const;
 
-export type Tab = 'all' | 'active' | 'read_only';
+export type Tab = 'all' | 'active' | 'read_only' | 'requests' | 'deleted';
 export type Sort = 'newest' | 'name' | 'people';
 
 export interface Board {
@@ -43,10 +43,25 @@ export const canDelete = (t: PlatformTeam, teamOne: boolean) =>
 
 export const isReadOnly = (t: PlatformTeam) => t.status === STATUS.readOnly;
 
-export function tabCounts(teams: PlatformTeam[]): Record<Tab, number> {
-  const ro = teams.filter(isReadOnly).length;
-  return { all: teams.length, active: teams.length - ro, read_only: ro };
+/** Tab counts: `all` is the live teams only; waiting sign-ups and deleted teams count apart. */
+export function tabCounts(board: Board): Record<Tab, number> {
+  const ro = board.teams.filter(isReadOnly).length;
+  return {
+    all: board.teams.length,
+    active: board.teams.length - ro,
+    read_only: ro,
+    requests: board.requests.length,
+    deleted: board.deleted.length,
+  };
 }
+
+/** The tab shown: `requests` falls back to `all` once the last request is answered. */
+export const shownTab = (tab: Tab, counts: Record<Tab, number>): Tab =>
+  tab === 'requests' && !counts.requests ? 'all' : tab;
+
+/** Waiting sign-ups show on every tab but `deleted`, whatever the search says. */
+export const visibleRequests = (requests: PlatformTeam[], tab: Tab): PlatformTeam[] =>
+  tab === 'deleted' ? [] : requests;
 
 const time = (ts: string | undefined) => (ts ? Date.parse(ts) || 0 : 0);
 
@@ -55,12 +70,8 @@ const matches = (t: PlatformTeam, needle: string) =>
   (t.slug ?? '').toLowerCase().includes(needle) ||
   (t.name ?? '').toLowerCase().includes(needle);
 
-/** Deleted teams show under the `all` tab only, filtered by the same search. */
-export function visibleDeleted(
-  deleted: PlatformTeam[],
-  { q, tab }: { q: string; tab: Tab },
-): PlatformTeam[] {
-  if (tab !== 'all') return [];
+/** The `deleted` tab's list: the deleted teams the search matches, in the server's order. */
+export function visibleDeleted(deleted: PlatformTeam[], q: string): PlatformTeam[] {
   const needle = q.trim().toLowerCase();
   return deleted.filter((t) => matches(t, needle));
 }
@@ -70,6 +81,7 @@ export function visibleTeams(
   { q, tab, sort }: { q: string; tab: Tab; sort: Sort },
 ): PlatformTeam[] {
   const needle = q.trim().toLowerCase();
+  if (tab === 'requests' || tab === 'deleted') return [];
   const list = teams.filter((t) => {
     if (tab === 'active' && isReadOnly(t)) return false;
     if (tab === 'read_only' && !isReadOnly(t)) return false;
@@ -95,6 +107,19 @@ export function shortDate(ts: string | undefined): string {
   if (!t) return '—';
   const d = new Date(t);
   return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
+}
+
+/** Days a deleted team is kept before its data is wiped (the server's retention). */
+export const RETENTION_DAYS = 30;
+
+/** A deleted team's wipe date as words that cannot read as the past: `kept till dec 19`. */
+export function keptWord(purgeAt: string | undefined): string {
+  return time(purgeAt) ? `kept till ${shortDate(purgeAt)}` : '';
+}
+
+/** The delete sheet's restore fact: the day a team deleted now is kept till (`dec 19`). */
+export function keptTillIfDeleted(now = Date.now()): string {
+  return shortDate(new Date(now + RETENTION_DAYS * 86_400_000).toISOString());
 }
 
 /** Last seen: `now`, `12 min`, `5 h`, `yesterday`, then the date. */

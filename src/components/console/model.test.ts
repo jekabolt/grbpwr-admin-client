@@ -4,15 +4,20 @@ import {
   canDelete,
   deleteRefusal,
   featureGroups,
+  keptTillIfDeleted,
+  keptWord,
   onCount,
   patchTeam,
   refusalWord,
+  RETENTION_DAYS,
   seenWord,
+  shownTab,
   splitBoard,
   tabCounts,
   teamOneSlug,
   usd,
   visibleDeleted,
+  visibleRequests,
   visibleTeams,
   withFeature,
   withReadOnly,
@@ -67,7 +72,49 @@ describe('splitBoard', () => {
     ]);
     expect(b.teams.map((x) => x.slug)).toEqual(['a']);
     expect(b.deleted.map((x) => x.slug)).toEqual(['x', 'w']);
-    expect(tabCounts(b.teams)).toEqual({ all: 1, active: 1, read_only: 0 });
+    expect(tabCounts(b)).toEqual({ all: 1, active: 1, read_only: 0, requests: 0, deleted: 2 });
+  });
+});
+
+describe('tabs', () => {
+  const board = splitBoard([
+    t('a'),
+    t('b', { status: 'read_only' }),
+    t('r1', { status: 'review' }),
+    t('r2', { status: 'review' }),
+    t('d1', { status: 'deleted' }),
+    t('d2', { status: 'deleted' }),
+    t('d3', { status: 'deleted' }),
+    t('p', { status: 'pending' }),
+  ]);
+  it('counts all without requests and deleted teams', () => {
+    expect(tabCounts(board)).toEqual({ all: 2, active: 1, read_only: 1, requests: 2, deleted: 3 });
+  });
+  it('the requests and deleted tabs list no live team', () => {
+    for (const tab of ['requests', 'deleted'] as const)
+      expect(visibleTeams(board.teams, { q: '', tab, sort: 'newest' })).toEqual([]);
+  });
+  it('requests show on every tab but deleted, whatever the search', () => {
+    for (const tab of ['all', 'active', 'read_only', 'requests'] as const)
+      expect(visibleRequests(board.requests, tab)).toHaveLength(2);
+    expect(visibleRequests(board.requests, 'deleted')).toEqual([]);
+  });
+  it('the requests tab falls back to all once none wait', () => {
+    expect(shownTab('requests', tabCounts(board))).toBe('requests');
+    expect(shownTab('requests', tabCounts(splitBoard([t('a')])))).toBe('all');
+    expect(shownTab('deleted', tabCounts(splitBoard([t('a')])))).toBe('deleted');
+  });
+});
+
+describe('wipe date words', () => {
+  it('reads as a date to come, never as the past', () => {
+    expect(keptWord('2026-12-19T12:00:00Z')).toBe('kept till dec 19');
+    expect(keptWord(undefined)).toBe('');
+    expect(keptWord('junk')).toBe('');
+  });
+  it('the delete sheet says the day thirty days on', () => {
+    expect(RETENTION_DAYS).toBe(30);
+    expect(keptTillIfDeleted(Date.parse('2026-11-19T12:00:00Z'))).toBe('dec 19');
   });
 });
 
@@ -80,14 +127,10 @@ describe('delete and restore', () => {
       expect(canDelete(t('a', { status }), false)).toBe(false);
     }
   });
-  it('deleted teams show under all only, searched like the rest', () => {
+  it('the deleted tab searches like the rest', () => {
     const gone = [t('golden-a', { name: 'golden a', status: 'deleted' }), t('vela')];
-    expect(visibleDeleted(gone, { q: '', tab: 'all' })).toHaveLength(2);
-    expect(visibleDeleted(gone, { q: 'GOLDEN', tab: 'all' }).map((x) => x.slug)).toEqual([
-      'golden-a',
-    ]);
-    expect(visibleDeleted(gone, { q: '', tab: 'active' })).toEqual([]);
-    expect(visibleDeleted(gone, { q: '', tab: 'read_only' })).toEqual([]);
+    expect(visibleDeleted(gone, '')).toHaveLength(2);
+    expect(visibleDeleted(gone, 'GOLDEN').map((x) => x.slug)).toEqual(['golden-a']);
   });
   it('deleteRefusal maps the server answers', () => {
     const err = (message: string, status: number) => Object.assign(new Error(message), { status });
@@ -121,7 +164,7 @@ describe('visibleTeams', () => {
       visibleTeams(rows, { q: '', tab: 'read_only', sort: 'newest' }).map((x) => x.slug),
     ).toEqual(['atelier-nord']);
     expect(visibleTeams(rows, { q: '', tab: 'active', sort: 'newest' })).toHaveLength(2);
-    expect(tabCounts(rows)).toEqual({ all: 3, active: 2, read_only: 1 });
+    expect(tabCounts(splitBoard(rows))).toMatchObject({ all: 3, active: 2, read_only: 1 });
   });
   it('sorts newest, name, people', () => {
     expect(visibleTeams(rows, { q: '', tab: 'all', sort: 'newest' }).map((x) => x.slug)).toEqual([
