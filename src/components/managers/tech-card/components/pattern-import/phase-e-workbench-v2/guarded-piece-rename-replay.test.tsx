@@ -72,7 +72,13 @@ async function setup() {
           savedRowRevision: seed.row.revision,
         },
       ],
-      pieces: seed.card.existingPieces.map((piece) => ({ ...piece, piecesPerGarment: 2 })),
+      pieces: seed.card.existingPieces.map((piece) => ({
+        ...piece,
+        piecesPerGarment: 2,
+        grainline: 'lengthwise',
+        cutSymmetry: 'TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL',
+        note: 'Keep grain aligned.',
+      })),
       pieceDxfAliases: {
         items: existingAliases.map((alias) => ({ ...alias, fabricPurpose: MAIN })),
       },
@@ -216,6 +222,10 @@ it('verifies the sparse rename and freshly opens identical exact pattern bytes w
       );
       expect(zeroMarkup).toContain(NAME);
       expect(zeroMarkup).toContain('Rename piece');
+      expect(zeroMarkup).toContain('<dt>Cut quantity</dt><dd>2</dd>');
+      expect(zeroMarkup).toContain('<dt>Grain direction</dt><dd>↑ lengthwise</dd>');
+      expect(zeroMarkup).toContain('<dt>Cut symmetry</dt><dd>identical copies</dd>');
+      expect(zeroMarkup).toContain('Keep grain aligned.');
       expect(save).not.toHaveBeenCalled();
       const linkedMarkup = renderToStaticMarkup(<CadTablePieceSelection {...props} />);
       expect(linkedMarkup).toContain(NAME);

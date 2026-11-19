@@ -1,6 +1,8 @@
-import { useState, type ChangeEvent, type KeyboardEvent } from 'react';
+import type { common_TechCardPiece } from 'api/proto-http/admin';
+import { Fragment, useState, type ChangeEvent, type KeyboardEvent } from 'react';
 import { Button, Input } from 'ui';
 import type { GuardedSavedPieceRename } from '../../guarded-piece-rename';
+import { cutSymmetryBadge, grainlineText } from '../../piece-codes';
 import { normalizeTechCardPieceRename } from 'utils/pattern';
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 import { areaOf, perimeter } from 'lib/pattern-import/semantics/geom';
@@ -48,7 +50,12 @@ export function handleCadTablePieceSelectionKey(
   }));
 }
 
-type SavedPieceName = Readonly<{ lineKey: string | undefined; name: string | undefined }>;
+type SavedPieceMetadata = Readonly<
+  Pick<
+    common_TechCardPiece,
+    'lineKey' | 'name' | 'piecesPerGarment' | 'grainline' | 'cutSymmetry' | 'note'
+  >
+>;
 
 type RenamePiece = Readonly<{
   row: GuardedSavedPieceRename['row'];
@@ -141,29 +148,34 @@ export function CadTablePieceSelection({
   owner: CadTableZeroCanvasOwner;
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
   features?: CadTablePieceFeaturesByKey;
-  savedPieces?: readonly SavedPieceName[];
+  savedPieces?: readonly SavedPieceMetadata[];
   renamePiece?: RenamePiece;
   operationIssueCount?: number;
 }>) {
   const { selectedPieceKeys } = owner.session.layout;
   const unit = usePatternImportDxfPhaseECadWorkbenchMeasurementUnitV1()?.unit ?? 'mm';
-  const savedNames = new Map<string, string | null>();
-  for (const { lineKey, name } of savedPieces ?? []) {
-    if (!lineKey) continue;
-    savedNames.set(lineKey, savedNames.has(lineKey) ? null : name?.trim() ? name : null);
+  const savedMetadata = new Map<string, SavedPieceMetadata | null>();
+  for (const metadata of savedPieces ?? []) {
+    if (!metadata.lineKey) continue;
+    savedMetadata.set(metadata.lineKey, savedMetadata.has(metadata.lineKey) ? null : metadata);
   }
   const rows = projection.pieces.map((piece) => {
     const objectKey = patternImportDxfPhaseECadTablePieceKeyV1(piece.pieceId, piece.pieceLineKey);
     const feature = features?.get(objectKey);
+    const metadata = savedMetadata.get(piece.pieceLineKey);
+    const savedName = metadata?.name?.trim() ? metadata.name : null;
+    const quantity = metadata?.piecesPerGarment ?? feature?.quantity;
     return {
       piece,
       objectKey,
       pieceId: piece.pieceId,
-      savedName: savedNames.get(piece.pieceLineKey),
-      label: savedNames.get(piece.pieceLineKey) || feature?.pieceLabel || piece.pieceId,
+      metadata,
+      feature,
+      savedName,
+      label: savedName || feature?.pieceLabel || piece.pieceId,
       material: feature?.materialLabel,
-      quantity: feature?.quantity,
-      statusLabel: feature?.quantity == null ? '—' : undefined,
+      quantity,
+      statusLabel: quantity == null ? '—' : undefined,
     };
   });
   const active =
@@ -171,6 +183,11 @@ export function CadTablePieceSelection({
       ? rows.find(({ objectKey }) => objectKey === selectedPieceKeys[0])
       : undefined;
   const renameLineKey = active?.piece.pieceLineKey;
+  const grainAngle = active?.feature?.grain?.angleDeg;
+  const grainDirection = grainlineText(active?.metadata?.grainline);
+  const symmetry = active?.metadata
+    ? cutSymmetryBadge(active.metadata.cutSymmetry, active.quantity)
+    : null;
 
   let measurements: { areaMm2: number; perimeterMm: number; sewingOnly: boolean } | null = null;
   if (active) {
@@ -193,6 +210,29 @@ export function CadTablePieceSelection({
         measurements = { areaMm2, perimeterMm, sewingOnly: outer === 'sewing-boundary' };
     }
   }
+
+  const details: readonly (readonly [string, string | number | null | undefined])[] = [
+    ['Material', active?.material],
+    ['Cut quantity', active?.quantity],
+    [
+      'Grain angle',
+      typeof grainAngle === 'number' && Number.isFinite(grainAngle)
+        ? `${grainAngle.toFixed(1)}°`
+        : null,
+    ],
+    ['Grain direction', grainDirection],
+    ['Cut symmetry', symmetry?.label],
+    [
+      measurements?.sewingOnly ? 'Sewing area' : 'Area',
+      measurements && formatPatternImportDxfPhaseEMeasurementAreaV1(measurements.areaMm2, unit),
+    ],
+    [
+      measurements?.sewingOnly ? 'Sewing perimeter' : 'Perimeter',
+      measurements &&
+        formatPatternImportDxfPhaseEMeasurementValueV1(measurements.perimeterMm, unit).formatted,
+    ],
+  ];
+  const note = active?.metadata?.note?.trim();
 
   return (
     <PatternImportDxfPhaseECadWorkbenchObjectSidebarV1
@@ -223,20 +263,17 @@ export function CadTablePieceSelection({
                 save={renamePiece.save}
               />
             ) : null}
-            {active.material ? <p className='text-labelColor'>{active.material}</p> : null}
-            {measurements ? (
-              <dl className='grid grid-cols-[1fr_auto] gap-x-2 tabular-nums'>
-                <dt>{measurements.sewingOnly ? 'Sewing area' : 'Area'}</dt>
-                <dd>{formatPatternImportDxfPhaseEMeasurementAreaV1(measurements.areaMm2, unit)}</dd>
-                <dt>{measurements.sewingOnly ? 'Sewing perimeter' : 'Perimeter'}</dt>
-                <dd>
-                  {
-                    formatPatternImportDxfPhaseEMeasurementValueV1(measurements.perimeterMm, unit)
-                      .formatted
-                  }
-                </dd>
-              </dl>
-            ) : null}
+            <dl className='grid grid-cols-[1fr_auto] gap-x-2 tabular-nums'>
+              {details.map(([label, value]) =>
+                value == null || value === '' ? null : (
+                  <Fragment key={label}>
+                    <dt>{label}</dt>
+                    <dd>{value}</dd>
+                  </Fragment>
+                ),
+              )}
+            </dl>
+            {note && <p className='whitespace-pre-wrap text-labelColor'>{note}</p>}
           </section>
         ) : selectedPieceKeys.length > 1 ? (
           <p className='shrink-0 border-t border-borderColor p-2 text-micro' aria-live='polite'>
