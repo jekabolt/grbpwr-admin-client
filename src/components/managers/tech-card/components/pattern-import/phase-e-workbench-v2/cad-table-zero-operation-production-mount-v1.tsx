@@ -1208,24 +1208,27 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
     currentPreparation?.status === 'settled' ? currentPreparation.authoringPrepared : null;
   const rebindExpectation =
     currentPreparation?.status === 'settled' ? currentPreparation.rebindExpectation : null;
-  const renameAuthority =
+  const savedPieceAuthority =
     authoringPrepared?.authoringAuthority ??
-    (linkedPieceRename && resolvedSource === 'saved' && prepared && 'authoringAuthority' in prepared
+    (resolvedSource === 'saved' && prepared && 'authoringAuthority' in prepared
       ? prepared.authoringAuthority
       : undefined);
   const currentSavedPieceMetadata =
-    isPatternImportDxfPhaseEZeroConnectPreparedAuthorityV1(renameAuthority) &&
-    renameAuthority.row.cardLockVersion === resolvedSavedCard?.lockVersion
+    isPatternImportDxfPhaseEZeroConnectPreparedAuthorityV1(savedPieceAuthority) &&
+    savedPieceAuthority.row.cardLockVersion === resolvedSavedCard?.lockVersion
       ? resolvedSavedCard?.techCard?.pieces
       : undefined;
   const attachedRename =
     linkedPieceRename &&
-    isPatternImportDxfPhaseEZeroConnectPreparedAuthorityV1(renameAuthority) &&
+    isPatternImportDxfPhaseEZeroConnectPreparedAuthorityV1(savedPieceAuthority) &&
     Object.entries(linkedPieceRename.row).every(
-      ([key, value]) => renameAuthority.row[key as keyof typeof renameAuthority.row] === value,
+      ([key, value]) =>
+        savedPieceAuthority.row[key as keyof typeof savedPieceAuthority.row] === value,
     )
       ? linkedPieceRename.attachment
       : undefined;
+  const renameAuthority =
+    authoringPrepared?.authoringAuthority ?? (attachedRename ? savedPieceAuthority : undefined);
   const emptyRename =
     selection.operationNumber == null &&
     resolvedSavedCard?.techCard &&
