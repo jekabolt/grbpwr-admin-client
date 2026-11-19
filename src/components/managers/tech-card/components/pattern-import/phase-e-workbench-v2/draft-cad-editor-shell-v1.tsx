@@ -8,6 +8,7 @@ import {
   PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_PRODUCTIVE_TOOLS_V1,
   type PatternImportDxfPhaseEDraftCadSessionV1,
   type PatternImportDxfPhaseEDraftCadToolV1,
+  draftCadNewPieceObjectKeyV1,
   listActiveDraftCadNewPiecesV1,
 } from './draft-cad-session-v1';
 import { PatternImportDxfPhaseECadWorkbenchToolButtonV1 } from './cad-workbench-tool-button-v1';
@@ -146,7 +147,7 @@ export type PatternImportDxfPhaseEDraftCadEditorShellPropsV1 = Readonly<{
     pieceCount: number;
     active: boolean;
   }>[];
-  onFocusPiece?: (pieceId: string, toggle: boolean) => void;
+  onFocusPiece?: (objectKey: string, toggle: boolean) => void;
   onToolChange: (tool: PatternImportDxfPhaseEDraftCadToolV1) => void;
   onTopologyToolChange?: (tool: PatternImportDxfPhaseEDraftCadTopologyToolV1 | null) => void;
   onUndo: () => void;
@@ -210,7 +211,7 @@ export function PatternImportDxfPhaseEDraftCadEditorShellV1({
     0,
   );
   const draftNewPieces = listActiveDraftCadNewPiecesV1(session).map((piece) => ({
-    objectKey: `draft:${piece.commandId}`,
+    objectKey: draftCadNewPieceObjectKeyV1(piece.commandId),
     pieceId: piece.pieceId,
     label: piece.displayName,
     quantity: 1,
@@ -377,7 +378,7 @@ export function PatternImportDxfPhaseEDraftCadEditorShellV1({
             fabricCount={materialScopes.length}
             collapsed={objectSidebarCollapsed}
             onCollapsedChange={setObjectSidebarCollapsed}
-            onFocusPiece={(pieceId, { toggle }) => onFocusPiece?.(pieceId, toggle)}
+            onFocusPiece={(objectKey, { toggle }) => onFocusPiece?.(objectKey, toggle)}
           />
         </div>
         <div className='relative min-h-[42rem] min-w-0'>

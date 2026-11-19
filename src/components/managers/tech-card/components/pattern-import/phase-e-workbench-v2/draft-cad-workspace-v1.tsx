@@ -68,6 +68,7 @@ import {
 import { PatternImportDxfPhaseEDraftCadEditorShellV1 } from './draft-cad-editor-shell-v1';
 import type { PatternImportDxfPhaseEDraftCadGeometryCompileArtifactV1 } from './draft-cad-geometry-compile-v1';
 import {
+  draftCadNewPieceObjectKeyV1,
   listActiveDraftCadNewPiecesV1,
   redoPatternImportDxfPhaseEDraftCadSessionV1,
   undoPatternImportDxfPhaseEDraftCadSessionV1,
@@ -609,7 +610,11 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
       onConnectChange={
         onCrossScopeConnect && !crossScopeConnectDisabled ? changeCrossScopeConnect : undefined
       }
-      selectedPieceIds={draftPieceId ? [draftPieceId] : selectedPieceIds}
+      selectedPieceIds={
+        draftPieceId && selectedDraftPiece
+          ? [draftCadNewPieceObjectKeyV1(selectedDraftPiece.commandId)]
+          : selectedPieceIds
+      }
       onArrangeSelectionAction={(action) =>
         publishArrangement(
           applyPatternImportDxfPhaseEDraftCadArrangementActionV1(arrangement, action),
@@ -625,13 +630,13 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
             }))
           : []
       }
-      onFocusPiece={(pieceId, toggle) => {
-        const index = projection.pieces.findIndex((piece) => piece.pieceId === pieceId);
-        if (index < 0) {
-          const piece = draftPieces.find((candidate) => candidate.pieceId === pieceId);
-          if (!piece) return;
+      onFocusPiece={(objectKey, toggle) => {
+        const piece = draftPieces.find(
+          (candidate) => draftCadNewPieceObjectKeyV1(candidate.commandId) === objectKey,
+        );
+        if (piece) {
           setSelectedDraftPiece({
-            pieceId,
+            pieceId: piece.pieceId,
             commandId: piece.commandId,
             catalogSha256: session.source.catalog.canonicalSha256,
           });
@@ -641,6 +646,9 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
           );
           return;
         }
+        const pieceId = objectKey;
+        const index = projection.pieces.findIndex((piece) => piece.pieceId === pieceId);
+        if (index < 0) return;
         setSelectedDraftPiece(null);
         const next = !toggle
           ? [pieceId]

@@ -705,6 +705,10 @@ export function createPatternImportDxfPhaseEDraftCadSessionV1(
   });
 }
 
+export function draftCadNewPieceObjectKeyV1(commandId: string) {
+  return `draft:${commandId}`;
+}
+
 export function listActiveDraftCadNewPiecesV1(session: PatternImportDxfPhaseEDraftCadSessionV1) {
   return session.history.slice(0, session.cursor).flatMap(({ commands }) =>
     commands.flatMap((command) => {
