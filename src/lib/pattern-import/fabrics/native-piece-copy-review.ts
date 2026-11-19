@@ -5,6 +5,7 @@ import { authoredPointKind } from '../manifest/authored-point';
 import { AUTHORED_TEXT_HEIGHT_MM, AUTHORED_TEXT_LAYER } from '../manifest/authored-text';
 import { PATIMPORT, type ManifestBlock } from '../types';
 import { asciiText, num } from '../write/format';
+import { R12_TEXT_HEIGHT, R12_TEXT_PITCH } from '../write/r12';
 
 function requireMatch(ok: unknown, detail: string): asserts ok {
   if (!ok) throw new Error(`Unlinked copy review refused: ${detail}.`);
@@ -26,7 +27,12 @@ const allowed: Record<string, readonly number[]> = {
 };
 
 /** The only ignored displacement is the common translation of a whole block on the writer's sheet. */
-function nativeBlock(block: RawBlock, record: ManifestBlock) {
+function nativeBlock(
+  block: RawBlock,
+  record: ManifestBlock,
+  displayHeading?: RawEntity,
+  preserveSheetPosition = false,
+) {
   const { identity } = record;
   const outer = block.entities.find((e) => e.type === 'POLYLINE' && e.layer === '1');
   const first = outer?.children[0];
@@ -56,6 +62,7 @@ function nativeBlock(block: RawBlock, record: ManifestBlock) {
         requireMatch(coordinate(value) === 0n, 'non-planar coordinate');
       if (e.type === 'TEXT' && e.layer === '1' && code === 1 && value === `Piece Name: ${identity}`)
         return [code, { pieceName: true }];
+      if (e === displayHeading && code === 1) return [code, { displayHeading: true }];
       return [code, value];
     });
     return [e.type, e.layer, tags, e.children.map(entity)];
@@ -63,6 +70,7 @@ function nativeBlock(block: RawBlock, record: ManifestBlock) {
   const relative = (value: number, axis: 'x' | 'y') =>
     (BigInt(value) - (axis === 'x' ? x : y)).toString();
   return JSON.stringify({
+    ...(preserveSheetPosition ? { cutOrigin: [x.toString(), y.toString()] } : {}),
     entities: block.entities.map(entity),
     authoredInternal: record.authoredInternal?.map((feature) => ({
       ...feature,
@@ -80,6 +88,34 @@ function nativeBlock(block: RawBlock, record: ManifestBlock) {
 }
 
 export type NativePieceCopyMode = 'duplicate' | 'mirror-across-grain';
+type ReviewedDisplayHeadings = Readonly<{ source: string; copy: string }>;
+
+/** One R12 writer heading, bound to the manifest label and the exact AAMA text row. */
+function writerDisplayHeading(block: RawBlock, displayName: string): RawEntity {
+  const displayEntities = block.entities.filter(({ layer }) => layer === '15');
+  const heading = displayEntities[0];
+  const previous = heading && block.entities[block.entities.indexOf(heading) - 1];
+  requireMatch(
+    displayEntities.length === 1 &&
+      heading.type === 'TEXT' &&
+      heading.children.length === 0 &&
+      heading.tags.length === allowed.TEXT.length &&
+      allowed.TEXT.every((code) => read(heading, code) !== undefined) &&
+      read(heading, 1) === asciiText(displayName) &&
+      read(heading, 7) === 'STANDARD' &&
+      read(heading, 40) === num(R12_TEXT_HEIGHT) &&
+      read(heading, 50) === num(0) &&
+      read(heading, 30) === num(0) &&
+      previous?.type === 'TEXT' &&
+      previous.layer === '1' &&
+      /^(Material|Category): /.test(read(previous, 1) ?? '') &&
+      read(heading, 10) === read(previous, 10) &&
+      coordinate(read(heading, 20)) ===
+        coordinate(read(previous, 20)) - coordinate(num(R12_TEXT_PITCH)),
+    'the manifest display heading does not match its exact R12 writer row',
+  );
+  return heading;
+}
 
 /** Coordinates relative to each block's directed, written grain. A reflection must land exactly
  * on the other block's six-decimal DXF grid. Winding carries the cut/hole distinction. */
@@ -248,7 +284,11 @@ function grainFrame(block: RawBlock, record: ManifestBlock, reflect: boolean) {
   });
 }
 
-function inventory(text: string, mirror?: { id: string; reflect: boolean }) {
+function inventory(
+  text: string,
+  mirror?: { id: string; reflect: boolean },
+  displayHeading?: { id: string; label: string },
+) {
   requireMatch(text.length > 0 && text.length <= PATIMPORT.maxInputBytes, 'invalid DXF size');
   const manifest = readManifest(text);
   requireMatch(manifest && manifest.sizes.length > 0, 'no saved writer manifest or sizes');
@@ -273,12 +313,22 @@ function inventory(text: string, mirror?: { id: string; reflect: boolean }) {
           e.tags.every((t) => [8, 2, 10, 20, 30].includes(t.code)) &&
           coordinate(read(e, 30)) === 0n &&
           coordinate(read(e, 10)) >= 0n &&
+          (!displayHeading || coordinate(read(e, 10)) === 0n) &&
           coordinate(read(e, 20)) === 0n,
       ),
     'missing, transformed or ambiguous native insertion',
   );
   const shapes = new Map<string, Map<string, string>>();
   const grainRanks = new Map<string, string>();
+  const displayHeadingRanks = new Map<string, string>();
+  if (displayHeading) {
+    const piece = manifest.pieces.find(({ identity }) => identity === displayHeading.id);
+    requireMatch(
+      piece?.displayName === displayHeading.label &&
+        piece.displayName.toUpperCase() !== piece.identity.toUpperCase(),
+      'the display heading is not bound to the reviewed manifest piece',
+    );
+  }
   for (const b of manifest.blocks) {
     const native = raw.blocks.get(b.block);
     requireMatch(
@@ -293,8 +343,12 @@ function inventory(text: string, mirror?: { id: string; reflect: boolean }) {
     const key = JSON.stringify([rank[0]!.rank, b.sizeToken, b.sizeId]);
     const ranks = shapes.get(b.identity) ?? new Map<string, string>();
     requireMatch(!ranks.has(key), 'duplicate native size rank');
-    ranks.set(key, nativeBlock(native, b));
+    ranks.set(key, nativeBlock(native, b, undefined, !!displayHeading));
     if (mirror?.id === b.identity) grainRanks.set(key, grainFrame(native, b, mirror.reflect));
+    if (displayHeading?.id === b.identity) {
+      const heading = writerDisplayHeading(native, displayHeading.label);
+      displayHeadingRanks.set(key, nativeBlock(native, b, heading));
+    }
     shapes.set(b.identity, ranks);
   }
   requireMatch(
@@ -303,7 +357,7 @@ function inventory(text: string, mirror?: { id: string; reflect: boolean }) {
       new Set(manifest.pieces.map((p) => p.identity)).size === manifest.pieces.length,
     'missing writer piece',
   );
-  return { manifest, shapes, grainRanks };
+  return { manifest, shapes, grainRanks, displayHeadingRanks };
 }
 
 /** Every original native block and exactly one additional independent piece must survive the ordinary writer. */
@@ -312,12 +366,29 @@ export function nativePieceCopyVerifier(
   sourceIdentity: string,
   copyIdentity: string,
   mode: NativePieceCopyMode = 'duplicate',
+  displayHeadings?: ReviewedDisplayHeadings,
 ) {
   requireMatch(mode === 'duplicate' || mode === 'mirror-across-grain', 'unknown copy operation');
   const mirror = mode === 'mirror-across-grain';
-  const source = inventory(sourceText, mirror ? { id: sourceIdentity, reflect: true } : undefined);
+  requireMatch(
+    !displayHeadings ||
+      (!mirror &&
+        /^[A-Z][A-Z0-9_]*$/.test(displayHeadings.source) &&
+        /^[A-Z][A-Z0-9_]*$/.test(displayHeadings.copy) &&
+        displayHeadings.source !== displayHeadings.copy),
+    'unsupported reviewed display heading',
+  );
+  const source = inventory(
+    sourceText,
+    mirror ? { id: sourceIdentity, reflect: true } : undefined,
+    displayHeadings && { id: sourceIdentity, label: displayHeadings.source },
+  );
   return (resultText: string) => {
-    const result = inventory(resultText, mirror ? { id: copyIdentity, reflect: false } : undefined);
+    const result = inventory(
+      resultText,
+      mirror ? { id: copyIdentity, reflect: false } : undefined,
+      displayHeadings && { id: copyIdentity, label: displayHeadings.copy },
+    );
     const original = source.shapes.get(sourceIdentity),
       copied = result.shapes.get(copyIdentity);
     const sourcePiece = source.manifest.pieces.find((p) => p.identity === sourceIdentity);
@@ -373,7 +444,10 @@ export function nativePieceCopyVerifier(
             sourcePiece.fused === copy.fused &&
             source.grainRanks.size === source.manifest.sizes.length &&
             sameRanks(source.grainRanks, result.grainRanks)
-        : sameRanks(original, copied),
+        : displayHeadings
+          ? source.displayHeadingRanks.size === source.manifest.sizes.length &&
+            sameRanks(source.displayHeadingRanks, result.displayHeadingRanks)
+          : sameRanks(original, copied),
       mirror
         ? 'the new piece differs from the exact reflected native layers, marks, material or ranks'
         : 'the duplicate changed a native layer, mark, coordinate or rank',

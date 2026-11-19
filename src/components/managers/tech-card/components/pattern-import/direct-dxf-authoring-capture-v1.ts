@@ -17,6 +17,7 @@ import {
 import { sha256Hex } from 'lib/features/sha256';
 import type {
   CardDraft,
+  ConversionManifest,
   PatternImportOpenFile,
   StageIO,
   StageName,
@@ -52,8 +53,36 @@ export async function directDxfAuthoringOpenFileV1(
 
 // Routing hint only. The independent saved-copy owner authenticates the original File and exact writer result.
 const unlinkedPieceCopyFiles = new WeakSet<File>();
-export function markUnlinkedPieceCopyFileV1(file: File) {
+type UnlinkedCopyHeadingReview = Readonly<{ scopeKey: string; manifest: ConversionManifest }>;
+const unlinkedCopyHeadings = new WeakMap<File, UnlinkedCopyHeadingReview>();
+export function markUnlinkedPieceCopyFileV1(file: File, heading?: UnlinkedCopyHeadingReview) {
   unlinkedPieceCopyFiles.add(file);
+  if (heading) unlinkedCopyHeadings.set(file, heading);
+}
+
+/** Preserve the verified own-format names on a heading-copy review through ordinary semantics. */
+export async function runOrdinaryDxfReviewSemanticsV1(
+  files: readonly File[],
+  card: Readonly<{ techCardId: number; scopeKey?: string }>,
+  input: StageIO['semantics']['in'],
+  run: (input: StageIO['semantics']['in']) => Promise<StageIO['semantics']['out']>,
+) {
+  const heading = files.length === 1 && unlinkedCopyHeadings.get(files[0]!);
+  if (!heading) return run(input);
+  if (heading.scopeKey !== card.scopeKey || heading.manifest.techCardId !== card.techCardId)
+    throw new Error('The reviewed unlinked copy belongs to another card or material scope.');
+  const {
+    buildPatternImportDxfExactManifestPieceOverridesV1,
+    buildPatternImportDxfSavedManifestAllowanceV1,
+  } = await import('./phase-e-workbench-v2/saved-dxf-reprocess-host-v1');
+  const fileAllowance = buildPatternImportDxfSavedManifestAllowanceV1(heading.manifest);
+  const initial = await run({ ...input, fileAllowance });
+  const exact = buildPatternImportDxfExactManifestPieceOverridesV1(initial, heading.manifest);
+  const pieceOverrides = { ...input.pieceOverrides };
+  for (const [seed, override] of Object.entries(exact)) {
+    pieceOverrides[Number(seed)] = { ...pieceOverrides[Number(seed)], ...override };
+  }
+  return run({ ...input, fileAllowance, pieceOverrides });
 }
 
 const reviewedCopyScopes = new WeakMap<CardDraft['scopes'][number], File>();

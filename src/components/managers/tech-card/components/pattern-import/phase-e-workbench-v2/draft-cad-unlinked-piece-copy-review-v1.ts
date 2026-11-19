@@ -11,7 +11,13 @@ import {
 } from 'lib/pattern-import/fabrics/native-piece-copy-review';
 import { sealApplyNewPieceIntent } from 'lib/pattern-import/fabrics/apply-new-piece-intent';
 import { aliasNames, aliasKey } from 'lib/pattern-import/fabrics/draft';
-import type { CardDraft } from 'lib/pattern-import/types';
+import {
+  identitiesOf,
+  identityProblem,
+  modStage,
+  sizeTokenTest,
+} from 'lib/pattern-import/manifest/identity';
+import type { CardDraft, ConversionManifest } from 'lib/pattern-import/types';
 import { writeDxfDetailed } from 'lib/pattern-import/write';
 import {
   PATTERN_IMPORT_DXF_PRODUCT_WRITER_REPLAY_V1,
@@ -53,6 +59,7 @@ type State = {
   sourceIdentity: string;
   sourceKey: string;
   identity: string;
+  headingManifest?: ConversionManifest;
   check: () => void;
   revalidate: () => Promise<void>;
   verifyGeometry: (resultText: string) => void;
@@ -171,13 +178,15 @@ export async function prepareUnlinkedDraftPieceCopyV1(input: {
   const job = structuredClone(replay.job);
   const candidates = job.pieces.filter((p) => p.identity === sourceIdentity),
     piece = candidates[0];
+  const mode = input.mode ?? 'duplicate';
+  requireCopy(mode === 'duplicate' || mode === 'mirror-across-grain', 'unknown copy operation');
   requireCopy(
     candidates.length === 1 &&
       piece &&
       !piece.pairOf &&
       !piece.pairHand &&
       !piece.ungraded &&
-      piece.displayName === sourceIdentity &&
+      (mode === 'duplicate' || piece.displayName === sourceIdentity) &&
       piece.sizes.length === job.sizes.length &&
       job.sizes.every(
         (s) =>
@@ -186,6 +195,14 @@ export async function prepareUnlinkedDraftPieceCopyV1(input: {
           ).length === 1,
       ),
     'no independent stable source piece with all ranks',
+  );
+  const headingDuplicate = mode === 'duplicate' && piece.displayName !== sourceIdentity;
+  requireCopy(
+    !headingDuplicate ||
+      (piece.piecesPerGarment === 1 &&
+        /^[A-Z][A-Z0-9_]*$/.test(piece.displayName) &&
+        identitiesOf(piece.code, piece.mods, null)[0]?.identity === sourceIdentity),
+    'the saved label is not one independently named writer heading',
   );
   const names = new Set(
     [
@@ -196,12 +213,28 @@ export async function prepareUnlinkedDraftPieceCopyV1(input: {
         .map((a) => a.blockName),
     ].map((n) => n.trim().toUpperCase()),
   );
+  if (headingDuplicate)
+    for (const { displayName } of job.pieces) names.add(displayName.trim().toUpperCase());
+  // A named source may already have a numbered part. G11 permits one such modifier.
+  const mods =
+    headingDuplicate && modStage(piece.mods.at(-1) ?? '') === 2
+      ? piece.mods.slice(0, -1)
+      : piece.mods;
+  const prefix = headingDuplicate ? [piece.code, ...mods].join('_') : sourceIdentity;
   let suffix = 2;
-  while (names.has(`${sourceIdentity}_${suffix}`.toUpperCase())) suffix++;
-  const identity = `${sourceIdentity}_${suffix}`,
+  const isSizeToken = sizeTokenTest(job.sizes.map(({ token }) => token));
+  while (
+    names.has(`${prefix}_${suffix}`.toUpperCase()) ||
+    (headingDuplicate &&
+      (names.has(`${piece.displayName}_${suffix}`) || isSizeToken(String(suffix))))
+  )
+    suffix++;
+  const identity = `${prefix}_${suffix}`,
     copy = structuredClone(piece);
-  const mode = input.mode ?? 'duplicate';
-  requireCopy(mode === 'duplicate' || mode === 'mirror-across-grain', 'unknown copy operation');
+  requireCopy(
+    !headingDuplicate || identityProblem(identity, { isSizeToken }) === null,
+    'the new native identity does not meet writer grammar',
+  );
   if (mode === 'mirror-across-grain') {
     const scopeKeys = new Set(
       [scope.target.scopeKey, scope.target.fabricPurpose, scope.target.bomLineKey].filter(Boolean),
@@ -219,13 +252,19 @@ export async function prepareUnlinkedDraftPieceCopyV1(input: {
     });
   }
   copy.identity = identity;
-  copy.displayName = identity;
-  copy.mods = [...piece.mods, String(suffix)];
+  copy.displayName = headingDuplicate ? `${piece.displayName}_${suffix}` : identity;
+  copy.mods = [...mods, String(suffix)];
   copy.seed = job.pieces.reduce((max, p) => Math.max(max, p.seed), 0) + 1;
   requireCopy(Number.isSafeInteger(copy.seed), 'no available piece seed');
   job.pieces.push(copy);
   const written = writeDxfDetailed(job, { now: () => new Date(replay.createdAt) });
-  const verifyGeometry = nativePieceCopyVerifier(sourceText, sourceIdentity, identity, mode);
+  const verifyGeometry = nativePieceCopyVerifier(
+    sourceText,
+    sourceIdentity,
+    identity,
+    mode,
+    headingDuplicate ? { source: piece.displayName, copy: copy.displayName } : undefined,
+  );
   verifyGeometry(written.dxfText);
   const file = new File(
     [written.dxfText],
@@ -250,6 +289,7 @@ export async function prepareUnlinkedDraftPieceCopyV1(input: {
     sourceIdentity,
     sourceKey,
     identity,
+    ...(headingDuplicate ? { headingManifest: written.manifest } : {}),
     check,
     revalidate: async () => {
       requireCopy(
@@ -279,7 +319,10 @@ export function takeUnlinkedDraftPieceCopyReviewV1(review: CopyReview) {
   pending.delete(review);
   state.check();
   opened.set(state.file, state);
-  markUnlinkedPieceCopyFileV1(state.file);
+  markUnlinkedPieceCopyFileV1(
+    state.file,
+    state.headingManifest && { scopeKey: state.scopeKey, manifest: state.headingManifest },
+  );
   return { file: state.file, identity: state.identity };
 }
 

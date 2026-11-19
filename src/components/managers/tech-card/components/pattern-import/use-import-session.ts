@@ -6,6 +6,7 @@ import {
   applyDirectDxfReviewedDraftV1,
   buildOrdinaryWizardReviewV1,
   captureDirectDxfAuthoringV1,
+  runOrdinaryDxfReviewSemanticsV1,
 } from './direct-dxf-authoring-capture-v1';
 // The wizard's state machine (08-CONTRACT §4.2). One session per run; every field of
 // `ImportSession` is the latest stage output, and `inputs` are what the operator decided — kept
@@ -812,6 +813,20 @@ export function useImportSession(deps: {
     }
   }
 
+  function runSemantics(input: StageIO['semantics']['in']) {
+    const files = iRef.current.fileList;
+    const generation = histGen.current;
+    return runOrdinaryDxfReviewSemanticsV1(
+      files,
+      { techCardId: rc().techCardId, scopeKey: deps.pinScopeKey },
+      input,
+      (reviewed) => {
+        if (generation !== histGen.current || files !== iRef.current.fileList) throw new StaleRun();
+        return run('semantics', reviewed);
+      },
+    );
+  }
+
   /** Existing manifested sheet(s) that can carry this run's previous size decision. */
   function storedSizeMaps(): NonNullable<StageIO['sizes']['in']['storedMaps']> {
     const files = new Set(iRef.current.fileList.map((f) => f.name.trim().toLowerCase()));
@@ -1376,7 +1391,7 @@ export function useImportSession(deps: {
           iRef.current = next;
           patchInputs({ overrides });
           if (sRef.current.semantics) {
-            const out = await run('semantics', semanticsInput(next));
+            const out = await runSemantics(semanticsInput(next));
             patch({ semantics: out });
           }
           return;
@@ -1395,7 +1410,7 @@ export function useImportSession(deps: {
               : iRef.current.gradeAnswers,
             shapeFixes: ev.input.shapeFixes ? { ...ev.input.shapeFixes } : iRef.current.shapeFixes,
           });
-          const out = await run('semantics', ev.input);
+          const out = await runSemantics(ev.input);
           patch({ semantics: out });
           return;
         }
@@ -1471,7 +1486,7 @@ export function useImportSession(deps: {
           // S3: the write does not trust what the details step showed. Semantics runs again on the
           // LIVE answers only (the worker writes from its last run), and every question it still
           // asks — folds, the cutting list, the outline, counts, names — refuses the write.
-          sem = await run('semantics', semanticsInput(iRef.current));
+          sem = await runSemantics(semanticsInput(iRef.current));
           patch({ semantics: sem });
           const open = unansweredAtWrite(sem, sRef.current.names, iRef.current, answersNow());
           if (open.length) throw new UnansweredQuestionsError(open);
@@ -1886,7 +1901,7 @@ export function useImportSession(deps: {
     const overrides = overridesFromNames(names, iRef.current.overrides);
     patchInputs({ overrides });
     iRef.current = { ...iRef.current, overrides };
-    const sem = await run('semantics', semanticsInput({ ...iRef.current, overrides }));
+    const sem = await runSemantics(semanticsInput({ ...iRef.current, overrides }));
     patch({ semantics: sem });
     namerNote.current = namerError;
     setNotice(namerError);
@@ -1894,7 +1909,7 @@ export function useImportSession(deps: {
 
   /** STOPFIX: the details of the pieces as named — what `toDetails` ends with, run on its own. */
   async function buildDetails() {
-    const sem = await run('semantics', semanticsInput(iRef.current));
+    const sem = await runSemantics(semanticsInput(iRef.current));
     patch({ semantics: sem });
   }
 

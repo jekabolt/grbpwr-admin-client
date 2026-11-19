@@ -12,6 +12,7 @@ import {
   captureDirectDxfAuthoringV1,
   directDxfAuthoringOpenFileV1,
   buildOrdinaryWizardReviewV1,
+  runOrdinaryDxfReviewSemanticsV1,
 } from './direct-dxf-authoring-capture-v1';
 import { cardPresegmentedIdentities } from './entry';
 
@@ -94,16 +95,23 @@ export async function draftThroughWizardStages(
       presegmentedIdentities: cardPresegmentedIdentities(card, 'main'),
       operatorGrain: {},
     };
-    const initial = await run('semantics', semanticsInput);
+    const runSemantics = (input: StageIO['semantics']['in']) =>
+      runOrdinaryDxfReviewSemanticsV1(
+        [file],
+        { techCardId: card.techCardId, scopeKey: 'main' },
+        input,
+        (reviewed) => run('semantics', reviewed),
+      );
+    const initial = await runSemantics(semanticsInput);
     const reviewedInput = { ...semanticsInput, ...resolveDetails?.(initial) };
-    const reviewed = resolveDetails ? await run('semantics', reviewedInput) : initial;
+    const reviewed = resolveDetails ? await runSemantics(reviewedInput) : initial;
     const assignment = pinToScope(
       await run('fabrics', { bom: card.scopes }),
       'main',
       reviewed.pieces.map(({ seed }) => seed),
       card.scopes,
     );
-    const semantics = await run('semantics', reviewedInput);
+    const semantics = await runSemantics(reviewedInput);
     if (semantics.blocked.length) throw new Error(JSON.stringify(semantics.blocked));
     const capture = await captureDirectDxfAuthoringV1([file], run);
     if (!capture.dxfNativeSewingReplay?.replayReady)
