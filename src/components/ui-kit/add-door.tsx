@@ -52,6 +52,12 @@ function AddDoorDemo() {
                 slot
               </AddDoor>
               <AddDoor shape='inline'>colour</AddDoor>
+              <AddDoor shape='tile' lowercase className='size-20'>
+                logo
+              </AddDoor>
+              <AddDoor shape='inline' lowercase>
+                new team
+              </AddDoor>
             </div>,
             null,
             <Text component='span'>{"shape='tile' | 'inline'"}</Text>,

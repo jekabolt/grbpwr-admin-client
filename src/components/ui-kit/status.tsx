@@ -15,7 +15,17 @@ function PillDemo() {
   return (
     <KitMatrix
       cols={[...tones]}
-      rows={[{ label: 'tone', cells: tones.map((t) => <Pill tone={t}>{t}</Pill>) }]}
+      rows={[
+        { label: 'tone', cells: tones.map((t) => <Pill tone={t}>{t}</Pill>) },
+        {
+          label: 'lowercase',
+          cells: tones.map((t) => (
+            <Pill tone={t} lowercase>
+              {t === 'warn' ? 'read only' : t}
+            </Pill>
+          )),
+        },
+      ]}
     />
   );
 }

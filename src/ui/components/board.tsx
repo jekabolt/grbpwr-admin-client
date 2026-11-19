@@ -82,7 +82,8 @@ export function BoardCard({
       {...(onClick ? { role: 'button', tabIndex: 0, onClick } : {})}
       className={cn(
         'border border-borderColor bg-bgColor px-2 py-1.5',
-        onClick && 'cursor-pointer hover:-translate-y-px hover:shadow-[2px_2px_0_0_var(--color-textColor)]',
+        onClick &&
+          'cursor-pointer hover:-translate-y-px hover:shadow-[2px_2px_0_0_var(--color-textColor)]',
         dimmed && 'opacity-60',
         className,
       )}
@@ -95,6 +96,9 @@ export function BoardCard({
 /** The add door's skin: a dashed frame and a quiet label that inks on hover. */
 const ADD_DOOR_SKIN =
   'border border-dashed border-borderColor text-micro uppercase tracking-label text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor disabled:cursor-not-allowed disabled:text-borderColor disabled:hover:border-borderColor';
+
+/** The same skin with the noun as written (lowercase) — the quiet door. */
+const ADD_DOOR_SKIN_LOWER = ADD_DOOR_SKIN.replace('uppercase ', '');
 
 const ADD_DOOR_SHAPE = {
   /** Full-width row under a list (or the list's first row when it is empty). */
@@ -111,8 +115,16 @@ export type AddDoorShape = keyof typeof ADD_DOOR_SHAPE;
  * Classes of the add door, for the one element `AddDoor` cannot be — a native `<select>` whose
  * first option is the `+ …` label. `afterRows` = rows stand above: the door keeps 16px of air.
  */
-export function addDoorClass(opts?: { shape?: AddDoorShape; afterRows?: boolean }) {
-  return cn(ADD_DOOR_SKIN, ADD_DOOR_SHAPE[opts?.shape ?? 'row'], opts?.afterRows && 'mt-4');
+export function addDoorClass(opts?: {
+  shape?: AddDoorShape;
+  afterRows?: boolean;
+  lowercase?: boolean;
+}) {
+  return cn(
+    opts?.lowercase ? ADD_DOOR_SKIN_LOWER : ADD_DOOR_SKIN,
+    ADD_DOOR_SHAPE[opts?.shape ?? 'row'],
+    opts?.afterRows && 'mt-4',
+  );
 }
 
 /**
@@ -124,19 +136,26 @@ export function AddDoor({
   children,
   shape = 'row',
   afterRows,
+  lowercase,
   className,
   ...props
 }: {
   children: React.ReactNode;
   shape?: AddDoorShape;
   afterRows?: boolean;
+  /** The noun as written (lowercase); absent — the uppercase door as before. */
+  lowercase?: boolean;
   className?: string;
   onClick?: (e: React.MouseEvent<HTMLButtonElement>) => void;
   disabled?: boolean;
   [k: string]: unknown;
 }) {
   return (
-    <button {...props} type='button' className={cn(addDoorClass({ shape, afterRows }), className)}>
+    <button
+      {...props}
+      type='button'
+      className={cn(addDoorClass({ shape, afterRows, lowercase }), className)}
+    >
       + {children}
     </button>
   );

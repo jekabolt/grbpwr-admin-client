@@ -5,18 +5,41 @@ import { KitDemo, KitLines } from './kit-entry';
 // Both shells portal into document.body (Radix Dialog), so they cannot render inline: trigger only.
 function ConfirmationModalDemo() {
   const [width, setWidth] = useState<'sm' | 'md' | 'lg' | null>(null);
+  const [quiet, setQuiet] = useState<'lowercase' | 'sheet' | null>(null);
   return (
     <>
       <KitLines
-        lines={(['sm', 'md', 'lg'] as const).map((w) => ({
-          label: w,
-          content: (
-            <Button variant='secondary' size='sm' onClick={() => setWidth(w)}>
-              open
-            </Button>
-          ),
-        }))}
+        lines={[
+          ...(['sm', 'md', 'lg'] as const).map((w) => ({
+            label: w,
+            content: (
+              <Button variant='secondary' size='sm' onClick={() => setWidth(w)}>
+                open
+              </Button>
+            ),
+          })),
+          ...(['lowercase', 'sheet'] as const).map((q) => ({
+            label: q,
+            content: (
+              <Button variant='secondary' size='sm' onClick={() => setQuiet(q)}>
+                open
+              </Button>
+            ),
+          })),
+        ]}
       />
+      <ConfirmationModal
+        open={quiet !== null}
+        onOpenChange={(o) => !o && setQuiet(null)}
+        onConfirm={() => undefined}
+        title='delete studio hale'
+        confirmLabel='delete'
+        width='sm'
+        lowercase
+        sheet={quiet === 'sheet'}
+      >
+        <Text>kept till dec 19</Text>
+      </ConfirmationModal>
       <ConfirmationModal
         open={width !== null}
         onOpenChange={(o) => !o && setWidth(null)}
@@ -62,10 +85,7 @@ function PopoverDemo() {
         {
           label: 'titled',
           content: (
-            <GenericPopover
-              title='filters'
-              openElement={<span className='underline'>open</span>}
-            >
+            <GenericPopover title='filters' openElement={<span className='underline'>open</span>}>
               <Row label='fabric' value='wool' />
             </GenericPopover>
           ),
@@ -89,7 +109,14 @@ function TooltipDemo() {
       lines={(['top', 'right', 'bottom'] as const).map((side) => ({
         label: side,
         content: (
-          <Tooltip side={side} trigger={<span className='underline' tabIndex={0}>hover</span>}>
+          <Tooltip
+            side={side}
+            trigger={
+              <span className='underline' tabIndex={0}>
+                hover
+              </span>
+            }
+          >
             wool 420
           </Tooltip>
         ),

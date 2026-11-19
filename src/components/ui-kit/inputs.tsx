@@ -222,6 +222,22 @@ function CheckboxDemo() {
             <CheckboxCommon name='kit-cbx-disabled' defaultChecked disabled />,
           ],
         },
+        {
+          label: 'locked',
+          cells: [
+            <CheckboxCommon name='kit-cbx-locked-off' locked />,
+            <CheckboxCommon name='kit-cbx-locked-on' locked defaultChecked />,
+            null,
+          ],
+        },
+        {
+          label: 'cell',
+          cells: [
+            <CheckboxCommon name='kit-cbx-cell-off' cell />,
+            <CheckboxCommon name='kit-cbx-cell-on' cell defaultChecked />,
+            <CheckboxCommon name='kit-cbx-cell-locked' cell locked defaultChecked />,
+          ],
+        },
       ]}
       labelWidth={150}
     />
