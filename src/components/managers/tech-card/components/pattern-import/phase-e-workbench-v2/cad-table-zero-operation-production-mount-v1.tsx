@@ -71,10 +71,7 @@ import {
   type PatternImportDxfPhaseECadTableZeroOperationSavedChoicesResultV1,
   type PatternImportDxfPhaseECadTableZeroOperationSavedPreparationResultV1,
 } from './cad-table-zero-operation-saved-preparation-v1';
-import {
-  isPatternImportDxfPhaseEZeroConnectPreparedAuthorityV1,
-  readPatternImportDxfPhaseEZeroConnectCurrentSavedReplayV1,
-} from './cad-table-zero-connect-phase-e-authority-v1';
+import { isPatternImportDxfPhaseEZeroConnectPreparedAuthorityV1 } from './cad-table-zero-connect-phase-e-authority-v1';
 import { useGuardedPieceRename } from '../../guarded-piece-rename';
 import { buildPatternImportDxfPhaseESavedCardContextV1 } from './saved-card-production-projection-v1';
 import {
@@ -1192,9 +1189,8 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
     currentPreparation?.status === 'settled' ? currentPreparation.rebindExpectation : null;
   const renameAuthority = authoringPrepared?.authoringAuthority;
   const currentSavedPieceMetadata =
-    renameAuthority &&
-    renameAuthority.row.cardLockVersion === resolvedSavedCard?.lockVersion &&
-    readPatternImportDxfPhaseEZeroConnectCurrentSavedReplayV1(renameAuthority)
+    isPatternImportDxfPhaseEZeroConnectPreparedAuthorityV1(renameAuthority) &&
+    renameAuthority.row.cardLockVersion === resolvedSavedCard?.lockVersion
       ? resolvedSavedCard?.techCard?.pieces
       : undefined;
   const renamePiece =
