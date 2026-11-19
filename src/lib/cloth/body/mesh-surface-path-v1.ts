@@ -1,5 +1,7 @@
 import {
   meshSurfaceVertexTrianglesV1,
+  type MeshSurfaceAdjacencyV1,
+  type MeshSurfacePositionsV1,
   type MeshSurfaceTopologyV1,
 } from './mesh-surface-topology-v1';
 
@@ -51,13 +53,13 @@ export interface MeshSurfacePathEvaluationV1 {
   readonly lengthM: number;
 }
 
-function validVertex(vertex: number, topology: MeshSurfaceTopologyV1): boolean {
+function validVertex(vertex: number, topology: MeshSurfaceAdjacencyV1): boolean {
   return Number.isSafeInteger(vertex) && vertex >= 0 && vertex < topology.vertexCount;
 }
 
 function pointTriangles(
   point: MeshSurfacePointV1,
-  topology: MeshSurfaceTopologyV1,
+  topology: MeshSurfaceAdjacencyV1,
 ): Uint32Array | null {
   if (point.kind === 'vertex') {
     return validVertex(point.vertex, topology)
@@ -83,7 +85,7 @@ function pointTriangles(
 function sharedTriangle(
   left: MeshSurfacePointV1,
   right: MeshSurfacePointV1,
-  topology: MeshSurfaceTopologyV1,
+  topology: MeshSurfaceAdjacencyV1,
 ): number | null {
   const leftTriangles = pointTriangles(left, topology);
   const rightTriangles = pointTriangles(right, topology);
@@ -95,7 +97,7 @@ function sharedTriangle(
   return null;
 }
 
-function evaluatePoint(point: MeshSurfacePointV1, positionsM: Float32Array): MeshSurfaceVec3V1 {
+function evaluatePoint(point: MeshSurfacePointV1, positionsM: MeshSurfacePositionsV1): MeshSurfaceVec3V1 {
   if (point.kind === 'vertex') {
     const offset = point.vertex * 3;
     return [positionsM[offset], positionsM[offset + 1], positionsM[offset + 2]];
@@ -144,7 +146,7 @@ export function meshSurfaceEdgePointV1(
 }
 
 export function createMeshSurfacePathV1(options: {
-  readonly topology: MeshSurfaceTopologyV1;
+  readonly topology: MeshSurfaceAdjacencyV1;
   readonly closed?: boolean;
   readonly points: readonly MeshSurfacePointV1[];
 }): MeshSurfacePathV1 {
@@ -164,7 +166,7 @@ export function createMeshSurfacePathV1(options: {
 
 export function validateMeshSurfacePathV1(
   path: MeshSurfacePathV1,
-  topology: MeshSurfaceTopologyV1,
+  topology: MeshSurfaceAdjacencyV1,
 ): MeshSurfacePathValidationResultV1 {
   if (path.version !== MESH_SURFACE_PATH_V1 || path.topologyHash !== topology.topologyHash) {
     return Object.freeze({
@@ -210,8 +212,8 @@ export function validateMeshSurfacePathV1(
 
 export function evaluateMeshSurfacePathV1(options: {
   readonly path: MeshSurfacePathV1;
-  readonly topology: MeshSurfaceTopologyV1;
-  readonly positionsM: Float32Array;
+  readonly topology: MeshSurfaceAdjacencyV1;
+  readonly positionsM: MeshSurfacePositionsV1;
 }): MeshSurfacePathEvaluationV1 {
   const validation = validateMeshSurfacePathV1(options.path, options.topology);
   if (!validation.ok) throw new RangeError(`Cannot evaluate surface path: ${validation.code}.`);

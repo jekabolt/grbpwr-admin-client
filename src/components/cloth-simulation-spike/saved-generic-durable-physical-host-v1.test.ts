@@ -75,6 +75,7 @@ import type { DxfGarmentObservedWebgpuReplayRequestV1 } from './dxf-garment-obse
 import type {
   DxfGarmentObservedPreviewHitV1,
   DxfGarmentObservedPreviewSeamSideV1,
+  DxfGarmentObservedPreviewSurfacePointV1,
 } from './dxf-garment-observed-strain-heatmap-preview-v1';
 import * as workbenchShell from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/cad-workbench-split-shell-v1';
 import type { PatternImportDxfPhaseEMeasurementUnitV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/measurement-units-v1';
@@ -162,6 +163,12 @@ const ports = vi.hoisted(() => ({
         runtimeSeamId?: string,
         measureSurface?: boolean,
       ) => DxfGarmentObservedPreviewHitV1 | null)
+    | null,
+  previewTape: null as
+    | ((
+        first: DxfGarmentObservedPreviewSurfacePointV1,
+        second: DxfGarmentObservedPreviewSurfacePointV1,
+      ) => Promise<number | null>)
     | null,
   previewSelect: null as
     | ((
@@ -298,6 +305,10 @@ vi.mock('./dxf-garment-observed-strain-heatmap-preview-v1', () => ({
         (measureSurface
           ? ports.previewPick?.(x, y, runtimeSeamId, true)
           : ports.previewPick?.(x, y, runtimeSeamId)) ?? null,
+      measureTape: async (
+        first: DxfGarmentObservedPreviewSurfacePointV1,
+        second: DxfGarmentObservedPreviewSurfacePointV1,
+      ) => (await ports.previewTape?.(first, second)) ?? null,
       setSelectedPiece: (
         pieceId: string | null,
         side?: DxfGarmentObservedPreviewSeamSideV1,
@@ -331,6 +342,7 @@ beforeEach(() => {
   ports.previewSignals.length = 0;
   ports.finalValidationFrame = null;
   ports.previewPick = null;
+  ports.previewTape = null;
   ports.previewSelect = null;
   vi.mocked(abortableAdminService).mockImplementation(
     () =>
@@ -3589,9 +3601,34 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
     await tap(110, anchorB);
     expect(tapeText('Straight-line distance 19.685 in')).not.toBeNull();
 
+    const measureTape = vi.fn(async () => 0.65);
+    ports.previewTape = measureTape;
+    await tapeClick('Surface tape');
+    expect(tapeText('Surface tape')?.['aria-pressed']).toBe(true);
+    await tap(100, anchorA);
+    await tap(110, anchorB);
+    expect(measureTape).toHaveBeenCalledWith(anchorA.surfacePoint, anchorB.surfacePoint);
+    expect(tapeText('Surface distance 25.591 in')).not.toBeNull();
+    expect(tapeText('Straight-line distance 19.685 in')).toBeNull();
+    ports.previewTape = async () => null;
+    await tapeClick('Clear');
+    await tap(100, anchorA);
+    await tap(110, anchorB);
+    expect(tapeText('No surface path between these points.')).not.toBeNull();
+    let completeLateTape: (lengthM: number) => void = () => {};
+    ports.previewTape = () =>
+      new Promise<number>((resolve) => {
+        completeLateTape = resolve;
+      });
+    await tapeClick('Clear');
+    await tap(100, anchorA);
+    await tap(110, anchorB);
+    expect(tapeText('Measuring along the cloth…')).not.toBeNull();
     interaction = null;
     await drawControls();
+    await act(async () => completeLateTape(0.8));
     expect(tapeSection()).toBeNull();
+    expect(tapeText('Surface distance 31.496 in')).toBeNull();
     expect(selectOutline).toHaveBeenLastCalledWith(null, undefined, undefined);
     expect(f.host.getSnapshot()).toBe(admitted);
     expect(f.host.getSnapshot().numeric.previewReceipt).toBe(mounted.receipt);

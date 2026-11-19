@@ -10,7 +10,8 @@ import {
 import {
   meshSurfaceTopologyMatchesIndicesV1,
   meshSurfaceVertexTrianglesV1,
-  type MeshSurfaceTopologyV1,
+  type MeshSurfaceAdjacencyV1,
+  type MeshSurfacePositionsV1,
 } from './mesh-surface-topology-v1';
 
 export const MESH_SURFACE_GEODESIC_V1 = 'mesh-surface-geodesic/v1' as const;
@@ -175,12 +176,12 @@ class MinHeap {
   }
 }
 
-function pointAt(positionsM: Float32Array, vertex: number): MeshSurfaceVec3V1 {
+function pointAt(positionsM: MeshSurfacePositionsV1, vertex: number): MeshSurfaceVec3V1 {
   const offset = vertex * 3;
   return [positionsM[offset], positionsM[offset + 1], positionsM[offset + 2]];
 }
 
-function pointPosition(point: MeshSurfacePointV1, positionsM: Float32Array): MeshSurfaceVec3V1 {
+function pointPosition(point: MeshSurfacePointV1, positionsM: MeshSurfacePositionsV1): MeshSurfaceVec3V1 {
   if (point.kind === 'vertex') return pointAt(positionsM, point.vertex);
   const a = pointAt(positionsM, point.a);
   const b = pointAt(positionsM, point.b);
@@ -201,7 +202,7 @@ function distance2(left: Vec2, right: Vec2): number {
 
 function pointTriangles(
   point: MeshSurfacePointV1,
-  topology: MeshSurfaceTopologyV1,
+  topology: MeshSurfaceAdjacencyV1,
 ): readonly number[] {
   if (point.kind === 'vertex') return [...meshSurfaceVertexTrianglesV1(topology, point.vertex)];
   const right = meshSurfaceVertexTrianglesV1(topology, point.b);
@@ -212,8 +213,8 @@ function pointTriangles(
 
 function pointCornerDistances(
   point: MeshSurfacePointV1,
-  topology: MeshSurfaceTopologyV1,
-  positionsM: Float32Array,
+  topology: MeshSurfaceAdjacencyV1,
+  positionsM: MeshSurfacePositionsV1,
 ): ReadonlyMap<number, number> {
   const position = pointPosition(point, positionsM);
   const distances = new Map<number, number>();
@@ -229,8 +230,8 @@ function pointCornerDistances(
 function edgeDijkstra(
   start: MeshSurfacePointV1,
   end: MeshSurfacePointV1,
-  topology: MeshSurfaceTopologyV1,
-  positionsM: Float32Array,
+  topology: MeshSurfaceAdjacencyV1,
+  positionsM: MeshSurfacePositionsV1,
 ): SeedResult | null {
   const starts = pointCornerDistances(start, topology, positionsM);
   const ends = pointCornerDistances(end, topology, positionsM);
@@ -279,7 +280,7 @@ function edgeDijkstra(
 
 function regionContains(
   vertex: number,
-  positionsM: Float32Array,
+  positionsM: MeshSurfacePositionsV1,
   region: MeshSurfaceGeodesicRegionV1 | undefined,
 ): boolean {
   if (!region) return true;
@@ -293,8 +294,8 @@ function regionContains(
 function corridorVertices(
   seed: readonly number[],
   rings: number,
-  topology: MeshSurfaceTopologyV1,
-  positionsM: Float32Array,
+  topology: MeshSurfaceAdjacencyV1,
+  positionsM: MeshSurfacePositionsV1,
   region: MeshSurfaceGeodesicRegionV1 | undefined,
 ): Uint8Array {
   const distanceByVertex = new Int32Array(topology.vertexCount);
@@ -341,14 +342,14 @@ function extractStrip(segmentTriangles: readonly number[]): readonly number[] | 
   return strip.length > 0 ? Object.freeze(strip) : null;
 }
 
-function triangleVertices(triangle: number, topology: MeshSurfaceTopologyV1): readonly number[] {
+function triangleVertices(triangle: number, topology: MeshSurfaceAdjacencyV1): readonly number[] {
   return [...topology.triangleIndices.subarray(triangle * 3, triangle * 3 + 3)];
 }
 
 function triangleAreaSquared(
   triangle: number,
-  topology: MeshSurfaceTopologyV1,
-  positionsM: Float32Array,
+  topology: MeshSurfaceAdjacencyV1,
+  positionsM: MeshSurfacePositionsV1,
 ): number {
   const vertices = triangleVertices(triangle, topology);
   const a = pointAt(positionsM, vertices[0]);
@@ -388,8 +389,8 @@ function unfoldStrip(
   stripInput: readonly number[],
   start: MeshSurfacePointV1,
   end: MeshSurfacePointV1,
-  topology: MeshSurfaceTopologyV1,
-  positionsM: Float32Array,
+  topology: MeshSurfaceAdjacencyV1,
+  positionsM: MeshSurfacePositionsV1,
 ): { readonly portals: readonly Portal[]; readonly epsilon: number } | null {
   const strip = stripInput.filter(
     (triangle) => triangleAreaSquared(triangle, topology, positionsM) !== 0,
@@ -629,7 +630,7 @@ function cornerAngle(
   vertex: number,
   left: number,
   right: number,
-  positionsM: Float32Array,
+  positionsM: MeshSurfacePositionsV1,
 ): number {
   const origin = pointAt(positionsM, vertex);
   const a = pointAt(positionsM, left);
@@ -655,8 +656,8 @@ interface FanFace {
 
 function vertexFan(
   vertex: number,
-  topology: MeshSurfaceTopologyV1,
-  positionsM: Float32Array,
+  topology: MeshSurfaceAdjacencyV1,
+  positionsM: MeshSurfacePositionsV1,
 ): { readonly faces: readonly FanFace[]; readonly total: number } | null {
   const triangles = [...meshSurfaceVertexTrianglesV1(topology, vertex)];
   if (triangles.length < 2) return null;
@@ -700,7 +701,7 @@ function directionAngleInFace(
   apex: number,
   target: MeshSurfacePointV1,
   face: FanFace,
-  positionsM: Float32Array,
+  positionsM: MeshSurfacePositionsV1,
 ): number {
   const origin = pointAt(positionsM, apex);
   const start = pointAt(positionsM, face.startVertex);
@@ -728,8 +729,8 @@ interface ApexViolation {
 function apexViolation(
   points: readonly MeshSurfacePointV1[],
   apexVertices: ReadonlySet<number>,
-  topology: MeshSurfaceTopologyV1,
-  positionsM: Float32Array,
+  topology: MeshSurfaceAdjacencyV1,
+  positionsM: MeshSurfacePositionsV1,
 ): ApexViolation | null {
   for (let index = 1; index < points.length - 1; index += 1) {
     const point = points[index];
@@ -756,7 +757,7 @@ function apexViolation(
   return null;
 }
 
-function trianglesShareEdge(left: number, right: number, topology: MeshSurfaceTopologyV1): boolean {
+function trianglesShareEdge(left: number, right: number, topology: MeshSurfaceAdjacencyV1): boolean {
   const edges = topology.triangleEdges;
   for (let i = 0; i < 3; i += 1) {
     for (let j = 0; j < 3; j += 1) {
@@ -770,7 +771,7 @@ function rerouteStripAroundVertex(
   strip: readonly number[],
   vertex: number,
   fan: readonly FanFace[],
-  topology: MeshSurfaceTopologyV1,
+  topology: MeshSurfaceAdjacencyV1,
   corridor: Uint8Array,
 ): readonly number[] | null {
   const order = fan.map(({ triangle }) => triangle);
@@ -829,7 +830,7 @@ function pathHasRepeatedPoint(points: readonly MeshSurfacePointV1[]): boolean {
 
 function surfacePolylineLength(
   points: readonly MeshSurfacePointV1[],
-  positionsM: Float32Array,
+  positionsM: MeshSurfacePositionsV1,
 ): number {
   let lengthM = 0;
   for (let index = 1; index < points.length; index += 1) {
@@ -842,8 +843,8 @@ function surfacePolylineLength(
 }
 
 function steinerAttempt(options: {
-  readonly topology: MeshSurfaceTopologyV1;
-  readonly positionsM: Float32Array;
+  readonly topology: MeshSurfaceAdjacencyV1;
+  readonly positionsM: MeshSurfacePositionsV1;
   readonly start: MeshSurfacePointV1;
   readonly end: MeshSurfacePointV1;
   readonly seed: readonly number[];
@@ -1097,7 +1098,7 @@ interface TriangleGrid {
   readonly cells: ReadonlyMap<number, Uint32Array>;
 }
 
-const triangleGridCache = new WeakMap<Float32Array, WeakMap<MeshSurfaceTopologyV1, TriangleGrid>>();
+const triangleGridCache = new WeakMap<MeshSurfacePositionsV1, WeakMap<MeshSurfaceAdjacencyV1, TriangleGrid>>();
 
 function gridCellKey(
   x: number,
@@ -1108,7 +1109,7 @@ function gridCellKey(
   return (z * dimensions[1] + y) * dimensions[0] + x;
 }
 
-function triangleGrid(positionsM: Float32Array, topology: MeshSurfaceTopologyV1): TriangleGrid {
+function triangleGrid(positionsM: MeshSurfacePositionsV1, topology: MeshSurfaceAdjacencyV1): TriangleGrid {
   const byTopology = triangleGridCache.get(positionsM);
   const cached = byTopology?.get(topology);
   if (cached) return cached;
@@ -1170,7 +1171,7 @@ function triangleGrid(positionsM: Float32Array, topology: MeshSurfaceTopologyV1)
       [...mutableCells].map(([key, triangles]) => [key, Uint32Array.from(triangles)] as const),
     ),
   });
-  const cache = byTopology ?? new WeakMap<MeshSurfaceTopologyV1, TriangleGrid>();
+  const cache = byTopology ?? new WeakMap<MeshSurfaceAdjacencyV1, TriangleGrid>();
   cache.set(topology, grid);
   triangleGridCache.set(positionsM, cache);
   return grid;
@@ -1206,8 +1207,8 @@ function rayTriangleParameter(
   origin: MeshSurfaceVec3V1,
   direction: MeshSurfaceVec3V1,
   triangle: number,
-  topology: MeshSurfaceTopologyV1,
-  positionsM: Float32Array,
+  topology: MeshSurfaceAdjacencyV1,
+  positionsM: MeshSurfacePositionsV1,
 ): number | null {
   const vertices = triangleVertices(triangle, topology);
   const a = pointAt(positionsM, vertices[0]);
@@ -1240,8 +1241,8 @@ function rayTriangleParameter(
 function midpointOutside(
   from: MeshSurfaceVec3V1,
   to: MeshSurfaceVec3V1,
-  topology: MeshSurfaceTopologyV1,
-  positionsM: Float32Array,
+  topology: MeshSurfaceAdjacencyV1,
+  positionsM: MeshSurfacePositionsV1,
 ): boolean {
   const midpoint: MeshSurfaceVec3V1 = [
     (from[0] + to[0]) / 2,
@@ -1269,8 +1270,8 @@ function midpointOutside(
 function segmentOutside(
   from: MeshSurfacePointV1,
   to: MeshSurfacePointV1,
-  topology: MeshSurfaceTopologyV1,
-  positionsM: Float32Array,
+  topology: MeshSurfaceAdjacencyV1,
+  positionsM: MeshSurfacePositionsV1,
   grid: TriangleGrid,
 ): boolean {
   const fromPosition = pointPosition(from, positionsM);
@@ -1292,8 +1293,8 @@ function segmentOutside(
 
 function tautSegments(
   path: MeshSurfacePathV1,
-  topology: MeshSurfaceTopologyV1,
-  positionsM: Float32Array,
+  topology: MeshSurfaceAdjacencyV1,
+  positionsM: MeshSurfacePositionsV1,
 ): { readonly segments: readonly MeshSurfaceGeodesicSegmentV1[]; readonly lengthM: number } | null {
   const grid = triangleGrid(positionsM, topology);
   const segments: MeshSurfaceGeodesicSegmentV1[] = [];
@@ -1380,8 +1381,8 @@ function failed(
 }
 
 export function computeMeshSurfaceGeodesicV1(options: {
-  readonly topology: MeshSurfaceTopologyV1;
-  readonly positionsM: Float32Array;
+  readonly topology: MeshSurfaceAdjacencyV1;
+  readonly positionsM: MeshSurfacePositionsV1;
   readonly triangleIndices: Uint16Array | Uint32Array;
   readonly start: MeshSurfacePointV1;
   readonly end: MeshSurfacePointV1;

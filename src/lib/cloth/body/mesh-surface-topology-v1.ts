@@ -1,5 +1,7 @@
 export const MESH_SURFACE_TOPOLOGY_V1 = 'mesh-surface-topology/v1' as const;
 
+export type MeshSurfacePositionsV1 = Float32Array | Float64Array;
+
 export interface MeshSurfaceTopologyInputV1 {
   readonly positionsM: Float32Array;
   readonly triangleIndices: Uint16Array | Uint32Array;
@@ -11,7 +13,7 @@ export interface MeshSurfaceTopologyInputV1 {
  * `vertexEdges` and `vertexNeighbours` share `vertexEdgeOffsets` and are paired: within a row,
  * sorted by neighbour, `vertexEdges[i]` is the edge to `vertexNeighbours[i]`. Fixed-stride tables use `-1` for "no triangle across a boundary".
  */
-export interface MeshSurfaceTopologyV1 {
+export interface MeshSurfaceAdjacencyV1 {
   readonly version: typeof MESH_SURFACE_TOPOLOGY_V1;
   readonly topologyHash: string;
   readonly vertexCount: number;
@@ -34,13 +36,16 @@ export interface MeshSurfaceTopologyV1 {
   readonly vertexEdgeOffsets: Uint32Array;
   readonly vertexEdges: Uint32Array;
   readonly vertexNeighbours: Uint32Array;
+}
+
+export interface MeshSurfaceTopologyV1 extends MeshSurfaceAdjacencyV1 {
   readonly mirrorVertexMap: Uint32Array;
   readonly midlineVertexOrder: readonly Uint32Array[];
 }
 
 /** A view of one vertex's triangles; allocates a view, so keep it off hot loops. */
 export function meshSurfaceVertexTrianglesV1(
-  topology: MeshSurfaceTopologyV1,
+  topology: MeshSurfaceAdjacencyV1,
   vertex: number,
 ): Uint32Array {
   return topology.vertexTriangles.subarray(
@@ -51,7 +56,7 @@ export function meshSurfaceVertexTrianglesV1(
 
 /** A view of one vertex's neighbours; allocates a view, so keep it off hot loops. */
 export function meshSurfaceVertexNeighboursV1(
-  topology: MeshSurfaceTopologyV1,
+  topology: MeshSurfaceAdjacencyV1,
   vertex: number,
 ): Uint32Array {
   return topology.vertexNeighbours.subarray(
@@ -65,14 +70,17 @@ export type MeshSurfaceTopologyFailureCodeV1 =
   | 'non-manifold'
   | 'symmetry-mismatch';
 
-export type MeshSurfaceTopologyResultV1 =
-  | Readonly<{ ok: true; topology: MeshSurfaceTopologyV1; buildMs: number; cached: boolean }>
+type MeshSurfaceBuildResultV1<T extends MeshSurfaceAdjacencyV1> =
+  | Readonly<{ ok: true; topology: T; buildMs: number; cached: boolean }>
   | Readonly<{
       ok: false;
       code: MeshSurfaceTopologyFailureCodeV1;
       errors: readonly string[];
       buildMs: number;
     }>;
+
+export type MeshSurfaceTopologyResultV1 = MeshSurfaceBuildResultV1<MeshSurfaceTopologyV1>;
+export type MeshSurfaceAdjacencyResultV1 = MeshSurfaceBuildResultV1<MeshSurfaceAdjacencyV1>;
 
 interface CachedTopology {
   readonly triangleIndices: Uint32Array;
@@ -198,7 +206,7 @@ function failure(
   startedAt: number,
   code: MeshSurfaceTopologyFailureCodeV1,
   errors: readonly string[],
-): MeshSurfaceTopologyResultV1 {
+): Extract<MeshSurfaceTopologyResultV1, { ok: false }> {
   return Object.freeze({
     ok: false as const,
     code,
@@ -208,19 +216,57 @@ function failure(
 }
 
 export function meshSurfaceTopologyMatchesIndicesV1(
-  topology: MeshSurfaceTopologyV1,
+  topology: MeshSurfaceAdjacencyV1,
   triangleIndices: Uint16Array | Uint32Array,
 ): boolean {
   return sameIndices(topology.triangleIndices, triangleIndices);
 }
 
+/** Indexed adjacency for an arbitrary surface; per-hit subdivisions are never put in the body cache. */
+export function createMeshSurfaceAdjacencyV1(
+  input: Readonly<{
+    positionsM: MeshSurfacePositionsV1;
+    triangleIndices: Uint16Array | Uint32Array;
+  }>,
+): MeshSurfaceAdjacencyResultV1 {
+  return buildMeshSurfaceTopology(input, 'adjacency');
+}
+
 export function createMeshSurfaceTopologyV1(
   input: MeshSurfaceTopologyInputV1,
 ): MeshSurfaceTopologyResultV1 {
+  return buildMeshSurfaceTopology(input, 'symmetric');
+}
+
+type MeshSurfaceAdjacencyInputV1 = Readonly<{
+  positionsM: MeshSurfacePositionsV1;
+  triangleIndices: Uint16Array | Uint32Array;
+}>;
+
+function buildMeshSurfaceTopology(
+  input: MeshSurfaceTopologyInputV1,
+  mode: 'symmetric',
+): MeshSurfaceTopologyResultV1;
+function buildMeshSurfaceTopology(
+  input: MeshSurfaceAdjacencyInputV1,
+  mode: 'adjacency',
+): MeshSurfaceAdjacencyResultV1;
+function buildMeshSurfaceTopology(
+  input: MeshSurfaceAdjacencyInputV1,
+  mode: 'symmetric' | 'adjacency',
+): MeshSurfaceAdjacencyResultV1 {
   const startedAt = performance.now();
-  if (!(input.positionsM instanceof Float32Array) || input.positionsM.length % 3 !== 0) {
-    return failure(startedAt, 'input-invalid', ['positionsM must be a complete XYZ Float32Array.']);
-  }
+  const { positionsM } = input;
+  const symmetricPositions = positionsM instanceof Float32Array ? positionsM : null;
+  if (
+    (!symmetricPositions && (mode === 'symmetric' || !(positionsM instanceof Float64Array))) ||
+    positionsM.length % 3 !== 0
+  )
+    return failure(startedAt, 'input-invalid', [
+      mode === 'symmetric'
+        ? 'positionsM must be a complete XYZ Float32Array.'
+        : 'positionsM must be a complete XYZ float array.',
+    ]);
   if (
     (!(input.triangleIndices instanceof Uint16Array) &&
       !(input.triangleIndices instanceof Uint32Array)) ||
@@ -239,7 +285,7 @@ export function createMeshSurfaceTopologyV1(
 
   const vertexCount = input.positionsM.length / 3;
   const hash = topologyHash(vertexCount, input.triangleIndices);
-  for (const cached of topologyCache.get(hash) ?? []) {
+  for (const cached of (mode === 'symmetric' ? topologyCache.get(hash) : undefined) ?? []) {
     if (sameIndices(cached.triangleIndices, input.triangleIndices)) {
       return Object.freeze({
         ok: true as const,
@@ -382,22 +428,7 @@ export function createMeshSurfaceTopologyV1(
     }
   }
 
-  // Mirror map: open-addressing hash over exact float bit patterns (no string keys).
-  const mirrorVertexMap = mirrorMap(input.positionsM, vertexCount);
-  if (typeof mirrorVertexMap === 'string') {
-    return failure(startedAt, 'symmetry-mismatch', [mirrorVertexMap]);
-  }
-
-  const midlineVertexOrder = orderedMidlineComponents(
-    input.positionsM,
-    vertexEdgeOffsets,
-    vertexNeighbourData,
-  );
-  if (!midlineVertexOrder) {
-    return failure(startedAt, 'symmetry-mismatch', ['The exact midline graph branches.']);
-  }
-
-  const topology = Object.freeze({
+  const adjacency = {
     version: MESH_SURFACE_TOPOLOGY_V1,
     topologyHash: hash,
     vertexCount,
@@ -413,9 +444,35 @@ export function createMeshSurfaceTopologyV1(
     vertexEdgeOffsets,
     vertexEdges: vertexEdgeData,
     vertexNeighbours: vertexNeighbourData,
-    mirrorVertexMap,
-    midlineVertexOrder,
-  } satisfies MeshSurfaceTopologyV1);
+  } satisfies MeshSurfaceAdjacencyV1;
+
+  if (mode === 'adjacency') {
+    return Object.freeze({
+      ok: true as const,
+      topology: Object.freeze(adjacency),
+      buildMs: elapsed(startedAt),
+      cached: false,
+    });
+  }
+  if (!symmetricPositions)
+    return failure(startedAt, 'input-invalid', ['positionsM must be a complete XYZ Float32Array.']);
+
+  // Mirror map: open-addressing hash over exact float bit patterns (no string keys).
+  const mirrorVertexMap = mirrorMap(symmetricPositions, vertexCount);
+  if (typeof mirrorVertexMap === 'string') {
+    return failure(startedAt, 'symmetry-mismatch', [mirrorVertexMap]);
+  }
+
+  const midlineVertexOrder = orderedMidlineComponents(
+    symmetricPositions,
+    vertexEdgeOffsets,
+    vertexNeighbourData,
+  );
+  if (!midlineVertexOrder) {
+    return failure(startedAt, 'symmetry-mismatch', ['The exact midline graph branches.']);
+  }
+
+  const topology = Object.freeze({ ...adjacency, mirrorVertexMap, midlineVertexOrder });
   const entries = topologyCache.get(hash) ?? [];
   entries.push({ triangleIndices, topology });
   topologyCache.set(hash, entries);

@@ -31,6 +31,7 @@ import {
 import type {
   DxfGarmentObservedPreviewHitV1,
   DxfGarmentObservedPreviewSeamSideV1,
+  DxfGarmentObservedPreviewSurfacePointV1,
 } from './dxf-garment-observed-strain-heatmap-preview-v1';
 
 import type { DxfGarmentObservedBoundaryEdgeV1 } from './dxf-garment-observed-unsewn-edges-v1';
@@ -1193,6 +1194,18 @@ export function createSavedGenericDurablePhysicalHostV1(
             }),
           }),
       });
+    },
+    async measurePreviewTape(
+      canvas: HTMLCanvasElement,
+      scope: SavedGenericDurablePhysicalPreviewScopeV1,
+      first: DxfGarmentObservedPreviewSurfacePointV1,
+      second: DxfGarmentObservedPreviewSurfacePointV1,
+    ): Promise<number | null> {
+      const preview = previewAdmission();
+      if (!preview || !matchesPreviewScope(scope, preview.durable) || !preview.current())
+        return null;
+      const measured = await host.measurePreviewTape(canvas, first, second);
+      return preview.current() ? measured : null;
     },
     setPreviewSelectedPiece(
       canvas: HTMLCanvasElement,

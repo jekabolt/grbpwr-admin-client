@@ -254,6 +254,14 @@ export async function createDxfGarmentObservedStrainHeatmapPreviewV1(
     current();
     const input = await projectDxfGarmentObservedStrainHeatmapV1(replayOwner, lifetime.signal);
     current();
+    const tapeAnchors = new WeakMap<
+      DxfGarmentObservedPreviewSurfacePointV1,
+      Readonly<{
+        triangleIndex: number;
+        barycentric: readonly [number, number, number];
+        pieceRange: (typeof input.pieceRanges)[number];
+      }>
+    >();
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0xf2f2f2);
     const bodyGeometry = own(new THREE.BufferGeometry());
@@ -501,15 +509,21 @@ export async function createDxfGarmentObservedStrainHeatmapPreviewV1(
               .addScaledVector(b!, weights.y)
               .addScaledVector(c!, weights.z);
             current();
+            const surfacePoint = Object.freeze({
+              vertexIndices: Object.freeze(vertexIndices),
+              positionM: Object.freeze([position.x, position.y, position.z] as const),
+            });
+            tapeAnchors.set(surfacePoint, {
+              triangleIndex,
+              barycentric: [weights.x, weights.y, weights.z],
+              pieceRange: range,
+            });
             return Object.freeze({
               kind: 'garment',
               frameReportSha256,
               triangleIndex,
               pieceId: range.pieceId,
-              surfacePoint: Object.freeze({
-                vertexIndices: Object.freeze(vertexIndices),
-                positionM: Object.freeze([position.x, position.y, position.z] as const),
-              }),
+              surfacePoint,
             });
           }
           // Test only a compiler-identified boundary of the frontmost hit face. Screen distance
@@ -586,6 +600,32 @@ export async function createDxfGarmentObservedStrainHeatmapPreviewV1(
       }),
       lifetime: lifetime.signal,
       pick,
+      async measureTape(
+        first: DxfGarmentObservedPreviewSurfacePointV1,
+        second: DxfGarmentObservedPreviewSurfacePointV1,
+      ): Promise<number | null> {
+        try {
+          current();
+          const start = tapeAnchors.get(first);
+          const end = tapeAnchors.get(second);
+          if (!start || !end || start.pieceRange !== end.pieceRange) return null;
+          const { measureDeformedClothSurfaceTapeV1 } = await import(
+            './deformed-cloth-surface-tape-v1'
+          );
+          current();
+          const measured = measureDeformedClothSurfaceTapeV1({
+            positionsM: input.finalPositions3M,
+            triangles: input.garmentTriangles,
+            pieceRange: start.pieceRange,
+            start: { triangleIndex: start.triangleIndex, barycentric: start.barycentric },
+            end: { triangleIndex: end.triangleIndex, barycentric: end.barycentric },
+          });
+          current();
+          return measured;
+        } catch {
+          return null;
+        }
+      },
       setSelectedPiece,
       dispose,
     });

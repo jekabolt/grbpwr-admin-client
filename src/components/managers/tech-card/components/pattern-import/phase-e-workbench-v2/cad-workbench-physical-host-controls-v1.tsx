@@ -318,7 +318,9 @@ export function CadWorkbenchPhysicalHostControlsV1({
     host: NonNullable<HostState['host']>;
     receipt: NonNullable<typeof receipt>;
     scopeKey: string;
+    mode: 'straight' | 'tape';
     points: readonly DxfGarmentObservedPreviewSurfacePointV1[];
+    tapeLengthM?: number | null;
   } | null>(null);
   const returningToFlat = host !== null && returningHost === host;
   const returnToFlat = () => {
@@ -345,17 +347,26 @@ export function CadWorkbenchPhysicalHostControlsV1({
   useLayoutEffect(() => {
     setMeasurement(null);
   }, [host, receipt, scopeKey]);
+  const toggleMeasurement = (mode: 'straight' | 'tape') => {
+    if (!canMeasure || !host || !receipt || !scopeKey) return;
+    setMeasurement(
+      activeMeasurement?.mode === mode ? null : { host, receipt, scopeKey, mode, points: [] },
+    );
+  };
   const [firstPoint, secondPoint] = activeMeasurement?.points ?? [];
-  const distance =
-    firstPoint && secondPoint
-      ? formatPatternImportDxfPhaseEMeasurementValueV1(
-          Math.hypot(
+  const lengthM =
+    activeMeasurement?.mode === 'tape'
+      ? activeMeasurement.tapeLengthM
+      : firstPoint && secondPoint
+        ? Math.hypot(
             secondPoint.positionM[0] - firstPoint.positionM[0],
             secondPoint.positionM[1] - firstPoint.positionM[1],
             secondPoint.positionM[2] - firstPoint.positionM[2],
-          ) * 1000,
-          unit,
-        ).formatted
+          )
+        : null;
+  const distance =
+    typeof lengthM === 'number'
+      ? formatPatternImportDxfPhaseEMeasurementValueV1(lengthM * 1000, unit).formatted
       : null;
   useLayoutEffect(() => {
     const canvas = previewCanvas.current;
@@ -430,14 +441,20 @@ export function CadWorkbenchPhysicalHostControlsV1({
       if (hit?.kind !== 'garment' || hit.frameReportSha256 !== receipt.frameReportSha256) return;
       const point = hit.surfacePoint;
       if (!point?.positionM.every(Number.isFinite)) return;
-      setMeasurement((current) =>
-        current === previous
-          ? {
-              ...previous,
-              points: previous.points.length === 1 ? [...previous.points, point] : [point],
-            }
-          : current,
-      );
+      const first = previous.points.length === 1 ? previous.points[0] : undefined;
+      const next = {
+        ...previous,
+        points: first ? [first, point] : [point],
+        tapeLengthM: undefined,
+      };
+      setMeasurement((current) => (current === previous ? next : current));
+      if (previous.mode === 'tape' && first) {
+        const publish = (tapeLengthM: number | null) =>
+          setMeasurement((current) => (current === next ? { ...next, tapeLengthM } : current));
+        void host
+          .measurePreviewTape(event.currentTarget, interaction.scope, first, point)
+          .then(publish, () => publish(null));
+      }
       return;
     }
     if (activeMeasurement || start.interaction !== interaction) return;
@@ -672,23 +689,30 @@ export function CadWorkbenchPhysicalHostControlsV1({
                   type='button'
                   size='xs'
                   variant='secondary'
-                  aria-pressed={Boolean(activeMeasurement)}
+                  aria-pressed={activeMeasurement?.mode === 'straight'}
                   disabled={!canMeasure}
-                  onClick={() => {
-                    if (canMeasure)
-                      setMeasurement(
-                        activeMeasurement ? null : { host, receipt, scopeKey, points: [] },
-                      );
-                  }}
+                  onClick={() => toggleMeasurement('straight')}
                 >
                   Measure 3D
+                </Button>
+                <Button
+                  type='button'
+                  size='xs'
+                  variant='secondary'
+                  aria-pressed={activeMeasurement?.mode === 'tape'}
+                  disabled={!canMeasure}
+                  onClick={() => toggleMeasurement('tape')}
+                >
+                  Surface tape
                 </Button>
                 {firstPoint && activeMeasurement ? (
                   <Button
                     type='button'
                     size='xs'
                     variant='secondary'
-                    onClick={() => setMeasurement({ ...activeMeasurement, points: [] })}
+                    onClick={() =>
+                      setMeasurement({ ...activeMeasurement, points: [], tapeLengthM: undefined })
+                    }
                   >
                     Clear
                   </Button>
@@ -697,10 +721,14 @@ export function CadWorkbenchPhysicalHostControlsV1({
               {activeMeasurement ? (
                 <Text component='span' size='micro' role='status' className='tabular-nums'>
                   {distance
-                    ? `Straight-line distance ${distance}`
-                    : firstPoint
-                      ? 'Pick the second point on the cloth.'
-                      : 'Pick two points on the cloth.'}
+                    ? `${activeMeasurement.mode === 'tape' ? 'Surface distance' : 'Straight-line distance'} ${distance}`
+                    : secondPoint
+                      ? activeMeasurement.tapeLengthM === null
+                        ? 'No surface path between these points.'
+                        : 'Measuring along the cloth…'
+                      : firstPoint
+                        ? 'Pick the second point on the cloth.'
+                        : 'Pick two points on the cloth.'}
                 </Text>
               ) : null}
             </section>

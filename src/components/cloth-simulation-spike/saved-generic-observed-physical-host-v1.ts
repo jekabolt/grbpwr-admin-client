@@ -1,6 +1,9 @@
 import { projectSavedFullAssemblyAoOnlySnapshotV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-full-assembly-physical-component-v1';
 import type { DxfGarmentObservedBoundaryEdgeV1 } from './dxf-garment-observed-unsewn-edges-v1';
-import type { DxfGarmentObservedPreviewSeamSideV1 } from './dxf-garment-observed-strain-heatmap-preview-v1';
+import type {
+  DxfGarmentObservedPreviewSeamSideV1,
+  DxfGarmentObservedPreviewSurfacePointV1,
+} from './dxf-garment-observed-strain-heatmap-preview-v1';
 import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 import type {
   DxfExactAssemblyGraphV1,
@@ -1360,6 +1363,16 @@ export function createSavedGenericObservedPhysicalHostV1(
         const hit = view.pick(clientX, clientY, runtimeSeamId, measureSurface);
         return hit && hit.frameReportSha256 === view.receipt.frameReportSha256 ? hit : null;
       });
+    },
+    async measurePreviewTape(
+      canvas: HTMLCanvasElement,
+      first: DxfGarmentObservedPreviewSurfacePointV1,
+      second: DxfGarmentObservedPreviewSurfacePointV1,
+    ): Promise<number | null> {
+      const view = withMountedPreview(canvas, (mounted) => mounted);
+      if (!view) return null;
+      const measured = await view.measureTape(first, second);
+      return withMountedPreview(canvas, (mounted) => (mounted === view ? measured : null));
     },
     setPreviewSelectedPiece(
       canvas: HTMLCanvasElement,
