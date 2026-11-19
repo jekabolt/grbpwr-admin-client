@@ -172,6 +172,7 @@ export type PatternImportDxfProductCompositeSidecarStorageWriterStrategyV3<
   receiptSchemaVersion: ReceiptSchema;
   mediaType: MediaType;
   acceptedCurrentMediaTypes: readonly string[];
+  historicalPredecessorLockVersion?: number;
   label: string;
   prepare: (
     request: Request,
@@ -698,9 +699,27 @@ export function createPatternImportDxfProductCompositeSidecarStorageWriterV3<
       let planned: PatternImportDxfProductCompositeSidecarStoragePlannedWriteV3<MediaType>;
       let base64: string;
       try {
+        const { currentAuthority } = request;
+        const lock = strategy.historicalPredecessorLockVersion;
+        if (
+          lock !== undefined &&
+          (!Number.isSafeInteger(lock) || lock < 0 || lock >= currentAuthority.row.cardLockVersion)
+        )
+          fail(
+            'current-readback-invalid',
+            'current-get',
+            'The fallback placement is not an earlier saved row.',
+          );
+        const predecessorAuthority =
+          lock === undefined
+            ? currentAuthority
+            : {
+                ...currentAuthority,
+                row: { ...currentAuthority.row, cardLockVersion: lock },
+              };
         const current = await mapCurrentEvidence(
           currentRow,
-          request.currentAuthority,
+          predecessorAuthority,
           acceptedCurrentMediaTypes,
         );
         try {

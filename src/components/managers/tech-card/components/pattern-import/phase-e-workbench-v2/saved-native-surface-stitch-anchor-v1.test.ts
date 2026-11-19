@@ -314,6 +314,7 @@ describe('saved native point closure marks', () => {
       sourceFileId: computeDxfProductSavedSourceFileIdV1(source.row),
       nativePathId,
       pointMm: [23, closed ? 26 : 20],
+      ...(!closed && { markedSegmentMm: line.slice(0, 2) }),
     });
   });
 

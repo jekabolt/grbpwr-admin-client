@@ -64,8 +64,8 @@ export function savedPointClosures(
   operationNumber: number,
   sizeId: number,
 ) {
-  if (!isVerifiedCompleteSavedAssemblySourceV1(source) || !source.sourceOnly)
-    throw new Error('Read the exact saved Assembly source before authoring a fastening.');
+  if (!isVerifiedCompleteSavedAssemblySourceV1(source))
+    throw new Error('Read the exact saved Assembly source before resolving a fastening.');
   const operation = savedOperation(source, operationNumber, 'button_attach');
   const rows = new Map(source.ownedSeams.map((row) => [row.seamKey, row]));
   return (operation.seamKeys ?? []).flatMap((key) => {

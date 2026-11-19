@@ -1,8 +1,10 @@
+import type { TechCardPatternSemanticSidecar } from 'api/proto-http/admin';
 import { MODEL_OPEN_REFERENCE_DIRECT_NEUTRAL_POSE_V9 } from 'components/managers/model/components/model-open-reference-direct-pose-v9';
 import {
   createModelMannequinPoseDocumentV2,
   fingerprintModelMannequinPoseDocumentV2,
 } from 'lib/cloth/body/model-mannequin-pose-document-v2';
+import { SAVED_WHOLE_ASSEMBLY_PLACEMENT_LIMITS_V10 } from 'lib/cloth/runtime/saved-whole-assembly-placement-limits-v10';
 import { sha256Hex } from 'lib/features/sha256';
 import {
   completeSavedAssemblyRowIdentityV1,
@@ -45,8 +47,8 @@ const reviewDomain = 'tech-card-complete-source-native-review/1';
 const anchorDomain = 'tech-card-saved-assembly-native-anchor/1';
 const maximumCarrierBytes = 4 * 1024 * 1024;
 const maximumWorldBytes = 131_072;
-const maximumVertices = 2_000;
-const maximumTriangles = 5_000;
+const { carrierVertices: maximumVertices, carrierTriangles: maximumTriangles } =
+  SAVED_WHOLE_ASSEMBLY_PLACEMENT_LIMITS_V10;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 const lowercaseSha = /^[a-f0-9]{64}$/;
@@ -101,7 +103,7 @@ type DocumentWire = Readonly<{
   encoding: 'canonical-json-utf8';
   profile: typeof SAVED_COMPLETE_ASSEMBLY_WHOLE_PLACEMENT_PROFILE_V1;
   bindings: NativeReviewV8['bindings'];
-  writeCas: Readonly<{ expectedPreviousSidecarSha256: string }>;
+  writeCas: Readonly<{ expectedPreviousSidecarSha256: string; rebuildStaleComplete?: true }>;
   components: readonly [RetainedCarrier, ComponentWire<typeof worldKind, typeof worldMediaType>];
 }>;
 
@@ -222,11 +224,15 @@ async function verifyReviewBinding(
     throw new Error('The retained review must have the exact saved V8 profile.');
   const { anchorRow, serverAssemblyRevision, completeSourceSha256 } = review.bindings;
   const carrier = source.priorCarrier;
-  const row = source.rows.find(({ patternLineKey }) => patternLineKey === carrier?.patternLineKey);
+  const row = source.rows.find(
+    ({ patternLineKey }) => patternLineKey === anchorRow?.patternLineKey,
+  );
   if (
     !row ||
     row.scopeKey !== 'main' ||
-    carrier?.cardLockVersion !== row.cardLockVersion ||
+    (!source.sourceOnly &&
+      (carrier?.patternLineKey !== row.patternLineKey ||
+        carrier.cardLockVersion !== row.cardLockVersion)) ||
     canonical(anchorRow) !==
       canonical({
         ...completeSavedAssemblyRowIdentityV1(row),
@@ -571,17 +577,9 @@ function result(
   };
 }
 
-/** Reads an exact whole initial layout from the actual current Complete Source slot. */
-export async function readSavedWholeAssemblyPlacementDocumentV10(
-  source: CompleteSavedAssemblySourceV1,
-  signal: AbortSignal,
-): Promise<SavedWholeAssemblyPlacementResultV10> {
-  signal.throwIfAborted();
-  const { metadata, blob, receipt } = readCurrentCarrier(source);
-  if (metadata.mediaType !== SAVED_COMPLETE_ASSEMBLY_WHOLE_PLACEMENT_MEDIA_V10)
-    throw new Error('A current saved whole layout placement is required.');
-  const bytes = await readBytes(blob, maximumCarrierBytes, signal);
+function parseWholePlacement(bytes: Uint8Array<ArrayBuffer>, sha256: string) {
   const { document } = parseCanonical<DocumentWire>(bytes, maximumCarrierBytes);
+  const rebuild = document.writeCas?.rebuildStaleComplete;
   if (
     !exactKeys(document, [
       'schemaVersion',
@@ -596,14 +594,121 @@ export async function readSavedWholeAssemblyPlacementDocumentV10(
     document.mediaType !== SAVED_COMPLETE_ASSEMBLY_WHOLE_PLACEMENT_MEDIA_V10 ||
     document.encoding !== 'canonical-json-utf8' ||
     document.profile !== SAVED_COMPLETE_ASSEMBLY_WHOLE_PLACEMENT_PROFILE_V1 ||
-    !exactKeys(document.writeCas, ['expectedPreviousSidecarSha256']) ||
+    !exactKeys(document.writeCas, [
+      'expectedPreviousSidecarSha256',
+      ...(rebuild === true ? ['rebuildStaleComplete'] : []),
+    ]) ||
     !isSha(document.writeCas.expectedPreviousSidecarSha256) ||
-    document.writeCas.expectedPreviousSidecarSha256 === blob.sha256 ||
+    document.writeCas.expectedPreviousSidecarSha256 === sha256 ||
     !Array.isArray(document.components) ||
     document.components.length !== 2
   )
     throw new Error('The saved whole layout carrier must have the exact V10 shape.');
+  return document;
+}
 
+type V10Predecessor = Readonly<{
+  metadata: Readonly<TechCardPatternSemanticSidecar>;
+  sha256: string;
+  review: StoredReview;
+}>;
+
+export async function readSavedWholeAssemblyRebuildPredecessorV10(
+  source: CompleteSavedAssemblySourceV1,
+  historical: TechCardPatternSemanticSidecar | undefined,
+  signal: AbortSignal,
+): Promise<V10Predecessor> {
+  if (!isVerifiedCompleteSavedAssemblySourceV1(source) || !source.sourceOnly || source.priorCarrier)
+    throw new Error('Read the current Complete Assembly source before rebuilding the placement.');
+  const metadata = Object.freeze(structuredClone(historical));
+  const main = source.rows.find(({ scopeKey }) => scopeKey === 'main');
+  if (
+    !main ||
+    metadata?.mediaType !== SAVED_COMPLETE_ASSEMBLY_WHOLE_PLACEMENT_MEDIA_V10 ||
+    metadata.techCardId !== main.techCardId ||
+    metadata.patternLineKey !== main.patternLineKey ||
+    metadata.savedRowRevision !== main.revision ||
+    metadata.patternVersion !== main.patternVersion ||
+    metadata.dxfSha256 !== main.sha256 ||
+    !Number.isSafeInteger(metadata.cardLockVersion) ||
+    metadata.cardLockVersion! >= main.cardLockVersion ||
+    !metadata.sidecarBytes ||
+    !metadata.byteLength ||
+    !isSha(metadata.sidecarSha256) ||
+    !isSha(metadata.postSaveReceiptSha256)
+  )
+    throw new Error('The saved 3D placement must be from an earlier Assembly of this exact DXF.');
+
+  const sha256 = metadata.sidecarSha256;
+  const bytes = await readBytes(
+    {
+      base64: metadata.sidecarBytes,
+      byteLength: metadata.byteLength,
+      sha256,
+    },
+    maximumCarrierBytes,
+    signal,
+  );
+  const document = parseWholePlacement(bytes, sha256);
+  const bindings = document.bindings;
+  if (
+    canonical(bindings.anchorRow) !==
+      canonical({
+        ...completeSavedAssemblyRowIdentityV1(main),
+        cardLockVersion: metadata.cardLockVersion,
+        patternVersion: main.patternVersion,
+      }) ||
+    !isSha(bindings.completeSourceSha256) ||
+    bindings.completeSourceSha256 === source.sourceSha256 ||
+    bindings.serverAssemblyRevision === source.serverAssemblyRevision ||
+    (await canonicalSeal(receiptDomain, document, undefined, signal, maximumCarrierBytes + 128)) !==
+      metadata.postSaveReceiptSha256
+  )
+    throw new Error(
+      'The prior 3D placement receipt does not match the saved DXF and earlier Assembly.',
+    );
+
+  const [retained] = document.components;
+  if (
+    !exactKeys(retained, ['kind', 'mediaType', 'byteLength', 'sha256', 'base64']) ||
+    retained.kind !== retainedKind
+  )
+    throw new Error('The prior 3D placement has no original signed native review.');
+  let review: StoredReview;
+  if (retained.mediaType === SAVED_COMPLETE_ASSEMBLY_PLACEMENT_MEDIA_V9) {
+    ({ review } = await decodeSavedCrossMaterialPlacementDocumentV9(
+      {
+        sidecarBytes: retained.base64,
+        sidecarSha256: retained.sha256,
+        byteLength: retained.byteLength,
+      },
+      signal,
+    ));
+  } else if (retained.mediaType === SAVED_COMPLETE_ASSEMBLY_NATIVE_MEDIA_V8) {
+    const native = await readBytes(retained, maximumCarrierBytes, signal);
+    review = {
+      ...parseCanonical<NativeReviewV8>(native, maximumCarrierBytes),
+      sha256: retained.sha256,
+    };
+  } else {
+    throw new Error('The prior 3D placement requires a native V8 review.');
+  }
+  if (canonical(review.document.bindings) !== canonical(bindings))
+    throw new Error('The prior native review belongs to a different Assembly binding.');
+  return { metadata, sha256, review };
+}
+
+/** Reads an exact whole initial layout from the actual current Complete Source slot. */
+export async function readSavedWholeAssemblyPlacementDocumentV10(
+  source: CompleteSavedAssemblySourceV1,
+  signal: AbortSignal,
+): Promise<SavedWholeAssemblyPlacementResultV10> {
+  signal.throwIfAborted();
+  const { metadata, blob, receipt } = readCurrentCarrier(source);
+  if (metadata.mediaType !== SAVED_COMPLETE_ASSEMBLY_WHOLE_PLACEMENT_MEDIA_V10)
+    throw new Error('A current saved whole layout placement is required.');
+  const bytes = await readBytes(blob, maximumCarrierBytes, signal);
+  const document = parseWholePlacement(bytes, blob.sha256);
   const [retainedComponent, worldComponent] = document.components;
   if (
     !exactKeys(worldComponent, ['kind', 'mediaType', 'byteLength', 'sha256', 'base64']) ||
@@ -658,10 +763,13 @@ export async function buildSavedWholeAssemblyPlacementDocumentV10(
   layout: SavedWholeAssemblyPlacementLayoutV10,
   body: SavedWholeAssemblyPlacementBodyV10,
   signal: AbortSignal,
+  rebuild?: Readonly<{
+    previous: Readonly<TechCardPatternSemanticSidecar>;
+    freshNativeReview: Readonly<{ bytes: Uint8Array; sha256: string; reviewReceiptSha256: string }>;
+  }>,
 ): Promise<SavedWholeAssemblyPlacementResultV10> {
   signal.throwIfAborted();
-  const { metadata, blob: previous, receipt } = readCurrentCarrier(source);
-  const { mediaType } = metadata;
+  const current = rebuild ? null : readCurrentCarrier(source);
   if (
     !exactKeys(layout, [
       'sizeId',
@@ -682,7 +790,34 @@ export async function buildSavedWholeAssemblyPlacementDocumentV10(
   const capturedLayout = structuredClone(layoutIdentity);
   const capturedBody = structuredClone(body);
   const positionBytes = encodeCoordinates(positionsM);
+  const freshReview = rebuild && {
+    ...rebuild.freshNativeReview,
+    bytes: rebuild.freshNativeReview.bytes.slice(),
+  };
+  const previous = rebuild
+    ? await readSavedWholeAssemblyRebuildPredecessorV10(source, rebuild.previous, signal)
+    : current!.blob;
   const retained = await (async (): Promise<RetainedReview> => {
+    if (freshReview) {
+      const fresh = await describeBytes(freshReview.bytes, signal);
+      if (fresh.sha256 !== freshReview.sha256)
+        throw new Error('The rebuilt native review differs from its verified bytes.');
+      return readRetainedReview(
+        source,
+        {
+          kind: retainedKind,
+          mediaType: SAVED_COMPLETE_ASSEMBLY_NATIVE_MEDIA_V8,
+          ...fresh,
+        },
+        signal,
+        freshReview.reviewReceiptSha256,
+      );
+    }
+    const {
+      metadata: { mediaType },
+      blob,
+      receipt,
+    } = current!;
     if (mediaType === SAVED_COMPLETE_ASSEMBLY_WHOLE_PLACEMENT_MEDIA_V10) {
       const before = await readSavedWholeAssemblyPlacementDocumentV10(source, signal);
       const { retainedCarrier, review, narrowPlacement } = before;
@@ -693,12 +828,7 @@ export async function buildSavedWholeAssemblyPlacementDocumentV10(
       mediaType !== SAVED_COMPLETE_ASSEMBLY_PLACEMENT_MEDIA_V9
     )
       throw new Error('Only an exact saved V8, V9, or V10 carrier can be used.');
-    return readRetainedReview(
-      source,
-      { kind: retainedKind, mediaType, ...previous },
-      signal,
-      receipt,
-    );
+    return readRetainedReview(source, { kind: retainedKind, mediaType, ...blob }, signal, receipt);
   })();
 
   const vertices = countLayoutVertices(capturedLayout, retained.review.document.selection);
@@ -721,7 +851,10 @@ export async function buildSavedWholeAssemblyPlacementDocumentV10(
     encoding: 'canonical-json-utf8',
     profile: SAVED_COMPLETE_ASSEMBLY_WHOLE_PLACEMENT_PROFILE_V1,
     bindings: retained.review.document.bindings,
-    writeCas: { expectedPreviousSidecarSha256: previous.sha256 },
+    writeCas: {
+      expectedPreviousSidecarSha256: previous.sha256,
+      ...(rebuild && { rebuildStaleComplete: true }),
+    },
     components: [
       retained.retainedCarrier,
       { kind: worldKind, mediaType: worldMediaType, ...(await describeBytes(worldBytes, signal)) },

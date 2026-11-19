@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect, useId, useRef, useState } from 'react';
 import { abortableAdminService } from 'api/api';
-import type { common_TechCard } from 'api/proto-http/admin';
+import type { common_TechCard, TechCardPatternSemanticSidecar } from 'api/proto-http/admin';
 import { rollGoodsScopes } from 'components/managers/tech-card/components/piece-block-refs';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { Button, CalloutBox, Select, Text } from 'ui';
+import { canonicalizePatternImportDxfPhaseESavedAssemblyValueV1 as canonical } from './saved-assembly-topology-hash-v1';
 import { readCompleteSavedAssemblySourceV1 } from './saved-assembly-complete-source-rpc-v1';
 import { buildPatternImportDxfPhaseESavedCardContextV1 } from './saved-card-production-projection-v1';
 import {
@@ -23,6 +24,7 @@ import type { PrepareSavedWholeAssemblyPreviewV1 } from './saved-whole-assembly-
 import type { RestoredWholeSourceCutPlacementV1 } from 'components/cloth-simulation-spike/prepare-saved-complete-whole-source-cut-v1';
 import {
   SAVED_COMPLETE_ASSEMBLY_WHOLE_PLACEMENT_MEDIA_V10,
+  readSavedWholeAssemblyRebuildPredecessorV10,
   type readSavedWholeAssemblyPlacementDocumentV10,
 } from './saved-whole-assembly-placement-document-v10';
 import type { PatternImportDxfPhaseEZeroOperationSavedCardAuthorityRuntimeV1 as Authority } from './zero-operation-saved-card-authority-v1';
@@ -43,6 +45,7 @@ export type SavedCrossMaterialReviewForPreviewV8 = Readonly<{
   lockVersion: number;
   operationNumber: number;
   sha256: string;
+  placementRebuild?: true;
   patternSize: CadWorkbenchSavedReviewSizeV1;
   load: (signal: AbortSignal) => ReturnType<typeof readSavedCompleteAssemblyNativePhysicalSourceV8>;
   verify: (signal: AbortSignal, expectedAuthoredFoldSourceSha256?: string) => Promise<void>;
@@ -176,13 +179,13 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
   const size = sizes.find(({ sizeId: value }) => String(value) === sizeId);
   const ready = !disabled && !busy && !loading && !!size && !!dictionary?.sizes;
 
-  async function run(action: 'review' | 'reopen' | 'save') {
+  async function run(action: 'review' | 'reopen' | 'save' | 'rebuild') {
     if (
       !ready ||
       inFlight.current ||
       !size ||
       !dictionary?.sizes ||
-      (action !== 'reopen' && !pairing)
+      ((action === 'review' || action === 'save') && !pairing)
     )
       return;
     const reviewed = state?.status === 'reviewed' ? state.review : null;
@@ -222,7 +225,7 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
       const source = await readCompleteSavedAssemblySourceV1(
         abortableAdminService(signal),
         exact.row,
-        {},
+        action === 'rebuild' ? { sourceOnly: true } : {},
         signal,
       );
       const operation = source.operations.find(
@@ -238,10 +241,17 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
       function publishRestored(
         restored: Awaited<ReturnType<typeof restoreSavedCompleteAssemblyNativeStitchReviewV8>>,
         current: typeof source,
-        placements: Readonly<{ narrow?: RestoredPlacement; whole?: WholePlacement }> = {},
+        placements: Readonly<{
+          narrow?: RestoredPlacement;
+          whole?: WholePlacement;
+          rebuild?: Readonly<{
+            previous: Readonly<TechCardPatternSemanticSidecar>;
+            freshNativeReview: Prepared;
+          }>;
+        }> = {},
         active = signal,
       ) {
-        const { narrow: placement, whole } = placements;
+        const { narrow: placement, whole, rebuild } = placements;
         active.throwIfAborted();
         if (restored.document.selection.operationNumber !== operationNumber)
           throw new Error('The saved review belongs to a different Assembly Order operation.');
@@ -279,12 +289,13 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
                 {
                   expectedServerAssemblyRevision: current.serverAssemblyRevision,
                   expectedCompleteSourceSha256: current.sourceSha256,
+                  ...(rebuild && { sourceOnly: true }),
                   authoredFolds,
                 },
                 active,
               )
             : current;
-          if (nativeSource.priorCarrier?.sidecarSha256 !== carrierSha256)
+          if (!rebuild && nativeSource.priorCarrier?.sidecarSha256 !== carrierSha256)
             throw new Error('The reviewed sewing runs changed before whole-assembly preparation.');
           return readSavedCompleteAssemblyNativeStitchAnchorsV1(
             nativeSource,
@@ -301,6 +312,7 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
             lockVersion: exact.row.cardLockVersion,
             operationNumber,
             sha256: carrierSha256,
+            ...(rebuild && { placementRebuild: true }),
             patternSize: Object.freeze({
               row: exact.row,
               operationNumber,
@@ -346,6 +358,7 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
                         return readCurrentSavedNeutralPlacementModelV1(input.body, active);
                       },
                       active,
+                      rebuild,
                     );
                     if (input.isCurrent())
                       publishRestored(
@@ -360,36 +373,37 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
                   },
             },
             placement: placement?.world,
-            savePlacement: whole
-              ? undefined
-              : async (input, active) => {
-                  const [
-                    { prepareCurrentSavedCrossMaterialPlacementV9 },
-                    { persistSavedCrossMaterialPlacementV9 },
-                    { readCurrentSavedNeutralPlacementModelV1 },
-                  ] = await Promise.all([
-                    import('./saved-cross-material-placement-prepare-v9'),
-                    import('./saved-cross-material-placement-storage-v9'),
-                    import('./saved-cross-material-placement-model-binding-v1'),
-                  ]);
-                  const prepared = await prepareCurrentSavedCrossMaterialPlacementV9(
-                    { ...input, loadReview: load, previousPlacementSha256: placement?.sha256 },
-                    active,
-                  );
-                  const saved = await persistSavedCrossMaterialPlacementV9(
-                    abortableAdminService,
-                    prepared,
-                    (signal) => {
-                      if (!input.isCurrent())
-                        throw new Error('The displayed mannequin or saved review changed.');
-                      return readCurrentSavedNeutralPlacementModelV1(input.body, signal);
-                    },
-                    active,
-                    placement,
-                  );
-                  if (input.isCurrent())
-                    publishRestored(restored, saved.source, { narrow: saved.reopened }, active);
-                },
+            savePlacement:
+              whole || rebuild
+                ? undefined
+                : async (input, active) => {
+                    const [
+                      { prepareCurrentSavedCrossMaterialPlacementV9 },
+                      { persistSavedCrossMaterialPlacementV9 },
+                      { readCurrentSavedNeutralPlacementModelV1 },
+                    ] = await Promise.all([
+                      import('./saved-cross-material-placement-prepare-v9'),
+                      import('./saved-cross-material-placement-storage-v9'),
+                      import('./saved-cross-material-placement-model-binding-v1'),
+                    ]);
+                    const prepared = await prepareCurrentSavedCrossMaterialPlacementV9(
+                      { ...input, loadReview: load, previousPlacementSha256: placement?.sha256 },
+                      active,
+                    );
+                    const saved = await persistSavedCrossMaterialPlacementV9(
+                      abortableAdminService,
+                      prepared,
+                      (signal) => {
+                        if (!input.isCurrent())
+                          throw new Error('The displayed mannequin or saved review changed.');
+                        return readCurrentSavedNeutralPlacementModelV1(input.body, signal);
+                      },
+                      active,
+                      placement,
+                    );
+                    if (input.isCurrent())
+                      publishRestored(restored, saved.source, { narrow: saved.reopened }, active);
+                  },
             async verify(active, expectedAuthoredFoldSourceSha256) {
               const latest = await readCompleteSavedAssemblySourceV1(
                 abortableAdminService(active),
@@ -413,7 +427,69 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
           },
         });
       }
-      if (action === 'save') {
+      if (action === 'rebuild') {
+        if (!prepareWholeAssemblyPreview)
+          throw new Error('The current assembly has no 3D preparation.');
+        const { semanticSidecar } = await abortableAdminService(
+          signal,
+        ).GetTechCardPatternSemanticSidecar({
+          techCardId: exact.row.techCardId,
+          patternLineKey: exact.row.patternLineKey,
+        });
+        const previous = await readSavedWholeAssemblyRebuildPredecessorV10(
+          source,
+          semanticSidecar,
+          signal,
+        );
+        const savedSelection = previous.review.document.selection;
+        const [a, b] = savedSelection.members;
+        if (
+          savedSelection.operationNumber !== operationNumber ||
+          savedSelection.sizeId !== size.sizeId ||
+          savedSelection.sizeToken !== size.token ||
+          a?.orderedVertexIds.length !== b?.orderedVertexIds.length
+        )
+          throw new Error('Choose the saved 3D placement operation and size before rebuilding.');
+        const selection = {
+          sizeId: size.sizeId,
+          sizeToken: size.token,
+          operationNumber,
+        };
+        const reviewed = await prepareSavedCompleteAssemblyNativeStitchReviewV8(
+          source,
+          projection,
+          {
+            ...selection,
+            ...(pairing
+              ? { pairing }
+              : {
+                  registrations: a.orderedVertexIds.map(
+                    (vertex, index) => [vertex, b.orderedVertexIds[index]!] as const,
+                  ),
+                }),
+          },
+          sizeAuthority,
+          signal,
+        );
+        if (!pairing) {
+          const old = structuredClone(savedSelection);
+          const currentSelection = reviewed.document.selection;
+          const normalized = {
+            ...old,
+            members: old.members.map((member) => ({
+              ...member,
+              row: { ...member.row, cardLockVersion: exact.row.cardLockVersion },
+            })),
+          };
+          if (canonical(normalized) !== canonical(currentSelection))
+            throw new Error(
+              'The saved sewing runs changed. Choose and review the current join direction.',
+            );
+        }
+        publishRestored(reviewed, source, {
+          rebuild: { previous: previous.metadata, freshNativeReview: reviewed },
+        });
+      } else if (action === 'save') {
         const saved = await persistSavedCompleteAssemblyNativeStitchReviewV8(
           abortableAdminService,
           source,
@@ -564,7 +640,11 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
           <>
             <NativeRuns review={state.review} />
             <Text component='p' size='micro' role='status'>
-              {state.status === 'reopened' ? 'Saved review verified. ' : ''}
+              {state.status === 'reopened'
+                ? state.preview.placementRebuild
+                  ? 'Current Assembly reviewed. '
+                  : 'Saved review verified. '
+                : ''}
               {state.review.document.selection.members[0].orderedVertexIds.length} corner pairs ·{' '}
               {state.review.document.review.stationCount} stitch stations
             </Text>
@@ -611,6 +691,18 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
           >
             Reopen saved review
           </Button>
+          {prepareWholeAssemblyPreview &&
+            !(state?.status === 'reopened' && state.preview.placementRebuild) && (
+              <Button
+                type='button'
+                variant='secondary'
+                size='xs'
+                disabled={!ready}
+                onClick={() => void run('rebuild')}
+              >
+                Review Assembly for 3D rebuild
+              </Button>
+            )}
           <Button
             type='button'
             variant='secondary'

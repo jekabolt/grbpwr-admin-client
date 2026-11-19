@@ -188,6 +188,7 @@ export async function prepareSavedFullAssemblyCompleteNativeRowsV1(
     {
       expectedServerAssemblyRevision: source.serverAssemblyRevision,
       expectedCompleteSourceSha256: source.sourceSha256,
+      ...(source.sourceOnly && { sourceOnly: true }),
     },
     signal,
   );

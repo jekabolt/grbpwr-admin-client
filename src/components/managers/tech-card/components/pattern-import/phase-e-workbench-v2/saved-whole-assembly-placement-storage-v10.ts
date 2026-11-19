@@ -35,8 +35,9 @@ export async function persistSavedWholeAssemblyPlacementV10(
   layout: SavedWholeAssemblyPlacementLayoutV10,
   readCurrentBody: ReadCurrentBody,
   signal: AbortSignal,
+  rebuild?: Parameters<typeof buildSavedWholeAssemblyPlacementDocumentV10>[4],
 ) {
-  const previous = source.priorCarrier;
+  const previous = rebuild?.previous ?? source.priorCarrier;
   if (
     !previous ||
     !previous.sidecarBytes ||
@@ -52,6 +53,7 @@ export async function persistSavedWholeAssemblyPlacementV10(
     snapshot,
     body,
     signal,
+    rebuild,
   );
   const { anchorRow, serverAssemblyRevision, completeSourceSha256 } = submitted.document.bindings;
   const row = completeSavedAssemblyRowIdentityV1(anchorRow);
@@ -72,6 +74,7 @@ export async function persistSavedWholeAssemblyPlacementV10(
       receiptSchemaVersion: receiptSchema,
       mediaType: SAVED_COMPLETE_ASSEMBLY_WHOLE_PLACEMENT_MEDIA_V10,
       acceptedCurrentMediaTypes: [previous.mediaType],
+      ...(rebuild && { historicalPredecessorLockVersion: previous.cardLockVersion }),
       label: 'Full assembly initial placement',
       async prepare(request, current) {
         if (
@@ -97,14 +100,27 @@ export async function persistSavedWholeAssemblyPlacementV10(
         };
       },
       async beforeRequest(_request, _planned, active) {
-        const [latest, liveBody] = await Promise.all([
-          readCompleteSavedAssemblySourceV1(createClient(active), row, pinned, active),
+        const checked = createClient(active);
+        const [latest, liveBody, stale] = await Promise.all([
+          readCompleteSavedAssemblySourceV1(
+            checked,
+            row,
+            { ...pinned, ...(rebuild && { sourceOnly: true }) },
+            active,
+          ),
           readCurrentBody(active),
+          rebuild
+            ? checked.GetTechCardPatternSemanticSidecar({
+                techCardId: row.techCardId,
+                patternLineKey: row.patternLineKey,
+              })
+            : null,
         ]);
-        const saved = latest.priorCarrier;
+        const saved = rebuild ? stale?.semanticSidecar : latest.priorCarrier;
         if (
           !saved ||
           saved.mediaType !== previous.mediaType ||
+          saved.cardLockVersion !== previous.cardLockVersion ||
           saved.sidecarSha256 !== previous.sidecarSha256 ||
           saved.postSaveReceiptSha256 !== previous.postSaveReceiptSha256 ||
           saved.sidecarBytes !== previous.sidecarBytes ||

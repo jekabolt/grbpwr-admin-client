@@ -3,6 +3,7 @@ import type {
   TechCardPatternSemanticSidecar,
 } from 'api/proto-http/admin';
 import { createHash } from 'node:crypto';
+import { SAVED_WHOLE_ASSEMBLY_PLACEMENT_LIMITS_V10 } from 'lib/cloth/runtime/saved-whole-assembly-placement-limits-v10';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { MODEL_OPEN_REFERENCE_DIRECT_NEUTRAL_POSE_V9 } from 'components/managers/model/components/model-open-reference-direct-pose-v9';
 import {
@@ -28,6 +29,7 @@ import { matchesSavedNeutralPlacementBodyV1 } from './saved-cross-material-place
 import {
   buildSavedWholeAssemblyPlacementDocumentV10,
   readSavedWholeAssemblyPlacementDocumentV10,
+  readSavedWholeAssemblyRebuildPredecessorV10,
   SAVED_COMPLETE_ASSEMBLY_WHOLE_PLACEMENT_MEDIA_V10,
   type SavedWholeAssemblyPlacementBodyV10,
   type SavedWholeAssemblyPlacementLayoutV10,
@@ -103,10 +105,10 @@ const rows = [anchor, pocket].map(({ revision: savedRowRevision, ...row }) => ({
 const digest = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
 const receipt = (domain: string, text: string) => digest(`${domain}\0${text}`);
 
-function snapshotText(serverAssemblyRevision = revision) {
+function snapshotText(serverAssemblyRevision = revision, cardLockVersion = anchor.cardLockVersion) {
   return canonical({
     serverAssemblyRevision,
-    rows,
+    rows: rows.map((row) => ({ ...row, cardLockVersion })),
     operations,
     ownedSeams,
     aliases,
@@ -118,9 +120,10 @@ async function readSource(
   semanticSidecar: TechCardPatternSemanticSidecar | undefined,
   serverAssemblyRevision = revision,
   sourceOnly?: true,
+  cardLockVersion = anchor.cardLockVersion,
 ) {
-  const [main, ...rest] = rows.map((row) => ({ ...row, downloadUrl: row.url }));
-  const sourceText = snapshotText(serverAssemblyRevision);
+  const [main, ...rest] = rows.map((row) => ({ ...row, cardLockVersion, downloadUrl: row.url }));
+  const sourceText = snapshotText(serverAssemblyRevision, cardLockVersion);
   const reply = {
     row: main,
     operations,
@@ -142,7 +145,7 @@ async function readSource(
         return reply;
       },
     },
-    anchor,
+    { ...anchor, cardLockVersion },
     { sourceOnly },
     signal,
   );
@@ -359,6 +362,71 @@ function withWorld(world: SavedWholeAssemblyPlacementResultV10['world']) {
 }
 
 describe('saved whole assembly placement V10', () => {
+  it('explicitly rebuilds stale placement while binding the fresh native review and predecessor CAS', async () => {
+    const lock = anchor.cardLockVersion + 1;
+    const clock = revision.replace(/:19$/, ':20');
+    const predecessor = sidecar(
+      SAVED_COMPLETE_ASSEMBLY_WHOLE_PLACEMENT_MEDIA_V10,
+      wholeDomain,
+      canonical(placed.document),
+    );
+    const source = await readSource(undefined, clock, true, lock);
+    const previous = await readSavedWholeAssemblyRebuildPredecessorV10(source, predecessor, signal);
+    expect(previous.review.sha256).toBe(placed.review.sha256);
+    const original = initialReview();
+    const freshDocument = {
+      ...original,
+      bindings: {
+        anchorRow: { ...anchor, cardLockVersion: lock },
+        serverAssemblyRevision: clock,
+        completeSourceSha256: source.sourceSha256,
+      },
+      selection: {
+        ...original.selection,
+        members: original.selection.members.map((member) => ({
+          ...member,
+          row: { ...member.row, cardLockVersion: lock },
+        })),
+      },
+    };
+    const freshText = canonical(freshDocument);
+    const rebuilt = await buildSavedWholeAssemblyPlacementDocumentV10(
+      source,
+      layout(),
+      body,
+      signal,
+      {
+        previous: predecessor,
+        freshNativeReview: {
+          bytes: new TextEncoder().encode(freshText),
+          sha256: digest(freshText),
+          reviewReceiptSha256: receipt(reviewDomain, freshText),
+        },
+      },
+    );
+    expect(rebuilt.document.writeCas).toEqual({
+      expectedPreviousSidecarSha256: predecessor.sidecarSha256,
+      rebuildStaleComplete: true,
+    });
+    expect(rebuilt.review.sha256).toBe(digest(freshText));
+    expect(rebuilt.document.bindings.completeSourceSha256).toBe(source.sourceSha256);
+    const stored = {
+      ...sidecar(
+        SAVED_COMPLETE_ASSEMBLY_WHOLE_PLACEMENT_MEDIA_V10,
+        wholeDomain,
+        canonical(rebuilt.document),
+      ),
+      cardLockVersion: lock,
+    };
+    const fresh = await readSource(stored, clock, undefined, lock);
+    expect((await readSavedWholeAssemblyPlacementDocumentV10(fresh, signal)).sha256).toBe(
+      rebuilt.sha256,
+    );
+    await expect(
+      readSavedWholeAssemblyRebuildPredecessorV10(source, stored, signal),
+    ).rejects.toThrow('earlier Assembly');
+  });
+
   it('reads the same sealed Assembly source without admitting a carrier when requested', async () => {
     const ordinary = await readSource(v8);
     const sourceOnly = await readSource(undefined, revision, true);
@@ -553,7 +621,7 @@ describe('saved whole assembly placement V10', () => {
       { ...last, pieceId: first.pieceId },
       { ...last, pieceId: last.pieceId.toLowerCase() },
       { ...last, vertexOffset: 4 },
-      { ...last, vertexCount: 2_001 },
+      { ...last, vertexCount: SAVED_WHOLE_ASSEMBLY_PLACEMENT_LIMITS_V10.carrierVertices + 1 },
       { ...last, triangleCount: 5_000 },
     ]) {
       await expect(

@@ -273,6 +273,7 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
     const resumeSuspended = options.resume === true;
     if (
       disabled ||
+      review.placementRebuild ||
       editing ||
       placementSave.current ||
       status.pending ||
@@ -365,39 +366,44 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
       className='space-y-2 border border-borderColor bg-bgColor px-2.5 py-2'
     >
       <div className='flex flex-wrap items-end gap-2'>
-        {(
-          [
-            ['X', x, setX],
-            ['Y', y, setY],
-            ['Z', z, setZ],
-          ] as const
-        ).map(([axis, value, setValue]) => (
-          <label key={axis} htmlFor={`${id}-${axis}`} className='w-16 text-micro'>
-            {axis} mm
-            <Input
-              name={`${id}-${axis}`}
-              value={value}
-              inputMode='decimal'
-              disabled={busy}
-              readOnly={!!review.placement && !editing}
-              onChange={(event: ChangeEvent<HTMLInputElement>) => setValue(event.target.value)}
-            />
-          </label>
-        ))}
-        <Button
-          type='button'
-          variant='main'
-          size='xs'
-          disabled={busy || editing || !validCenter || !bodyMatchesPlacement || !body?.isCurrent()}
-          onClick={() => preview('seam')}
-        >
-          {status.pending
-            ? 'Computing cloth…'
-            : acceptedFrame?.kind !== 'seam'
-              ? 'Preview cloth'
-              : 'Refresh cloth'}
-        </Button>
-        {review.wholeAssembly && (
+        {!review.placementRebuild &&
+          (
+            [
+              ['X', x, setX],
+              ['Y', y, setY],
+              ['Z', z, setZ],
+            ] as const
+          ).map(([axis, value, setValue]) => (
+            <label key={axis} htmlFor={`${id}-${axis}`} className='w-16 text-micro'>
+              {axis} mm
+              <Input
+                name={`${id}-${axis}`}
+                value={value}
+                inputMode='decimal'
+                disabled={busy}
+                readOnly={!!review.placement && !editing}
+                onChange={(event: ChangeEvent<HTMLInputElement>) => setValue(event.target.value)}
+              />
+            </label>
+          ))}
+        {!review.placementRebuild && (
+          <Button
+            type='button'
+            variant='main'
+            size='xs'
+            disabled={
+              busy || editing || !validCenter || !bodyMatchesPlacement || !body?.isCurrent()
+            }
+            onClick={() => preview('seam')}
+          >
+            {status.pending
+              ? 'Computing cloth…'
+              : acceptedFrame?.kind !== 'seam'
+                ? 'Preview cloth'
+                : 'Refresh cloth'}
+          </Button>
+        )}
+        {review.wholeAssembly && !review.placementRebuild && (
           <Button
             type='button'
             variant='secondary'
@@ -433,17 +439,19 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
             Resume full layout
           </Button>
         )}
-        {review.wholeAssembly && (!acceptedFrame || wholeProgress?.paused) && (
-          <Button
-            type='button'
-            variant='secondary'
-            size='xs'
-            disabled={busy || editing || !bodyMatchesWhole || !body?.isCurrent()}
-            onClick={() => preview('whole', { resume: !!wholeProgress?.paused, step: true })}
-          >
-            Step one frame
-          </Button>
-        )}
+        {review.wholeAssembly &&
+          !review.placementRebuild &&
+          (!acceptedFrame || wholeProgress?.paused) && (
+            <Button
+              type='button'
+              variant='secondary'
+              size='xs'
+              disabled={busy || editing || !bodyMatchesWhole || !body?.isCurrent()}
+              onClick={() => preview('whole', { resume: !!wholeProgress?.paused, step: true })}
+            >
+              Step one frame
+            </Button>
+          )}
         {(wholeProgress || (status.pending && previewKind.current === 'whole')) && (
           <Button
             type='button'
@@ -463,7 +471,7 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
             disabled={busy || editing || !bodyMatchesWhole || !body?.isCurrent()}
             onClick={() => void savePlacement('whole')}
           >
-            Save full placement
+            {review.placementRebuild ? 'Rebuild 3D placement' : 'Save full placement'}
           </Button>
         )}
         {review.savePlacement && (!review.placement || editing) && (

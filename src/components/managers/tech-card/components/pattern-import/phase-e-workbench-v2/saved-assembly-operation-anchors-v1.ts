@@ -35,7 +35,7 @@ type PhysicalSeam = Readonly<{
   anchors: readonly SavedAssemblyPhysicalAnchorV1[];
 }>;
 
-type Pose = Readonly<{
+type OwnedDecision = Readonly<{
   operationNumber: number;
   seamKey: string;
   seam: TechCardSeam;
@@ -57,7 +57,8 @@ export function bindSavedAssemblyOperationAnchorsV1(
   if (!isVerifiedCompleteSavedAssemblySourceV1(source))
     throw new TypeError('Operation anchors require a verified complete saved Assembly source.');
   const physical: PhysicalSeam[] = [];
-  const poses: Pose[] = [];
+  const poses: OwnedDecision[] = [];
+  const pointClosures: OwnedDecision[] = [];
   const unavailable: Array<
     Readonly<{ operationNumber: number; seamKey: string; seam: TechCardSeam }>
   > = [];
@@ -125,6 +126,10 @@ export function bindSavedAssemblyOperationAnchorsV1(
         poses.push({ operationNumber, seamKey, seam });
         continue;
       }
+      if (seam.kind === 'TECH_CARD_SEAM_KIND_POINT_CLOSURE') {
+        pointClosures.push({ operationNumber, seamKey, seam });
+        continue;
+      }
       if (
         !seam.kind ||
         !physicalKinds.has(seam.kind) ||
@@ -185,6 +190,7 @@ export function bindSavedAssemblyOperationAnchorsV1(
     sourceSha256: source.sourceSha256,
     physical: Object.freeze(physical),
     poses: Object.freeze(poses),
+    ...(pointClosures.length && { pointClosures: Object.freeze(pointClosures) }),
     unavailable: Object.freeze(unavailable),
   });
 }

@@ -29,7 +29,19 @@ import {
 import { resolveSavedNativeAuthoredFoldGeometryV1 } from './saved-native-authored-fold-geometry-v1';
 import { readSavedGarmentLabelStitchAnchorV1 } from './saved-garment-label-stitch-anchor-v1';
 import { readSavedCutStripStitchAnchorV1 } from './saved-cut-strip-stitch-anchor-v1';
+import { savedPointClosures } from './saved-point-closure-authoring-v1';
+import {
+  resolveSavedNativePointClosureMarkV1,
+  type SavedNativePointClosureMarkRequestV1,
+} from './saved-native-point-closure-mark-v1';
 import type { PatternImportDxfPhaseESavedRowCardProjectionV1 } from './saved-row-production-runtime-v1';
+
+type NativePointClosureApertureV1 = Readonly<{
+  seamKey: string;
+  pieceLineKey: string;
+  markedStartMm: readonly [number, number];
+  markedEndMm: readonly [number, number];
+}>;
 
 type OperationAnchorIdentity = Readonly<{
   /** Zero-based ordinal in the exact persisted Complete Source operation list. */
@@ -285,10 +297,36 @@ export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
     string,
     Awaited<ReturnType<typeof resolveSavedNativeAuthoredFoldGeometryV1>>
   >();
+  const ownedOpenClosures = [
+    ...new Set(built.operationAnchors.pointClosures?.map(({ operationNumber }) => operationNumber)),
+  ].flatMap((operation) =>
+    savedPointClosures(source, operation, selectedSizeId).filter(
+      ({ stale, intent }) => !stale && intent === 'open',
+    ),
+  );
+  const closureJobsByRow = new Map<
+    string,
+    { key: string; mark: SavedNativePointClosureMarkRequestV1 }[]
+  >();
+  for (const { key, hole, button } of ownedOpenClosures) {
+    for (const mark of [hole, button]) {
+      const list = closureJobsByRow.get(mark.patternLineKey);
+      if (list) list.push({ key, mark });
+      else closureJobsByRow.set(mark.patternLineKey, [{ key, mark }]);
+    }
+  }
+  const closureAliases = source.aliases.flatMap(({ scopeKey, blockName, pieceLineKey }) =>
+    scopeKey && blockName && pieceLineKey ? [{ scopeKey, blockName, pieceLineKey }] : [],
+  );
+  const apertureByKey = new Map<string, NativePointClosureApertureV1>();
   const nativeNotchesByPiece = new Map<string, readonly NativeNotchPoint[]>();
   const host = createSavedFullAssemblyCompleteDxfHostsV1(source, projection).createCanonical();
   try {
-    for (const lineKey of new Set([...jobsByRow.keys(), ...foldJobsByRow.keys()])) {
+    for (const lineKey of new Set([
+      ...jobsByRow.keys(),
+      ...foldJobsByRow.keys(),
+      ...closureJobsByRow.keys(),
+    ])) {
       signal.throwIfAborted();
       const jobs = jobsByRow.get(lineKey) ?? [];
       const foldJobs = foldJobsByRow.get(lineKey) ?? [];
@@ -308,7 +346,34 @@ export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
       const { bytes } = await host.readAuthoritativeRow(member.row, signal, () => {});
       const file = new Uint8Array(bytes);
       try {
-        const firstPath = jobs[0]?.path ?? foldJobs[0]!.path;
+        for (const { key, mark } of closureJobsByRow.get(lineKey) ?? []) {
+          const resolved = await resolveSavedNativePointClosureMarkV1(
+            {
+              row: member.row,
+              bytes: file.buffer,
+              aliases: closureAliases,
+              size: { sizeId: selectedSizeId, sizeToken: size.token },
+            },
+            mark,
+            signal,
+          );
+          if (resolved.role === 'BUTTONHOLE_MIDPOINT') {
+            const endpoints = resolved.markedSegmentMm;
+            if (!endpoints)
+              throw new Error('A saved buttonhole has no exact native straight segment.');
+            apertureByKey.set(
+              key,
+              Object.freeze({
+                seamKey: key,
+                pieceLineKey: resolved.pieceLineKey,
+                markedStartMm: endpoints[0],
+                markedEndMm: endpoints[1],
+              }),
+            );
+          }
+        }
+        const firstPath = jobs[0]?.path ?? foldJobs[0]?.path;
+        if (!firstPath) continue;
         const parsed = await parseSavedNativeStitchRowV1(file, `${firstPath.blockName}.dxf`);
         signal.throwIfAborted();
         if (parsed.failedFiles || parsed.skippedBlocks)
@@ -422,6 +487,7 @@ export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
     {
       expectedServerAssemblyRevision: source.serverAssemblyRevision,
       expectedCompleteSourceSha256: source.sourceSha256,
+      ...(source.sourceOnly && { sourceOnly: true }),
       ...(authored && {
         authoredFolds: {
           sizeId: authored.sizeId,
@@ -473,6 +539,19 @@ export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
     labelAnchors: Object.freeze(labels),
     ...(strips.length && { stripAnchors: Object.freeze(strips) }),
     poses: built.operationAnchors.poses,
+    ...(built.operationAnchors.pointClosures && {
+      pointClosures: built.operationAnchors.pointClosures,
+    }),
+    ...(ownedOpenClosures.length && {
+      pointClosureApertures: Object.freeze(
+        ownedOpenClosures.map(({ key }) => {
+          const aperture = apertureByKey.get(key);
+          if (!aperture)
+            throw new Error('A verified Open fastening has no exact current buttonhole.');
+          return aperture;
+        }),
+      ),
+    }),
     ...(fresh.authoredFolds && {
       authoredFoldSourceSha256: fresh.authoredFolds.sourceSha256,
       authoredFolds: Object.freeze(

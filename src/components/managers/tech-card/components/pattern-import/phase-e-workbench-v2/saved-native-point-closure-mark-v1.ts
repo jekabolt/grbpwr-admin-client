@@ -48,6 +48,7 @@ export type SavedNativePointClosureMarkV1 = SavedNativePointClosureMarkRequestV1
     sourceFileId: string;
     nativePathId: number;
     pointMm: Vec2Mm;
+    markedSegmentMm?: readonly [Vec2Mm, Vec2Mm];
   }>;
 
 const maxMarkVertices = 256;
@@ -361,6 +362,7 @@ async function readMarks(
             'the native mark does not have complete ordered geometry or an interior center',
           );
         if (!pointMm || !path.src.block) return [];
+        const edge = role === 'BUTTONHOLE_MIDPOINT' ? group?.[0] : undefined;
         return [
           Object.freeze({
             sourceFileId,
@@ -375,6 +377,12 @@ async function readMarks(
             sourceInstancePath: Object.freeze([...instancePath]),
             sourceEntityOp: path.src.op,
             pointMm,
+            ...(edge && {
+              markedSegmentMm: Object.freeze([
+                Object.freeze([...edge.startMm] as [number, number]),
+                Object.freeze([...edge.endMm] as [number, number]),
+              ] as const),
+            }),
           }),
         ];
       }),
