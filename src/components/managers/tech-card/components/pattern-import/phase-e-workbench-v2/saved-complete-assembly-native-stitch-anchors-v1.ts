@@ -32,16 +32,13 @@ import { readSavedCutStripStitchAnchorV1 } from './saved-cut-strip-stitch-anchor
 import { savedPointClosures } from './saved-point-closure-authoring-v1';
 import {
   resolveSavedNativePointClosureMarkV1,
-  type SavedNativePointClosureMarkRequestV1,
+  type SavedNativePointClosureMarkV1,
 } from './saved-native-point-closure-mark-v1';
+import {
+  bindSavedNativePointFasteningV1,
+  savedNativeFasteningApertureV1,
+} from './saved-native-point-fastening-v1';
 import type { PatternImportDxfPhaseESavedRowCardProjectionV1 } from './saved-row-production-runtime-v1';
-
-type NativePointClosureApertureV1 = Readonly<{
-  seamKey: string;
-  pieceLineKey: string;
-  markedStartMm: readonly [number, number];
-  markedEndMm: readonly [number, number];
-}>;
 
 type OperationAnchorIdentity = Readonly<{
   /** Zero-based ordinal in the exact persisted Complete Source operation list. */
@@ -297,28 +294,36 @@ export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
     string,
     Awaited<ReturnType<typeof resolveSavedNativeAuthoredFoldGeometryV1>>
   >();
-  const ownedOpenClosures = [
+  const ownedClosures = [
     ...new Set(built.operationAnchors.pointClosures?.map(({ operationNumber }) => operationNumber)),
-  ].flatMap((operation) =>
-    savedPointClosures(source, operation, selectedSizeId).filter(
-      ({ stale, intent }) => !stale && intent === 'open',
-    ),
+  ].flatMap((operationNumber) =>
+    savedPointClosures(source, operationNumber, selectedSizeId).filter(({ stale }) => !stale),
   );
-  const closureJobsByRow = new Map<
-    string,
-    { key: string; mark: SavedNativePointClosureMarkRequestV1 }[]
-  >();
-  for (const { key, hole, button } of ownedOpenClosures) {
-    for (const mark of [hole, button]) {
-      const list = closureJobsByRow.get(mark.patternLineKey);
-      if (list) list.push({ key, mark });
-      else closureJobsByRow.set(mark.patternLineKey, [{ key, mark }]);
+  type ClosureJob = Readonly<{
+    key: string;
+    buttonOperation: number;
+    point: ReturnType<typeof savedPointClosures>[number]['hole'];
+  }>;
+  const closureJobsByRow = new Map<string, ClosureJob[]>();
+  for (const { key, buttonOperation, hole, button } of ownedClosures) {
+    for (const point of [hole, button]) {
+      const jobs = closureJobsByRow.get(point.patternLineKey);
+      const job = { key, buttonOperation, point };
+      if (jobs) jobs.push(job);
+      else closureJobsByRow.set(point.patternLineKey, [job]);
     }
   }
   const closureAliases = source.aliases.flatMap(({ scopeKey, blockName, pieceLineKey }) =>
     scopeKey && blockName && pieceLineKey ? [{ scopeKey, blockName, pieceLineKey }] : [],
   );
-  const apertureByKey = new Map<string, NativePointClosureApertureV1>();
+  const closureMarks = new Map<
+    string,
+    Map<
+      SavedNativePointClosureMarkV1['role'],
+      Readonly<{ row: SavedAssemblyNativeSewingPathV1['row']; mark: SavedNativePointClosureMarkV1 }>
+    >
+  >();
+  const usedNativeClosureMarks = new Set<string>();
   const nativeNotchesByPiece = new Map<string, readonly NativeNotchPoint[]>();
   const host = createSavedFullAssemblyCompleteDxfHostsV1(source, projection).createCanonical();
   try {
@@ -346,31 +351,26 @@ export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
       const { bytes } = await host.readAuthoritativeRow(member.row, signal, () => {});
       const file = new Uint8Array(bytes);
       try {
-        for (const { key, mark } of closureJobsByRow.get(lineKey) ?? []) {
-          const resolved = await resolveSavedNativePointClosureMarkV1(
+        for (const { key, buttonOperation, point } of closureJobsByRow.get(lineKey) ?? []) {
+          if (point.savedRowRevision !== member.row.revision)
+            throw new Error('A saved fastening mark belongs to a different pattern revision.');
+          const mark = await resolveSavedNativePointClosureMarkV1(
             {
               row: member.row,
               bytes: file.buffer,
               aliases: closureAliases,
               size: { sizeId: selectedSizeId, sizeToken: size.token },
             },
-            mark,
+            point,
             signal,
           );
-          if (resolved.role === 'BUTTONHOLE_MIDPOINT') {
-            const endpoints = resolved.markedSegmentMm;
-            if (!endpoints)
-              throw new Error('A saved buttonhole has no exact native straight segment.');
-            apertureByKey.set(
-              key,
-              Object.freeze({
-                seamKey: key,
-                pieceLineKey: resolved.pieceLineKey,
-                markedStartMm: endpoints[0],
-                markedEndMm: endpoints[1],
-              }),
-            );
-          }
+          const identity = JSON.stringify([buttonOperation, mark.sourceFileId, mark.nativePathId]);
+          const marks = closureMarks.get(key) ?? new Map();
+          if (usedNativeClosureMarks.has(identity) || marks.has(mark.role))
+            throw new Error('A saved fastening mark is registered more than once.');
+          usedNativeClosureMarks.add(identity);
+          marks.set(mark.role, { row: member.row, mark });
+          closureMarks.set(key, marks);
         }
         const firstPath = jobs[0]?.path ?? foldJobs[0]?.path;
         if (!firstPath) continue;
@@ -503,6 +503,17 @@ export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
     fresh.priorCarrier?.mediaType !== source.priorCarrier?.mediaType
   )
     throw new Error('The saved Assembly carrier changed while reading its native stitch anchors.');
+  const nativePointFastenings = Object.freeze(
+    ownedClosures.map((binding) => {
+      const marks = closureMarks.get(binding.key);
+      return bindSavedNativePointFasteningV1(
+        binding,
+        { sizeId: selectedSizeId, sizeToken: size.token },
+        marks?.get('BUTTONHOLE_MIDPOINT'),
+        marks?.get('BUTTON_MARK_CENTER'),
+      );
+    }),
+  );
   const ownedSeamKeys = new Set(source.ownedSeams.map(({ seamKey }) => seamKey));
   return Object.freeze({
     schemaVersion: 'saved-complete-assembly-native-stitch-anchors/1' as const,
@@ -542,14 +553,10 @@ export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
     ...(built.operationAnchors.pointClosures && {
       pointClosures: built.operationAnchors.pointClosures,
     }),
-    ...(ownedOpenClosures.length && {
+    ...(nativePointFastenings.length && {
+      nativePointFastenings,
       pointClosureApertures: Object.freeze(
-        ownedOpenClosures.map(({ key }) => {
-          const aperture = apertureByKey.get(key);
-          if (!aperture)
-            throw new Error('A verified Open fastening has no exact current buttonhole.');
-          return aperture;
-        }),
+        nativePointFastenings.map(savedNativeFasteningApertureV1),
       ),
     }),
     ...(fresh.authoredFolds && {

@@ -31,14 +31,18 @@ function savedOperation(source: CompleteSavedAssemblySourceV1, number: number, w
 function pointRequest(
   anchor: common_TechCardSeamAnchor,
   role: SavedNativePointClosureMarkRequestV1['role'],
-): SavedNativePointClosureMarkRequestV1 {
+): SavedNativePointClosureMarkRequestV1 & Readonly<{ savedRowRevision: number }> {
   const point = anchor.pointClosure;
+  const savedRowRevision = point?.savedRowRevision;
   if (
     !point ||
     point.role !== (role === 'BUTTONHOLE_MIDPOINT' ? holeRole : buttonRole) ||
     !anchor.pieceLineKey ||
     !point.patternLineKey ||
     !point.dxfSha256 ||
+    typeof savedRowRevision !== 'number' ||
+    !Number.isSafeInteger(savedRowRevision) ||
+    savedRowRevision < 1 ||
     !point.sizeId ||
     !point.aliasBlockName ||
     !point.nativeBlockName ||
@@ -50,6 +54,7 @@ function pointRequest(
     pieceLineKey: anchor.pieceLineKey,
     patternLineKey: point.patternLineKey,
     dxfSha256: point.dxfSha256,
+    savedRowRevision,
     sizeId: point.sizeId,
     aliasBlockName: point.aliasBlockName,
     nativeBlockName: point.nativeBlockName,
@@ -70,7 +75,8 @@ export function savedPointClosures(
   const rows = new Map(source.ownedSeams.map((row) => [row.seamKey, row]));
   return (operation.seamKeys ?? []).flatMap((key) => {
     const row = rows.get(key);
-    if (row?.kind !== POINT_CLOSURE_KIND) return [];
+    if (row?.kind !== POINT_CLOSURE_KIND || row.status !== 'TECH_CARD_SEAM_STATUS_CONFIRMED')
+      return [];
     const [a] = row.sideA?.parts ?? [];
     const [b] = row.sideB?.parts ?? [];
     if (!a || !b || row.sideA?.parts?.length !== 1 || row.sideB?.parts?.length !== 1)
@@ -94,6 +100,7 @@ export function savedPointClosures(
         hole,
         button,
         buttonholeOperation,
+        buttonOperation: operationNumber,
         intent: intent === closedIntent ? 'closed' : 'open',
         stale: row.stale === true,
       },
