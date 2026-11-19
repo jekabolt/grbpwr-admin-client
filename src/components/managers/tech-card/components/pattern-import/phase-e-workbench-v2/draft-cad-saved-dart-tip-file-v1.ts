@@ -41,6 +41,8 @@ export function registerSavedDartTipFileV1(
 export const readSavedGeometryPieceHeadingV1 = (file: File) =>
   files.get(file) ? pieceHeadings.get(file) : undefined;
 export const isSavedDartTipReviewFileV1 = (file: File) => files.has(file);
+export const isSavedFixedEndReviewFileV1 = (file: File) =>
+  !!files.get(file) && fixedEndReplacements.has(file);
 export function cancelSavedDartTipReviewV1(file?: File) {
   if (file && files.has(file)) files.set(file, null);
 }

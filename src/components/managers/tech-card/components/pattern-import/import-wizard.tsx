@@ -39,6 +39,7 @@ import { createAiNamer } from './ai-namer';
 import { cardBuildDraft } from './card-apply';
 import { setRefusalSink } from './refusal-report';
 import { ApplyStep } from './steps/apply';
+import { isSavedFixedEndReviewFileV1 } from './phase-e-workbench-v2/draft-cad-saved-dart-tip-file-v1';
 import {
   assemblyImpact,
   blockingCount,
@@ -619,6 +620,10 @@ function WizardBody({
   const [override, setOverride] = useState<PrimaryOverride | null>(null);
   const draft = session.draft;
   const created = createdCount(draft);
+  const reviewsFixedEnd =
+    requireManualApply &&
+    api.inputs.fileList.length === 1 &&
+    api.inputs.fileList.some(isSavedFixedEndReviewFileV1);
   // T4: answers the apply step's assembly tiles still owe (apply waits for them)
   const impactOpen =
     session.step === 'apply' && !card.downloadOnly
@@ -680,14 +685,20 @@ function WizardBody({
       if (impactOpen && !applyRunning)
         return { label: `answer ${impactOpen}`, onClick: onAsk, title: blocker ?? undefined };
       return {
-        label: applyRunningLabel(api.apply) ?? `apply ${plural(created, 'piece')} to the card`,
+        label:
+          applyRunningLabel(api.apply) ??
+          (reviewsFixedEnd
+            ? 'Save new DXF revision'
+            : `apply ${plural(created, 'piece')} to the card`),
         onClick: blocked ? onAsk : () => void api.dispatch({ type: 'apply' }),
         disabled: !draft || applyRunning,
         loading: applyRunning,
         overlay: true,
-        title: draft
-          ? `uploads ${plural(draft.scopes.filter((s) => !s.alreadyOnCard).length, 'file')}, then adds the pieces`
-          : undefined,
+        title: reviewsFixedEnd
+          ? 'Replace the reviewed DXF in its existing pattern row'
+          : draft
+            ? `uploads ${plural(draft.scopes.filter((s) => !s.alreadyOnCard).length, 'file')}, then adds the pieces`
+            : undefined,
       };
     }
     // check: the way to the apply screen (replace / add, what goes up) — the ellipsis says one
@@ -696,7 +707,9 @@ function WizardBody({
       return {
         label: card.downloadOnly
           ? `download .dxf (${draft?.downloads.length ?? 0})…`
-          : `apply ${plural(created, 'piece')} to the card…`,
+          : reviewsFixedEnd
+            ? 'Review the DXF revision'
+            : `apply ${plural(created, 'piece')} to the card…`,
         onClick: blocked ? onAsk : () => void api.next(),
         disabled: !nextStep,
         title: blocked
@@ -1154,6 +1167,7 @@ function WizardBody({
                 </Button>
               )}
               {requireManualApply &&
+              !reviewsFixedEnd &&
               session.step === 'apply' &&
               !applied &&
               !card.downloadOnly &&
