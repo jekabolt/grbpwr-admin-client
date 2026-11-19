@@ -1,6 +1,9 @@
 import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 
-import type { PatternImportDxfPhaseEExactNAssemblyOrderSessionV2 } from './exact-n-seam-production-mount-v2';
+import type {
+  PatternImportDxfPhaseEExactNAssemblyOrderSessionV2,
+  PatternImportDxfProductExactNDesktopGeometryV2,
+} from './exact-n-seam-production-mount-v2';
 import type { PatternImportDxfPhaseESavedAssemblyCurrentTopologyV1 } from './saved-assembly-authority-transport-v1';
 
 function sameOrdered(left: readonly string[], right: readonly string[]): boolean {
@@ -49,6 +52,23 @@ export function matchesPatternImportDxfProductExactNSessionFreshAuthorityV1(
       session.current.assemblyTopologySha256 === current.assemblyTopologySha256 &&
       session.current.selectedOperation.sourceOperationNumber === current.selectedOperationNumber &&
       sameOrdered(session.current.selectedOperation.seamIds, operation.seamKeys),
+  );
+}
+
+export function matchesPatternImportDxfProductExactNDesktopGeometryV2(
+  geometry: PatternImportDxfProductExactNDesktopGeometryV2 | null,
+  session: PatternImportDxfPhaseEExactNAssemblyOrderSessionV2,
+): geometry is PatternImportDxfProductExactNDesktopGeometryV2 {
+  if (!geometry) return false;
+  const { catalog, projection } = geometry;
+  return (
+    catalog.techCardId === session.current.row.techCardId &&
+    catalog.scopeKey === session.current.row.scopeKey &&
+    catalog.canonicalSha256 === session.current.catalogCanonicalSha256 &&
+    projection.expectedCatalogCanonicalSha256 === catalog.canonicalSha256 &&
+    projection.sizeSelectionCanonicalSha256 === catalog.sizeSelectionCanonicalSha256 &&
+    projection.sourceFileId === catalog.sourceFileId &&
+    projection.sizeToken === catalog.sizeToken
   );
 }
 

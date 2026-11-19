@@ -1,4 +1,5 @@
 import type { ClothSeamMap } from '../mesh/cloth-mesh-ir';
+import type { SeamPointEmbeddingV1 } from '../mesh/triangulation/seam-point-embedding-v1';
 
 export type SeamConstraintDiagnosticCode =
   | 'conflicting-ownership'
@@ -44,6 +45,142 @@ export type CompiledSeamConstraints = {
 };
 
 export const ALL_AT_ONCE_SEAM_PREACTIVATION_V1 = 'all-at-once-seam-preactivation/v1' as const;
+
+type EmbeddedSeamEndpoint = Pick<SeamPointEmbeddingV1, 'vertexIndices' | 'weights'>;
+
+export type EmbeddedSeamSupportV1 = Readonly<{
+  particleIndex: number;
+  /** Coefficient in qA − qB. Multiply it by the unit gap direction for an XPBD gradient. */
+  signedWeight: number;
+}>;
+
+/** Compile the signed support used for gap, graph coloring and XPBD inverse mass. */
+export function compileEmbeddedSeamSupportV1(
+  sideA: EmbeddedSeamEndpoint,
+  sideB: EmbeddedSeamEndpoint,
+  particleCount: number,
+): readonly EmbeddedSeamSupportV1[] {
+  if (!Number.isSafeInteger(particleCount) || particleCount < 3) {
+    throw new Error('Embedded seam requires a valid particle count.');
+  }
+
+  const byParticle = new Map<number, number>();
+  for (const [endpoint, sign] of [
+    [sideA, 1],
+    [sideB, -1],
+  ] as const) {
+    const { vertexIndices, weights } = endpoint;
+    if (
+      vertexIndices.length !== 3 ||
+      weights.length !== 3 ||
+      new Set(vertexIndices).size !== 3 ||
+      vertexIndices.some((i) => !Number.isSafeInteger(i) || i < 0 || i >= particleCount) ||
+      weights.some((weight) => !Number.isFinite(weight) || weight < 0 || weight > 1) ||
+      Math.abs(weights[0] + weights[1] + weights[2] - 1) > 4 * Number.EPSILON
+    ) {
+      throw new Error('Embedded seam requires three distinct indices and barycentric weights.');
+    }
+    for (const [i, particleIndex] of vertexIndices.entries()) {
+      const weight = weights[i]!;
+      byParticle.set(particleIndex, (byParticle.get(particleIndex) ?? 0) + sign * weight);
+    }
+  }
+
+  const supports = [...byParticle]
+    .filter(([, weight]) => weight !== 0)
+    .sort(([a], [b]) => a - b)
+    .map(([particleIndex, weight]) => {
+      const signedWeight = Math.fround(weight);
+      if (signedWeight === 0) {
+        throw new Error('Embedded seam support underflows in f32.');
+      }
+      return { particleIndex, signedWeight };
+    });
+  if (supports.length === 0) {
+    throw new Error('Embedded seam cannot join identical material locations.');
+  }
+  return supports;
+}
+
+type StagedEmbeddedSeamPairV1 = Readonly<{
+  operationOrder: number;
+  seamId: string;
+  sourcePairIndex: number;
+  sideA: EmbeddedSeamEndpoint;
+  sideB: EmbeddedSeamEndpoint;
+}>;
+
+/** Assign stable dispatch colors and preserve the source's order across operations. */
+export function compileStagedEmbeddedSeamScheduleV1(
+  pairs: readonly StagedEmbeddedSeamPairV1[],
+  particleCount: number,
+) {
+  const sourceIds = new Set<string>();
+  let previousOperationOrder = -1;
+  const rows = pairs.map(({ operationOrder, seamId, sourcePairIndex, sideA, sideB }, rank) => {
+    if (
+      !Number.isSafeInteger(operationOrder) ||
+      operationOrder < 0 ||
+      operationOrder < previousOperationOrder ||
+      !seamId ||
+      !Number.isSafeInteger(sourcePairIndex) ||
+      sourcePairIndex < 0
+    ) {
+      throw new Error('Embedded seams require ordered operations and stable pair identities.');
+    }
+    const key = JSON.stringify([operationOrder, seamId, sourcePairIndex]);
+    if (sourceIds.has(key)) throw new Error('Embedded seam pair identity is repeated.');
+    sourceIds.add(key);
+    previousOperationOrder = operationOrder;
+    return {
+      operationOrder,
+      seamId,
+      sourcePairIndex,
+      activationRank: rank,
+      supports: compileEmbeddedSeamSupportV1(sideA, sideB, particleCount),
+    };
+  });
+  const colors = colorSeamRows(rows, (row) =>
+    row.supports.map(({ particleIndex }) => particleIndex),
+  );
+  const grouped = colors.flat();
+  const activationOrder = new Uint32Array(grouped.length);
+  grouped.forEach(({ activationRank }, offset) => {
+    activationOrder[activationRank] = offset;
+  });
+  return { grouped, activationOrder, colorRanges: seamColorRanges(colors) };
+}
+
+function colorSeamRows<T>(rows: readonly T[], particlesOf: (row: T) => readonly number[]): T[][] {
+  const colorsAtVertex = new Map<number, Set<number>>();
+  const colors: T[][] = [];
+  for (const row of rows) {
+    const occupied = particlesOf(row).map((particle) => {
+      const existing = colorsAtVertex.get(particle);
+      if (existing) return existing;
+      const next = new Set<number>();
+      colorsAtVertex.set(particle, next);
+      return next;
+    });
+    let color = 0;
+    while (occupied.some((used) => used.has(color))) color += 1;
+    colors[color] ??= [];
+    colors[color].push(row);
+    for (const used of occupied) used.add(color);
+  }
+  return colors;
+}
+
+function seamColorRanges(colors: readonly (readonly unknown[])[]): Uint32Array {
+  const ranges = new Uint32Array(colors.length * 2);
+  let offset = 0;
+  colors.forEach((rows, color) => {
+    ranges[color * 2] = offset;
+    ranges[color * 2 + 1] = rows.length;
+    offset += rows.length;
+  });
+  return ranges;
+}
 
 export type SeamPreactivationRejectReason =
   | 'invalid-tolerance'
@@ -315,27 +452,7 @@ export function compileSeamConstraints(
 
   if (diagnostics.length > 0) return { ok: false, diagnostics };
 
-  const colorsAtVertex = new Map<number, Set<number>>();
-  const colorsFor = (vertex: number): Set<number> => {
-    const existing = colorsAtVertex.get(vertex);
-    if (existing !== undefined) return existing;
-    const colors = new Set<number>();
-    colorsAtVertex.set(vertex, colors);
-    return colors;
-  };
-  const colors: SourceConstraint[][] = [];
-  for (const constraint of sourceConstraints) {
-    const firstColors = colorsFor(constraint.first);
-    const secondColors = colorsFor(constraint.second);
-    let color = 0;
-    while (firstColors.has(color) || secondColors.has(color)) {
-      color += 1;
-    }
-    colors[color] ??= [];
-    colors[color].push(constraint);
-    firstColors.add(color);
-    secondColors.add(color);
-  }
+  const colors = colorSeamRows(sourceConstraints, ({ first, second }) => [first, second]);
 
   const grouped = colors.flat();
   const vertexPairs = new Uint32Array(grouped.length * 2);
@@ -354,14 +471,6 @@ export function compileSeamConstraints(
   });
   activationOrder.set(groupedOffsetsByActivationRank);
 
-  const colorRanges = new Uint32Array(colors.length * 2);
-  let offset = 0;
-  colors.forEach((constraints, color) => {
-    colorRanges[color * 2] = offset;
-    colorRanges[color * 2 + 1] = constraints.length;
-    offset += constraints.length;
-  });
-
   return {
     ok: true,
     diagnostics: [],
@@ -373,7 +482,7 @@ export function compileSeamConstraints(
       targetLengthsM,
       seamIdIndices: groupedSeamIds,
       sourcePairIndices,
-      colorRanges,
+      colorRanges: seamColorRanges(colors),
       activationOrder,
     },
   };

@@ -1808,6 +1808,14 @@ export type AssemblyResolutionBasis =
   // Unresolved: the component card has neither colours nor an output material — it was never wired to
   // the warehouse. Fix on the card.
   | "ASSEMBLY_RESOLUTION_BASIS_NO_OUTPUT";
+export type TechCardSeamPointClosureRole =
+  | "TECH_CARD_SEAM_POINT_CLOSURE_ROLE_UNKNOWN"
+  | "TECH_CARD_SEAM_POINT_CLOSURE_ROLE_BUTTONHOLE_MIDPOINT"
+  | "TECH_CARD_SEAM_POINT_CLOSURE_ROLE_BUTTON_MARK_CENTER";
+export type TechCardSeamPointClosureIntent =
+  | "TECH_CARD_SEAM_POINT_CLOSURE_INTENT_UNKNOWN"
+  | "TECH_CARD_SEAM_POINT_CLOSURE_INTENT_OPEN"
+  | "TECH_CARD_SEAM_POINT_CLOSURE_INTENT_CLOSED";
 // TechCardSeamLayer is an explicit stacking of a seam side's piece: under or over the other side.
 export type TechCardSeamLayer =
   | "TECH_CARD_SEAM_LAYER_UNKNOWN"
@@ -1832,7 +1840,8 @@ export type TechCardSeamKind =
   | "TECH_CARD_SEAM_KIND_COMPOSITE"
   | "TECH_CARD_SEAM_KIND_SURFACE"
   | "TECH_CARD_SEAM_KIND_CLOSURE"
-  | "TECH_CARD_SEAM_KIND_POSE";
+  | "TECH_CARD_SEAM_KIND_POSE"
+  | "TECH_CARD_SEAM_KIND_POINT_CLOSURE";
 // TechCardSeamDirection is how the two sides walk against each other. REVERSED is the normal seam
 // (face-up pieces walk a shared seam oppositely); SAME when one side is a flipped instance. UNKNOWN
 // is legal on write: the reader then picks the pairing itself.
@@ -3672,6 +3681,7 @@ export type TechCardSeamAnchor = {
   // Which way THIS anchor's piece lies against the other side's pieces in the step that sews the
   // row (the owner's under/over switch). UNKNOWN = unset: the client's own rule, as before.
   layer: TechCardSeamLayer | undefined;
+  pointClosure?: TechCardSeamPointClosureAnchor;
 };
 
 // TechCardSeamSample is one point of an edge's shape, in the piece's own bbox-normalised frame
@@ -3689,6 +3699,24 @@ export type TechCardSeamPlacement = {
   yMm: number | undefined;
   rotDeg: number | undefined;
   flip: boolean | undefined;
+};
+
+// The exact original L8 mark of one piece in one saved size. The point is derived from the signed
+// DXF after reading. A decoded PathId by itself is not a durable entity identity.
+export type TechCardSeamPointClosureAnchor = {
+  patternLineKey: string | undefined;
+  savedRowRevision: number | undefined;
+  dxfSha256: string | undefined;
+  sizeId: number | undefined;
+  aliasBlockName: string | undefined;
+  nativeBlockName: string | undefined;
+  sourceInstancePath: string[] | undefined;
+  sourceEntityOp?: number;
+  role: TechCardSeamPointClosureRole | undefined;
+  // The buttonhole side holds the owner's choice, independent of physical closure in a frame.
+  intent: TechCardSeamPointClosureIntent | undefined;
+  buttonholeOperationNumber: number | undefined;
+  buttonOperationNumber: number | undefined;
 };
 
 // One size of a measured topstitch line.

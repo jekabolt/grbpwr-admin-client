@@ -1,13 +1,17 @@
 import type {
   MeasurementSurfacePatternPieceOverlayV1,
+  MeasurementSurfacePatternPieceSeamV1,
   MeasurementSurfacePatternPieceTransformV1,
   MeasurementSurfacePatternPieceV1,
 } from 'components/shared/measurement-watertight-surface-v1-stage';
+import { readPatternImportDxfProductPhaseEPreparedPieceOrdinalsV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 
 import type {
   PatternImportDxfPhaseECadMannequinDxfStagingSelectionV1,
   PatternImportDxfPhaseECadMannequinDxfStagingSourceV1,
 } from './cad-mannequin-dxf-staging-v1';
+import { readSavedAllScopeStagingLaneOrdinalsV1 } from './cad-mannequin-saved-all-scope-staging-v1';
+import type { CadTableSavedTopstitchOverlayV1 } from './cad-table-saved-topstitch-overlay-v1';
 
 export const PATTERN_IMPORT_DXF_PHASE_E_CAD_MANNEQUIN_PATTERN_PIECE_OVERLAY_V1 =
   'pattern-import-dxf-phase-e-cad-mannequin-pattern-piece-overlay/1' as const;
@@ -36,6 +40,8 @@ export type PatternImportDxfPhaseECadMannequinPatternOverlayDecorationV1 = Reado
   scopeKey: string;
   pieceId: string;
   contourId: string;
+  operationSeam?: MeasurementSurfacePatternPieceSeamV1['operationSeam'];
+  ordinalBadgeVisible?: boolean;
   semanticColorCss?: string | null;
   /** Exact ordered Phase-D boundary identities. Empty or missing identities fail closed. */
   orderedVertexIds: readonly string[];
@@ -93,11 +99,16 @@ export function buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1(
     sources: readonly PatternImportDxfPhaseECadMannequinDxfStagingSourceV1[];
     selection?: PatternImportDxfPhaseECadMannequinDxfStagingSelectionV1 | null;
     activeScopeKey?: string | null;
+    preserveLegacyMultiScopeLanes?: boolean;
     swatchesByScope?: Readonly<Record<string, string | null | undefined>>;
     transformsByPieceKey?: Readonly<Record<string, MeasurementSurfacePatternPieceTransformV1>>;
     decorations?: readonly PatternImportDxfPhaseECadMannequinPatternOverlayDecorationV1[];
+    savedTopstitch?: CadTableSavedTopstitchOverlayV1;
     guides?: MeasurementSurfacePatternPieceOverlayV1['guides'];
     tool?: PatternImportDxfPhaseECadMannequinPatternOverlayToolV1;
+    dragPlane?: MeasurementSurfacePatternPieceOverlayV1['dragPlane'];
+    translationGroup?: MeasurementSurfacePatternPieceOverlayV1['translationGroup'];
+    rotationGroup?: MeasurementSurfacePatternPieceOverlayV1['rotationGroup'];
     onFocus?: (selection: PatternImportDxfPhaseECadMannequinDxfStagingSelectionV1) => void;
     onTransform?: (pieceKey: string, transform: MeasurementSurfacePatternPieceTransformV1) => void;
   }>,
@@ -110,7 +121,7 @@ export function buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1(
   }
 
   const pieces = input.sources.flatMap((source) =>
-    source.projection.pieces.map((piece, index) => ({ source, piece, sourcePieceIndex: index })),
+    source.projection.pieces.map((piece) => ({ source, piece })),
   );
   const pieceKeys = pieces.map(
     ({ source, piece }) => `${source.scopeKey}:${piece.pieceId}:${piece.pieceLineKey}`,
@@ -147,16 +158,48 @@ export function buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1(
   }
 
   const selectedScope = input.selection?.scopeKey || input.activeScopeKey || null;
+  const selectedPieces = pieces.filter(
+    ({ source, piece }) =>
+      input.selection?.pieceId === piece.pieceId &&
+      (!selectedScope || selectedScope === source.scopeKey) &&
+      (input.selection.pieceLineKey == null || input.selection.pieceLineKey === piece.pieceLineKey),
+  );
+  const selectedPiece = selectedPieces.length === 1 ? selectedPieces[0] : null;
+  // V6 offsets are relative to historical staged lanes. A single exact catalog can recover
+  // its lanes; multiple material scopes need an independently known historical scope order.
+  const ordinals =
+    input.sources.length === 1
+      ? readPatternImportDxfProductPhaseEPreparedPieceOrdinalsV1(
+          input.sources[0].projection,
+          input.sources[0].scopeKey,
+        )
+      : input.preserveLegacyMultiScopeLanes
+        ? null
+        : readSavedAllScopeStagingLaneOrdinalsV1(input.sources);
   const overlayPieces: MeasurementSurfacePatternPieceOverlayV1['pieces'] = Object.freeze(
     pieces.map(({ source, piece }, index) => {
       const pieceKey = `${source.scopeKey}:${piece.pieceId}:${piece.pieceLineKey}`;
-      const selected =
-        input.selection?.pieceId === piece.pieceId &&
-        (!selectedScope || selectedScope === source.scopeKey);
+      const ordinal = ordinals?.[index] ?? index;
+      const selected = selectedPiece?.source === source && selectedPiece.piece === piece;
       const pieceDecorations = (input.decorations ?? []).filter(
         (decoration) =>
           decoration.scopeKey === source.scopeKey && decoration.pieceId === piece.pieceId,
       );
+      const stitch = input.savedTopstitch;
+      const topstitch =
+        stitch?.scopeKey === source.scopeKey &&
+        stitch.sourceFileId === source.projection.sourceFileId &&
+        stitch.sizeToken === source.projection.sizeToken &&
+        stitch.pieceId === piece.pieceId &&
+        stitch.pieceLineKey === piece.pieceLineKey
+          ? {
+              lineKey: stitch.lineKey,
+              operationNumber: stitch.operationNumber,
+              widthMm: stitch.widthMm,
+              threadBomLineKey: stitch.threadBomLineKey,
+              pointsMm: stitch.pointsMm,
+            }
+          : undefined;
       const contourById = new Map(piece.contours.map((contour) => [contour.contourId, contour]));
       const seams = pieceDecorations.flatMap((decoration) => {
         const contour = contourById.get(decoration.contourId);
@@ -174,6 +217,10 @@ export function buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1(
             seamId: decoration.seamId,
             side: decoration.side,
             contourId: decoration.contourId,
+            ...(decoration.operationSeam && {
+              operationSeam: Object.freeze({ ...decoration.operationSeam }),
+              ordinalBadgeVisible: decoration.ordinalBadgeVisible === true,
+            }),
             colorCss: stableCssColor(decoration.semanticColorCss),
             orderedVertexIds: Object.freeze([...decoration.orderedVertexIds]),
             thread:
@@ -198,8 +245,8 @@ export function buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1(
         scopeKey: source.scopeKey,
         pieceId: piece.pieceId,
         pieceLineKey: piece.pieceLineKey,
-        lane: (['left', 'right', 'front', 'back'] as const)[index % 4],
-        laneIndex: Math.floor(index / 4),
+        lane: (['left', 'right', 'front', 'back'] as const)[ordinal % 4],
+        laneIndex: Math.floor(ordinal / 4),
         contours: Object.freeze(
           piece.contours.map((contour) =>
             Object.freeze({
@@ -220,6 +267,7 @@ export function buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1(
         swatchCss: stableCssColor(input.swatchesByScope?.[source.scopeKey]),
         transform: input.transformsByPieceKey?.[pieceKey] ?? null,
         seams: Object.freeze(seams),
+        topstitch,
       });
     }),
   );
@@ -241,6 +289,9 @@ export function buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1(
       revision,
       pieces: overlayPieces,
       tool: input.tool ?? 'select',
+      ...(input.dragPlane && { dragPlane: input.dragPlane }),
+      ...(input.translationGroup && { translationGroup: input.translationGroup }),
+      ...(input.rotationGroup && { rotationGroup: input.rotationGroup }),
       visibility: Object.freeze({
         pieces: true,
         edges: true,
@@ -250,14 +301,26 @@ export function buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1(
       }),
       guides: input.guides,
       onSelectPiece: (
-        piece: Pick<MeasurementSurfacePatternPieceV1, 'pieceKey' | 'scopeKey' | 'pieceId'>,
-      ) =>
+        hit: Pick<
+          MeasurementSurfacePatternPieceV1,
+          'pieceKey' | 'scopeKey' | 'pieceId' | 'pieceLineKey'
+        >,
+      ) => {
+        const piece = overlayPieces.find(
+          ({ pieceKey, scopeKey, pieceId, pieceLineKey }) =>
+            pieceKey === hit.pieceKey &&
+            scopeKey === hit.scopeKey &&
+            pieceId === hit.pieceId &&
+            pieceLineKey === hit.pieceLineKey,
+        );
+        if (!piece) return;
         input.onFocus?.({
           scopeKey: piece.scopeKey,
           pieceId: piece.pieceId,
-          seamId:
-            input.selection?.pieceId === piece.pieceId ? input.selection?.seamId ?? null : null,
-        }),
+          pieceLineKey: piece.pieceLineKey,
+          seamId: piece.selected ? input.selection?.seamId ?? null : null,
+        });
+      },
       onTransformPiece: input.onTransform,
     }),
   });

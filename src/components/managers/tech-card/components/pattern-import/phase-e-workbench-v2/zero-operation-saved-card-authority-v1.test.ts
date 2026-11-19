@@ -66,7 +66,7 @@ function cardWithSavedRow(
 
 const row: DxfProductSavedRowIdentityV1 = Object.freeze({
   techCardId: 6,
-  scopeKey: 'TECH_CARD_BOM_PURPOSE_MAIN',
+  scopeKey: 'main',
   patternLineKey: 'pattern-main',
   revision: 7,
   cardLockVersion: 13,
@@ -113,6 +113,24 @@ describe('zero-operation saved card authority', () => {
       row: { ...row, cardLockVersion: 15 },
     });
     await expect(runtime.resolveLatestCard(row, signal)).rejects.toThrow(/saved DXF row changed/i);
+  });
+
+  it('reads the captured lock before an existing operation seam write and rejects row or lock drift', async () => {
+    const reads = [card(), card(7, 14), card(8)];
+    const readTechCard = vi.fn(async () => reads.shift()!);
+    const runtime = createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1({
+      orderSizeIds,
+      sizeNameById,
+      readTechCard,
+    });
+    const signal = new AbortController().signal;
+
+    await expect(runtime.resolveExactCurrentCard(row, signal)).resolves.toMatchObject({ row });
+    await expect(runtime.resolveExactCurrentCard(row, signal)).rejects.toThrow(/lock moved/i);
+    await expect(runtime.resolveExactCurrentCard(row, signal)).rejects.toThrow(
+      /row identity moved/i,
+    );
+    expect(readTechCard).toHaveBeenCalledTimes(3);
   });
 
   it.each([
@@ -306,7 +324,7 @@ describe('zero-operation saved card authority', () => {
     if (!result.ok) return;
     expect(result.choices).toEqual([
       expect.objectContaining({
-        scopeKey: 'TECH_CARD_BOM_PURPOSE_MAIN',
+        scopeKey: 'main',
         sizes: [expect.objectContaining({ sizeToken: 'M', sizeId: 2 })],
       }),
     ]);
@@ -781,7 +799,7 @@ describe('zero-operation saved card authority', () => {
         techCard: card(),
         orderSizeIds,
         sizeNameById,
-        scopeKey: 'TECH_CARD_BOM_PURPOSE_MAIN',
+        scopeKey: 'main',
         sizeToken: 'M',
         authority,
         generation: generationOwner.beginSaved('cancelled-saved-preparation'),
@@ -808,7 +826,7 @@ describe('zero-operation saved card authority', () => {
       techCard: card(),
       orderSizeIds,
       sizeNameById,
-      scopeKey: 'TECH_CARD_BOM_PURPOSE_MAIN',
+      scopeKey: 'main',
       sizeToken: 'M',
       authority,
       generation: generationOwner.beginSaved('failed-saved-preparation'),

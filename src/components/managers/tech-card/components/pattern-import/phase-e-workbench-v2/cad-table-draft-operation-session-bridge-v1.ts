@@ -17,6 +17,7 @@ import {
 } from './cad-table-draft-operation-planner-v1';
 import type { PatternImportDxfPhaseEDraftOperationConnectionIntentV1 } from './draft-operation-from-connection-v1';
 import {
+  activeDraftCadTransactionsV1,
   PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_PRODUCTIVE_TOOLS_V1,
   PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_SESSION_V1,
   type PatternImportDxfPhaseEDraftCadCommandV1,
@@ -286,11 +287,13 @@ function commandKind(
   if (tool === 'dart') return 'dart';
   if (tool === 'mark' || tool === 'notch' || tool === 'add-point') return 'detail';
   if (
+    tool === 'pen' ||
     tool === 'rectangle' ||
     tool === 'circle' ||
     tool === 'ellipse' ||
     tool === 'internal-line' ||
     tool === 'pattern-line' ||
+    tool === 'guideline' ||
     tool === 'french-curve'
   )
     return 'construct';
@@ -300,12 +303,14 @@ function commandKind(
 const CAD_TOOL_LABELS: Readonly<
   Partial<Record<PatternImportDxfPhaseEDraftCadCommandV1['tool'], string>>
 > = Object.freeze({
+  pen: 'Create Pen piece',
   rectangle: 'Create rectangle piece',
   circle: 'Create circle piece',
   ellipse: 'Create ellipse piece',
   'internal-line': 'Internal line',
   'pattern-line': 'Pattern line',
   'french-curve': 'French curve',
+  guideline: 'Guideline',
   'add-point': 'Add point',
   dart: 'Dart',
   cut: 'Cut',
@@ -326,6 +331,11 @@ function commandParameters(
   command: PatternImportDxfPhaseEDraftCadCommandV1,
 ): readonly Readonly<{ label: string; value: string }>[] {
   switch (command.tool) {
+    case 'pen':
+      return Object.freeze([
+        Object.freeze({ label: 'Piece', value: command.payload.newPiece?.pieceLineKey ?? '—' }),
+        Object.freeze({ label: 'Corners', value: String(command.payload.pointsMm.length) }),
+      ]);
     case 'rectangle':
       return Object.freeze([
         Object.freeze({ label: 'Piece', value: command.payload.newPiece?.pieceLineKey ?? '—' }),
@@ -375,7 +385,9 @@ function commandParameters(
     case 'spread':
       return Object.freeze([
         Object.freeze({ label: 'Amount', value: `${command.payload.amountMm} mm` }),
-        Object.freeze({ label: 'Pivot', value: pointLabel(command.payload.pivotMm) }),
+        command.payload.mode === 'parallel'
+          ? Object.freeze({ label: 'Parallel opening', value: command.payload.movingSide })
+          : Object.freeze({ label: 'Pivot', value: pointLabel(command.payload.pivotMm) }),
         Object.freeze({ label: 'Cut', value: command.payload.cutLineEntityId }),
       ]);
     case 'dart':
@@ -398,6 +410,11 @@ function commandParameters(
       return Object.freeze([
         Object.freeze({ label: 'Kind', value: command.payload.kind }),
         Object.freeze({ label: 'Depth', value: `${command.payload.depthMm} mm` }),
+      ]);
+    case 'guideline':
+      return Object.freeze([
+        Object.freeze({ label: 'Start', value: pointLabel(command.payload.fromMm) }),
+        Object.freeze({ label: 'End', value: pointLabel(command.payload.toMm) }),
       ]);
     case 'internal-line':
     case 'french-curve':
@@ -456,6 +473,27 @@ function cadCommandShapeValid(command: PatternImportDxfPhaseEDraftCadCommandV1):
     !CAD_STABLE_ID.test(command.payload?.entityId ?? '')
   )
     return false;
+  if (command.tool === 'pen') {
+    const { closed, pointsMm, newPiece } = command.payload;
+    return Boolean(
+      closed &&
+        Array.isArray(pointsMm) &&
+        pointsMm.length >= 3 &&
+        pointsMm.length <= 256 &&
+        pointsMm.every(finitePoint) &&
+        newPiece &&
+        CAD_STABLE_ID.test(newPiece.pieceId) &&
+        CAD_STABLE_ID.test(newPiece.pieceLineKey) &&
+        CAD_STABLE_ID.test(newPiece.contourId) &&
+        Array.isArray(newPiece.vertexIds) &&
+        newPiece.vertexIds.length === pointsMm.length &&
+        new Set(newPiece.vertexIds).size === newPiece.vertexIds.length &&
+        newPiece.vertexIds.every((vertexId) => CAD_STABLE_ID.test(vertexId)) &&
+        newPiece.displayName.trim().length > 0 &&
+        newPiece.gradingPolicy === 'ungraded-current-size' &&
+        newPiece.placementPolicy === 'separate-writer-block',
+    );
+  }
   if (command.tool === 'rectangle') {
     const newPiece = command.payload.newPiece;
     return (
@@ -503,7 +541,9 @@ function cadCommandShapeValid(command: PatternImportDxfPhaseEDraftCadCommandV1):
     );
   if (command.tool === 'spread')
     return (
-      finitePoint(command.payload.pivotMm) &&
+      (command.payload.mode === 'parallel'
+        ? ['positive', 'negative'].includes(command.payload.movingSide)
+        : finitePoint(command.payload.pivotMm)) &&
       CAD_STABLE_ID.test(command.payload.cutLineEntityId) &&
       Number.isFinite(command.payload.amountMm) &&
       command.payload.amountMm > 0
@@ -515,6 +555,8 @@ function cadCommandShapeValid(command: PatternImportDxfPhaseEDraftCadCommandV1):
       command.payload.pointsMm.every(finitePoint) &&
       (command.tool !== 'pattern-line' || typeof command.payload.closed === 'boolean')
     );
+  if (command.tool === 'guideline')
+    return finitePoint(command.payload.fromMm) && finitePoint(command.payload.toMm);
   if (command.tool === 'french-curve')
     return (
       Array.isArray(command.payload.controlPointsMm) &&
@@ -606,7 +648,7 @@ export function buildPatternImportDxfPhaseECadCommandDraftOperationsV1(input: {
   const targetKeys = new Set(
     input.catalog.pieces.map(({ pieceId, pieceLineKey }) => `${pieceId}\u0000${pieceLineKey}`),
   );
-  const activeTransactions = session.history.slice(0, session.cursor);
+  const activeTransactions = activeDraftCadTransactionsV1(session);
   const transactionIds = new Set<string>();
   const commandIds = new Set<string>();
   const entityIds = new Set<string>();

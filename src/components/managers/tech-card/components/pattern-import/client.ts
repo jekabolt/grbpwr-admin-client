@@ -1,3 +1,4 @@
+import type { ApplyNewPieceIntent } from 'lib/pattern-import/fabrics/apply-new-piece-intent';
 // What the wizard needs from the outside world, as three narrow seams.
 //
 // The wizard is written against the CONTRACT (lib/pattern-import/types.ts §11), not against an
@@ -156,6 +157,7 @@ export type DraftBuilder = (
     dxfProvenance?: StageIO['dxf-provenance']['out'];
     /** Separate exact source/contour replay carrier; contains no raw DXF. */
     dxfPhaseDReplay?: StageIO['dxf-phase-d-replay']['out'];
+    dxfNativeSewingReplay?: StageIO['dxf-native-sewing-replay']['out'];
   },
 ) => CardDraft;
 
@@ -169,4 +171,10 @@ export type ApplyProgress = { scopeKey: string; state: 'uploading' | 'uploaded' 
 export type ApplyDraftFn = (
   draft: CardDraft,
   onProgress?: (p: ApplyProgress) => void,
+  options?: Readonly<{
+    replaceMatchingFile?: true;
+    newPieceIntent?: ApplyNewPieceIntent;
+    join?: import('./phase-e-workbench-v2/draft-cad-saved-join-review').JoinApply;
+    fixedEndReplacement?: import('./phase-e-workbench-v2/saved-fixed-end-outline-authority-v1').SavedFixedEndReplacementV1;
+  }>,
 ) => Promise<ApplyResult>;

@@ -1,10 +1,31 @@
 import { describe, expect, it } from 'vitest';
-import { Group, Mesh, MeshBasicMaterial, TorusGeometry, Vector3 } from 'three';
+import {
+  BufferAttribute,
+  BufferGeometry,
+  Color,
+  DoubleSide,
+  FrontSide,
+  Group,
+  Mesh,
+  MeshBasicMaterial,
+  MeshStandardMaterial,
+  PerspectiveCamera,
+  Ray,
+  Raycaster,
+  TorusGeometry,
+  Vector2,
+  Vector3,
+} from 'three';
 
 import {
   MEASUREMENT_SURFACE_JOINT_MARKER_COARSE_HIT_DIAMETER_CSS_PX_V9,
   MEASUREMENT_SURFACE_JOINT_MARKER_HIT_DIAMETER_CSS_PX_V1,
   MEASUREMENT_SURFACE_PATTERN_PIECE_PROJECTED_HIT_RECEIPT_V1,
+  measurementSurfaceCommittedPatternGestureV1,
+  captureMeasurementSurfaceRotationGroupV1,
+  measurementSurfaceMovePatternOnPlaneV1,
+  measurementSurfacePatternDragIntersectionV1,
+  measurementSurfacePatternDragPlaneV1,
   measurementSurfaceExpandRotationPickerV9,
   measurementSurfaceJointEditorEffectiveEditModeV1,
   measurementSurfaceJointGroupsSignatureV1,
@@ -18,6 +39,11 @@ import {
   measurementSurfaceOrbitControlsEnabledV2,
   measurementSurfacePatternPieceTransformReceiptV1,
   measurementSurfaceRestoreCameraV10,
+  pickMeasurementSurfaceAcceptedClothPieceV1,
+  pickMeasurementSurfaceAcceptedClothPointV1,
+  createMeasurementSurfaceAcceptedInternalLinesV1,
+  updateMeasurementSurfaceAcceptedClothBacksideV1,
+  updateMeasurementSurfaceAcceptedClothStrainV1,
   measurementSurfaceRotationGizmoMatrixV6,
   measurementSurfaceRotationGizmoSignatureV6,
   measurementSurfaceSelectedJointOcclusionSamplesV10,
@@ -27,7 +53,354 @@ import {
   validateMeasurementSurfacePatternPieceProjectedHitReceiptV1,
   validateMeasurementSurfacePatternPieceTransformReceiptV1,
   type MeasurementSurfacePatternPieceOverlayV1,
+  type MeasurementSurfaceAcceptedClothV1,
 } from './measurement-watertight-surface-v1-stage';
+
+it('draws only native line buffers belonging to the current accepted cloth frame', () => {
+  const positionsM = Float32Array.of(0, 0, 0, 1, 0, 0, 0, 1, 0);
+  const segmentsM = Float32Array.of(0.25, 0.25, 0, 0.5, 0.25, 0);
+  const nativeInternalLines = { frameNumber: 29, positionsM, segmentsM };
+  const current = {
+    positionsM,
+    frameNumber: 29,
+    isCurrent: () => true,
+    ranges: [{ triangleOffset: 0, triangleCount: 1, color: 0 }],
+    nativeInternalLines,
+  };
+  expect(
+    createMeasurementSurfaceAcceptedInternalLinesV1({ ...current, frameNumber: 30 }),
+  ).toBeNull();
+  expect(
+    createMeasurementSurfaceAcceptedInternalLinesV1({ ...current, positionsM: positionsM.slice() }),
+  ).toBeNull();
+  expect(
+    createMeasurementSurfaceAcceptedInternalLinesV1({ ...current, isCurrent: () => false }),
+  ).toBeNull();
+  const display = createMeasurementSurfaceAcceptedInternalLinesV1(current);
+  expect(display?.geometry.getAttribute('position').array).toEqual(segmentsM);
+  expect(display?.geometry.getAttribute('position').array).not.toBe(segmentsM);
+  expect(display?.material.depthTest).toBe(true);
+  expect(display?.material.depthWrite).toBe(false);
+  display?.geometry.dispose();
+  display?.material.dispose();
+});
+
+it('tracks signed group Z rotation through the angle boundary, rejects ambiguous pivots and finishes once', () => {
+  const pivot = { anchor: new Group(), content: new Group() };
+  const other = { anchor: new Group(), content: new Group() };
+  pivot.anchor.position.set(0, 0, 1);
+  other.anchor.position.set(1, 0, 2);
+  const bindings = new Map([
+    ['pivot', pivot],
+    ['other', other],
+  ]);
+  const commits: number[] = [];
+  const group = {
+    pieceKeys: ['other', 'pivot'],
+    onRotate: (_key: string, angle: number) => commits.push(angle),
+  };
+  const point = (degrees: number) =>
+    new Vector3(Math.cos((degrees * Math.PI) / 180), Math.sin((degrees * Math.PI) / 180), 1);
+  const capture = (start: Vector3) =>
+    captureMeasurementSurfaceRotationGroupV1(group, bindings, 'pivot', start);
+  expect(capture(pivot.anchor.position)).toBeNull();
+  expect(
+    captureMeasurementSurfaceRotationGroupV1(group, bindings, 'unknown', point(170)),
+  ).toBeNull();
+  expect(
+    captureMeasurementSurfaceRotationGroupV1(
+      group,
+      new Map([
+        ['pivot', pivot],
+        ['other', pivot],
+      ]),
+      'pivot',
+      point(170),
+    ),
+  ).toBeNull();
+  const gesture = capture(point(170))!;
+  gesture.preview(point(-170));
+  expect(other.content.rotation.z).toBeCloseTo((20 * Math.PI) / 180);
+  gesture.preview(pivot.anchor.position);
+  expect(other.content.rotation.z).toBeCloseTo((20 * Math.PI) / 180);
+  gesture.preview(point(-60));
+  gesture.preview(point(60));
+  gesture.preview(point(170));
+  expect(other.content.rotation.z).toBeCloseTo(2 * Math.PI);
+  expect(other.anchor.position.toArray()).toEqual([1, 0, 2]);
+  gesture.finish(true);
+  gesture.finish(true);
+  gesture.preview(point(20));
+  expect(commits).toHaveLength(1);
+  expect(commits[0]).toBeCloseTo(2 * Math.PI);
+  expect(other.content.rotation.z).toBe(0);
+  const backwards = capture(point(-170))!;
+  backwards.preview(point(170));
+  backwards.finish(true);
+  expect(commits[1]).toBeCloseTo((-20 * Math.PI) / 180);
+});
+
+describe('staged piece translation using the selected world plane', () => {
+  const start = new Vector3(0.12, -0.53, 0.74);
+  const camera = new PerspectiveCamera(32, 1, 0.001, 100);
+  camera.position.set(2, 3, 5);
+  camera.lookAt(start);
+  camera.updateMatrixWorld();
+  const rayTo = (point: Vector3) =>
+    new Ray(camera.position.clone(), point.clone().sub(camera.position).normalize());
+
+  it.each([
+    ['xy', 2, new Vector3(0.12, -0.25, 0)],
+    ['xz', 1, new Vector3(-0.12, 0, 0.25)],
+    ['yz', 0, new Vector3(0, 0.12, -0.25)],
+  ] as const)(
+    'moves only in %s and retains the last valid point through a grazing ray',
+    (mode, locked, delta) => {
+      const plane = measurementSurfacePatternDragPlaneV1(mode, camera, start);
+      const startPoint = measurementSurfacePatternDragIntersectionV1(rayTo(start), plane, camera)!;
+      const gesture = { plane, startPoint, startPosition: start.clone() };
+      const position = start.clone();
+      const destination = start.clone().add(delta);
+      measurementSurfaceMovePatternOnPlaneV1(rayTo(destination), camera, gesture, position);
+      expect(position.distanceTo(destination)).toBeLessThan(1e-12);
+      expect(position.getComponent(locked)).toBe(start.getComponent(locked));
+      const lastValid = position.clone();
+      const grazing = new Ray(
+        camera.position.clone(),
+        delta.clone().normalize().addScaledVector(plane.normal, -0.001).normalize(),
+      );
+      expect(measurementSurfacePatternDragIntersectionV1(grazing, plane, camera)).toBeNull();
+      measurementSurfaceMovePatternOnPlaneV1(grazing, camera, gesture, position);
+      expect(position.equals(lastValid)).toBe(true);
+      measurementSurfaceMovePatternOnPlaneV1(rayTo(start), camera, gesture, position);
+      expect(position.equals(start)).toBe(true);
+    },
+  );
+  it('uses the current camera for the view plane and declines ambiguous or behind hits', () => {
+    const view = measurementSurfacePatternDragPlaneV1('view', camera, start);
+    expect(view.normal.distanceTo(camera.getWorldDirection(new Vector3()))).toBeLessThan(1e-12);
+    expect(view.distanceToPoint(start)).toBeCloseTo(0);
+    const xy = measurementSurfacePatternDragPlaneV1('xy', camera, start);
+    const hit = (origin: Vector3, direction: Vector3) =>
+      measurementSurfacePatternDragIntersectionV1(new Ray(origin, direction), xy, camera);
+    expect(hit(start.clone(), new Vector3(1, 0, 0))).toBeNull();
+    expect(hit(start.clone(), new Vector3(0, 0, -1))).toBeNull();
+    expect(hit(camera.position.clone(), new Vector3(0, 0, 1))).toBeNull();
+  });
+
+  it('clips oblique pointer rays by camera depth', () => {
+    const camera = new PerspectiveCamera(90, 1, 1, 10);
+    camera.updateMatrixWorld();
+    const hit = (point: Vector3) =>
+      measurementSurfacePatternDragIntersectionV1(
+        new Ray(camera.position.clone(), point.clone().normalize()),
+        measurementSurfacePatternDragPlaneV1('xy', camera, point),
+        camera,
+      );
+    const visible = new Vector3(9, 0, -9.5);
+    expect(visible.length()).toBeGreaterThan(camera.far);
+    expect(hit(visible)?.distanceTo(visible)).toBeLessThan(1e-12);
+    expect(hit(new Vector3(0.79, 0, -0.8))).toBeNull();
+    expect(hit(new Vector3(9, 0, -10.1))).toBeNull();
+  });
+});
+
+it('ignores a stationary placement and preserves untouched local components at a nonzero origin', () => {
+  const basePosition = new Vector3(1.1, 2.3, -3.2);
+  const previous = { offsetM: [0.2, 0.17, -0.23] as const, rotationRad: 0.9 };
+  const anchor = new Group();
+  anchor.position.copy(basePosition).add(new Vector3(...previous.offsetM));
+  const content = new Group();
+  content.rotation.z = previous.rotationRad;
+  const gesture = {
+    startPosition: anchor.position.clone(),
+    startRotation: previous.rotationRad,
+    binding: { basePosition, anchor, content, piece: { transform: previous } },
+  };
+  expect(anchor.position.x - basePosition.x).not.toBe(previous.offsetM[0]);
+  expect(measurementSurfaceCommittedPatternGestureV1(gesture)).toBeNull();
+  content.rotation.z = 1.1;
+  expect(measurementSurfaceCommittedPatternGestureV1(gesture)).toEqual({
+    ...previous,
+    rotationRad: 1.1,
+  });
+  anchor.position.y = basePosition.y + 0.5;
+  expect(measurementSurfaceCommittedPatternGestureV1(gesture)?.offsetM).toEqual([0.2, 0.5, -0.23]);
+});
+
+it('applies accepted-frame signed color without replacing positions, triangle groups or materials', () => {
+  const geometry = new BufferGeometry();
+  const positions = new Float32Array(27);
+  const position = new BufferAttribute(positions, 3);
+  geometry.setAttribute('position', position);
+  geometry.addGroup(0, 9, 0);
+  const material = new MeshStandardMaterial({ color: 0x405060 });
+  const mesh = new Mesh(geometry, [material]);
+  let active = true;
+  const cloth: MeasurementSurfaceAcceptedClothV1 = {
+    positionsM: positions,
+    frameNumber: 29,
+    ranges: [{ triangleOffset: 0, triangleCount: 3, color: 0x405060 }],
+    isCurrent: () => active,
+  };
+  const overlay = {
+    frameNumber: 29,
+    positionsM: positions,
+    valuesInDrawOrder: Float32Array.of(-0.5, 0, 0.8),
+  };
+
+  expect(updateMeasurementSurfaceAcceptedClothStrainV1(mesh, cloth)).toBe(false);
+  expect(geometry.getAttribute('color')).toBeUndefined();
+  expect(
+    updateMeasurementSurfaceAcceptedClothStrainV1(mesh, { ...cloth, principalStrain: overlay }),
+  ).toBe(true);
+  const colors = geometry.getAttribute('color');
+  const rgb = (i: number) =>
+    new Color(colors.getX(i), colors.getY(i), colors.getZ(i)).getHexString();
+  expect(Array.from({ length: 9 }, (_, i) => rgb(i))).toEqual([
+    '2166ac',
+    '2166ac',
+    '2166ac',
+    'f3f4f6',
+    'f3f4f6',
+    'f3f4f6',
+    'b2182b',
+    'b2182b',
+    'b2182b',
+  ]);
+  expect(mesh.geometry).toBe(geometry);
+  expect(geometry.getAttribute('position')).toBe(position);
+  expect(geometry.groups).toEqual([{ start: 0, count: 9, materialIndex: 0 }]);
+  expect(mesh.material[0]).toBe(material);
+  expect(material.vertexColors).toBe(true);
+  expect(material.color.getHex()).toBe(0xffffff);
+
+  for (const invalid of [
+    { ...overlay, frameNumber: 28 },
+    { ...overlay, positionsM: positions.slice() },
+    { ...overlay, valuesInDrawOrder: Float32Array.of(0, 0) },
+    { ...overlay, valuesInDrawOrder: Float32Array.of(0, NaN, 0) },
+  ]) {
+    expect(
+      updateMeasurementSurfaceAcceptedClothStrainV1(mesh, { ...cloth, principalStrain: invalid }),
+    ).toBe(false);
+    expect(material.vertexColors).toBe(false);
+    expect(material.color.getHex()).toBe(0x405060);
+  }
+  expect(
+    updateMeasurementSurfaceAcceptedClothStrainV1(mesh, { ...cloth, principalStrain: overlay }),
+  ).toBe(true);
+  expect(geometry.getAttribute('color')).toBe(colors);
+  active = false;
+  expect(
+    updateMeasurementSurfaceAcceptedClothStrainV1(mesh, { ...cloth, principalStrain: overlay }),
+  ).toBe(false);
+  expect(material.vertexColors).toBe(false);
+  expect(material.color.getHex()).toBe(0x405060);
+});
+
+it('picks the accepted mesh from each visible side and rejects hidden, occluded or revoked hits', () => {
+  const first = {
+    row: {
+      techCardId: 11,
+      scopeKey: 'main',
+      patternLineKey: 'saved-front',
+      revision: 1,
+      cardLockVersion: 7,
+      url: 'https://saved.example/fixture.dxf',
+      sizeBytes: 100,
+      sha256: 'a'.repeat(64),
+    },
+    sizeToken: 'M',
+    pieceId: 'front',
+    pieceLineKey: 'native-front',
+    sourceInstancePath: ['insert-a'],
+  };
+  const second = { ...first, pieceLineKey: 'native-back', sourceInstancePath: ['insert-b'] };
+  const positionsM = new Float32Array([-2, -1, 0, 0, -1, 0, -1, 1, 0, 0, -1, 0, 2, -1, 0, 1, 1, 0]);
+  const clothGeometry = new BufferGeometry();
+  clothGeometry.setAttribute('position', new BufferAttribute(positionsM, 3));
+  clothGeometry.addGroup(0, 3, 0);
+  clothGeometry.addGroup(3, 3, 1);
+  const materials = [new MeshStandardMaterial(), new MeshStandardMaterial()];
+  const cloth = new Mesh(clothGeometry, materials);
+  const bodyGeometry = new BufferGeometry();
+  bodyGeometry.setAttribute(
+    'position',
+    new BufferAttribute(new Float32Array([-2, -1, 1, 0, -1, 1, -1, 1, 1]), 3),
+  );
+  const body = new Mesh(bodyGeometry, new MeshBasicMaterial());
+  const camera = new PerspectiveCamera(60, 1, 0.01, 100);
+  camera.position.set(0, 0, 5);
+  camera.updateMatrixWorld();
+  const ray = (x: number) => {
+    const p = new Vector3(x, 0, 0).project(camera);
+    const raycaster = new Raycaster();
+    raycaster.setFromCamera(new Vector2(p.x, p.y), camera);
+    return raycaster;
+  };
+  const rearRay = (x: number) => new Raycaster(new Vector3(x, 0, -5), new Vector3(0, 0, 1));
+  let current = true;
+  const accepted: MeasurementSurfaceAcceptedClothV1 = {
+    positionsM,
+    frameNumber: 32,
+    ranges: [
+      { triangleOffset: 0, triangleCount: 1, color: 0, sourcePiece: first },
+      { triangleOffset: 1, triangleCount: 1, color: 0, sourcePiece: second },
+    ],
+    isCurrent: () => current,
+  };
+  updateMeasurementSurfaceAcceptedClothBacksideV1(cloth, accepted.showBackside);
+  expect(materials.map((material) => material.side)).toEqual([DoubleSide, DoubleSide]);
+  expect(pickMeasurementSurfaceAcceptedClothPieceV1(rearRay(-1), cloth, null, accepted)).toBe(
+    first,
+  );
+  expect(
+    pickMeasurementSurfaceAcceptedClothPointV1(rearRay(1), cloth, null, accepted)?.triangleIndex,
+  ).toBe(1);
+
+  const doubleSideVersions = materials.map((material) => material.version);
+  updateMeasurementSurfaceAcceptedClothBacksideV1(cloth, false);
+  expect(materials.map((material) => material.side)).toEqual([FrontSide, FrontSide]);
+  expect(materials.map((material) => material.version)).toEqual(
+    doubleSideVersions.map((v) => v + 1),
+  );
+  expect(pickMeasurementSurfaceAcceptedClothPieceV1(rearRay(-1), cloth, null, accepted)).toBeNull();
+  expect(pickMeasurementSurfaceAcceptedClothPointV1(rearRay(1), cloth, null, accepted)).toBeNull();
+  expect(pickMeasurementSurfaceAcceptedClothPieceV1(ray(-1), cloth, null, accepted)).toBe(first);
+  expect(pickMeasurementSurfaceAcceptedClothPieceV1(ray(1), cloth, body, accepted)).toBe(second);
+  expect(pickMeasurementSurfaceAcceptedClothPieceV1(ray(-1), cloth, body, accepted)).toBeNull();
+  const point = pickMeasurementSurfaceAcceptedClothPointV1(ray(1), cloth, body, accepted);
+  expect(point?.triangleIndex).toBe(1);
+  expect(point?.barycentric[0]).toBeCloseTo(0.25, 12);
+  expect(point?.barycentric[1]).toBeCloseTo(0.25, 12);
+  expect(point?.barycentric[2]).toBeCloseTo(0.5, 12);
+  expect(pickMeasurementSurfaceAcceptedClothPointV1(ray(-1), cloth, body, accepted)).toBeNull();
+  expect(
+    pickMeasurementSurfaceAcceptedClothPieceV1(ray(1), cloth, body, {
+      ...accepted,
+      ranges: [accepted.ranges[0], { triangleOffset: 1, triangleCount: 1, color: 0 }],
+    }),
+  ).toBeNull();
+
+  updateMeasurementSurfaceAcceptedClothBacksideV1(cloth);
+  expect(pickMeasurementSurfaceAcceptedClothPieceV1(rearRay(-1), cloth, null, accepted)).toBe(
+    first,
+  );
+  expect(
+    pickMeasurementSurfaceAcceptedClothPointV1(rearRay(1), cloth, null, accepted)?.triangleIndex,
+  ).toBe(1);
+  expect(cloth.geometry).toBe(clothGeometry);
+  expect(cloth.geometry.getAttribute('position').array).toBe(positionsM);
+  expect(cloth.material).toBe(materials);
+  current = false;
+  expect(pickMeasurementSurfaceAcceptedClothPieceV1(ray(1), cloth, body, accepted)).toBeNull();
+  expect(pickMeasurementSurfaceAcceptedClothPointV1(ray(1), cloth, body, accepted)).toBeNull();
+  clothGeometry.dispose();
+  cloth.material.forEach((material) => material.dispose());
+  bodyGeometry.dispose();
+  body.material.dispose();
+});
 
 describe('measurement surface active guide dataset v1', () => {
   it('publishes an explicit visual-only receipt and an off state', () => {

@@ -1,5 +1,6 @@
 import { aliasNames, normBlock } from 'lib/pattern-import/fabrics/draft';
 import type {
+  Affine,
   DraftScopeTarget,
   GrainFeature,
   ManifestSize,
@@ -104,6 +105,14 @@ export type GeneratedFusingSheet = {
   filename: string;
   dxfText: string;
   blocks: string[];
+  /** Exact writer frame per part and size, in millimetres from the host pattern's local frame. */
+  blockPlacements: {
+    blockName: string;
+    sourceIdentity: string;
+    sizeId: number;
+    sizeToken: string;
+    hostLocalToBlock: Affine;
+  }[];
   /**
    * How the card links this sheet's blocks to pieces: one row per block identity, spelled as the
    * importer spells its own converted sheets (`aliasNames`: the identity, or the raw `_UNI` block);
@@ -185,6 +194,7 @@ function grainOf(
   spec: PieceFuseSpec,
   source: FusingSourceSize,
   cut: readonly PtMm[],
+  historicalRead: boolean,
 ): GrainFeature | null {
   if (spec.grain === 'any') return null;
   const sourceAngle = source.grain
@@ -198,7 +208,9 @@ function grainOf(
         ? sourceAngle + 45
         : sourceAngle;
   const line = spec.grain === 'as_piece' && source.grain ? source.grain : axisThrough(cut, angle);
-  const fitted = fitGrainInside(line.a, line.b, [cut], { minMm: 1 });
+  const fitted = historicalRead
+    ? ([line.a, line.b] as const)
+    : fitGrainInside(line.a, line.b, [cut], { minMm: 1 });
   if (!fitted) return null;
   const angleDeg = (Math.atan2(line.b.y - line.a.y, line.b.x - line.a.x) * 180) / Math.PI;
   return {
@@ -518,8 +530,65 @@ export function mapFuseSpecToSize(
   return source;
 }
 
+/** Historical drawn zones used proportional box coordinates with the original inset snap. */
+const HISTORICAL_ZONE_SNAP_MM = 0.5;
+
+function mapHistoricalZone(
+  source: PieceFuseSpec,
+  baseOutline: readonly PtMm[],
+  targetOutline: readonly PtMm[],
+  seamAllowanceMm?: number | null,
+): PieceFuseSpec {
+  if (source.mode !== 'zone' || !source.zone || 'dxfPieceKey' in source.zone) return source;
+  const from = bbox(baseOutline);
+  const to = bbox(targetOutline);
+  const mapAxis = (value: number, start: number, end: number, low: number, high: number) =>
+    end > start ? low + ((value - start) / (end - start)) * (high - low) : low;
+  const mapPoint = ({ x, y }: PtMm): PtMm => ({
+    x: mapAxis(x, from.minX, from.maxX, to.minX, to.maxX),
+    y: mapAxis(y, from.minY, from.maxY, to.minY, to.maxY),
+  });
+  if ('rect' in source.zone) {
+    const [x0, y0, x1, y1] = source.zone.rect;
+    const a = mapPoint({ x: x0, y: y0 });
+    const b = mapPoint({ x: x1, y: y1 });
+    return { ...source, zone: { rect: [a.x, a.y, b.x, b.y] } };
+  }
+  const baseInset = fuseInsetRingMm(baseOutline, source, seamAllowanceMm);
+  const targetInset = fuseInsetRingMm(targetOutline, source, seamAllowanceMm);
+  const mapRing = (ring: FuseSpline, followInset: boolean): FuseSpline => ({
+    points: ring.points.map((point) => {
+      const mapped = mapPoint(point);
+      const onInset = followInset && projectOnRing(point, baseInset).d <= HISTORICAL_ZONE_SNAP_MM;
+      return { ...point, ...(onInset ? projectOnRing(mapped, targetInset).p : mapped) };
+    }),
+  });
+  return {
+    ...source,
+    zone: {
+      spline: mapRing(source.zone.spline, true),
+      islands: source.zone.islands.map((island) => mapRing(island, true)),
+      holes: source.zone.holes.map((hole) => mapRing(hole, false)),
+    },
+  };
+}
+
 /** Pure source-piece → one all-size DXF per used interlining BOM line. */
 export function buildFusingSheets(input: BuildFusingSheetsInput): BuildFusingSheetsResult {
+  return buildFusingSheetsFromSource(input, false);
+}
+
+/** Reconstructs an already saved bare R12 verifier candidate using the shared pure writer. */
+export function reconstructHistoricalFusingForVerificationV1(
+  input: BuildFusingSheetsInput & { createdAt: string },
+): BuildFusingSheetsResult {
+  return buildFusingSheetsFromSource(input, true);
+}
+
+function buildFusingSheetsFromSource(
+  input: BuildFusingSheetsInput,
+  historicalRead: boolean,
+): BuildFusingSheetsResult {
   const warnings: string[] = [];
   const skippedSizes: FusingSkippedSize[] = [];
   const approximate: FusingApproximateSize[] = [];
@@ -555,7 +624,16 @@ export function buildFusingSheets(input: BuildFusingSheetsInput): BuildFusingShe
     let extraSeeds = 0;
     for (let pieceIndex = 0; pieceIndex < sources.length; pieceIndex++) {
       const sourcePiece = sources[pieceIndex];
-      const fuse = sourcePiece.fuse!;
+      const storedFuse = sourcePiece.fuse!;
+      if (
+        historicalRead &&
+        storedFuse.mode !== 'whole' &&
+        (storedFuse.mode !== 'zone' || !storedFuse.zone || 'dxfPieceKey' in storedFuse.zone)
+      )
+        throw new Error('Historical fusing replay requires whole pieces or authored drawn zones.');
+      const fuse = historicalRead
+        ? { ...storedFuse, insetMm: storedFuse.insetMm ?? 3 }
+        : storedFuse;
       const ordered = [...sourcePiece.sizes].sort((a, b) => a.rank - b.rank);
       const base = chooseBaseSize(
         ordered,
@@ -573,28 +651,30 @@ export function buildFusingSheets(input: BuildFusingSheetsInput): BuildFusingShe
       for (const sourceSize of ordered) {
         const guessed = new Set<'line' | 'notch'>();
         try {
-          const sizedFuse = mapFuseSpecToSize(
-            fuse,
-            base.outline,
-            sourceSize.outline,
-            sourcePiece.seamAllowanceMm,
-            { base: base.internals ?? [], target: sourceSize.internals ?? [] },
-            (what) => guessed.add(what),
-            sourcePiece.gradeMap && sourceSize.sizeId !== base.sizeId
-              ? {
-                  map: sourcePiece.gradeMap,
-                  from: base.sizeId,
-                  to: sourceSize.sizeId,
-                  approximate: (reasons) =>
-                    approximate.push({
-                      piece: sourcePiece.identity,
-                      size: sourceSize.sizeToken,
-                      approximate: true,
-                      reason: reasons.join('; '),
-                    }),
-                }
-              : null,
-          );
+          const sizedFuse = historicalRead
+            ? mapHistoricalZone(fuse, base.outline, sourceSize.outline, sourcePiece.seamAllowanceMm)
+            : mapFuseSpecToSize(
+                fuse,
+                base.outline,
+                sourceSize.outline,
+                sourcePiece.seamAllowanceMm,
+                { base: base.internals ?? [], target: sourceSize.internals ?? [] },
+                (what) => guessed.add(what),
+                sourcePiece.gradeMap && sourceSize.sizeId !== base.sizeId
+                  ? {
+                      map: sourcePiece.gradeMap,
+                      from: base.sizeId,
+                      to: sourceSize.sizeId,
+                      approximate: (reasons) =>
+                        approximate.push({
+                          piece: sourcePiece.identity,
+                          size: sourceSize.sizeToken,
+                          approximate: true,
+                          reason: reasons.join('; '),
+                        }),
+                    }
+                  : null,
+              );
           for (const what of guessed)
             warnings.push(
               `${sourcePiece.identity}_${sourceSize.sizeToken}: ${what} not found, built by guess`,
@@ -617,6 +697,8 @@ export function buildFusingSheets(input: BuildFusingSheetsInput): BuildFusingShe
                 : undefined,
           });
           const parts = fuseParts(polygons, sizedFuse.zone);
+          if (historicalRead && parts.length !== 1)
+            throw new Error('Historical fusing replay needs one cut part at every rank.');
           partCounts.add(parts.length);
           parts.forEach((part, index) => {
             const cut = part.outer;
@@ -627,7 +709,7 @@ export function buildFusingSheets(input: BuildFusingSheetsInput): BuildFusingShe
               cut,
               cutLoops: part.holes,
               seam: null,
-              grain: grainOf(fuse, sourceSize, cut),
+              grain: grainOf(fuse, sourceSize, cut, historicalRead),
               notches: [],
               drills: [],
               internal: [],
@@ -710,7 +792,11 @@ export function buildFusingSheets(input: BuildFusingSheetsInput): BuildFusingShe
         generator: 'grbpwr/fusing-dxf',
         dialect: 'r12',
       },
-      { embed: null, now: () => fusingSheetStamp(input.createdAt) },
+      {
+        embed: null,
+        now: () => fusingSheetStamp(input.createdAt),
+        ...(historicalRead ? { legacyFusingGrainAnchor: true } : {}),
+      },
     );
     warnings.push(
       ...written.detail.warnings.filter(
@@ -720,8 +806,19 @@ export function buildFusingSheets(input: BuildFusingSheetsInput): BuildFusingShe
     sheets.push({
       bomLineKey: line.bomLineKey,
       filename: fusingSheetFilename(input.style, line.code),
-      dxfText: markGeneratedFusing(written.detail.bareText),
+      dxfText: historicalRead
+        ? written.detail.bareText
+        : markGeneratedFusing(written.detail.bareText),
       blocks: written.detail.plan.blocks.map((block) => block.name),
+      blockPlacements: written.detail.plan.blocks.map(
+        ({ name, identity, sizeId, sizeToken, transform }) => ({
+          blockName: name,
+          sourceIdentity: sourceOfPart.get(normBlock(identity).toLowerCase()) ?? identity,
+          sizeId,
+          sizeToken,
+          hostLocalToBlock: { ...transform },
+        }),
+      ),
       aliases: [...aliasNames(written.detail.manifest)].map(([identity, blockName]) => ({
         identity: sourceOfPart.get(normBlock(identity).toLowerCase()) ?? identity,
         blockName,

@@ -1,7 +1,10 @@
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 
 import { SHEET_INK, vy } from '../sheet-viewport';
-import { resolvePatternImportDxfPhaseEVertexV1 } from './measurement-v1';
+import {
+  resolvePatternImportDxfPhaseEVertexV1,
+  type PatternImportDxfPhaseEVertexAnchorV1,
+} from './measurement-v1';
 import {
   formatPatternImportDxfPhaseEDraftCadMeasurementV1,
   type PatternImportDxfPhaseEDraftCadTopologySessionV1,
@@ -11,13 +14,21 @@ export function PatternImportDxfPhaseEDraftCadTopologyOverlayV1({
   projection,
   state,
   pieceId,
+  pieceLineKey,
   unit,
 }: Readonly<{
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
-  state: PatternImportDxfPhaseEDraftCadTopologySessionV1;
+  state: Pick<
+    PatternImportDxfPhaseEDraftCadTopologySessionV1,
+    'sourceIdentity' | 'unit' | 'measurements' | 'callouts'
+  >;
   pieceId: string;
+  pieceLineKey?: string;
   unit: number;
 }>) {
+  const isActivePiece = (anchor: PatternImportDxfPhaseEVertexAnchorV1 | undefined) =>
+    anchor?.pieceId === pieceId &&
+    (pieceLineKey === undefined || anchor.pieceLineKey === pieceLineKey);
   return (
     <g
       data-draft-cad-topology-overlay-v1=''
@@ -25,7 +36,7 @@ export function PatternImportDxfPhaseEDraftCadTopologyOverlayV1({
       pointerEvents='none'
     >
       {state.measurements.map((measurement) => {
-        if (measurement.anchors[0]?.pieceId !== pieceId) return null;
+        if (!isActivePiece(measurement.anchors[0])) return null;
         const vertices = measurement.anchors.map((anchor) =>
           resolvePatternImportDxfPhaseEVertexV1(projection, anchor),
         );
@@ -81,7 +92,7 @@ export function PatternImportDxfPhaseEDraftCadTopologyOverlayV1({
       })}
 
       {state.callouts.map((callout, index) => {
-        if (callout.anchor.pieceId !== pieceId) return null;
+        if (!isActivePiece(callout.anchor)) return null;
         const vertex = resolvePatternImportDxfPhaseEVertexV1(projection, callout.anchor);
         if (!vertex) return null;
         const dx = unit * 28;

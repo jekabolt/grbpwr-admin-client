@@ -17,6 +17,13 @@
 //                `_L` drawn + `_R` = its mirror across the grain (G12), ppg per hand;
 //   7. growth  — cut area must grow with size (G8) → 'non-monotone' when > 2 sizes.
 
+import {
+  equalAxisPoint,
+  hasSingleCutEdge,
+  isReadProductFoldAxis,
+  matchesSavedFoldRank,
+} from '../adapters/dxf/product-fold-axis';
+import { nativeCutLoopPathIds, resolveNativeCutLoops } from '../adapters/dxf/native-cut-holes';
 import { isMirrorSymmetric } from '../ai/geom';
 import { chainView, partAt, sheetView } from '../assemble/composite';
 import { parseQuantity, saysFold } from '../ai/evidence';
@@ -84,7 +91,7 @@ import {
 import { wallModel } from '../pieces/walls';
 import { hausdorffMm } from '../pieces/fill';
 import { silentRead, type SilentRead } from '../pieces/gfit/silent-inputs';
-import { silentOff } from '../pieces/gfit/silent';
+import { sameDxfRankOutline, silentOff } from '../pieces/gfit/silent';
 import { type Excursion, stripSpikes } from '../spikes';
 import { featuresOf, innerSeamLines, measuredAllowance } from './allowance';
 import { readNotchMarks, type MarkRead } from '../pieces/notch-marks';
@@ -174,12 +181,21 @@ export function resolvePatternImportSemanticsAllowanceMm(
 
 type DxfExtra = {
   dxf?: {
+    block?: string;
+    group?: number;
     identity?: string;
+    savedDisplayName?: string;
     outerIsSeam?: boolean;
+    zeroAllowanceSeam?: true;
+    authoredAllowanceCorner?: PieceSizeSpec['authoredAllowanceCorner'];
+    authoredOutlineCorner?: PieceSizeSpec['authoredOutlineCorner'];
+    textMarks?: PieceSizeSpec['textMarks'];
+    pointMarks?: PieceSizeSpec['pointMarks'];
     sizeSource?: 'label' | 'block-name' | 'none';
     identitySource?: 'label' | 'block-name';
     generatedFusing?: boolean;
     features?: Feature[];
+    nativeCutHoles?: true;
     instances?: number;
     /** The block's own QUANTITY label (AAMA/CLO), if it carries one. */
     quantity?: number | null;
@@ -187,6 +203,16 @@ type DxfExtra = {
     rulGraded?: boolean;
   };
 };
+
+function isLabelledDxfBlock(
+  dxf: DxfExtra['dxf'],
+): dxf is NonNullable<DxfExtra['dxf']> & { block: string; group: number } {
+  return (
+    !!dxf?.block &&
+    dxf.group != null &&
+    (dxf.sizeSource === 'label' || dxf.sizeSource === 'block-name')
+  );
+}
 type Blocked = SemanticsOutput['blocked'][number];
 
 /** How a written size relates to its source candidate, for the walls the gate compares (G3/G4). */
@@ -234,6 +260,11 @@ export type SemanticsDetail = {
   notchChordsOf: (identity: string, rank: number) => NotchChord[] | undefined;
   /** Internal opt-in trace for the exact DXF lineage side stage; never added to SemanticsOutput. */
   dxfProvenanceOf: (identity: string, rank: number) => DxfSemanticsProvenanceTraceV1 | undefined;
+  /** Separate native drawn sewing trace; never substitutes for the legacy outer trace. */
+  dxfSewingProvenanceOf: (
+    identity: string,
+    rank: number,
+  ) => DxfSemanticsProvenanceTraceV1 | undefined;
   /** Per piece: the offset reports and measured numbers the probe and the wizard show. */
   notes: Record<PieceKey, string[]>;
 };
@@ -928,6 +959,7 @@ export function buildPieceSpecsDetailed(
     const name = readName({
       override: ov,
       dxfIdentity: sorted[0].dxf?.identity ?? null,
+      dxfDisplayName: sorted[0].dxf?.savedDisplayName,
       texts,
       isSizeToken,
       isTitle: titleTest(top, textById),
@@ -979,6 +1011,16 @@ export function buildPieceSpecsDetailed(
       name.notes.push(oneFromClosed.note);
     } else if (!ungraded && mapped.length >= 2) {
       ungraded = sameOutline(mapped);
+      // A complete set of independently size-labelled DXF blocks is graded even when the
+      // drafter used the same coordinates at every rank. Keep each drawn contour and its lineage.
+      const explicitDxfRanks =
+        ungraded &&
+        sorted.length === run.sizes.length &&
+        sorted.every(
+          (candidate, rank) =>
+            candidate.rank === run.sizes[rank].rank && isLabelledDxfBlock(candidate.dxf),
+        ) &&
+        new Set(sorted.map(({ dxf }) => dxf!.group)).size === sorted.length;
       // MOOD Ф5: under a size key, one outline in every size is ONE evidence — the drawing (drawn
       // once / by every pen in one place) and the label (no size named) make it one piece for all
       // sizes; one of them alone asks; a size's own line beside it makes it graded (semantics/
@@ -990,7 +1032,8 @@ export function buildPieceSpecsDetailed(
       // equal areas and boxes, but contours apart: not one outline
       if (one && !alike(mapped))
         one = { kind: 'graded', why: 'the sizes close on outlines of one area and box, apart' };
-      if (ungraded && ov.ungraded === false) ungraded = false;
+      if (ungraded && (ov.ungraded === false || (ov.ungraded == null && explicitDxfRanks)))
+        ungraded = false;
       else if (ungraded && ov.ungraded === true)
         name.notes.push('one piece for all sizes: the operator');
       else if (one?.kind === 'proven')
@@ -1233,7 +1276,18 @@ export function buildPieceSpecsDetailed(
         ],
       };
     }
-    const resolvedAllowance = resolvePatternImportSemanticsAllowanceMm(A);
+    const explicitZeroAllowance =
+      !ov.allowance && p.cands.every(({ c }) => c.dxf?.zeroAllowanceSeam);
+    if (explicitZeroAllowance)
+      A = {
+        meaning: 'both',
+        allowanceMm: 0,
+        origin: 'measured',
+        evidence: ['The exact saved DXF cut and sewing boundaries coincide.'],
+      };
+    const resolvedAllowance = explicitZeroAllowance
+      ? { allowanceMm: 0, defaulted: false }
+      : resolvePatternImportSemanticsAllowanceMm(A);
     const allowMm = resolvedAllowance.allowanceMm;
     if (resolvedAllowance.defaulted)
       pieceNotes.push(`no allowance known: the other line is ${allowMm} mm (default)`);
@@ -1244,6 +1298,25 @@ export function buildPieceSpecsDetailed(
     // ── fold (E1a, D3): a fold word unfolds the piece only when it is bound to a straight edge of
     // THIS outline and the result is a believable whole; otherwise the operator is asked.
     const wantFold = ov.unfoldedFold ?? null;
+    const savedRanks = input.savedNativeHalfFolds?.[seed];
+    if (
+      savedRanks !== undefined &&
+      (!Array.isArray(savedRanks) ||
+        savedRanks.length < 1 ||
+        savedRanks.length > 2 ||
+        savedRanks.length !== p.cands.length ||
+        p.cands.length !== p.all.length ||
+        wantFold !== null ||
+        operatorFold[seed] ||
+        new Set(savedRanks.map((a) => a.rank)).size !== savedRanks.length)
+    ) {
+      block(
+        seed,
+        'fold-unresolved',
+        'Saved half requires one distinct native answer per current size.',
+      );
+      continue;
+    }
     const opFold = wantFold === false ? null : operatorFold[seed] ?? null;
     const foldWords = wantFold === false ? [] : foldWordsOf(p.fam, sheet);
     let refEdge: FoldLine | null = opFold;
@@ -1713,7 +1786,58 @@ export function buildPieceSpecsDetailed(
       let halfEdge: FoldEdge | null = null;
       if (wantFold !== false) {
         foldFeat = (feats.find((f) => f.kind === 'fold') as FoldFeature | undefined) ?? null;
-        if (foldFeat) fold = { a: foldFeat.a, b: foldFeat.b };
+        const savedRank = savedRanks?.find((a) => a.rank === c.rank);
+        if (
+          savedRanks &&
+          (!savedRank ||
+            !foldFeat ||
+            savedRank.seed !== seed ||
+            savedRank.sizeId !== card.sizeId ||
+            savedRank.size !== card.token ||
+            savedRank.block !== c.dxf?.block ||
+            savedRank.identity !== c.dxf?.identity ||
+            !matchesSavedFoldRank(foldFeat, savedRank))
+        ) {
+          blockedHere = {
+            reason: 'fold-unresolved',
+            detail: `${card.token}: saved half axis does not match the native source rank`,
+          };
+          break;
+        }
+        if (
+          !savedRanks &&
+          halfPick &&
+          p.cands.length > 1 &&
+          foldFeat &&
+          isReadProductFoldAxis(foldFeat)
+        ) {
+          blockedHere = {
+            reason: 'fold-unresolved',
+            detail: `${card.token}: a saved graded half requires a directed answer for each rank`,
+          };
+          break;
+        }
+        const nativePick = savedRank ?? halfPick;
+        if (foldFeat && nativePick && isReadProductFoldAxis(foldFeat)) {
+          if (
+            !equalAxisPoint(nativePick.a, foldFeat.a) ||
+            !equalAxisPoint(nativePick.b, foldFeat.b) ||
+            feats.filter((f) => f.kind === 'fold').length !== 1 ||
+            !hasSingleCutEdge(outer, foldFeat.a, foldFeat.b)
+          ) {
+            blockedHere = {
+              reason: 'fold-unresolved',
+              detail: `${card.token}: selected half axis does not exact-match the native cut edge`,
+            };
+            break;
+          }
+          halfEdge = {
+            a: foldFeat.a,
+            b: foldFeat.b,
+            lenMm: Math.hypot(foldFeat.b.x - foldFeat.a.x, foldFeat.b.y - foldFeat.a.y),
+          };
+          halfSizes.push(`${card.token}: selected exact native half axis`);
+        } else if (foldFeat) fold = { a: foldFeat.a, b: foldFeat.b };
         else if (halfPick) {
           // L13: the edge the sheet points at in THIS size (parallel to the answer), else the
           // straight run matching the answered edge — no convex-hull filter (a half whose tips
@@ -2018,7 +2142,14 @@ export function buildPieceSpecsDetailed(
       lastGrain = grain;
 
       // L13: the half's fold line — the cut line's own run along the fold edge
-      const halfLine = halfEdge ? halfFoldLine(halfEdge, cut) : null;
+      const halfLine =
+        halfEdge && foldFeat
+          ? hasSingleCutEdge(cut, foldFeat.a, foldFeat.b)
+            ? ([foldFeat.a, foldFeat.b] as const)
+            : null
+          : halfEdge
+            ? halfFoldLine(halfEdge, cut)
+            : null;
       if (halfEdge && !halfLine) {
         blockedHere = {
           reason: 'fold-unresolved',
@@ -2053,12 +2184,31 @@ export function buildPieceSpecsDetailed(
               confidence: foldFeat ? foldFeat.confidence : 0.6,
             } satisfies FoldFeature)
           : null;
+      const cutLoops = c.dxf?.nativeCutHoles
+        ? resolveNativeCutLoops(c.dxf, c.rank, card, cut)
+        : null;
+      if (c.dxf?.nativeCutHoles && !cutLoops) {
+        blockedHere = {
+          reason: 'offset-topology',
+          detail: `${card.token}: the size or native cut boundary changed; its holes cannot be applied to this shape.`,
+        };
+        break;
+      }
       const spec: PieceSizeSpec = {
         // SOURCE rank (SizeRun.sizes[rank]): the write stage looks walls up by candidate rank
         rank: c.rank,
         sizeToken: card.token,
         sizeId: card.sizeId,
         cut,
+        ...(cutLoops ? { cutLoops } : {}),
+        ...(c.dxf?.textMarks?.length ? { textMarks: c.dxf.textMarks } : {}),
+        ...(c.dxf?.authoredAllowanceCorner
+          ? { authoredAllowanceCorner: c.dxf.authoredAllowanceCorner }
+          : {}),
+        ...(c.dxf?.authoredOutlineCorner
+          ? { authoredOutlineCorner: c.dxf.authoredOutlineCorner }
+          : {}),
+        ...(c.dxf?.pointMarks?.length ? { pointMarks: c.dxf.pointMarks } : {}),
         seam,
         grain,
         notches: notchesOut,
@@ -2068,7 +2218,7 @@ export function buildPieceSpecsDetailed(
         offset,
         walls: mr?.cleaned.length ? c.walls.filter((w) => !mr.cleaned.includes(w)) : c.walls,
         bbox: bboxOf(cut),
-        areaMm2: areaOf(cut),
+        areaMm2: areaOf(cut) + (cutLoops?.reduce((a, loop) => a + signedArea(loop), 0) ?? 0),
         ...(c.rankFrom === 'continuity' ? { continuity: continuityRecord(c) } : {}),
         ...(sizeKinks.length ? { kinks: sizeKinks } : {}),
         ...(c.rankFrom === 'repair' && c.repair
@@ -2651,6 +2801,10 @@ export function buildPieceSpecsDetailed(
       events.add('mirror');
     if (src.w.fold) events.add('unfold');
     const direction = signedArea(cand.outer) < 0 ? ('reverse' as const) : ('forward' as const);
+    const nativeHolePaths =
+      matches.length === 1 && matches[0].cutLoops?.length
+        ? nativeCutLoopPathIds(cand.dxf!, cand.rank, matches[0])
+        : null;
     if (matches.length !== 1) events.add('unknown');
     else if (events.size === 0) {
       const target = geometry === 'cut' ? matches[0].cut : matches[0].seam;
@@ -2686,7 +2840,56 @@ export function buildPieceSpecsDetailed(
       geometry,
       cyclicShift: 0 as const,
       direction,
+      ...(nativeHolePaths ? { cutLoopSourcePathIds: nativeHolePaths } : {}),
       mutations: Object.freeze(mutationOrder.filter((mutation) => events.has(mutation))),
+    });
+  };
+  const dxfSewingProvenanceOf = (
+    identity: string,
+    rank: number,
+  ): DxfSemanticsProvenanceTraceV1 | undefined => {
+    const src = sourceOf(identity, rank);
+    if (!src || !(src.cand as PieceCandidate & DxfExtra).dxf) return undefined;
+    const cand = src.cand as PieceCandidate & DxfExtra;
+    const seams = cand.dxf!.features?.filter((feature) => feature.kind === 'seam') ?? [];
+    const drawn = seams.length === 1 && seams[0].kind === 'seam' ? seams[0].pts : null;
+    const events = new Set<DxfPipelineMutationEventV1>();
+    if (!drawn || drawn.length < 3) events.add('unknown');
+    if (cand.dxf!.rulGraded) events.add('rul');
+    if (src.w.fold) events.add('unfold');
+    if (
+      src.w.t.a !== 1 ||
+      src.w.t.b !== 0 ||
+      src.w.t.c !== 0 ||
+      src.w.t.d !== 1 ||
+      src.w.t.e !== 0 ||
+      src.w.t.f !== 0
+    )
+      events.add('mirror');
+    const direction = drawn && signedArea(drawn) < 0 ? ('reverse' as const) : ('forward' as const);
+    const expected = drawn ? (direction === 'reverse' ? [...drawn].reverse() : drawn) : null;
+    const matches = unique.filter((piece) => piece.identity === identity);
+    const sizes = matches.length === 1 ? matches[0].sizes.filter((size) => size.rank === rank) : [];
+    const actual = sizes.length === 1 ? sizes[0].seam : null;
+    // Only compare the declared sample order. Never search coordinates or transfer cut IDs.
+    if (
+      !expected ||
+      !actual ||
+      actual.length !== expected.length ||
+      actual.some(
+        (point, index) =>
+          Math.abs(point.x - expected[index].x) > 1e-9 ||
+          Math.abs(point.y - expected[index].y) > 1e-9,
+      )
+    )
+      events.add('unknown');
+    return Object.freeze({
+      seed: cand.seed,
+      rank: cand.rank,
+      geometry: 'seam' as const,
+      cyclicShift: 0 as const,
+      direction,
+      mutations: Object.freeze([...events]),
     });
   };
   /** Source-frame lines → the identity's frame: the fold edge dropped and mirrored, then `t`. */
@@ -2867,8 +3070,25 @@ export function buildPieceSpecsDetailed(
   const gradeOf = (identity: string, rank: number): GradeEvidence | undefined => {
     const src = sourceOf(identity, rank);
     if (!src || traced) return undefined;
-    // a DXF's blocks are no drawing of nested size lines: nothing to read
-    if ((src.cand as PieceCandidate & DxfExtra).dxf) return undefined;
+    const dxf = (src.cand as PieceCandidate & DxfExtra).dxf;
+    if (dxf) {
+      const previous = sourceOf(identity, rank - 1);
+      const other = (previous?.cand as (PieceCandidate & DxfExtra) | undefined)?.dxf;
+      // The two ranks must come from separate source blocks. Duplicating one common outline into
+      // missing ranks cannot supply this evidence.
+      if (
+        previous &&
+        previous.cand.rank === rank - 1 &&
+        src.cand.rank === rank &&
+        isLabelledDxfBlock(dxf) &&
+        isLabelledDxfBlock(other) &&
+        dxf.block !== other.block &&
+        dxf.group !== other.group &&
+        sameDxfRankOutline(previous.cand.outer, src.cand.outer)
+      )
+        return { coincidentDxfRank: previous.cand.rank };
+      return undefined;
+    }
     return silentOf().evidence(src.cand.seed, src.cand.rank);
   };
   const alongOf = bandCutSupport(set, run);
@@ -2958,6 +3178,7 @@ export function buildPieceSpecsDetailed(
     gradeOf,
     notchChordsOf,
     dxfProvenanceOf,
+    dxfSewingProvenanceOf,
     notes,
   };
 }

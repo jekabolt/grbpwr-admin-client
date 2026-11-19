@@ -1,3 +1,13 @@
+import { readSavedJoinFile } from './phase-e-workbench-v2/draft-cad-saved-join-file';
+import { savedReviewLabelV1 } from './phase-e-workbench-v2/draft-cad-saved-dart-tip-file-v1';
+import { isSavedDartTipReviewFileV1 } from './phase-e-workbench-v2/draft-cad-saved-dart-tip-file-v1';
+import {
+  directDxfAuthoringOpenFileV1,
+  applyDirectDxfReviewedDraftV1,
+  buildOrdinaryWizardReviewV1,
+  captureDirectDxfAuthoringV1,
+  runOrdinaryDxfReviewSemanticsV1,
+} from './direct-dxf-authoring-capture-v1';
 // The wizard's state machine (08-CONTRACT §4.2). One session per run; every field of
 // `ImportSession` is the latest stage output, and `inputs` are what the operator decided — kept
 // across `back`, so re-entering a step re-runs it with the previous answers (contract: "back{to}
@@ -88,7 +98,6 @@ import { driveTick, newDriveState, type DriveState, type DriveStopWhy } from './
 import { autopilotRecordOf, mergeAssumptions, type Assumption } from './autopilot/types';
 import { aiAsideAssumptions } from './autopilot/ai-pages';
 import { answerRecordOf } from './autopilot/replay-record';
-import { acceptCurrentFindings } from './steps/accepted-findings';
 import {
   before,
   cloneInput,
@@ -449,7 +458,9 @@ export function useImportSession(deps: {
    * to the sheet's inferred main fabric. The operator can still change it on the fabrics step.
    */
   pinScopeKey?: string;
+  savedCopyFile?: File;
 }) {
+  const pinnedSavedFile = useRef(deps.savedCopyFile);
   const { client, namer, buildDraft, applyDraft } = deps;
   /** The LIVE card as the latest render sees it (only the freshness check reads it). */
   const cardRef = useRef(deps.card);
@@ -802,6 +813,20 @@ export function useImportSession(deps: {
     }
   }
 
+  function runSemantics(input: StageIO['semantics']['in']) {
+    const files = iRef.current.fileList;
+    const generation = histGen.current;
+    return runOrdinaryDxfReviewSemanticsV1(
+      files,
+      { techCardId: rc().techCardId, scopeKey: deps.pinScopeKey },
+      input,
+      (reviewed) => {
+        if (generation !== histGen.current || files !== iRef.current.fileList) throw new StaleRun();
+        return run('semantics', reviewed);
+      },
+    );
+  }
+
   /** Existing manifested sheet(s) that can carry this run's previous size decision. */
   function storedSizeMaps(): NonNullable<StageIO['sizes']['in']['storedMaps']> {
     const files = new Set(iRef.current.fileList.map((f) => f.name.trim().toLowerCase()));
@@ -856,11 +881,9 @@ export function useImportSession(deps: {
     try {
       if (!files.length) throw new Error('the files are no longer at hand');
       const bytes = await Promise.all(
-        files.map(async (f) => ({
-          name: f.name,
-          bytes: await f.arrayBuffer(),
-          ...(generatedFusingFile(f.name) ? { generatedFusing: true } : {}),
-        })),
+        files.map((f, index) =>
+          directDxfAuthoringOpenFileV1(f, index, generatedFusingFile(f.name)),
+        ),
       );
       const opened = await client.open(bytes);
       fresh = opened.sessionId;
@@ -1054,6 +1077,21 @@ export function useImportSession(deps: {
     try {
       switch (ev.type) {
         case 'files': {
+          if (
+            !pinnedSavedFile.current &&
+            ev.files.length === 1 &&
+            isSavedDartTipReviewFileV1(ev.files[0]!)
+          )
+            pinnedSavedFile.current = ev.files[0];
+          if (
+            pinnedSavedFile.current &&
+            (ev.files.length !== 1 || ev.files[0] !== pinnedSavedFile.current)
+          )
+            throw new Error(
+              isSavedDartTipReviewFileV1(pinnedSavedFile.current)
+                ? `Review this ${savedReviewLabelV1(pinnedSavedFile.current)} with its original DXF. Close the review to import other files.`
+                : 'Review this saved copy with its original DXF. Close the review to import other files.',
+            );
           takeCard();
           patchInputs({ ...EMPTY_INPUTS, fileList: ev.files });
           baseSeeds.current = null;
@@ -1067,11 +1105,9 @@ export function useImportSession(deps: {
           checkFilesBeforeReading(ev.files);
           setSession({ ...EMPTY_SESSION, busy: { stage: 'extract', done: 0, total: 1 } });
           const bytes = await Promise.all(
-            ev.files.map(async (f) => ({
-              name: f.name,
-              bytes: await f.arrayBuffer(),
-              ...(generatedFusingFile(f.name) ? { generatedFusing: true } : {}),
-            })),
+            ev.files.map((f, index) =>
+              directDxfAuthoringOpenFileV1(f, index, generatedFusingFile(f.name)),
+            ),
           );
           const opened = await client.open(bytes);
           patch({ sessionId: opened.sessionId, files: opened.files });
@@ -1355,7 +1391,7 @@ export function useImportSession(deps: {
           iRef.current = next;
           patchInputs({ overrides });
           if (sRef.current.semantics) {
-            const out = await run('semantics', semanticsInput(next));
+            const out = await runSemantics(semanticsInput(next));
             patch({ semantics: out });
           }
           return;
@@ -1374,7 +1410,7 @@ export function useImportSession(deps: {
               : iRef.current.gradeAnswers,
             shapeFixes: ev.input.shapeFixes ? { ...ev.input.shapeFixes } : iRef.current.shapeFixes,
           });
-          const out = await run('semantics', ev.input);
+          const out = await runSemantics(ev.input);
           patch({ semantics: out });
           return;
         }
@@ -1450,10 +1486,15 @@ export function useImportSession(deps: {
           // S3: the write does not trust what the details step showed. Semantics runs again on the
           // LIVE answers only (the worker writes from its last run), and every question it still
           // asks — folds, the cutting list, the outline, counts, names — refuses the write.
-          sem = await run('semantics', semanticsInput(iRef.current));
+          sem = await runSemantics(semanticsInput(iRef.current));
           patch({ semantics: sem });
           const open = unansweredAtWrite(sem, sRef.current.names, iRef.current, answersNow());
           if (open.length) throw new UnansweredQuestionsError(open);
+          // A full-source capture includes omitted blocks. This draft gains exact authoring
+          // evidence only after the confirmed save reconstructs the new scope from its bytes.
+          const authoringCapture = a.dxfOmissions?.seeds.length
+            ? {}
+            : await captureDirectDxfAuthoringV1(iRef.current.fileList, run);
           const out = await run('write', {
             scopes: rc().scopes,
             assignment: a,
@@ -1470,7 +1511,7 @@ export function useImportSession(deps: {
                   ]
                 : [],
             ),
-            dialect: 'r12',
+            dialect: readSavedJoinFile(pinnedSavedFile.current)?.dialect ?? 'r12',
             // RULHOOK: 'rul' also packs base DXF + .rul (an unknown base is dropped, its reason
             // on `writeStorage.ignored`); absent / 'blocks' = today's write
             ...writeStorageInput(writeStorageFor(iRef.current.writeStorage, writtenTokens(sizes))),
@@ -1492,8 +1533,11 @@ export function useImportSession(deps: {
             // files reuses them (autopilot/replay.ts); never a reason not to write
             ...replayOf(),
           });
-          const draft = buildDraft(out, { card: rc(), semantics: sem });
-          const accepted = acceptCurrentFindings(out.gate, draft, rc().existingShapes ?? []);
+          const accepted = buildOrdinaryWizardReviewV1(iRef.current.fileList, buildDraft, out, {
+            card: rc(),
+            semantics: sem,
+            ...authoringCapture,
+          });
           patch({ draft: accepted.draft, gate: accepted.gate, step: 'check' });
           return;
         }
@@ -1543,10 +1587,24 @@ export function useImportSession(deps: {
           // failed result with its reason — the step never stays 'running'
           let result: ApplyResult;
           try {
-            result = await applyDraft(built, (p) => {
-              progress[p.scopeKey] = p.state;
-              setApply({ phase: 'running', progress: { ...progress } });
-            });
+            result = await applyDirectDxfReviewedDraftV1(
+              built,
+              iRef.current.fileList,
+              ev.token,
+              () => sRef.current.draft === built && applyLock.current === lock && !cardStale(),
+              (reviewOptions) =>
+                applyDraft(
+                  built,
+                  (p) => {
+                    progress[p.scopeKey] = p.state;
+                    setApply({ phase: 'running', progress: { ...progress } });
+                  },
+                  ev.replaceMatchingFile
+                    ? { ...reviewOptions, replaceMatchingFile: true }
+                    : reviewOptions,
+                ),
+              pinnedSavedFile.current,
+            );
           } catch (e) {
             result = {
               ok: false,
@@ -1843,7 +1901,7 @@ export function useImportSession(deps: {
     const overrides = overridesFromNames(names, iRef.current.overrides);
     patchInputs({ overrides });
     iRef.current = { ...iRef.current, overrides };
-    const sem = await run('semantics', semanticsInput({ ...iRef.current, overrides }));
+    const sem = await runSemantics(semanticsInput({ ...iRef.current, overrides }));
     patch({ semantics: sem });
     namerNote.current = namerError;
     setNotice(namerError);
@@ -1851,7 +1909,7 @@ export function useImportSession(deps: {
 
   /** STOPFIX: the details of the pieces as named — what `toDetails` ends with, run on its own. */
   async function buildDetails() {
-    const sem = await run('semantics', semanticsInput(iRef.current));
+    const sem = await runSemantics(semanticsInput(iRef.current));
     patch({ semantics: sem });
   }
 
@@ -2841,6 +2899,12 @@ export function useImportSession(deps: {
     retryWrite: () =>
       dispatch({ type: 'write-storage', ...(iRef.current.writeStorage ?? { storage: 'blocks' }) }),
     extracted,
+    dxfImportScopeKey:
+      extracted.presegmented &&
+      inputs.fileList.length === 1 &&
+      /\.dxf$/i.test(inputs.fileList[0].name)
+        ? deps.pinScopeKey
+        : undefined,
     errorCode,
     notice,
     /** A9: what the AI page-role call did (answered, unavailable, timed out) — a note, not a stop. */

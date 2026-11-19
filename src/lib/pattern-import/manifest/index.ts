@@ -1,3 +1,4 @@
+import { parseAuthoredAllowanceCorner } from './authored-allowance-corner';
 // CONVERSION MANIFEST — embedded in, and read back from, the DXF the converter writes (08-CONTRACT §3).
 //
 // The upload path carries only the DXF bytes, so the file itself is the only durable channel from the
@@ -32,6 +33,14 @@
 // Main-thread safe by contract: JSON, string and fflate (pure JS) operations only, no imports beyond
 // `types.ts` (and the siblings `identity.ts`, the G11 identity grammar the wizard and the gate share,
 // and `contour-sig.ts`, the F14f cut-ring signature the writer embeds and the card checks).
+import { parseManifestAuthoredText } from './authored-text';
+import { parseManifestAuthoredInternal } from './authored-internal';
+import {
+  parseAuthoredFixedEndOutlineCorner,
+  parseAuthoredOutlineCorner,
+} from './authored-outline-corner';
+import { parseManifestAuthoredNotches } from './authored-notches';
+import { parseProtectedLineSplit } from './protected-line-split';
 import { Inflate, deflateSync } from 'fflate';
 import {
   MANIFEST_TAG,
@@ -791,6 +800,7 @@ export function validateManifest(x: unknown): ConversionManifest {
 
   if (!Array.isArray(x.blocks)) fail('blocks', 'not an array');
   const blockNames = new Set<string>();
+  let sawProtectedSplit = false;
   const blocks: ManifestBlock[] = x.blocks.map((b, i) => {
     const p = `blocks[${i}]`;
     if (!isObj(b)) fail(p, 'not an object');
@@ -911,9 +921,86 @@ export function validateManifest(x: unknown): ConversionManifest {
     if (!piece.ungraded && !sizeTokens.has(b.sizeToken.trim().toLowerCase())) {
       fail(`${p}.sizeToken`, `"${b.sizeToken}" is not a size of this manifest`);
     }
+    const split =
+      b.protectedLineSplit === undefined ? null : parseProtectedLineSplit(b.protectedLineSplit);
+    if (b.protectedLineSplit !== undefined) {
+      if (!split || sawProtectedSplit || (split.role === 'seam' && !b.hasSeam))
+        fail(`${p}.protectedLineSplit`, 'invalid or repeated protected vertex');
+      sawProtectedSplit = true;
+    }
+    const authoredInternal =
+      b.authoredInternal === undefined
+        ? null
+        : parseManifestAuthoredInternal(b.authoredInternal, b.internal as number);
+    if (b.authoredInternal !== undefined && !authoredInternal)
+      fail(`${p}.authoredInternal`, 'invalid native layer-8 path metadata');
+    if (authoredInternal?.some(({ turnAllowance }) => turnAllowance) && (!b.hasSeam || !b.contour))
+      fail(
+        `${p}.authoredInternal`,
+        'a saved turn allowance requires native cut and sewing contours',
+      );
+    const authoredAllowanceCorner =
+      b.authoredAllowanceCorner === undefined
+        ? null
+        : parseAuthoredAllowanceCorner(b.authoredAllowanceCorner);
+    if (
+      b.authoredAllowanceCorner !== undefined &&
+      (!authoredAllowanceCorner ||
+        !b.hasSeam ||
+        !b.contour ||
+        b.authoredOutlineCorner !== undefined ||
+        b.authoredFixedEndOutlineCorner !== undefined ||
+        authoredInternal?.some(({ turnAllowance }) => turnAllowance))
+    )
+      fail(
+        `${p}.authoredAllowanceCorner`,
+        'expected one authored join on the native cut and sewing pair',
+      );
+    const authoredOutlineCorner =
+      b.authoredOutlineCorner === undefined
+        ? null
+        : parseAuthoredOutlineCorner(b.authoredOutlineCorner);
+    const authoredFixedEndOutlineCorner =
+      b.authoredFixedEndOutlineCorner === undefined
+        ? null
+        : parseAuthoredFixedEndOutlineCorner(b.authoredFixedEndOutlineCorner);
+    if (b.authoredOutlineCorner !== undefined || b.authoredFixedEndOutlineCorner !== undefined) {
+      const hasLinked = b.authoredOutlineCorner !== undefined;
+      const hasFixedEnd = b.authoredFixedEndOutlineCorner !== undefined;
+      if (
+        hasLinked === hasFixedEnd ||
+        !(authoredOutlineCorner ?? authoredFixedEndOutlineCorner) ||
+        !piece.ungraded ||
+        b.sizeToken !== 'UNI' ||
+        !b.hasSeam ||
+        piece.allowanceMm !== 0 ||
+        !b.contour
+      )
+        fail(
+          `${p}.${hasFixedEnd ? 'authoredFixedEndOutlineCorner' : 'authoredOutlineCorner'}`,
+          'invalid shared rounded outline metadata',
+        );
+    }
+    const authoredText =
+      b.authoredText === undefined ? null : parseManifestAuthoredText(b.authoredText);
+    if (b.authoredText !== undefined && !authoredText)
+      fail(`${p}.authoredText`, 'invalid native CAD text metadata');
+    const authoredNotches =
+      b.authoredNotches === undefined
+        ? null
+        : parseManifestAuthoredNotches(b.authoredNotches, b.notches as number);
+    if (b.authoredNotches !== undefined && !authoredNotches)
+      fail(`${p}.authoredNotches`, 'invalid native layer-4 notch group');
     const [x0, y0, x1, y1] = b.bboxMm as number[];
     return {
       block: b.block,
+      ...(split ? { protectedLineSplit: split } : {}),
+      ...(authoredInternal ? { authoredInternal } : {}),
+      ...(authoredAllowanceCorner ? { authoredAllowanceCorner } : {}),
+      ...(authoredOutlineCorner ? { authoredOutlineCorner } : {}),
+      ...(authoredFixedEndOutlineCorner ? { authoredFixedEndOutlineCorner } : {}),
+      ...(authoredText ? { authoredText } : {}),
+      ...(authoredNotches ? { authoredNotches } : {}),
       identity: b.identity,
       sizeToken: b.sizeToken,
       sizeId: b.sizeId,

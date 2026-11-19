@@ -46,6 +46,7 @@ export type PatternImportDxfPhaseECadWorkbenchObjectSidebarPropsV1 = Readonly<{
     active: boolean;
   }>[];
   selectedPieceIds?: readonly string[];
+  selectionDetails?: ReactNode;
   dressFormLabel?: string;
   seamCount?: number;
   pinCount?: number;
@@ -106,6 +107,7 @@ export function PatternImportDxfPhaseECadWorkbenchObjectSidebarV1({
   pieces,
   seams = [],
   selectedPieceIds = [],
+  selectionDetails = null,
   dressFormLabel = '',
   seamCount = 0,
   pinCount = 0,
@@ -378,6 +380,8 @@ export function PatternImportDxfPhaseECadWorkbenchObjectSidebarV1({
           )
         ) : null}
       </div>
+
+      {selectionDetails}
 
       {issueCount ? (
         <div className='shrink-0 border-t border-borderColor p-2' data-cad-object-issues=''>

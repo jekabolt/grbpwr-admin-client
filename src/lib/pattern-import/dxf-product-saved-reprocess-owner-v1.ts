@@ -1,10 +1,12 @@
+import type { DxfNativeSewingReplayStageOutputV1 } from './dxf-native-sewing-replay-v1';
 import {
   PATTERN_IMPORT_DXF_PRODUCT_WRITER_REPLAY_CARRIER_V1,
   PATIMPORT,
   type CardDraft,
   type DraftScope,
 } from './types';
-import { writeDxfDetailed } from './write';
+import { embedManifest } from './manifest';
+import { writeDxfDetailed, writeDxfWithRetainedLineSplit } from './write';
 
 export const DXF_PRODUCT_SAVED_REPROCESS_OWNER_V1 = 'dxf-product-saved-reprocess-owner/1' as const;
 export const DXF_PRODUCT_SAVED_REPROCESS_REQUEST_V1 =
@@ -85,6 +87,7 @@ export type DxfProductSavedReprocessResultV1 =
       sourceFileId: string;
       /** Exact carrier draft with every raw DXF text field removed. */
       draft: CardDraft;
+      nativeSewingReplay?: DxfNativeSewingReplayStageOutputV1;
       blockers: readonly [];
     }>
   | Readonly<{
@@ -95,6 +98,16 @@ export type DxfProductSavedReprocessResultV1 =
       draft: null;
       blockers: readonly [DxfProductSavedReprocessBlockerV1];
     }>;
+
+type VerifiedSavedReprocess = Extract<DxfProductSavedReprocessResultV1, { ok: true }>;
+const verifiedSavedReprocesses = new WeakSet<VerifiedSavedReprocess>();
+
+/** True only for a result published after exact writer bytes and a fresh row read have matched. */
+export function isDxfProductSavedReprocessVerifiedV1(
+  value: DxfProductSavedReprocessResultV1 | undefined,
+): value is VerifiedSavedReprocess {
+  return value?.ok === true && verifiedSavedReprocesses.has(value);
+}
 
 export type DxfProductSavedReprocessHostV1 = Readonly<{
   /**
@@ -119,7 +132,13 @@ export type DxfProductSavedReprocessHostV1 = Readonly<{
     }>,
     signal: AbortSignal,
     onProgress: (done: number, total: number, note?: string) => void,
-  ) => Promise<Readonly<{ row: DxfProductSavedRowIdentityV1; draft: CardDraft }>>;
+  ) => Promise<
+    Readonly<{
+      row: DxfProductSavedRowIdentityV1;
+      draft: CardDraft;
+      nativeSewingReplay?: DxfNativeSewingReplayStageOutputV1;
+    }>
+  >;
   /** Reads row metadata again after reconstruction so a stale card lock/revision cannot win. */
   readCurrentRowIdentity: (
     expected: DxfProductSavedRowIdentityV1,
@@ -128,6 +147,21 @@ export type DxfProductSavedReprocessHostV1 = Readonly<{
   crypto?: Pick<Crypto, 'subtle'>;
   dispose?: () => void;
 }>;
+
+type VerifiedReadInput = Parameters<DxfProductSavedReprocessHostV1['reprocess']>[0];
+const activeReads = new WeakMap<VerifiedReadInput, { signal: AbortSignal; claimed: boolean }>();
+
+/** Single use, bounded to this exact host call after the transactional row and downloaded hash match. */
+export function claimProtectedSavedReadV1(input: VerifiedReadInput): () => void {
+  const active = activeReads.get(input);
+  if (!active || active.claimed || active.signal.aborted)
+    throw new Error('The protected DXF requires an active verified saved-row read.');
+  active.claimed = true;
+  return () => {
+    if (activeReads.get(input) !== active || active.signal.aborted)
+      throw new Error('The protected saved-row read has expired.');
+  };
+}
 
 export const DXF_PRODUCT_SAVED_REPROCESS_OWNER_CLAIMS_V1 = Object.freeze({
   authoritativeRowReadRequired: true,
@@ -287,13 +321,14 @@ function exactReplayDate(value: unknown): Date | null {
   }
 }
 
-function writerReplayOutput(scope: DraftScope):
+async function writerReplayOutput(scope: DraftScope): Promise<
   | Readonly<{
       ok: true;
       dxfText: string;
       manifest: DraftScope['manifest'];
     }>
-  | Readonly<{ ok: false; detail: string }> {
+  | Readonly<{ ok: false; detail: string }>
+> {
   const replay = scope.writerReplay;
   if (!replay)
     return Object.freeze({
@@ -307,13 +342,15 @@ function writerReplayOutput(scope: DraftScope):
       detail: 'The product writer replay carrier has no exact canonical createdAt timestamp.',
     });
   try {
-    const rerun = writeDxfDetailed(replay.job, {
-      now: () => new Date(createdAt.getTime()),
-    });
+    const options = { embed: null, now: () => new Date(createdAt.getTime()) };
+    const rerun = replay.retainedLineSplit
+      ? await writeDxfWithRetainedLineSplit(replay.job, replay.retainedLineSplit, options)
+      : writeDxfDetailed(replay.job, options);
+    const manifest = { ...rerun.manifest, gate: scope.manifest.gate };
     return Object.freeze({
       ok: true as const,
-      dxfText: rerun.dxfText,
-      manifest: rerun.manifest,
+      dxfText: embedManifest(rerun.bareText, manifest),
+      manifest,
     });
   } catch {
     return Object.freeze({
@@ -357,7 +394,9 @@ function deepFreezeOwned<T>(value: T, seen = new Set<object>()): T {
   return Object.freeze(value);
 }
 
-async function validateAndRedactDraft(
+/** Verifies the ordinary writer's full output against the saved row and redacts the raw text.
+ * Callers operating on a published draft must first take a private snapshot before awaiting. */
+export async function validateAndRedactSavedDxfDraftV1(
   draft: CardDraft,
   row: DxfProductSavedRowIdentityV1,
   sourceFileId: string,
@@ -425,31 +464,36 @@ async function validateAndRedactDraft(
       code: 'reconstructed-writer-replay-mismatch',
       detail: 'The writer replay job scope does not exact-match the reconstructed draft scope.',
     };
-  const rerun = writerReplayOutput(draft.scopes[0]);
+  const rerun = await writerReplayOutput(draft.scopes[0]);
   if (!rerun.ok)
     return {
       ok: false,
       code: 'reconstructed-writer-replay-mismatch',
       detail: rerun.detail,
     };
-  const replayBytes = latin1Bytes(rerun.dxfText);
-  if (!replayBytes)
+  const matchesSavedBytes = async (text: string) => {
+    const bytes = latin1Bytes(text);
+    if (!bytes) return false;
+    try {
+      return bytes.byteLength === row.sizeBytes && (await sha256(bytes, crypto)) === row.sha256;
+    } finally {
+      bytes.fill(0);
+    }
+  };
+  let exact = await matchesSavedBytes(rerun.dxfText);
+  if (!exact && rerun.manifest.sizes.length > 1) {
+    // The wizard appends this derived grade map after its writer and gate. Legacy rows may
+    // carry only the gated DXF. Accept either complete production variant solely by row SHA.
+    const { withGradeMap } = await import('./write/grade-map');
+    const graded = await withGradeMap(rerun.dxfText, rerun.manifest.sizes);
+    exact = graded.file !== null && (await matchesSavedBytes(graded.text));
+  }
+  if (!exact)
     return {
       ok: false,
       code: 'reconstructed-writer-byte-replay-mismatch',
-      detail: 'Reconstructed writer output is not the byte-preserving Latin-1 DXF representation.',
+      detail: 'Reconstructed writer bytes do not exact-match the saved row size and SHA-256.',
     };
-  try {
-    const replaySha256 = await sha256(replayBytes, crypto);
-    if (replayBytes.byteLength !== row.sizeBytes || replaySha256 !== row.sha256)
-      return {
-        ok: false,
-        code: 'reconstructed-writer-byte-replay-mismatch',
-        detail: 'Reconstructed writer bytes do not exact-match the saved row size and SHA-256.',
-      };
-  } finally {
-    replayBytes.fill(0);
-  }
   try {
     const detached = structuredClone(draft);
     for (const scope of detached.scopes) {
@@ -614,16 +658,16 @@ export function createDxfProductSavedReprocessOwnerV1(host: DxfProductSavedRepro
       // cleanup remains reliable even when the disposable worker detaches its own copy.
       disposableReprocessBytes = ownedBytes.slice();
       let rebuilt: Awaited<ReturnType<DxfProductSavedReprocessHostV1['reprocess']>>;
+      const reprocessInput = Object.freeze({
+        row,
+        sourceFileId,
+        syntheticFilename: SYNTHETIC_DXF_NAME,
+        bytes: disposableReprocessBytes,
+      });
+      activeReads.set(reprocessInput, { signal: controller.signal, claimed: false });
       try {
-        rebuilt = await host.reprocess(
-          {
-            row,
-            sourceFileId,
-            syntheticFilename: SYNTHETIC_DXF_NAME,
-            bytes: disposableReprocessBytes,
-          },
-          controller.signal,
-          (done, total, note) => progress('reprocess', 2, done, total, note),
+        rebuilt = await host.reprocess(reprocessInput, controller.signal, (done, total, note) =>
+          progress('reprocess', 2, done, total, note),
         );
       } catch (error) {
         const foreignDxf = error instanceof DxfProductSavedForeignDxfDetectedErrorV1;
@@ -641,6 +685,8 @@ export function createDxfProductSavedReprocessOwnerV1(host: DxfProductSavedRepro
           row,
           sourceFileId,
         );
+      } finally {
+        activeReads.delete(reprocessInput);
       }
       if (aborted(controller.signal))
         return blocked('cancelled', 'Saved-DXF reprocess was cancelled.', row, sourceFileId);
@@ -651,7 +697,7 @@ export function createDxfProductSavedReprocessOwnerV1(host: DxfProductSavedRepro
           row,
           sourceFileId,
         );
-      const validated = await validateAndRedactDraft(
+      const validated = await validateAndRedactSavedDxfDraftV1(
         rebuilt.draft,
         row,
         sourceFileId,
@@ -685,14 +731,19 @@ export function createDxfProductSavedReprocessOwnerV1(host: DxfProductSavedRepro
           sourceFileId,
         );
       progress('revalidate', 3, 1, 1);
-      return Object.freeze({
+      const verified: VerifiedSavedReprocess = Object.freeze({
         ok: true as const,
         schemaVersion: DXF_PRODUCT_SAVED_REPROCESS_OWNER_V1,
         row,
         sourceFileId,
         draft: validated.draft,
+        ...(rebuilt.nativeSewingReplay
+          ? { nativeSewingReplay: deepFreezeOwned(structuredClone(rebuilt.nativeSewingReplay)) }
+          : {}),
         blockers: Object.freeze([]) as readonly [],
       });
+      verifiedSavedReprocesses.add(verified);
+      return verified;
     } finally {
       try {
         disposableReprocessBytes?.fill(0);

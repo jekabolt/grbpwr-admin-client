@@ -15,6 +15,7 @@ import type {
   ManifestSize,
   ManifestSource,
   PieceSpec,
+  RetainedLineSplit,
   WriteDxfFn,
   WriteJob,
   WriteResult,
@@ -23,17 +24,28 @@ import { isAsciiDxf } from './format';
 import { buildManifest } from './manifest-build';
 import { embedManifest as embedManifestLocal } from '../manifest';
 import { type Plan, pieceInScope, planBlocks } from './plan';
+import type { AuthoredLineSplitInput } from './protected-line-split';
 import { writeR12 } from './r12';
 import { writeR2000 } from './r2000';
 
 export { blockNameOf, pieceInScope, UNI_TOKEN } from './plan';
 export type { Plan, PlannedBlock } from './plan';
+export {
+  RetainedRankedDraftPointErrorV1,
+  writeDxfWithRetainedRankedDraftPointV1,
+} from './retained-ranked-draft-point-v1';
+export type {
+  RetainedRankedDraftPointInputV1,
+  RetainedRankedDraftPointResultV1,
+} from './retained-ranked-draft-point-v1';
 
 export type WriteOptions = {
   /** Manifest embedder; null = bare DXF. Default: the shared `manifest/` `embedManifest`. */
   embed?: EmbedManifestFn | null;
   /** Clock for `createdAt` (tests pin it). */
   now?: () => Date;
+  /** Retain the original grain midpoint when verifying a historical bare R12 fusing row. */
+  legacyFusingGrainAnchor?: true;
 };
 
 export type WriteDetail = WriteResult & {
@@ -45,8 +57,50 @@ export type WriteDetail = WriteResult & {
 };
 
 export function writeDxfDetailed(job: WriteJob, opts: WriteOptions = {}): WriteDetail {
-  const warnings: string[] = [];
-  const plan = planBlocks(job.pieces, job.scope, warnings);
+  if (
+    opts.legacyFusingGrainAnchor &&
+    (job.generator !== 'grbpwr/fusing-dxf' ||
+      job.dialect !== 'r12' ||
+      !job.scope.isInterlining ||
+      opts.embed !== null)
+  )
+    throw new Error('Historical fusing grain is supported only for bare R12 interlining replay.');
+  return emitPlannedDxf(
+    job,
+    planBlocks(job.pieces, job.scope, [], opts.legacyFusingGrainAnchor),
+    opts,
+  );
+}
+
+/** First compile only. The caller owns the current card and selection. No Apply or worker authority is implied. */
+export async function writeDxfWithAuthoredLineSplit(
+  sourceJob: WriteJob,
+  input: AuthoredLineSplitInput,
+  opts: Pick<WriteOptions, 'now'> = {},
+): Promise<WriteDetail> {
+  const job = structuredClone(sourceJob);
+  const args = structuredClone(input);
+  const plan = planBlocks(job.pieces, job.scope);
+  const { preserveAuthoredLineSplit } = await import('./protected-line-split');
+  await preserveAuthoredLineSplit(job, plan, args);
+  return emitPlannedDxf(job, plan, { now: opts.now });
+}
+
+/** Replays exactly one existing native vertex after independent worker verification of the reviewed file. */
+export async function writeDxfWithRetainedLineSplit(
+  sourceJob: WriteJob,
+  occurrence: RetainedLineSplit,
+  opts: WriteOptions = {},
+): Promise<WriteDetail> {
+  const job = structuredClone(sourceJob),
+    retained = structuredClone(occurrence);
+  const plan = planBlocks(job.pieces, job.scope);
+  const { retainReviewedLineSplit } = await import('./retained-line-split');
+  await retainReviewedLineSplit(job, plan, retained);
+  return emitPlannedDxf(job, plan, opts);
+}
+
+function emitPlannedDxf(job: WriteJob, plan: Plan, opts: WriteOptions): WriteDetail {
   const createdAt = (opts.now ?? (() => new Date()))().toISOString();
   const manifest = buildManifest(job, plan.specs, plan.blocks, createdAt);
   const sample = job.sizes.length
@@ -65,7 +119,7 @@ export function writeDxfDetailed(job: WriteJob, opts: WriteOptions = {}): WriteD
   const dxfText = embed ? embed(bareText, manifest) : bareText;
   const transforms: Record<string, Affine> = {};
   for (const b of plan.blocks) transforms[b.name] = b.transform;
-  return { dxfText, manifest, warnings, plan, bareText, transforms };
+  return { dxfText, manifest, warnings: plan.warnings, plan, bareText, transforms };
 }
 
 export const writeDxf: WriteDxfFn = (job) => {

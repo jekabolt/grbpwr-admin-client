@@ -15,6 +15,8 @@ import {
   DXF_SOURCE_NATIVE_STRAIGHT_EDGE_AUTHORITY_V1,
   DXF_SOURCE_NATIVE_STRAIGHT_EDGE_PROJECTION_REQUEST_V1,
   projectDxfSourceNativeStraightEdgeAuthorityV1,
+  projectDxfSourceNativeStraightEdgeSelectedPathsV1,
+  DXF_SOURCE_NATIVE_STRAIGHT_EDGE_SELECTED_PATHS_REQUEST_V1,
   type DxfSourceNativeStraightEdgeDescriptorV1,
   type DxfSourceNativeStraightEdgeOwnerV1,
 } from '../../pattern-import/dxf-source-native-straight-edge-authority-v1';
@@ -1568,11 +1570,44 @@ function v3CloneProjection(
  * Consumes the genuine extraction owner and content-binds its exact line descriptors to the V2
  * selected source-path artifact. Existing replay V1 and source-path V2 values are never widened.
  */
-export async function bindDxfProductPhaseDNativeStraightEdgesV3(
+/** Whole-file V3 admission remains unchanged. */
+export function bindDxfProductPhaseDNativeStraightEdgesV3(
   sourceNativeOwner: DxfSourceNativeStraightEdgeOwnerV1,
   sourcePathArtifactV2: DxfPipelineSourcePathArtifactV2,
   requestInput: unknown,
   crypto: Pick<Crypto, 'subtle'> | undefined = globalThis.crypto,
+): Promise<DxfProductPhaseDNativeStraightEdgesBindResultV3> {
+  return bindNativeStraightEdgesV3(
+    sourceNativeOwner,
+    sourcePathArtifactV2,
+    requestInput,
+    crypto,
+    false,
+  );
+}
+
+/** Selected paths derive only from the validated V2 carrier, never caller-supplied projection data. */
+export function bindDxfProductPhaseDSelectedNativeStraightEdgesV3(
+  sourceNativeOwner: DxfSourceNativeStraightEdgeOwnerV1,
+  sourcePathArtifactV2: DxfPipelineSourcePathArtifactV2,
+  requestInput: unknown,
+  crypto: Pick<Crypto, 'subtle'> | undefined = globalThis.crypto,
+): Promise<DxfProductPhaseDNativeStraightEdgesBindResultV3> {
+  return bindNativeStraightEdgesV3(
+    sourceNativeOwner,
+    sourcePathArtifactV2,
+    requestInput,
+    crypto,
+    true,
+  );
+}
+
+async function bindNativeStraightEdgesV3(
+  sourceNativeOwner: DxfSourceNativeStraightEdgeOwnerV1,
+  sourcePathArtifactV2: DxfPipelineSourcePathArtifactV2,
+  requestInput: unknown,
+  crypto: Pick<Crypto, 'subtle'> | undefined,
+  selectedPathsOnly: boolean,
 ): Promise<DxfProductPhaseDNativeStraightEdgesBindResultV3> {
   if (
     (typeof sourceNativeOwner !== 'object' && typeof sourceNativeOwner !== 'function') ||
@@ -1597,14 +1632,27 @@ export async function bindDxfProductPhaseDNativeStraightEdgesV3(
   try {
     const request = v3Request(requestInput);
     const validatedArtifact = v3SourcePathArtifact(sourcePathArtifactV2, request);
-    const sourceProjectionResult = projectDxfSourceNativeStraightEdgeAuthorityV1(
-      sourceNativeOwner,
-      {
-        schemaVersion: DXF_SOURCE_NATIVE_STRAIGHT_EDGE_PROJECTION_REQUEST_V1,
-        sourceFileId: request.sourceFileId,
-        sourceSha256: request.sourceSha256,
-      },
-    );
+    const selectedPathIds = [
+      ...new Set(
+        validatedArtifact.artifact.carrier.pieces.flatMap((piece) =>
+          piece.contours.flatMap((contour) =>
+            contour.sourceVertices.map((vertex) => vertex.sourcePathId),
+          ),
+        ),
+      ),
+    ].sort((a, b) => a - b);
+    const sourceProjectionResult = selectedPathsOnly
+      ? await projectDxfSourceNativeStraightEdgeSelectedPathsV1(sourceNativeOwner, {
+          schemaVersion: DXF_SOURCE_NATIVE_STRAIGHT_EDGE_SELECTED_PATHS_REQUEST_V1,
+          sourceFileId: request.sourceFileId,
+          sourceSha256: request.sourceSha256,
+          sourcePathIds: selectedPathIds,
+        })
+      : projectDxfSourceNativeStraightEdgeAuthorityV1(sourceNativeOwner, {
+          schemaVersion: DXF_SOURCE_NATIVE_STRAIGHT_EDGE_PROJECTION_REQUEST_V1,
+          sourceFileId: request.sourceFileId,
+          sourceSha256: request.sourceSha256,
+        });
     if (!sourceProjectionResult.ok) {
       const upstreamCode = sourceProjectionResult.blockers[0]?.code;
       if (upstreamCode === 'forged-owner')
@@ -1633,7 +1681,10 @@ export async function bindDxfProductPhaseDNativeStraightEdgesV3(
     }
     const sourceProjection = sourceProjectionResult.projection;
     if (
-      sourceProjection.schemaVersion !== DXF_SOURCE_NATIVE_STRAIGHT_EDGE_AUTHORITY_V1 ||
+      sourceProjection.schemaVersion !==
+        (selectedPathsOnly
+          ? 'dxf-source-native-straight-edge-selected-paths/1'
+          : DXF_SOURCE_NATIVE_STRAIGHT_EDGE_AUTHORITY_V1) ||
       sourceProjection.sourceFileId !== request.sourceFileId ||
       sourceProjection.sourceSha256 !== request.sourceSha256 ||
       !SHA256.test(sourceProjection.authoritySha256) ||
@@ -1654,12 +1705,29 @@ export async function bindDxfProductPhaseDNativeStraightEdgesV3(
         'sourceNativeProjection',
         'fresh extraction projection must be complete, blocker-free, and line-native.',
       );
+    if (
+      selectedPathsOnly &&
+      (!('scope' in sourceProjection) ||
+        sourceProjection.scope.kind !== 'exact-selected-source-paths' ||
+        sourceProjection.scope.wholeFileCompletenessClaimed !== false ||
+        canonical(sourceProjection.scope.sourcePathIds) !== canonical(selectedPathIds))
+    )
+      v3Fail(
+        'source-native-incomplete',
+        'sourceNativeProjection.scope',
+        'Selected native scope differs from exact validated carrier paths.',
+      );
     const recomputedAuthoritySha256 = await digest(
-      'dxf-source-native-straight-edge-authority-v1',
+      selectedPathsOnly
+        ? 'dxf-source-native-straight-edge-selected-paths-v1'
+        : 'dxf-source-native-straight-edge-authority-v1',
       {
-        schemaVersion: DXF_SOURCE_NATIVE_STRAIGHT_EDGE_AUTHORITY_V1,
+        schemaVersion: sourceProjection.schemaVersion,
         sourceFileId: sourceProjection.sourceFileId,
         sourceSha256: sourceProjection.sourceSha256,
+        ...('scope' in sourceProjection
+          ? { scope: sourceProjection.scope, complete: sourceProjection.complete }
+          : {}),
         descriptors: sourceProjection.descriptors,
         blockers: sourceProjection.blockers,
       },

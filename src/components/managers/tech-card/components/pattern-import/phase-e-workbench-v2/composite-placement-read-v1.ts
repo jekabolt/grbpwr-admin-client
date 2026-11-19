@@ -7,6 +7,7 @@ import {
   PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V3,
   decodePatternImportDxfProductCompositeSidecarV3,
   readPatternImportDxfProductCompositeComponentBytesV3,
+  type PatternImportDxfProductCompositeSidecarResultV3,
 } from 'lib/cloth/domain/pattern-import-dxf-product-composite-sidecar-v3';
 import {
   readPatternImportDxfProductMultiseamPlacementSidecarV2,
@@ -19,6 +20,18 @@ import {
   PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V4,
   decodePatternImportDxfProductCompositeSidecarV4,
 } from './composite-sidecar-v4';
+import {
+  PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V5,
+  decodePatternImportDxfProductCompositeSidecarV5,
+} from './composite-sidecar-v5';
+import {
+  PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6,
+  decodePatternImportDxfProductCompositeSidecarV6,
+} from './composite-sidecar-v6';
+import {
+  PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7,
+  decodePatternImportDxfProductCompositeSidecarV7,
+} from './composite-sidecar-v7';
 
 type Evidence = PatternImportDxfProductMultiseamPlacementSidecarReadCurrentEvidenceV2 &
   Readonly<{ serverAssemblyRevision: string }>;
@@ -59,9 +72,86 @@ function encodeBytes(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
+type CompositeV3Success = Extract<PatternImportDxfProductCompositeSidecarResultV3, { ok: true }>;
+
+async function decodePlacementOuter(
+  mediaType: unknown,
+  bytes: Uint8Array<ArrayBuffer>,
+  crypto: Pick<Crypto, 'subtle'> | undefined,
+): Promise<
+  | null
+  | Readonly<{
+      ok: false;
+      detail: string;
+    }>
+  | Readonly<{
+      ok: true;
+      seal: Readonly<{ canonicalSha256: string; canonicalByteLength: number }>;
+      bindings: CompositeV3Success['document']['bindings'];
+      nested: CompositeV3Success;
+    }>
+> {
+  if (mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V3) {
+    const decoded = await decodePatternImportDxfProductCompositeSidecarV3(bytes, crypto);
+    return decoded.ok
+      ? Object.freeze({
+          ok: true as const,
+          seal: decoded.seal,
+          bindings: decoded.document.bindings,
+          nested: decoded,
+        })
+      : Object.freeze({ ok: false as const, detail: decoded.blockers[0].detail });
+  }
+  if (mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V4) {
+    const decoded = await decodePatternImportDxfProductCompositeSidecarV4(bytes, crypto);
+    return decoded.ok
+      ? Object.freeze({
+          ok: true as const,
+          seal: decoded.seal,
+          bindings: decoded.document.bindings,
+          nested: decoded.nestedCompositeV3,
+        })
+      : Object.freeze({ ok: false as const, detail: decoded.blockers[0].detail });
+  }
+  if (mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V5) {
+    const decoded = await decodePatternImportDxfProductCompositeSidecarV5(bytes, crypto);
+    return decoded.ok
+      ? Object.freeze({
+          ok: true as const,
+          seal: decoded.seal,
+          bindings: decoded.document.bindings,
+          nested: decoded.nestedCompositeV4.nestedCompositeV3,
+        })
+      : Object.freeze({ ok: false as const, detail: decoded.blockers[0].detail });
+  }
+  if (mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6) {
+    const decoded = await decodePatternImportDxfProductCompositeSidecarV6(bytes, crypto);
+    return decoded.ok
+      ? Object.freeze({
+          ok: true as const,
+          seal: decoded.seal,
+          bindings: decoded.document.bindings,
+          nested: decoded.nestedCompositeV5.nestedCompositeV4.nestedCompositeV3,
+        })
+      : Object.freeze({ ok: false as const, detail: decoded.blockers[0].detail });
+  }
+  if (mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7) {
+    const decoded = await decodePatternImportDxfProductCompositeSidecarV7(bytes, crypto);
+    return decoded.ok
+      ? Object.freeze({
+          ok: true as const,
+          seal: decoded.seal,
+          bindings: decoded.document.bindings,
+          nested: decoded.nestedCompositeV6.nestedCompositeV5.nestedCompositeV4.nestedCompositeV3,
+        })
+      : Object.freeze({ ok: false as const, detail: decoded.blockers[0].detail });
+  }
+  return null;
+}
+
 /**
  * Reads the persisted placement component through the existing V2 verified-read owner. The
- * actual GET returns the Composite V3/V4 envelope; only its verified embedded component is
+ * actual GET returns a Composite V3–V7 envelope; only its verified embedded component is
  * adapted to V2. This neither writes a sidecar nor turns exact-N consistency into authority.
  */
 function createCompositePlacementReadHost(
@@ -101,23 +191,16 @@ function createCompositePlacementReadHost(
         if (read.status === 'absent') return read;
         const envelope = read.row;
         const mediaType = data(envelope, 'mediaType');
-        if (
-          mediaType !== PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V3 &&
-          mediaType !== PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V4
-        )
-          return read;
         const bytes = decodeBytes(data(envelope, 'sidecarBytes'), data(envelope, 'byteLength'));
-        const decoded =
-          mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V4
-            ? await decodePatternImportDxfProductCompositeSidecarV4(bytes, crypto)
-            : await decodePatternImportDxfProductCompositeSidecarV3(bytes, crypto);
-        if (!decoded.ok) throw new TypeError(decoded.blockers[0].detail);
+        const decoded = await decodePlacementOuter(mediaType, bytes, crypto);
+        if (!decoded) return read;
+        if (!decoded.ok) throw new TypeError(decoded.detail);
         if (
           decoded.seal.canonicalSha256 !== data(envelope, 'sidecarSha256') ||
           decoded.seal.canonicalByteLength !== bytes.byteLength
         )
           throw new TypeError('The Composite GET digest differs from the canonical bytes.');
-        const { bindings } = decoded.document;
+        const { bindings } = decoded;
         const row = captured.expectedRow;
         if (
           bindings.serverAssemblyRevision !== revision ||
@@ -128,7 +211,7 @@ function createCompositePlacementReadHost(
           )
         )
           throw new TypeError('The Composite GET no longer matches the saved row and Assembly.');
-        const nested = 'nestedCompositeV3' in decoded ? decoded.nestedCompositeV3 : decoded;
+        const nested = decoded.nested;
         const placement = observed ? nested.observedPlacementDocument : nested.placementDocument;
         const kind = observed ? 'multiseam-placement-v3' : 'multiseam-placement-v2';
         const placementBytes = readPatternImportDxfProductCompositeComponentBytesV3(

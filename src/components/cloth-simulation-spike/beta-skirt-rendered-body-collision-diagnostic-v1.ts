@@ -1184,6 +1184,49 @@ function selfIntersectionPolicy(
   });
 }
 
+function bodySurfaceHasDefensibleTopology(topology: TopologyAudit) {
+  return (
+    topology.closedTwoManifold &&
+    topology.singleComponent &&
+    topology.consistentEdgeWinding &&
+    topology.nonManifoldVertexCount === 0 &&
+    topology.degenerateTriangleCount === 0 &&
+    topology.duplicateTriangleCount === 0
+  );
+}
+
+/** Closed-surface prerequisites for signing cut contact on already captured body bytes. */
+export function auditActualBodyClosedSurfaceForContactV1(
+  positionsM: Float32Array,
+  triangles: Uint32Array,
+) {
+  const policy = BETA_SKIRT_RENDERED_BODY_COLLISION_DIAGNOSTIC_POLICY_V1;
+  const counts = validateMesh(positionsM, triangles, 'body');
+  if (counts.vertexCount > policy.maxBodyVertices || counts.triangleCount > policy.maxBodyTriangles)
+    throw new RangeError('Body geometry exceeds the diagnostic resource budget.');
+  let minimum = Infinity;
+  let maximum = -Infinity;
+  for (const value of positionsM) {
+    minimum = Math.min(minimum, value);
+    maximum = Math.max(maximum, value);
+  }
+  const epsilonM = Math.max(policy.absoluteEpsilonM, (maximum - minimum) * policy.relativeEpsilon);
+  const topology = topologyAudit(positionsM, triangles, epsilonM);
+  const self = bodySurfaceHasDefensibleTopology(topology)
+    ? validateMeasurementSurfaceSelfIntersectionV1(
+        positionsM,
+        triangles,
+        selfIntersectionPolicy(policy),
+      )
+    : null;
+  return Object.freeze({
+    passed: self?.passed === true,
+    topology,
+    bodySelfIntersectionCount: self?.intersectionCount ?? null,
+    broadPhase: self?.broadPhase ?? null,
+  });
+}
+
 function canonicalBytes(
   input: BetaSkirtRenderedBodyCollisionDiagnosticInputV1,
 ): Uint8Array<ArrayBuffer> {
@@ -1368,13 +1411,7 @@ export async function evaluateBetaSkirtRenderedBodyCollisionDiagnosticV1(
   const bodyBvh = createTriangleBvh(snapshot.bodyPositionsM, snapshot.bodyTriangles);
   const unsigned = unsignedClearances(worldGarment, bodyBvh, policy.unsafeClearanceMarginM);
   const topologyDefensible =
-    topology.closedTwoManifold &&
-    topology.singleComponent &&
-    topology.consistentEdgeWinding &&
-    topology.nonManifoldVertexCount === 0 &&
-    topology.degenerateTriangleCount === 0 &&
-    topology.duplicateTriangleCount === 0 &&
-    bodySelfIntersectionCount === 0;
+    bodySurfaceHasDefensibleTopology(topology) && bodySelfIntersectionCount === 0;
   let signed: ReturnType<typeof signedClearances> | null = null;
   if (topologyDefensible) {
     signed = signedClearances(

@@ -466,6 +466,16 @@ function canonicalVertexId(value: unknown, label: string, expectedSourceCurveId?
   return vertexId;
 }
 
+export function isCanonicalDxfVertexIdV1(value: unknown): value is string {
+  if (typeof value !== 'string' || !value.startsWith(`${VERTEX_ID_PREFIX}/`)) return false;
+  try {
+    canonicalVertexId(value, 'vertexId');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function snapshotInstancePath(
   value: unknown,
   requireFrozen: boolean,
@@ -619,6 +629,23 @@ export function createDxfInsertInstancePathV1(
     return success(Object.freeze(tokens));
   } catch (error) {
     return failureResult(error);
+  }
+}
+
+/** Returns the raw block name recorded by one canonical INSERT occurrence token. */
+export function readDxfInsertInstanceBlockNameV1(token: unknown): string | null {
+  if (
+    typeof token !== 'string' ||
+    token.length > MAX_INSTANCE_TOKEN_LENGTH ||
+    !canonicalInstanceToken(token)
+  )
+    return null;
+  const hex = token.split('/')[1];
+  const bytes = Uint8Array.from(hex.match(/../g)!, (pair) => Number.parseInt(pair, 16));
+  try {
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch {
+    return null;
   }
 }
 

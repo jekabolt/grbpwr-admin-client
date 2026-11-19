@@ -1,14 +1,16 @@
+import { createSavedNativeSewingAuthoringViewV1 } from './saved-native-sewing-authoring-view-v1';
+import type { DxfNativeSewingReplayStageOutputV1 } from 'lib/pattern-import/dxf-native-sewing-replay-v1';
+import { savedWorkbenchBindingScopeKeyV1 } from './saved-workbench-scope-v1';
 import type { common_TechCard } from 'api/proto-http/admin';
-import {
-  bindingScopes,
-  scopeKeyOfBinding,
-} from 'components/managers/tech-card/components/bom-purpose';
+import { bindingScopes } from 'components/managers/tech-card/components/bom-purpose';
 import { rollGoodsScopes } from 'components/managers/tech-card/components/piece-block-refs';
 import {
   buildPatternImportDxfProductPhaseEAuthoringCatalogV1,
   type PatternImportDxfProductPhaseEAuthoringCatalogV1,
 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import { selectPatternImportDxfProductDraftPhaseDSizeV1 } from 'lib/cloth/domain/pattern-import-dxf-product-draft-phase-d-selection-v1';
+import { capturePatternImportDxfProductCurrentSavedReplayV1 } from 'lib/cloth/domain/pattern-import-dxf-product-commit-replay-v1';
+import type { PieceDTO } from 'lib/nesting/types';
 import type { DxfProductPhaseDSizeSelectionResultV1 } from 'lib/pattern-import/dxf-product-phase-d-size-selection-v1';
 import {
   createDxfProductSavedForeignReprocessOwnerV1,
@@ -17,6 +19,9 @@ import {
 import {
   createDxfProductSavedReprocessOwnerV1,
   DXF_PRODUCT_SAVED_REPROCESS_REQUEST_V1,
+  isDxfProductSavedReprocessVerifiedV1,
+  type DxfProductSavedReprocessHostV1,
+  type DxfProductSavedReprocessResultV1,
 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 import {
   projectPatternImportDxfProductPhaseEAssemblyV1,
@@ -42,6 +47,8 @@ import {
   createPatternImportDxfPhaseEDraftCadCompileSourceV1,
   type PatternImportDxfPhaseEDraftCadCompileSourceV1,
 } from './draft-cad-compile-source-v1';
+import type { CadTableSavedFoldAxesByPieceV1 } from './cad-table-saved-piece-folds-v1';
+import type { CadTableSavedSeamAllowancesByPieceV1 } from './cad-table-saved-seam-allowances-v1';
 
 export const PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_OPERATION_SAVED_PREPARATION_V1 =
   'pattern-import-dxf-phase-e-cad-table-zero-operation-saved-preparation/1' as const;
@@ -114,11 +121,16 @@ export type PatternImportDxfPhaseECadTableZeroOperationSavedPreparationResultV1 
       preparationGeneration: number;
       importGeneration: number;
       choices: readonly PatternImportDxfPhaseECadTableZeroOperationFreshChoiceV1[];
+      sourceSurface?: 'explicit-native-drawn-sewing';
+      foreignSavedDxf?: true;
       selection: SuccessfulSelection;
       catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1;
       projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
       draftCadCompileSource: PatternImportDxfPhaseEDraftCadCompileSourceV1;
+      savedFoldAxes?: CadTableSavedFoldAxesByPieceV1;
+      savedSeamAllowances?: CadTableSavedSeamAllowancesByPieceV1;
       authoringAuthority: PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1;
+      verifiedNativeReplay?: Extract<DxfProductSavedReprocessResultV1, { ok: true }>;
       blocker: null;
       claims: typeof PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_OPERATION_SAVED_PREPARATION_CLAIMS_V1;
     }>
@@ -140,6 +152,8 @@ export type PatternImportDxfPhaseECadTableZeroOperationSavedPreparationResultV1 
     }>;
 
 type Request = Readonly<{
+  /** Explicit sewing authoring only; omitted keeps the existing import surface. */
+  sourceSurface?: 'explicit-native-drawn-sewing';
   techCard: common_TechCard | null | undefined;
   orderSizeIds: (ids: number[]) => number[];
   sizeNameById: ReadonlyMap<number, string>;
@@ -197,8 +211,8 @@ export function listPatternImportDxfPhaseECadTableZeroOperationSavedChoicesV1(
   const choices = card.scopes.flatMap((scope) => {
     const rows = patterns.filter(
       (pattern) =>
-        scopeKeyOfBinding(pattern.fabricPurpose, pattern.bomLineKey, bindings) === scope.scopeKey &&
-        Boolean(pattern.lineKey && pattern.url && pattern.downloadUrl),
+        savedWorkbenchBindingScopeKeyV1(pattern.fabricPurpose, pattern.bomLineKey, bindings) ===
+          scope.scopeKey && Boolean(pattern.lineKey && pattern.url && pattern.downloadUrl),
     );
     if (rows.length !== 1) return [];
     return [
@@ -268,6 +282,18 @@ function blockedPreparation(
   });
 }
 
+function hasPossibleDrawnAllowance(draft: CardDraft): boolean {
+  const paths = draft.dxfPhaseDReplay?.carrier?.source.paths ?? [];
+  const occurrences = new Set<string>();
+  for (const { closed, provenance } of paths) {
+    if (!closed || !provenance.instancePath.length) continue;
+    const key = JSON.stringify(provenance.instancePath);
+    if (occurrences.has(key)) return true;
+    occurrences.add(key);
+  }
+  return false;
+}
+
 export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
   request: Request,
   signal?: AbortSignal,
@@ -331,11 +357,50 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
     );
 
   const hostDeps = {
+    ...(request.sourceSurface ? { nativeSewingReplay: true } : {}),
     resolveCard: request.authority.resolveCard,
     readAuthoritativeRow: capability.authority.readAuthoritativeRow,
   };
+  // Read the ordinary layer geometry while the current reprocess owner still holds the verified
+  // original bytes. Keep only its detached geometry and leave the ordinary read unchanged.
+  const needsFoldGeometry = request.techCard.pieceFolds?.some(
+    ({ anchoredSize, stale }) => anchoredSize === request.sizeToken && !stale,
+  );
+  const showAllowance = !request.sourceSurface;
+  let readNativeBlockGeometry: readonly PieceDTO[] | undefined;
+  const withNativeBlockGeometry = (
+    host: DxfProductSavedReprocessHostV1,
+  ): DxfProductSavedReprocessHostV1 =>
+    !showAllowance && !needsFoldGeometry
+      ? host
+      : {
+          ...host,
+          async reprocess(input, hostSignal, progress) {
+            readNativeBlockGeometry = undefined;
+            // The regular worker takes ownership of input.bytes when opened.
+            const bytes = Uint8Array.from(input.bytes);
+            try {
+              const result = await host.reprocess(input, hostSignal, progress);
+              if (!needsFoldGeometry && !hasPossibleDrawnAllowance(result.draft)) return result;
+              try {
+                const { parseSavedNativeStitchRowV1 } = await import(
+                  './saved-legacy-native-stitch-run-v8'
+                );
+                hostSignal.throwIfAborted();
+                const parsed = await parseSavedNativeStitchRowV1(bytes, input.syntheticFilename);
+                if (!hostSignal.aborted && !parsed.failedFiles)
+                  readNativeBlockGeometry = parsed.pieces;
+              } catch {
+                // An unsupported mark or CAD profile cannot block the regular saved pattern table.
+              }
+              return result;
+            } finally {
+              bytes.fill(0);
+            }
+          },
+        };
   const exactOwner = createDxfProductSavedReprocessOwnerV1(
-    createPatternImportDxfPhaseESavedDxfReprocessHostV1(hostDeps),
+    withNativeBlockGeometry(createPatternImportDxfPhaseESavedDxfReprocessHostV1(hostDeps)),
   );
   let foreignOwner: ReturnType<typeof createDxfProductSavedForeignReprocessOwnerV1> | null = null;
   const cancel = () => {
@@ -368,11 +433,15 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
         blocker('saved-preparation-cancelled', 'Exact saved DXF preparation was cancelled.'),
       );
     let draft: CardDraft;
+    let nativeSewingReplay: DxfNativeSewingReplayStageOutputV1 | undefined;
     if (reprocessed.ok) {
       draft = reprocessed.draft;
+      nativeSewingReplay = reprocessed.nativeSewingReplay;
     } else if (reprocessed.blockers[0]?.code === 'foreign-saved-dxf-detected') {
       foreignOwner = createDxfProductSavedForeignReprocessOwnerV1(
-        createPatternImportDxfPhaseEForeignSavedDxfReprocessHostV1(hostDeps),
+        withNativeBlockGeometry(
+          createPatternImportDxfPhaseEForeignSavedDxfReprocessHostV1(hostDeps),
+        ),
       );
       const foreign = await foreignOwner.run({
         schemaVersion: DXF_PRODUCT_SAVED_FOREIGN_REPROCESS_REQUEST_V1,
@@ -394,6 +463,7 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
           ),
         );
       draft = foreign.draft;
+      nativeSewingReplay = foreign.nativeSewingReplay;
     } else {
       return blockedPreparation(
         request,
@@ -404,10 +474,17 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
         ),
       );
     }
+    const authoringDraft = request.sourceSurface
+      ? createSavedNativeSewingAuthoringViewV1(draft, nativeSewingReplay, authoritative.row.sha256)
+      : draft;
     const [selection, catalogResult] = await Promise.all([
-      selectPatternImportDxfProductDraftPhaseDSizeV1(draft, request.scopeKey, request.sizeToken),
+      selectPatternImportDxfProductDraftPhaseDSizeV1(
+        authoringDraft,
+        request.scopeKey,
+        request.sizeToken,
+      ),
       buildPatternImportDxfProductPhaseEAuthoringCatalogV1(
-        draft,
+        authoringDraft,
         request.scopeKey,
         request.sizeToken,
       ),
@@ -461,7 +538,8 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
           projection.blockers[0]?.detail ?? 'Exact saved Assembly projection is unavailable.',
         ),
       );
-    const draftCadCompileSource = createPatternImportDxfPhaseEDraftCadCompileSourceV1(draft);
+    const draftCadCompileSource =
+      createPatternImportDxfPhaseEDraftCadCompileSourceV1(authoringDraft);
     if (!draftCadCompileSource)
       return blockedPreparation(
         request,
@@ -471,6 +549,46 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
           'The verified saved DXF has no detached raw-free Draft CAD compile source.',
         ),
       );
+    let savedFoldAxes: CadTableSavedFoldAxesByPieceV1 | undefined;
+    let savedSeamAllowances: CadTableSavedSeamAllowancesByPieceV1 | undefined;
+    const savedSizeTokens = scope.sizes.map(({ sizeToken }) => sizeToken);
+    if (readNativeBlockGeometry && showAllowance) {
+      try {
+        const { projectCadTableSavedSeamAllowancesV1 } = await import(
+          './cad-table-saved-seam-allowances-v1'
+        );
+        savedSeamAllowances = projectCadTableSavedSeamAllowancesV1({
+          projection: projection.projection,
+          selected: selection.selection,
+          sourceSha256: authoritative.row.sha256,
+          scopeKey: authoritative.row.scopeKey,
+          candidates: readNativeBlockGeometry,
+          savedSizeTokens,
+        });
+      } catch {
+        // An unverified allowance cannot change the regular saved pattern table.
+      }
+    }
+    if (readNativeBlockGeometry && needsFoldGeometry) {
+      try {
+        const current = await request.authority.resolveExactCurrentCard(
+          authoritative.row,
+          signal ?? new AbortController().signal,
+        );
+        const { projectCadTableSavedPieceFoldAxesV1 } = await import(
+          './cad-table-saved-piece-folds-v1'
+        );
+        savedFoldAxes = projectCadTableSavedPieceFoldAxesV1(
+          current.techCard.pieceFolds ?? [],
+          projection.projection,
+          readNativeBlockGeometry,
+          savedSizeTokens,
+        );
+      } catch {
+        // Fold rows and their drawing must both be current to enrich this projection.
+      }
+    }
+    signal?.throwIfAborted();
     if (!isPatternImportDxfPhaseECadTableZeroOperationGenerationTicketCurrentV1(request.generation))
       return blockedPreparation(
         request,
@@ -480,12 +598,27 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
           'A newer zero-operation preparation superseded this saved-row generation.',
         ),
       );
+    const pattern = request.techCard?.techCard?.patterns?.find(
+      ({ lineKey }) => lineKey === authoritative.row.patternLineKey,
+    );
+    const savedReplay =
+      request.sourceSurface && reprocessed.ok && pattern
+        ? capturePatternImportDxfProductCurrentSavedReplayV1(
+            reprocessed,
+            Number(pattern.sizeId ?? 0),
+          )
+        : null;
     const authoringAuthority = capturePatternImportDxfPhaseEZeroConnectPreparedAuthorityV1({
       row: authoritative.row,
-      draft,
+      draft:
+        savedReplay && nativeSewingReplay
+          ? { ...draft, dxfNativeSewingReplay: nativeSewingReplay }
+          : draft,
       selection: selection.selection,
       catalog: catalogResult.catalog,
       generation: request.generation,
+      savedSizes: scope.sizes,
+      ...(savedReplay ? { savedReplay } : {}),
     });
     if (!authoringAuthority)
       return blockedPreparation(
@@ -513,11 +646,20 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
       preparationGeneration: request.generation.preparationGeneration,
       importGeneration: request.generation.importGeneration,
       choices: choices.choices,
+      ...(request.sourceSurface ? { sourceSurface: request.sourceSurface } : {}),
+      ...(reprocessed.ok ? {} : { foreignSavedDxf: true as const }),
       selection: selection.selection,
       catalog: catalogResult.catalog,
       projection: projection.projection,
       draftCadCompileSource,
+      ...(savedFoldAxes?.size ? { savedFoldAxes } : {}),
+      ...(savedSeamAllowances?.size ? { savedSeamAllowances } : {}),
       authoringAuthority,
+      ...(request.sourceSurface &&
+      isDxfProductSavedReprocessVerifiedV1(reprocessed) &&
+      reprocessed.nativeSewingReplay?.replayReady
+        ? { verifiedNativeReplay: reprocessed }
+        : {}),
       blocker: null,
       claims: PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_OPERATION_SAVED_PREPARATION_CLAIMS_V1,
     });

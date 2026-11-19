@@ -1,6 +1,6 @@
 import { embedManifest } from '../../pattern-import/manifest';
 import { isAsciiDxf } from '../../pattern-import/write/format';
-import { writeDxfDetailed } from '../../pattern-import/write';
+import { writeDxfDetailed, writeDxfWithRetainedLineSplit } from '../../pattern-import/write';
 import {
   PATTERN_IMPORT_DXF_PRODUCT_WRITER_REPLAY_CARRIER_V1,
   type ConversionManifest,
@@ -164,7 +164,14 @@ export async function replayPatternImportDxfProductWriterV1(
 
   let detail: ReturnType<typeof writeDxfDetailed>;
   try {
-    detail = writeDxfDetailed(input.replay.job, { embed: null, now: () => date });
+    const options = { embed: null, now: () => date };
+    detail = input.replay.retainedLineSplit
+      ? await writeDxfWithRetainedLineSplit(
+          input.replay.job,
+          input.replay.retainedLineSplit,
+          options,
+        )
+      : writeDxfDetailed(input.replay.job, options);
   } catch {
     return blocked('writer-replay-failed', 'The production writer could not replay the typed job.');
   }
@@ -189,11 +196,22 @@ export async function replayPatternImportDxfProductWriterV1(
   }
   if (!isAsciiDxf(completeText))
     return blocked('writer-output-invalid', 'Rebuilt product DXF is not exact ASCII.');
-  const bytes = textEncoder.encode(completeText);
+  let bytes = textEncoder.encode(completeText);
   if (bytes.byteLength === 0 || bytes.byteLength > MAX_BYTES)
     return blocked('writer-output-invalid', 'Rebuilt product DXF exceeds the byte bound.');
-  const exportSha256 = await sha256(crypto, bytes);
+  let exportSha256 = await sha256(crypto, bytes);
   if (!exportSha256) return blocked('sha256-unavailable', 'SHA-256 is unavailable.');
+  if (exportSha256 !== input.expected.exportSha256 && detail.manifest.sizes.length > 1) {
+    const { withGradeMap } = await import('../../pattern-import/write/grade-map');
+    const graded = await withGradeMap(completeText, detail.manifest.sizes);
+    if (graded.file) {
+      bytes = textEncoder.encode(graded.text);
+      if (bytes.byteLength > MAX_BYTES)
+        return blocked('writer-output-invalid', 'Rebuilt product DXF exceeds the byte bound.');
+      exportSha256 = await sha256(crypto, bytes);
+      if (!exportSha256) return blocked('sha256-unavailable', 'SHA-256 is unavailable.');
+    }
+  }
   if (exportSha256 !== input.expected.exportSha256)
     return blocked(
       'export-sha-mismatch',

@@ -342,7 +342,8 @@ function projectSide(
     pieces[0]?.contours.filter(({ contourId }) => contourId === side.contourId) ?? [];
   if (pieces.length !== 1 || contours.length !== 1)
     fail('catalog-topology-mismatch', 'Exact piece, line and contour must occur once in catalog.');
-  const vertices = contours[0].boundaryVertices;
+  const contour = contours[0];
+  const vertices = contour.boundaryVertices;
   if (
     vertices.length < 2 ||
     new Set(vertices.map(({ vertexId }) => vertexId)).size !== vertices.length ||
@@ -360,17 +361,22 @@ function projectSide(
   const end = vertices.find(({ vertexId }) => vertexId === side.boundaryVertexIds[1]);
   if (!start || !end)
     fail('catalog-topology-mismatch', 'Exact boundary vertices are absent from catalog.');
-  const expectedEndOrdinal =
-    side.direction === 'forward'
-      ? (start.ordinal + 1) % vertices.length
-      : (start.ordinal - 1 + vertices.length) % vertices.length;
-  if (end.ordinal !== expectedEndOrdinal)
+  const followsContour = (first: number, second: number) =>
+    second === first + 1 || (contour.closed && first === vertices.length - 1 && second === 0);
+  const forwardPair = followsContour(start.ordinal, end.ordinal);
+  const reversePair = followsContour(end.ordinal, start.ordinal);
+  if (side.direction === 'forward' ? !forwardPair : !reversePair && !forwardPair)
     fail(
       'catalog-boundary-order-mismatch',
       'Exact boundary vertices are not one adjacent ordered catalog edge.',
     );
-  const startArc = side.direction === 'forward' ? start.normalizedArc : 1 - start.normalizedArc;
-  let endArc = side.direction === 'forward' ? end.normalizedArc : 1 - end.normalizedArc;
+  // V4 can retain traversal-ordered IDs or the increasing native span plus a reverse flag.
+  // The IDs stay exactly as sealed. Only the arc uses the physical traversal order.
+  const nativePairReversed = side.direction === 'reverse' && !reversePair;
+  const first = nativePairReversed ? end : start;
+  const second = nativePairReversed ? start : end;
+  const startArc = side.direction === 'forward' ? first.normalizedArc : 1 - first.normalizedArc;
+  let endArc = side.direction === 'forward' ? second.normalizedArc : 1 - second.normalizedArc;
   while (endArc <= startArc) endArc += 1;
   return deepFreeze({
     seamId: side.seamId,

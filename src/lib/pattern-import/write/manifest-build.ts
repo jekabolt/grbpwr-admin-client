@@ -1,11 +1,16 @@
+import { authoredAllowanceCornerMarker } from '../manifest/authored-allowance-corner';
+import { parseAuthoredOutlineCorner } from '../manifest/authored-outline-corner';
 // The ConversionManifest of one scope file (08-CONTRACT §3), built from the plan — never from
 // the text, so the gate can compare the two.
 
+import { authoredInternalVertices, authoredQuadraticGrid } from '../manifest/authored-internal';
+import { AUTHORED_NOTCH_STROKES } from '../manifest/authored-notches';
 import type {
   ReplayRecord,
   AutopilotRecord,
   ConversionManifest,
   ManifestBlock,
+  ManifestAuthoredNotchGroup,
   ManifestContinuity,
   ManifestPiece,
   PieceSpec,
@@ -19,6 +24,35 @@ import { contourSigCap, contourSignature } from '../manifest/contour-sig';
 // area to 1 mm² keep the per-block entry short (M1: the 999 prologue of a 138-block sheet).
 const r1 = (v: number) => Math.round(v * 10) / 10;
 const r0 = (v: number) => Math.round(v);
+
+function authoredNotchesOf(block: PlannedBlock): ManifestAuthoredNotchGroup[] {
+  const groups = [];
+  for (let index = 0; index < block.notches.length; ) {
+    const firstStroke = index;
+    const first = block.notches[index]!.authoredGroup;
+    if (!first) {
+      index++;
+      continue;
+    }
+    const strokeCount = AUTHORED_NOTCH_STROKES[first.shape];
+    const vertices = [];
+    for (let stroke = 0; stroke < strokeCount; stroke++, index++) {
+      const native = block.notches[index];
+      const group = native?.authoredGroup;
+      if (
+        !native ||
+        !group ||
+        first.groupId !== group.groupId ||
+        first.shape !== group.shape ||
+        group.index !== stroke
+      )
+        throw new Error(`${block.name}: the authored notch strokes are missing or out of order.`);
+      vertices.push(...authoredInternalVertices([native.a, native.b]));
+    }
+    groups.push({ groupId: first.groupId, shape: first.shape, firstStroke, vertices });
+  }
+  return groups;
+}
 
 export const LAYERS = { cut: '1', seam: '14', grain: '7', notch: '4', internal: '8' } as const;
 
@@ -62,8 +96,42 @@ export function manifestBlock(b: PlannedBlock, sigPts?: number): ManifestBlock {
     maxX = Math.max(maxX, p.x);
     maxY = Math.max(maxY, p.y);
   }
+  const authoredInternal = b.internal.flatMap(
+    ({ pts, closed, authoredLabel, quadratic, turnAllowance }, index) =>
+      authoredLabel
+        ? [
+            {
+              index,
+              label: authoredLabel,
+              closed,
+              vertices: authoredInternalVertices(pts),
+              ...(quadratic ? { quadratic } : {}),
+              ...(turnAllowance ? { turnAllowance } : {}),
+            },
+          ]
+        : [],
+  );
+  const allowanceCorner =
+    b.size.authoredAllowanceCorner && authoredAllowanceCornerMarker(b.size.authoredAllowanceCorner);
+  const corner =
+    b.size.authoredOutlineCorner && authoredQuadraticGrid(b.size.authoredOutlineCorner);
+  const authoredText = b.size.textMarks?.map(({ text, at }) => {
+    const [x, y] = authoredInternalVertices([at]);
+    return { anchor: [x!, y!] as [number, number], text };
+  });
+  const authoredNotches = authoredNotchesOf(b);
   return {
     block: b.name,
+    ...(b.protectedLineSplit ? { protectedLineSplit: b.protectedLineSplit } : {}),
+    ...(authoredInternal.length ? { authoredInternal } : {}),
+    ...(allowanceCorner ? { authoredAllowanceCorner: allowanceCorner } : {}),
+    ...(corner
+      ? parseAuthoredOutlineCorner(corner)
+        ? { authoredOutlineCorner: corner }
+        : { authoredFixedEndOutlineCorner: corner }
+      : {}),
+    ...(authoredText?.length ? { authoredText } : {}),
+    ...(authoredNotches.length ? { authoredNotches } : {}),
     identity: b.identity,
     sizeToken: b.sizeToken,
     sizeId: b.sizeId,

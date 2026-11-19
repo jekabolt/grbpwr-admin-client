@@ -162,10 +162,7 @@ describe('zero-connect exact anchor geometry', () => {
       ok: true,
       geometry: {
         geometrySizeToken: 'M',
-        sideTargets: [
-          'piece-front#dxf:front%3Asewing:front%3Av0>front%3Av1',
-          'piece-back#dxf:back%3Asewing:back%3Av1>back%3Av0',
-        ],
+        sideTargets: ['piece-front#dxf:0:0', 'piece-back#dxf:0:0'],
         pieces: [
           {
             edges: [

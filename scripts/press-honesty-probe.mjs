@@ -298,10 +298,15 @@ ck(rBare?.id !== rFlat?.id, 'молчание и приутюживание — 
 const rOpen = await resolveKind({ operationType: T.PRESS_OPEN });
 ck(rOpen?.label === 'Press open', 'разутюжка по-прежнему называется собой', JSON.stringify(rOpen));
 
-// ── 5. СПИСОК АВТОРИНГА НЕ ВЫРОС ──────────────────────────────────────────────────────────────
+// ── 5. ПУНКТ-СОСТОЯНИЕ НЕ ДОБАВЛЕН В СПИСОК ──────────────────────────────────────────────────────────────
 head('5. пункт-состояние не пролез в список выбора');
 const off = await offered();
-ck(off.length === 53, 'в списке авторинга по-прежнему 53 пункта', String(off.length));
+// The label/tag authoring change added J3 to the existing 53 options, independently of G0.
+ck(
+  off.length === 54 && off.some((k) => k.id === 'J3' && k.label === 'Hang tag'),
+  'в списке авторинга 54 пункта, включая J3 «Hang tag»',
+  String(off.length),
+);
 ck(
   !off.some((k) => /not recorded/i.test(k.label)),
   'строки-состояния среди предлагаемых нет',

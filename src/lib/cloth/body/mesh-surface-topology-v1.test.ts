@@ -10,6 +10,7 @@ import {
   type MakeHumanOpenReferenceBasisKindV1,
 } from './measurement-open-reference-display-v1';
 import {
+  createMeshSurfaceAdjacencyV1,
   createMeshSurfaceTopologyV1,
   meshSurfaceTopologyMatchesIndicesV1,
 } from './mesh-surface-topology-v1';
@@ -110,5 +111,22 @@ describe('mesh surface topology v1', () => {
     const changed = basis.indices.slice();
     [changed[0], changed[1]] = [changed[1], changed[0]];
     expect(meshSurfaceTopologyMatchesIndicesV1(result.topology, changed)).toBe(false);
+  });
+
+  it('builds deformed Float64 adjacency without reading or warming the body topology cache', () => {
+    const positionsM = Float32Array.of(-1, 0, 0, 1, 0, 0, -1, 1, 0, 1, 1, 0);
+    const triangleIndices = Uint16Array.of(0, 1, 2, 2, 1, 3);
+    const deformed = Float64Array.from(positionsM);
+    deformed[0] += 0.0001;
+    const clothInput = { positionsM: deformed, triangleIndices };
+    const bodyInput = { positionsM, triangleIndices };
+
+    expect(createMeshSurfaceAdjacencyV1(clothInput)).toMatchObject({ ok: true, cached: false });
+    expect(createMeshSurfaceTopologyV1(bodyInput)).toMatchObject({ ok: true, cached: false });
+    expect(createMeshSurfaceAdjacencyV1(clothInput)).toMatchObject({ ok: true, cached: false });
+    expect(createMeshSurfaceTopologyV1(bodyInput)).toMatchObject({ ok: true, cached: true });
+    expect(
+      createMeshSurfaceTopologyV1({ positionsM: Float32Array.from(deformed), triangleIndices }),
+    ).toMatchObject({ ok: false, code: 'symmetry-mismatch' });
   });
 });

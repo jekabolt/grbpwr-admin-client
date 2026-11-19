@@ -388,6 +388,7 @@ export function useTechCardUndoHistory({
             (patch) => ({ ...patch, path: [...path, ...patch.path] }),
           ),
         );
+        if (!patches.length) return;
         const label = active.label || labelOf(active.textPath, patches);
         const next = recordUndoPatches(core.current, patches, label, active.token);
         if (next !== core.current) publish(next);

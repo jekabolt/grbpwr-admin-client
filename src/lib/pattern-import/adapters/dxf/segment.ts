@@ -1,10 +1,41 @@
+import {
+  decodeAuthoredAllowanceCorner,
+  matchesAuthoredAllowanceCorner,
+} from '../../manifest/authored-allowance-corner';
+import {
+  decodeTurnAllowance,
+  verifyTurnAllowanceGeometry,
+} from '../../manifest/authored-turn-allowance';
 // DXF already carries pieces: one top-level INSERT = one piece × size. This turns the IR + the DXF
 // side channel into pre-segmented piece candidates, applying every measured CLO/AAMA rule of
 // 10-CLO-DXF-FORMAT §2 (dialect, cut-line mode, grain arrow, POINT notches, notch twins, labels,
 // sizes, pairs, ungraded layer 1).
 
-import type { AllowanceDecision, IRPath, IRText, PathId, PtMm, Style } from '../../types';
+import {
+  authoredInternalVertices,
+  decodeAuthoredQuadratic,
+  sampleAuthoredQuadratic,
+} from '../../manifest/authored-internal';
+import { AUTHORED_NOTCH_STROKES } from '../../manifest/authored-notches';
+import { AUTHORED_TEXT_LAYER } from '../../manifest/authored-text';
+import { isNativeStraightL8Polyline, nativeAuthoredOutlinePoints } from './extract';
+import { readNativePairedAuthoredOutlineCorner } from '../../manifest/authored-outline-corner';
+import { readAuthoredTextMarks } from './authored-text';
+import { contourSigProblem } from '../../manifest/contour-sig';
+import type {
+  AllowanceDecision,
+  AuthoredInternalLabel,
+  AuthoredPointMark,
+  AuthoredTurnAllowance,
+  AuthoredQuadraticControls,
+  IRPath,
+  IRText,
+  PathId,
+  PtMm,
+  Style,
+} from '../../types';
 import { PATIMPORT } from '../../types';
+import { authoredPointKind } from '../../manifest/authored-point';
 import type {
   CutMode,
   DxfBlockPiece,
@@ -38,12 +69,14 @@ type LayerKind =
   | 'drill'
   | 'seam'
   | 'annotation'
+  | 'authored-point'
   | 'qv'
   | 'ref'
   | 'unknown';
 
 /** AAMA/ASTM D6673 layer numbers (+ CLO's 19 annotation) and common names in foreign files. */
 export function layerKind(layer: string | null): LayerKind {
+  if (authoredPointKind(layer)) return 'authored-point';
   const l = (layer ?? '').trim();
   const aama: Record<string, LayerKind> = {
     '1': 'cut',
@@ -575,11 +608,94 @@ function blockPiece(
 ): BlockWork {
   const page = read.doc.pages[0];
   const paths = group.paths.map((id) => pathById.get(id)).filter((p): p is IRPath => !!p);
-  const texts = group.texts.map((id) => textById.get(id)).filter((t): t is IRText => !!t);
+  const groupTexts = group.texts.map((id) => textById.get(id)).filter((t): t is IRText => !!t);
+  const textMarks = readAuthoredTextMarks(read, group, groupTexts);
+  const texts = groupTexts.filter((text) => text.layer !== AUTHORED_TEXT_LAYER);
   const layerOfPath = (p: IRPath) => page.styles[p.style]?.layer ?? null;
   const kindOf = (p: IRPath) => layerKind(layerOfPath(p));
   const roles: Record<PathId, PathRole> = {};
   const by = (k: LayerKind) => paths.filter((p) => kindOf(p) === k);
+  const authored = group.block ? read.meta.authoredInternalByBlock?.get(group.block) : undefined;
+  const authoredInternalLabels = new Map<PathId, AuthoredInternalLabel>();
+  const authoredQuadraticByPath = new Map<PathId, AuthoredQuadraticControls>();
+  const authoredTurnAllowanceByPath = new Map<PathId, AuthoredTurnAllowance>();
+  if (authored) {
+    const { a, b, c, d, e, f } = group.transform;
+    if (read.meta.units.mmPerUnit !== 1 || a !== 1 || b !== 0 || c !== 0 || d !== 1)
+      throw new Error(`Typed CAD lines in ${group.block} require their original millimetre frame.`);
+    const layerEight = paths.filter((path) => layerOfPath(path) === '8');
+    for (const { index, label, closed, vertices, quadratic, turnAllowance } of authored) {
+      const path = layerEight[index];
+      const coords = path ? authoredInternalVertices(path.pts, { x: e, y: f }) : [];
+      if (
+        !path ||
+        path.src.block !== group.block ||
+        !['POLYLINE', 'LWPOLYLINE'].includes(read.meta.pathEntity[path.id]) ||
+        path.closed !== closed ||
+        coords.length !== vertices.length ||
+        coords.some((value, i) => value !== vertices[i])
+      )
+        throw new Error(`The saved layer-8 path for ${label} in ${group.block} changed.`);
+      if (quadratic) {
+        const sampled = sampleAuthoredQuadratic(quadratic);
+        const sampledCoords = sampled && authoredInternalVertices(sampled);
+        if (
+          !isNativeStraightL8Polyline(path) ||
+          !sampledCoords ||
+          sampledCoords.length !== vertices.length ||
+          sampledCoords.some((value, i) => value !== vertices[i])
+        )
+          throw new Error(
+            `The saved French curve controls in ${group.block} do not reproduce the native layer-8 path.`,
+          );
+        authoredQuadraticByPath.set(path.id, decodeAuthoredQuadratic(quadratic, { x: e, y: f }));
+      }
+      if (turnAllowance) {
+        const c = paths.filter((path) => layerOfPath(path) === '1');
+        const s = paths.filter((path) => layerOfPath(path) === '14');
+        const cut = c.length === 1 && c[0]!.closed && nativeAuthoredOutlinePoints(c[0]!);
+        const sewing = s.length === 1 && s[0]!.closed && nativeAuthoredOutlinePoints(s[0]!);
+        const crease = !path.closed && nativeAuthoredOutlinePoints(path);
+        if (
+          !cut ||
+          !sewing ||
+          !crease ||
+          !verifyTurnAllowanceGeometry(turnAllowance, cut, sewing, crease, true)
+        )
+          throw new Error(
+            `The saved turn in ${group.block} does not reproduce its exact native crease and paired edges.`,
+          );
+        authoredTurnAllowanceByPath.set(
+          path.id,
+          decodeTurnAllowance(turnAllowance, { x: e, y: f }),
+        );
+      }
+      // Authored marks have a checked native role before the generic seam and drill heuristics.
+      authoredInternalLabels.set(path.id, label);
+      roles[path.id] = 'internal';
+    }
+  }
+  const pointMarks: AuthoredPointMark[] = [];
+  for (const path of by('authored-point')) {
+    const point = read.meta.points[path.id];
+    const kind = authoredPointKind(layerOfPath(path));
+    if (
+      group.kind !== 'insert' ||
+      path.src.block !== group.block ||
+      read.meta.pathEntity[path.id] !== 'POINT' ||
+      !kind ||
+      !point ||
+      point.z !== 0 ||
+      point.thickness !== 0 ||
+      point.angleDeg !== null ||
+      path.closed ||
+      path.pts.length !== 1
+    )
+      throw new Error(
+        `The CAD point in ${group.block || 'the drawing'} is not a planar block POINT.`,
+      );
+    pointMarks.push({ at: { ...point.at }, kind });
+  }
 
   // cut
   let cutLayerPaths = by('cut');
@@ -633,7 +749,8 @@ function blockPiece(
 
   // seam (L14)
   const seamPick = pickOuter(by('seam'), '14');
-  let seam = seamPick.outer;
+  const authoredSeam = seamPick.outer;
+  let seam = authoredSeam;
   let seamSource: DxfBlockPiece['seamSource'] = seam ? 'L14' : null;
   for (const p of seamPick.rest) roles[p.id] = p.closed ? 'seam-extra' : 'other';
 
@@ -659,13 +776,91 @@ function blockPiece(
     }
   }
 
-  // L1 == L14 → mode B: the seam lives on layer 8
+  // CLO mode B reuses L14 for the cut. The writer's explicit zero-allowance block
+  // retains its independent L14 path when both source rings match exactly.
+  const signature = group.block && read.meta.zeroAllowanceSeamBlocks?.get(group.block);
+  const explicitZeroAllowanceSeam = Boolean(
+    signature &&
+      cut?.layer === '1' &&
+      authoredSeam &&
+      cut.paths.length === 1 &&
+      authoredSeam.paths.length === 1 &&
+      seamPick.loops.length === 1 &&
+      seamPick.rest.length === 0 &&
+      cut.pts.length === authoredSeam.pts.length &&
+      cut.pts.every(
+        ({ x, y }, index) => x === authoredSeam.pts[index]?.x && y === authoredSeam.pts[index]?.y,
+      ) &&
+      !contourSigProblem(signature, cut.pts),
+  );
+  const rounded = group.block && read.meta.authoredOutlineCornerByBlock?.get(group.block);
+  let authoredOutlineCorner;
+  if (rounded) {
+    const { a, b, c, d, e, f } = group.transform;
+    const cutPath = cut && pathById.get(cut.paths[0]!);
+    const seamPath = authoredSeam && pathById.get(authoredSeam.paths[0]!);
+    const nativeCut = cutPath && nativeAuthoredOutlinePoints(cutPath);
+    const nativeSeam = seamPath && nativeAuthoredOutlinePoints(seamPath);
+    if (
+      read.meta.units.mmPerUnit !== 1 ||
+      a !== 1 ||
+      b !== 0 ||
+      c !== 0 ||
+      d !== 1 ||
+      !explicitZeroAllowanceSeam ||
+      cutLayerPaths.length !== 1 ||
+      !nativeCut ||
+      !nativeSeam ||
+      !readNativePairedAuthoredOutlineCorner(nativeCut, nativeSeam, rounded)
+    )
+      throw new Error(
+        `The saved rounded corner in ${group.block} does not reproduce both native outlines.`,
+      );
+    authoredOutlineCorner = decodeAuthoredQuadratic(rounded, { x: e, y: f });
+  }
+  const allowanceCorner = group.block && read.meta.authoredAllowanceCornerByBlock?.get(group.block);
+  let authoredAllowanceCorner;
+  if (allowanceCorner) {
+    const { a, b, c, d, e, f } = group.transform;
+    const seamLayers = paths.filter((path) => layerOfPath(path) === '14');
+    const nativeCut =
+      cutLayerPaths.length === 1 &&
+      cutLayerPaths[0]!.closed &&
+      nativeAuthoredOutlinePoints(cutLayerPaths[0]!);
+    const nativeSeam =
+      seamLayers.length === 1 &&
+      seamLayers[0]!.closed &&
+      nativeAuthoredOutlinePoints(seamLayers[0]!);
+    if (
+      read.meta.units.mmPerUnit !== 1 ||
+      a !== 1 ||
+      b !== 0 ||
+      c !== 0 ||
+      d !== 1 ||
+      !nativeCut ||
+      !nativeSeam ||
+      !matchesAuthoredAllowanceCorner(
+        nativeCut,
+        nativeSeam,
+        decodeAuthoredAllowanceCorner(allowanceCorner),
+      )
+    )
+      throw new Error(
+        `The saved allowance corner in ${group.block} does not reproduce its exact native edges.`,
+      );
+    authoredAllowanceCorner = decodeAuthoredAllowanceCorner(allowanceCorner, { x: e, y: f });
+  }
   let cutEqualsSeam = false;
-  if (cut && seam && Math.abs(cut.areaMm2 - seam.areaMm2) <= 1e-4 * cut.areaMm2) {
+  if (
+    !explicitZeroAllowanceSeam &&
+    cut &&
+    seam &&
+    Math.abs(cut.areaMm2 - seam.areaMm2) <= 1e-4 * cut.areaMm2
+  ) {
     const ds = sampleDistances(seam, cut);
     cutEqualsSeam = Math.max(...ds) < 0.05;
   }
-  const internalPaths = by('internal');
+  const internalPaths = by('internal').filter(({ id }) => !authoredInternalLabels.has(id));
   if (cut && cutEqualsSeam) {
     const big = (c: DxfContour) =>
       c.areaMm2 >= 0.5 * cut.areaMm2 &&
@@ -783,8 +978,60 @@ function blockPiece(
 
   // notches
   const raw: RawNotch[] = [];
+  const ownedNotches = new Map<PathId, DxfNotch>();
+  const groups = group.block ? read.meta.authoredNotchesByBlock?.get(group.block) : undefined;
+  if (groups) {
+    const { a, b, c, d, e, f } = group.transform;
+    if (!cut || read.meta.units.mmPerUnit !== 1 || a !== 1 || b !== 0 || c !== 0 || d !== 1)
+      throw new Error(`Typed CAD notches in ${group.block} require an exact millimetre cut frame.`);
+    const layer4 = paths.filter((path) => layerOfPath(path) === '4');
+    for (const { groupId, shape, firstStroke, vertices } of groups) {
+      for (let index = 0; index < AUTHORED_NOTCH_STROKES[shape]; index++) {
+        const path = layer4[firstStroke + index];
+        const coords = path ? authoredInternalVertices(path.pts, { x: e, y: f }) : [];
+        if (
+          !path ||
+          path.src.block !== group.block ||
+          read.meta.pathEntity[path.id] !== 'LINE' ||
+          path.closed ||
+          coords.length !== 4 ||
+          coords.some((value, coordinate) => value !== vertices[index * 4 + coordinate])
+        )
+          throw new Error(`The saved layer-4 stroke for ${shape} in ${group.block} changed.`);
+        const [at, end] = path.pts as [PtMm, PtMm];
+        const depthMm = Math.hypot(end.x - at.x, end.y - at.y);
+        if (
+          distToContour(at, cut) > 0.001 ||
+          depthMm < 1 - 1e-5 ||
+          depthMm > PATIMPORT.notchMaxMm + 1e-5 ||
+          !pointInPolygon(end, cut.pts)
+        )
+          throw new Error(
+            `The saved layer-4 stroke for ${shape} is outside the cut in ${group.block}.`,
+          );
+        const dir = { x: (end.x - at.x) / depthMm, y: (end.y - at.y) / depthMm };
+        ownedNotches.set(path.id, {
+          at,
+          dir,
+          depthMm,
+          angleDeg: deg(dir),
+          on: 'cut',
+          distMm: 0,
+          source: 'line',
+          paths: [path.id],
+          authoredGroup: { groupId, shape, index },
+          authoredEnd: end,
+        });
+      }
+    }
+  }
   for (const p of by('notch')) {
     roles[p.id] = 'notch';
+    const owned = ownedNotches.get(p.id);
+    if (owned) {
+      raw.push(owned);
+      continue;
+    }
     const pa = read.meta.points[p.id];
     if (p.pts.length === 1) {
       const at = p.pts[0];
@@ -860,6 +1107,9 @@ function blockPiece(
     cut,
     seam,
     seamSource,
+    ...(explicitZeroAllowanceSeam ? { zeroAllowanceSeam: true as const } : {}),
+    ...(authoredAllowanceCorner ? { authoredAllowanceCorner } : {}),
+    ...(authoredOutlineCorner ? { authoredOutlineCorner } : {}),
     cutEqualsSeam,
     seamToCutMm,
     grain,
@@ -867,7 +1117,12 @@ function blockPiece(
     notchStats: { raw: raw.length, exactDuplicates: 0, twins: 0, derived: 0 },
     drills,
     roles,
-    texts: group.texts,
+    ...(authoredInternalLabels.size ? { authoredInternalLabels } : {}),
+    ...(authoredQuadraticByPath.size ? { authoredQuadraticByPath } : {}),
+    ...(authoredTurnAllowanceByPath.size ? { authoredTurnAllowanceByPath } : {}),
+    texts: texts.map(({ id }) => id),
+    ...(textMarks.length ? { textMarks } : {}),
+    ...(pointMarks.length ? { pointMarks } : {}),
     gradePoints: { turn, curve },
     pointNumbers,
     annotations,
@@ -895,7 +1150,8 @@ function dedupeNotches(
   staleCut: boolean,
   allowanceMm: number,
 ): void {
-  const { raw, piece } = w;
+  const { piece } = w;
+  const raw = w.raw.filter(({ authoredGroup }) => !authoredGroup);
   const live = raw.map(() => true);
   if (staleCut) {
     const graded = raw.some((n) => n.on !== 'cut');
@@ -1019,7 +1275,7 @@ function dedupeNotches(
     }
     out.push(proj);
   }
-  piece.notches = out;
+  piece.notches = [...out, ...w.raw.filter(({ authoredGroup }) => authoredGroup)];
 }
 
 /** Cumulative arc length of a closed polyline; c[i] = length up to vertex i, c[n] = perimeter. */
@@ -1106,6 +1362,7 @@ function transferNotches(sample: DxfBlockPiece, target: DxfBlockPiece): number {
   const sameDir = Math.sign(sample.seam.signedAreaMm2) === Math.sign(target.seam.signedAreaMm2);
   let n = 0;
   for (const src of sample.notches) {
+    if (src.authoredGroup) continue;
     const near = nearestOnPolyline(src.at, S0, true);
     const s0 = c0[near.seg] + near.t * (c0[near.seg + 1] - c0[near.seg]);
     let sk: number;

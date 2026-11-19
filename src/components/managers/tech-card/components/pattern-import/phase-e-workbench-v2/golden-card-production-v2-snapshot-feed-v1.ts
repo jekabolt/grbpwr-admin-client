@@ -10,6 +10,10 @@ import {
 import type { PatternImportDxfPhaseEGoldenWholeCardLiveReaderResultV1 } from './golden-whole-card-live-reader-v1';
 import { readPatternImportDxfProductExactNSeamRestorePatchV2 } from './composite-sidecar-restore-authority-v4';
 import type { PatternImportDxfProductCompositeSidecarTransactionResultV4 } from './composite-sidecar-transaction-v4';
+import {
+  isExactNSeamDocumentLockCurrent,
+  subscribeExactNSeamDocumentRetirement,
+} from './exact-n-seam-production-session-store-v2';
 
 export const PATTERN_IMPORT_DXF_PHASE_E_GOLDEN_CARD_PRODUCTION_V2_SNAPSHOT_FEED_V1 =
   'pattern-import-dxf-phase-e-golden-card-production-v2-snapshot-feed/1' as const;
@@ -55,7 +59,13 @@ export type PatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedResultV1 = R
   claims: typeof PATTERN_IMPORT_DXF_PHASE_E_GOLDEN_CARD_PRODUCTION_V2_SNAPSHOT_FEED_CLAIMS_V1;
 }>;
 
-const feeds = new Map<number, PatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV1>();
+const feeds = new Map<
+  number,
+  Readonly<{
+    cardLockVersion: number;
+    feed: PatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV1;
+  }>
+>();
 const listeners = new Map<number, Set<() => void>>();
 
 function publish(techCardId: number): void {
@@ -74,7 +84,10 @@ export function readPatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV1(
   techCardId: number | undefined,
 ): PatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV1 | null {
   if (!techCardId || !Number.isSafeInteger(techCardId) || techCardId < 1) return null;
-  return feeds.get(techCardId) ?? null;
+  const current = feeds.get(techCardId);
+  return current && isExactNSeamDocumentLockCurrent(techCardId, current.cardLockVersion)
+    ? current.feed
+    : null;
 }
 
 export function subscribePatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV1(
@@ -85,7 +98,13 @@ export function subscribePatternImportDxfPhaseEGoldenCardProductionV2SnapshotFee
   const current = listeners.get(techCardId) ?? new Set<() => void>();
   current.add(listener);
   listeners.set(techCardId, current);
+  const stopRetirement = subscribeExactNSeamDocumentRetirement(techCardId, () => {
+    const saved = feeds.get(techCardId);
+    if (saved && !isExactNSeamDocumentLockCurrent(techCardId, saved.cardLockVersion))
+      clearPatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV1(techCardId);
+  });
   return () => {
+    stopRetirement();
     current.delete(listener);
     if (!current.size) listeners.delete(techCardId);
   };
@@ -175,7 +194,11 @@ export function publishPatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV
   )
     return false;
   try {
-    const current = feeds.get(detached.techCardId);
+    const { techCardId, cardLockVersion } = patch.bindings.row;
+    if (!isExactNSeamDocumentLockCurrent(techCardId, cardLockVersion)) return false;
+    const prior = feeds.get(techCardId);
+    if (prior && prior.cardLockVersion > cardLockVersion) return false;
+    const current = prior?.cardLockVersion === cardLockVersion ? prior.feed : null;
     if (
       current &&
       (current.cardRef !== detached.cardRef ||
@@ -194,8 +217,11 @@ export function publishPatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV
       ) ?? []),
       projection,
     ].sort((left, right) => left.operationNumber - right.operationNumber);
-    feeds.set(detached.techCardId, deepFreeze({ ...detached, exactOperationProjections }));
-    publish(detached.techCardId);
+    feeds.set(techCardId, {
+      cardLockVersion,
+      feed: deepFreeze({ ...detached, exactOperationProjections }),
+    });
+    publish(techCardId);
     return true;
   } catch {
     return false;

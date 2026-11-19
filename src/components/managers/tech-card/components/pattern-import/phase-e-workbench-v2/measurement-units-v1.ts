@@ -33,6 +33,12 @@ const UNIT = Object.freeze({
   Readonly<{ mmPerUnit: number; decimals: number }>
 >);
 
+export function patternImportDxfPhaseEMillimetresPerUnitV1(
+  unit: PatternImportDxfPhaseEMeasurementUnitV1,
+): number {
+  return UNIT[unit].mmPerUnit;
+}
+
 function finiteMm(value: number, name: string): void {
   if (!Number.isFinite(value)) throw new TypeError(`${name} must be a finite millimetre value.`);
 }
@@ -65,6 +71,20 @@ export function formatPatternImportDxfPhaseEMeasurementValueV1(
     value,
     formatted: `${value.toFixed(definition.decimals)} ${unit}`,
   });
+}
+
+export function formatPatternImportDxfPhaseEMeasurementAreaV1(
+  squareMm: number,
+  unit: PatternImportDxfPhaseEMeasurementUnitV1,
+): string {
+  finiteMm(squareMm, 'squareMm');
+  const definition = UNIT[unit];
+  if (!definition) throw new TypeError(`Unsupported measurement unit: ${String(unit)}.`);
+  const area = roundPatternImportDxfPhaseEMeasurementV1(
+    squareMm / definition.mmPerUnit ** 2,
+    definition.decimals,
+  );
+  return `${area.toFixed(definition.decimals)} ${unit}²`;
 }
 
 /**

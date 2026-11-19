@@ -12,6 +12,18 @@ export const applyAffine = (t: Affine, p: PtMm): PtMm => ({
   y: t.b * p.x + t.d * p.y + t.f,
 });
 
+/** Cut-loop winding identifies islands and holes, even across a reflection. */
+export function transformCutLoops(
+  t: Affine,
+  loops: readonly (readonly PtMm[])[] | undefined,
+): PtMm[][] | undefined {
+  const reversesWinding = t.a * t.d - t.b * t.c < 0;
+  return loops?.map((loop) => {
+    const points = loop.map((point) => applyAffine(t, point));
+    return reversesWinding ? points.reverse() : points;
+  });
+}
+
 /** t1 ∘ t2 (t2 applied first). */
 export function compose(t1: Affine, t2: Affine): Affine {
   return {

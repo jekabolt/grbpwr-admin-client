@@ -1,5 +1,10 @@
 import type { ApplyResult, CardDraft } from '../../pattern-import/types';
 import {
+  isDxfProductSavedReprocessVerifiedV1,
+  type DxfProductSavedReprocessResultV1,
+} from '../../pattern-import/dxf-product-saved-reprocess-owner-v1';
+import type { PatternImportDxfManifestBridgeViewV1 } from './pattern-import-dxf-handoff-bridge-v1';
+import {
   PATTERN_IMPORT_DXF_PRODUCT_WRITER_REPLAY_V1,
   replayPatternImportDxfProductWriterV1,
 } from './pattern-import-dxf-product-writer-replay-v1';
@@ -72,6 +77,116 @@ export type PatternImportDxfProductCommitReplayResultV1 =
       claims: typeof BLOCKED_CLAIMS;
     }>;
 
+export type PatternImportDxfProductVerifiedCommitReplayV1 = Extract<
+  PatternImportDxfProductCommitReplayResultV1,
+  { ok: true }
+>;
+
+export type PatternImportDxfProductVerifiedSavedReplayV1 = Readonly<{
+  ok: true;
+  schemaVersion: 'pattern-import-dxf-product-current-saved-replay/1';
+  savedRowRevision: number;
+  evidence: PatternImportDxfProductVerifiedCommitReplayV1['evidence'];
+}>;
+
+export type PatternImportDxfProductVerifiedReplayV1 =
+  | PatternImportDxfProductVerifiedCommitReplayV1
+  | PatternImportDxfProductVerifiedSavedReplayV1;
+
+const replayedManifests = new WeakMap<
+  PatternImportDxfProductVerifiedReplayV1,
+  PatternImportDxfManifestBridgeViewV1
+>();
+
+/** Binds the first metadata attachment to an independently verified, already saved DXF. */
+export function capturePatternImportDxfProductCurrentSavedReplayV1(
+  saved: DxfProductSavedReprocessResultV1,
+  patternSizeId: number,
+): PatternImportDxfProductVerifiedSavedReplayV1 | null {
+  if (
+    !isDxfProductSavedReprocessVerifiedV1(saved) ||
+    !Number.isSafeInteger(patternSizeId) ||
+    patternSizeId < 0 ||
+    !saved.nativeSewingReplay?.replayReady ||
+    saved.nativeSewingReplay.pipeline.contentBinding?.sourceSha256 !== saved.row.sha256 ||
+    saved.draft.scopes.length !== 1
+  )
+    return null;
+  const { row } = saved;
+  const { manifest } = saved.draft.scopes[0];
+  const aliases = saved.draft.aliases.map(({ scopeKey, blockName, pieceLineKey }) =>
+    Object.freeze({ scopeKey, blockName, pieceLineKey }),
+  );
+  const pieceLineKeys = [...new Set(aliases.map(({ pieceLineKey }) => pieceLineKey))];
+  if (
+    aliases.length !== 2 ||
+    pieceLineKeys.length !== 2 ||
+    aliases.some(
+      ({ scopeKey, blockName, pieceLineKey }) =>
+        scopeKey !== row.scopeKey || !blockName || !pieceLineKey,
+    ) ||
+    new Set(aliases.map(({ blockName }) => blockName.toLowerCase())).size !== aliases.length
+  )
+    return null;
+  const proof: PatternImportDxfProductVerifiedSavedReplayV1 = Object.freeze({
+    ok: true,
+    schemaVersion: 'pattern-import-dxf-product-current-saved-replay/1',
+    savedRowRevision: row.revision,
+    evidence: Object.freeze({
+      techCardId: row.techCardId,
+      scopeKey: row.scopeKey,
+      patternLineKey: row.patternLineKey,
+      patternUrl: row.url,
+      patternSizeId,
+      previousLockVersion: row.cardLockVersion,
+      productExportSha256: row.sha256,
+      byteLength: row.sizeBytes,
+      pieceLineKeys: Object.freeze(pieceLineKeys),
+      aliases: Object.freeze(aliases),
+      aliasCount: aliases.length,
+    }),
+  });
+  const { v, generator, createdAt, techCardId, units, cutLayerIsFinal, source } = manifest;
+  replayedManifests.set(proof, {
+    v,
+    generator,
+    createdAt,
+    techCardId,
+    units,
+    cutLayerIsFinal,
+    source: structuredClone(source),
+  });
+  return proof;
+}
+
+export function readPatternImportDxfProductCommitReplayScopeV1(
+  proof: PatternImportDxfProductVerifiedReplayV1 | undefined,
+): string | null {
+  return proof && replayedManifests.has(proof) ? proof.evidence.scopeKey : null;
+}
+
+export function matchesPatternImportDxfProductCommitReplaySourceV1(
+  proof: PatternImportDxfProductVerifiedReplayV1,
+  manifest: PatternImportDxfManifestBridgeViewV1,
+  sourceSha256: string,
+  exportSha256: string,
+): boolean {
+  const replayed = replayedManifests.get(proof);
+  return (
+    replayed !== undefined &&
+    sourceSha256 === proof.evidence.productExportSha256 &&
+    exportSha256 === proof.evidence.productExportSha256 &&
+    manifest.v === replayed.v &&
+    manifest.generator === replayed.generator &&
+    manifest.createdAt === replayed.createdAt &&
+    manifest.techCardId === replayed.techCardId &&
+    manifest.techCardId === proof.evidence.techCardId &&
+    manifest.units === replayed.units &&
+    manifest.cutLayerIsFinal === replayed.cutLayerIsFinal &&
+    JSON.stringify(manifest.source) === JSON.stringify(replayed.source)
+  );
+}
+
 function blocked(
   code: PatternImportDxfProductCommitReplayBlockerV1['code'],
   detail: string,
@@ -128,11 +243,30 @@ export async function replayCommittedPatternImportDxfProductScopeV1(
       'Commit receipt URL does not equal the exact upload URL.',
     );
 
+  const scopeEvidence = {
+    techCardId: apply.commitReceipt.techCardId,
+    previousLockVersion: apply.commitReceipt.previousLockVersion,
+    scopeKey,
+    patternLineKey: committed.patternLineKey,
+    patternUrl: committed.patternUrl,
+    patternSizeId: committed.patternSizeId,
+    pieceLineKeys: Object.freeze([...committed.pieceLineKeys]),
+    aliases: Object.freeze(
+      committed.aliases.map(({ scopeKey: aliasScope, blockName, pieceLineKey }) =>
+        Object.freeze({ scopeKey: aliasScope, blockName, pieceLineKey }),
+      ),
+    ),
+    aliasCount: committed.aliases.length,
+  };
+  const { replay, finalManifest } = structuredClone({
+    replay: draftScope.writerReplay,
+    finalManifest: draftScope.manifest,
+  });
   const replayed = await replayPatternImportDxfProductWriterV1(
     {
       schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_WRITER_REPLAY_V1,
-      replay: draftScope.writerReplay,
-      finalManifest: draftScope.manifest,
+      replay,
+      finalManifest,
       expected: { scopeKey, exportSha256: uploadSha256 },
     },
     crypto,
@@ -143,27 +277,26 @@ export async function replayCommittedPatternImportDxfProductScopeV1(
       replayed.blockers.map(({ code, detail }) => `${code}: ${detail}`).join('; '),
     );
 
-  return Object.freeze({
+  const proof = Object.freeze({
     ok: true as const,
     schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMMIT_REPLAY_V1,
     evidence: Object.freeze({
-      techCardId: apply.commitReceipt.techCardId,
-      previousLockVersion: apply.commitReceipt.previousLockVersion,
-      scopeKey,
-      patternLineKey: committed.patternLineKey,
-      patternUrl: committed.patternUrl,
-      patternSizeId: committed.patternSizeId,
+      ...scopeEvidence,
       productExportSha256: replayed.receipt.exportSha256,
       byteLength: replayed.receipt.byteLength,
-      pieceLineKeys: Object.freeze([...committed.pieceLineKeys]),
-      aliases: Object.freeze(
-        committed.aliases.map(({ scopeKey: aliasScope, blockName, pieceLineKey }) =>
-          Object.freeze({ scopeKey: aliasScope, blockName, pieceLineKey }),
-        ),
-      ),
-      aliasCount: committed.aliases.length,
     }),
     blockers: Object.freeze([]) as readonly [],
     claims: PATTERN_IMPORT_DXF_PRODUCT_COMMIT_REPLAY_CLAIMS_V1,
   });
+  const { v, generator, createdAt, techCardId, units, cutLayerIsFinal, source } = finalManifest;
+  replayedManifests.set(proof, {
+    v,
+    generator,
+    createdAt,
+    techCardId,
+    units,
+    cutLayerIsFinal,
+    source,
+  });
+  return proof;
 }

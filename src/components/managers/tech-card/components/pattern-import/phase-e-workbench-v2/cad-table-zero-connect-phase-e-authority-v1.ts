@@ -1,6 +1,12 @@
 import type { PatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
+import type { PatternImportDxfProductVerifiedSavedReplayV1 } from 'lib/cloth/domain/pattern-import-dxf-product-commit-replay-v1';
 import type { DxfProductPhaseDSizeSelectionResultV1 } from 'lib/pattern-import/dxf-product-phase-d-size-selection-v1';
+import {
+  projectPatternImportDxfProductPhaseEAssemblyV1,
+  type PatternImportDxfProductPhaseEAssemblyProjectionV1,
+} from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
+import { bareToken, sizeTokensOf } from '../../nesting/block-code';
 import type { CardDraft } from 'lib/pattern-import/types';
 
 import {
@@ -20,6 +26,7 @@ export type PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1 = Readonly<{
   catalogCanonicalSha256: string;
   sizeSelectionCanonicalSha256: string;
   sourceFileId: string;
+  selectedRank: Readonly<{ sizeId: number | null; spellings: readonly string[] }>;
   preparationGeneration: number;
   importGeneration: number;
   readonly [preparedAuthorityBrand]: never;
@@ -41,9 +48,12 @@ export type PatternImportDxfPhaseEZeroConnectPreparedAuthorityRefreshResultV1 =
       blocker: Readonly<{ code: 'fresh-saved-authority-unavailable'; detail: string }>;
     }>;
 
+export type PatternImportDxfPhaseEZeroConnectRefreshLockV1 = 'current' | 'advanced';
+
 export type PatternImportDxfPhaseEZeroConnectPreparedAuthorityRefreshOwnerV1 = Readonly<{
   refresh: (
     signal: AbortSignal,
+    lock?: PatternImportDxfPhaseEZeroConnectRefreshLockV1,
   ) => Promise<PatternImportDxfPhaseEZeroConnectPreparedAuthorityRefreshResultV1>;
 }>;
 
@@ -54,6 +64,8 @@ type PreparedAuthorityState = Readonly<{
   catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1;
   preparationGeneration: number;
   importGeneration: number;
+  savedReplay?: PatternImportDxfProductVerifiedSavedReplayV1;
+  savedSceneProjection?: PatternImportDxfProductPhaseEAssemblyProjectionV1;
 }>;
 
 const authorityStates = new WeakMap<object, PreparedAuthorityState>();
@@ -91,6 +103,57 @@ export function isPatternImportDxfPhaseEZeroConnectPreparedAuthorityV1(
   );
 }
 
+export function readPatternImportDxfPhaseEZeroConnectCurrentSavedReplayV1(
+  authority: PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1,
+): Readonly<{
+  draft: CardDraft;
+  savedReplay: PatternImportDxfProductVerifiedSavedReplayV1;
+}> | null {
+  if (!isPatternImportDxfPhaseEZeroConnectPreparedAuthorityV1(authority)) return null;
+  const state = authorityStates.get(authority);
+  return state?.savedReplay ? { draft: state.draft, savedReplay: state.savedReplay } : null;
+}
+
+/** Returns the issued display projection of this verified saved row's private selected Phase D. */
+export function readPatternImportDxfPhaseEZeroConnectSavedSceneProjectionV1(
+  authority: PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1,
+): PatternImportDxfProductPhaseEAssemblyProjectionV1 | null {
+  if (!isPatternImportDxfPhaseEZeroConnectPreparedAuthorityV1(authority)) return null;
+  const state = authorityStates.get(authority)!;
+  if (state.savedSceneProjection) return state.savedSceneProjection;
+  const result = projectPatternImportDxfProductPhaseEAssemblyV1(state.catalog, state.selection);
+  if (!result.ok) return null;
+  authorityStates.set(
+    authority,
+    Object.freeze({ ...state, savedSceneProjection: result.projection }),
+  );
+  return result.projection;
+}
+
+type SavedSize = Readonly<{ sizeId: number; sizeToken: string; label: string }>;
+
+/** One stored DXF spelling can select a rank only when no other rank in this card uses it. */
+function savedRank(token: string, sizes?: readonly SavedSize[]) {
+  const ranks = sizes?.map((size) => ({
+    sizeId: size.sizeId,
+    token: size.sizeToken,
+    spellings: new Set(
+      [size.sizeToken, ...sizeTokensOf(size.label)].map(bareToken).filter(Boolean),
+    ),
+  }));
+  const selected = ranks?.filter((rank) => rank.token === token);
+  if (!ranks || selected?.length !== 1)
+    return Object.freeze({
+      sizeId: null,
+      spellings: Object.freeze(ranks ? [] : [bareToken(token)]),
+    });
+  const rank = selected[0]!;
+  const spellings = [...rank.spellings].filter((spelling) =>
+    ranks.every((other) => other === rank || !other.spellings.has(spelling)),
+  );
+  return Object.freeze({ sizeId: rank.sizeId, spellings: Object.freeze(spellings.sort()) });
+}
+
 /**
  * Keeps the replay draft and selected Phase-D carrier private while an ordinary card save may
  * replace the preparation. The public token exposes only immutable exact bindings.
@@ -102,6 +165,8 @@ export function capturePatternImportDxfPhaseEZeroConnectPreparedAuthorityV1(
     selection: SuccessfulSelection;
     catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1;
     generation: PatternImportDxfPhaseECadTableZeroOperationGenerationTicketV1;
+    savedSizes?: readonly SavedSize[];
+    savedReplay?: PatternImportDxfProductVerifiedSavedReplayV1;
   }>,
 ): PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1 | null {
   const { row, draft, selection, catalog, generation } = input;
@@ -125,6 +190,7 @@ export function capturePatternImportDxfPhaseEZeroConnectPreparedAuthorityV1(
   const token = Object.freeze({
     schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_PREPARED_AUTHORITY_V1,
     row: Object.freeze({ ...row }),
+    selectedRank: savedRank(catalog.sizeToken, input.savedSizes),
     catalogCanonicalSha256: catalog.canonicalSha256,
     sizeSelectionCanonicalSha256: selection.selection.canonicalSha256,
     sourceFileId: catalog.sourceFileId,
@@ -140,6 +206,7 @@ export function capturePatternImportDxfPhaseEZeroConnectPreparedAuthorityV1(
       catalog,
       preparationGeneration: token.preparationGeneration,
       importGeneration: token.importGeneration,
+      ...(input.savedReplay ? { savedReplay: input.savedReplay } : {}),
     }),
   );
   return token;

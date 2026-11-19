@@ -56,8 +56,8 @@ export function surfacePartSide(
 }
 
 /**
- * A surface seam lays one piece on a line, by whole edges (owner, Р5, 11.11): the part side drops its
- * stretches and keeps the edges of one piece — the one just clicked, else the first one in hand.
+ * A surface seam lays one piece on a line. Keep the picked edges and stretches of that piece
+ * in order. The piece just clicked takes precedence over the first piece already in hand.
  */
 export function surfacePick<T extends SidePick>(
   sel: T,
@@ -71,8 +71,10 @@ export function surfacePick<T extends SidePick>(
   const lead = clicked && edges.includes(clicked) ? clicked : edges[0];
   const piece = lead ? pieceOf(lead) : null;
   const kept = sel[side].filter((id) => isInner(id) || pieceOf(id) === piece);
-  if (kept.length === sel[side].length && !Object.keys(sel.spans[side]).length) return sel;
-  return { ...sel, [side]: kept, spans: { ...sel.spans, [side]: {} } };
+  const ranges = Object.entries(sel.spans[side]);
+  const keptRanges = ranges.filter(([target]) => kept.includes(target));
+  if (kept.length === sel[side].length && keptRanges.length === ranges.length) return sel;
+  return { ...sel, [side]: kept, spans: { ...sel.spans, [side]: Object.fromEntries(keptRanges) } };
 }
 
 const TOUCH_MM = 0.5;

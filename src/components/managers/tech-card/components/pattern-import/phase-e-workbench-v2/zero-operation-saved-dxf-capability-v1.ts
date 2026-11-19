@@ -1,7 +1,8 @@
 import {
-  bindingScopes,
-  scopeKeyOfBinding,
-} from 'components/managers/tech-card/components/bom-purpose';
+  savedWorkbenchBindingScopeKeyV1,
+  savedWorkbenchScopeKeyV1,
+} from './saved-workbench-scope-v1';
+import { bindingScopes } from 'components/managers/tech-card/components/bom-purpose';
 import type {
   FabricScope,
   RollGoodsLine,
@@ -226,7 +227,7 @@ export function resolvePatternImportDxfPhaseEZeroOperationSavedDxfCapabilityV1(
   const scopeKey = request.scopeKey.trim();
   if (!scopeKey || scopeKey.length > 256 || !STABLE_ID.test(scopeKey))
     return blocked('invalid-material-scope', 'A stable explicit material scope key is required.');
-  if (!request.scopes.some(({ key }) => key === scopeKey))
+  if (!request.scopes.some((scope) => savedWorkbenchScopeKeyV1(scope) === scopeKey))
     return blocked(
       'material-scope-unavailable',
       'The explicit material scope is absent from the current saved card projection.',
@@ -251,7 +252,11 @@ export function resolvePatternImportDxfPhaseEZeroOperationSavedDxfCapabilityV1(
   const patternBindings = bindingScopes(request.scopes, request.patterns);
   const candidates = request.patterns.filter(
     (pattern) =>
-      scopeKeyOfBinding(pattern.fabricPurpose, pattern.bomLineKey, patternBindings) === scopeKey,
+      savedWorkbenchBindingScopeKeyV1(
+        pattern.fabricPurpose,
+        pattern.bomLineKey,
+        patternBindings,
+      ) === scopeKey,
   );
   if (candidates.length === 0)
     return blocked(

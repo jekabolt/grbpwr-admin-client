@@ -59,6 +59,7 @@ export type PatternImportDxfPhaseEExactCompositePersistenceRequestV3 = Readonly<
   catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1;
   proposal: PatternImportDxfProductPhaseEMultiseamProposalV2;
   choices: PatternImportDxfProductPhaseEMultiseamChoicesV2;
+  requiredSemanticV1Sha256?: string;
 }>;
 
 export type PatternImportDxfPhaseEExactCompositePersistenceBlockerV3 = Readonly<{
@@ -257,6 +258,7 @@ async function preserveCurrentComponents(
   authority: PatternImportDxfProductCompositeSidecarBindingsV3,
   selectedOperationNumber: number,
   crypto: Pick<Crypto, 'subtle'> | undefined,
+  requiredSemanticV1Sha256?: string,
 ): Promise<PreservedComponents> {
   if (!row)
     fail(
@@ -272,6 +274,16 @@ async function preserveCurrentComponents(
     !Number.isSafeInteger(row.byteLength)
   )
     fail('current-sidecar-invalid', 'current-get', 'Current sidecar metadata is invalid.');
+  if (
+    requiredSemanticV1Sha256 !== undefined &&
+    (row.mediaType !== PATTERN_IMPORT_DXF_PRODUCT_SEMANTIC_SIDECAR_MEDIA_TYPE_V1 ||
+      row.sidecarSha256 !== requiredSemanticV1Sha256)
+  )
+    fail(
+      'current-sidecar-invalid',
+      'current-get',
+      'The standalone Product Semantic V1 reviewed for these first choices has changed.',
+    );
   const bytes = copyCanonicalBase64(row.sidecarBytes, row.byteLength as number);
   try {
     if ((await digest(bytes, crypto)) !== row.sidecarSha256)
@@ -412,6 +424,7 @@ export function createPatternImportDxfPhaseEExactCompositePersistenceV3(
           request.currentAuthority,
           request.selectedOperationNumber,
           crypto,
+          request.requiredSemanticV1Sha256,
         );
         let exactOwner: PatternImportDxfProductPhaseEExactTopologyBindingOwnerV1;
         const exact = await buildPatternImportDxfProductPhaseEExactTopologyBindingV1(

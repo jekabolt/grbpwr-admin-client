@@ -1,3 +1,8 @@
+import {
+  type MeasurementSurfaceContactHierarchyBudgetV1,
+  findMeasurementSurfaceContactCandidatesV1,
+} from './measurement-surface-contact-hierarchy-v1';
+
 export const MEASUREMENT_SURFACE_SELF_INTERSECTION_V1 =
   'measurement-surface-self-intersection/v1' as const;
 
@@ -50,6 +55,60 @@ export interface MeasurementSurfaceSelfIntersectionReportV1 {
   readonly intersectionCount: number;
   readonly intersections: readonly MeasurementSurfaceIntersectionPairV1[];
   readonly blockers: readonly 'self-intersection'[];
+}
+
+export const MEASUREMENT_PARTITIONED_SURFACE_SELF_INTERSECTION_V1 =
+  'measurement-partitioned-surface-self-intersection/v1' as const;
+
+export interface MeasurementSurfaceContactPartitionV1 {
+  readonly vertexCount: number;
+  readonly triangleCount: number;
+}
+
+type MeasurementSurfaceInputBudgetV1 = Pick<
+  MeasurementSurfaceSelfIntersectionPolicyV1,
+  'maxVertices' | 'maxTriangles' | 'maxInputBytes'
+>;
+
+export interface MeasurementPartitionedSurfaceContactBudgetV1
+  extends MeasurementSurfaceInputBudgetV1,
+    MeasurementSurfaceContactHierarchyBudgetV1 {}
+
+export const DEFAULT_MEASUREMENT_PARTITIONED_SURFACE_CONTACT_BUDGET_V1: MeasurementPartitionedSurfaceContactBudgetV1 =
+  Object.freeze({
+    maxVertices: 50000,
+    maxTriangles: 80000,
+    maxInputBytes: 4 * 1024 * 1024,
+    maxHierarchyNodes: 60000,
+    maxPairVisits: 2000000,
+    maxCandidatePairs: 600000,
+  });
+
+export interface MeasurementPartitionedSurfaceSelfIntersectionReportV1
+  extends Omit<MeasurementSurfaceSelfIntersectionReportV1, 'version' | 'broadPhase'> {
+  readonly version: typeof MEASUREMENT_PARTITIONED_SURFACE_SELF_INTERSECTION_V1;
+  readonly pairScope: 'all' | 'reference-against-pieces';
+  readonly partitionEpsilonM: readonly number[];
+  readonly broadPhase: {
+    readonly hierarchyNodeCount: number;
+    readonly nodePairVisitCount: number;
+    readonly trianglePairVisitCount: number;
+    readonly candidatePairCount: number;
+    readonly topologyAdjacentPairCount: number;
+  };
+}
+
+export interface MeasurementReferenceSurfaceClearanceReportV1 {
+  readonly version: 'measurement-reference-surface-clearance/v1';
+  readonly minimumClearanceM: number;
+  readonly passed: boolean;
+  readonly crossings: MeasurementPartitionedSurfaceSelfIntersectionReportV1;
+  readonly unprovenPairCount: number;
+  readonly unprovenPairs: readonly {
+    readonly referenceTriangle: number;
+    readonly cutTriangle: number;
+    readonly separationLowerBoundM: number;
+  }[];
 }
 
 export const DEFAULT_MEASUREMENT_SURFACE_SELF_INTERSECTION_POLICY_V1: MeasurementSurfaceSelfIntersectionPolicyV1 =
@@ -262,7 +321,7 @@ function requireUndecoratedTypedArray(
 function preflight(
   positions: Float32Array,
   indices: Uint32Array,
-  policy: MeasurementSurfaceSelfIntersectionPolicyV1,
+  policy: MeasurementSurfaceInputBudgetV1,
 ): {
   readonly vertexCount: number;
   readonly triangleCount: number;
@@ -361,7 +420,7 @@ function triangleAabbs(
   indices: Uint32Array,
   vertexCount: number,
   triangleCount: number,
-  epsilonM: number,
+  epsilonM: number | Float64Array,
 ): Float64Array {
   const aabbs = new Float64Array(triangleCount * 6);
   const canonicalFaces = new Set<string>();
@@ -387,7 +446,8 @@ function triangleAabbs(
       distance(value.b, value.c),
       distance(value.c, value.a),
     );
-    if (!(longestEdgeM > 0) || value.normalLength <= epsilonM * longestEdgeM) {
+    const triangleEpsilonM = typeof epsilonM === 'number' ? epsilonM : epsilonM[triangleIndex];
+    if (!(longestEdgeM > 0) || value.normalLength <= triangleEpsilonM * longestEdgeM) {
       throw new RangeError(`Triangle ${triangleIndex} is degenerate at the validator epsilon.`);
     }
     const aabbOffset = triangleIndex * 6;
@@ -1092,6 +1152,120 @@ function triangleIntersectionKind(
   return strongest === 2 ? 'proper-crossing' : strongest === 1 ? 'touching' : null;
 }
 
+function triangleSeparationLowerBoundM(
+  first: Triangle,
+  second: Triangle,
+  epsilonM: number,
+  targetM: number,
+): number {
+  // Every axis gives a lower bound on Euclidean separation. Use a common local origin for
+  // projections and subtract the larger mesh tolerance before certifying the clearance.
+  const firstPoints = [[0, 0, 0], subtract(first.b, first.a), subtract(first.c, first.a)] as const;
+  const secondPoints = [second.a, second.b, second.c].map((point) => subtract(point, first.a));
+  let best = 0;
+  const useAxis = (axis: Point3) => {
+    const norm = Math.hypot(...axis);
+    if (norm === 0) return false;
+    const a = firstPoints.map((point) => dot(point, axis));
+    const b = secondPoints.map((point) => dot(point, axis));
+    const gap = Math.max(Math.min(...b) - Math.max(...a), Math.min(...a) - Math.max(...b));
+    best = Math.max(best, gap / norm - epsilonM);
+    return best >= targetM;
+  };
+  if (useAxis(first.normal) || useAxis(second.normal)) return best;
+  const firstEdges = firstPoints.map((point, i) => subtract(firstPoints[(i + 1) % 3], point));
+  const secondEdges = secondPoints.map((point, i) => subtract(secondPoints[(i + 1) % 3], point));
+  for (const edge of firstEdges) {
+    if (useAxis(cross(first.normal, edge))) return best;
+    for (const other of secondEdges) {
+      if (useAxis(cross(edge, other))) return best;
+    }
+  }
+  for (const edge of secondEdges) {
+    if (useAxis(cross(second.normal, edge))) return best;
+  }
+  // At an exterior vertex/edge closest pair, the connecting segment is another useful axis.
+  const usePointAndEdgeAxes = (
+    points: readonly Point3[],
+    starts: readonly Point3[],
+    edges: readonly Point3[],
+  ) =>
+    points.some((point) =>
+      starts.some((start, i) => {
+        const end = starts[(i + 1) % 3];
+        const edge = edges[i];
+        const t = Math.max(0, Math.min(1, dot(subtract(point, start), edge) / dot(edge, edge)));
+        return useAxis(subtract(point, interpolate(start, end, t)));
+      }),
+    );
+  if (!usePointAndEdgeAxes(firstPoints, secondPoints, secondEdges))
+    usePointAndEdgeAxes(secondPoints, firstPoints, firstEdges);
+  return best;
+}
+
+function surfaceEpsilonM(bounds: Bounds, policy: MeasurementSurfaceSelfIntersectionPolicyV1) {
+  const epsilonM = Math.max(
+    policy.absoluteEpsilonM,
+    bounds.diagonalM * policy.relativeEpsilon,
+    bounds.maxAbsCoordinateM * FLOAT32_RELATIVE_ULP * policy.float32UlpMultiplier,
+  );
+  if (!Number.isFinite(epsilonM) || epsilonM <= 0) {
+    throw new RangeError('Scale-aware intersection epsilon is not finite and positive.');
+  }
+  return epsilonM;
+}
+
+function checkIntersectionCandidates(
+  positions: Float32Array,
+  indices: Uint32Array,
+  candidatePairKeys: readonly number[],
+  epsilonM: number,
+  angularEpsilon: number,
+  triangleEpsilonsM?: Float64Array,
+) {
+  const triangleCount = indices.length / 3;
+  const intersections: MeasurementSurfaceIntersectionPairV1[] = [];
+  let topologyAdjacentPairCount = 0;
+  const triangleCache: Array<Triangle | undefined> = new Array(triangleCount);
+  const cachedTriangle = (triangleIndex: number): Triangle =>
+    (triangleCache[triangleIndex] ??= triangle(positions, indices, triangleIndex));
+  for (const key of candidatePairKeys) {
+    const triangleA = Math.floor(key / triangleCount);
+    const triangleB = key - triangleA * triangleCount;
+    const sharedVertices = sharedTopologyVertices(indices, triangleA, triangleB);
+    if (sharedVertices.length > 0) topologyAdjacentPairCount++;
+    const first = cachedTriangle(triangleA);
+    const second = cachedTriangle(triangleB);
+    const pairEpsilonM = triangleEpsilonsM
+      ? Math.max(triangleEpsilonsM[triangleA], triangleEpsilonsM[triangleB])
+      : epsilonM;
+    if (
+      adjacentContactIsProvablyConfinedByPlaneSides(
+        indices,
+        triangleA,
+        triangleB,
+        sharedVertices,
+        first,
+        second,
+        pairEpsilonM,
+        positions,
+      )
+    ) {
+      continue;
+    }
+    const kind = triangleIntersectionKind(first, second, pairEpsilonM, angularEpsilon);
+    if (kind === null) continue;
+    if (
+      sharedVertices.length > 0 &&
+      adjacentContactIsConfined(kind, sharedVertices, positions, first, second, pairEpsilonM)
+    ) {
+      continue;
+    }
+    intersections.push(Object.freeze({ triangleA, triangleB, kind }));
+  }
+  return { intersections: Object.freeze(intersections), topologyAdjacentPairCount };
+}
+
 /**
  * Pure, synchronous CPU diagnostic over caller-owned Float32/Uint32 mesh bytes.
  * Invalid or over-budget input throws before the relevant expensive phase; valid input produces a
@@ -1105,50 +1279,16 @@ export function validateMeasurementSurfaceSelfIntersectionV1(
   const policy = snapshotPolicy(policyInput);
   const { vertexCount, triangleCount, inputByteLength } = preflight(positions, indices, policy);
   const bounds = geometryBounds(positions);
-  const epsilonM = Math.max(
-    policy.absoluteEpsilonM,
-    bounds.diagonalM * policy.relativeEpsilon,
-    bounds.maxAbsCoordinateM * FLOAT32_RELATIVE_ULP * policy.float32UlpMultiplier,
-  );
-  if (!Number.isFinite(epsilonM) || epsilonM <= 0) {
-    throw new RangeError('Scale-aware intersection epsilon is not finite and positive.');
-  }
+  const epsilonM = surfaceEpsilonM(bounds, policy);
   const aabbs = triangleAabbs(positions, indices, vertexCount, triangleCount, epsilonM);
   const broadPhase = gridBroadPhase(aabbs, indices, bounds, epsilonM, triangleCount, policy, 2);
-  const intersections: MeasurementSurfaceIntersectionPairV1[] = [];
-  const triangleCache: Array<Triangle | undefined> = new Array(triangleCount);
-  const cachedTriangle = (triangleIndex: number): Triangle =>
-    (triangleCache[triangleIndex] ??= triangle(positions, indices, triangleIndex));
-  for (const key of broadPhase.candidatePairKeys) {
-    const triangleA = Math.floor(key / triangleCount);
-    const triangleB = key - triangleA * triangleCount;
-    const sharedVertices = sharedTopologyVertices(indices, triangleA, triangleB);
-    const first = cachedTriangle(triangleA);
-    const second = cachedTriangle(triangleB);
-    if (
-      adjacentContactIsProvablyConfinedByPlaneSides(
-        indices,
-        triangleA,
-        triangleB,
-        sharedVertices,
-        first,
-        second,
-        epsilonM,
-        positions,
-      )
-    ) {
-      continue;
-    }
-    const kind = triangleIntersectionKind(first, second, epsilonM, policy.angularEpsilon);
-    if (kind === null) continue;
-    if (
-      sharedVertices.length > 0 &&
-      adjacentContactIsConfined(kind, sharedVertices, positions, first, second, epsilonM)
-    ) {
-      continue;
-    }
-    intersections.push(Object.freeze({ triangleA, triangleB, kind }));
-  }
+  const { intersections } = checkIntersectionCandidates(
+    positions,
+    indices,
+    broadPhase.candidatePairKeys,
+    epsilonM,
+    policy.angularEpsilon,
+  );
   const blockers = intersections.length === 0 ? [] : (['self-intersection'] as const);
   return Object.freeze({
     version: MEASUREMENT_SURFACE_SELF_INTERSECTION_V1,
@@ -1159,8 +1299,209 @@ export function validateMeasurementSurfaceSelfIntersectionV1(
     epsilonM,
     broadPhase: Object.freeze(broadPhase.report),
     intersectionCount: intersections.length,
-    intersections: Object.freeze(intersections),
+    intersections,
     blockers: Object.freeze(blockers),
+  });
+}
+
+function snapshotPartitionedContactBudget(
+  input?: MeasurementPartitionedSurfaceContactBudgetV1,
+): MeasurementPartitionedSurfaceContactBudgetV1 {
+  const defaults = DEFAULT_MEASUREMENT_PARTITIONED_SURFACE_CONTACT_BUDGET_V1;
+  if (input === undefined) return defaults;
+  const keys = Object.keys(defaults) as (keyof MeasurementPartitionedSurfaceContactBudgetV1)[];
+  if (!input || typeof input !== 'object' || Reflect.ownKeys(input).length !== keys.length)
+    throw new TypeError('Partitioned contact budget must specify all V1 limits.');
+  const budget = { ...defaults };
+  for (const key of keys) {
+    const value = Object.getOwnPropertyDescriptor(input, key)?.value;
+    if (!Number.isSafeInteger(value) || value <= 0)
+      throw new RangeError(`Partitioned contact budget ${key} must be a positive safe integer.`);
+    budget[key] = value;
+  }
+  return budget;
+}
+
+function validatePartitionedSurface(
+  positions: Float32Array,
+  indices: Uint32Array,
+  partitions: readonly MeasurementSurfaceContactPartitionV1[],
+  firstPartitionAgainstRest: boolean,
+  budgetInput?: MeasurementPartitionedSurfaceContactBudgetV1,
+  clearanceM = 0,
+) {
+  const budget = snapshotPartitionedContactBudget(budgetInput);
+  const policy = DEFAULT_MEASUREMENT_SURFACE_SELF_INTERSECTION_POLICY_V1;
+  const partitionCount = Array.isArray(partitions)
+    ? Object.getOwnPropertyDescriptor(partitions, 'length')?.value
+    : 0;
+  if (
+    !Number.isSafeInteger(partitionCount) ||
+    partitionCount < (firstPartitionAgainstRest ? 2 : 1) ||
+    partitionCount > budget.maxTriangles
+  )
+    throw new RangeError('Contact partitions must cover the complete source surface.');
+  const counts: MeasurementSurfaceContactPartitionV1[] = [];
+  for (let i = 0; i < partitionCount; i++) {
+    const partition = Object.getOwnPropertyDescriptor(partitions, i)?.value;
+    if (!partition || typeof partition !== 'object')
+      throw new TypeError('Contact partitions must contain plain ranges.');
+    const pieceVertices = Object.getOwnPropertyDescriptor(partition, 'vertexCount')?.value;
+    const pieceTriangles = Object.getOwnPropertyDescriptor(partition, 'triangleCount')?.value;
+    if (
+      !Number.isSafeInteger(pieceVertices) ||
+      pieceVertices < 3 ||
+      !Number.isSafeInteger(pieceTriangles) ||
+      pieceTriangles < 1
+    )
+      throw new RangeError('Contact partition has an invalid range.');
+    counts.push({ vertexCount: pieceVertices, triangleCount: pieceTriangles });
+  }
+  const { vertexCount, triangleCount, inputByteLength } = preflight(positions, indices, budget);
+  if (counts.length > triangleCount)
+    throw new RangeError('Contact partitions must cover the complete source surface.');
+  const partitionEpsilonM: number[] = [];
+  const triangleEpsilonsM = new Float64Array(triangleCount);
+  let vertexOffset = 0;
+  let triangleOffset = 0;
+  let epsilonM = 0;
+  for (const partition of counts) {
+    const vertexEnd = vertexOffset + partition.vertexCount;
+    const triangleEnd = triangleOffset + partition.triangleCount;
+    if (vertexEnd > vertexCount || triangleEnd > triangleCount)
+      throw new RangeError('Contact partition has an invalid range.');
+    for (let i = triangleOffset * 3; i < triangleEnd * 3; i++) {
+      const vertex = indices[i];
+      if (vertex < vertexOffset || vertex >= vertexEnd)
+        throw new RangeError('Contact triangle references a vertex outside its source piece.');
+    }
+    const pieceBounds = geometryBounds(positions.subarray(vertexOffset * 3, vertexEnd * 3));
+    const pieceEpsilonM = surfaceEpsilonM(pieceBounds, policy);
+    partitionEpsilonM.push(pieceEpsilonM);
+    triangleEpsilonsM.fill(pieceEpsilonM, triangleOffset, triangleEnd);
+    epsilonM = Math.max(epsilonM, pieceEpsilonM);
+    vertexOffset = vertexEnd;
+    triangleOffset = triangleEnd;
+  }
+  if (vertexOffset !== vertexCount || triangleOffset !== triangleCount)
+    throw new RangeError('Contact partitions must cover the complete source surface.');
+  const aabbs = triangleAabbs(positions, indices, vertexCount, triangleCount, triangleEpsilonsM);
+  const { candidatePairKeys, ...visitCounts } = findMeasurementSurfaceContactCandidatesV1(
+    aabbs,
+    triangleEpsilonsM,
+    counts.map(({ triangleCount }) => triangleCount),
+    budget,
+    firstPartitionAgainstRest,
+    clearanceM,
+  );
+  const { intersections, topologyAdjacentPairCount } = checkIntersectionCandidates(
+    positions,
+    indices,
+    candidatePairKeys,
+    epsilonM,
+    policy.angularEpsilon,
+    triangleEpsilonsM,
+  );
+  const blockers = intersections.length === 0 ? [] : (['self-intersection'] as const);
+  const report: MeasurementPartitionedSurfaceSelfIntersectionReportV1 = Object.freeze({
+    version: MEASUREMENT_PARTITIONED_SURFACE_SELF_INTERSECTION_V1,
+    pairScope: firstPartitionAgainstRest ? 'reference-against-pieces' : 'all',
+    passed: blockers.length === 0,
+    vertexCount,
+    triangleCount,
+    inputByteLength,
+    epsilonM,
+    partitionEpsilonM: Object.freeze(partitionEpsilonM),
+    broadPhase: Object.freeze({
+      ...visitCounts,
+      candidatePairCount: candidatePairKeys.length,
+      topologyAdjacentPairCount,
+    }),
+    intersectionCount: intersections.length,
+    intersections,
+    blockers: Object.freeze(blockers),
+  });
+  return {
+    report,
+    candidatePairKeys,
+    triangleEpsilonsM,
+    referenceTriangleCount: counts[0].triangleCount,
+  };
+}
+
+/**
+ * Checks exact cut pieces in their packed world coordinates. Each partition is a complete piece
+ * with consecutive owned vertex and triangle ranges. Disjoint pieces use their own scales; contact
+ * across pieces is checked at the larger of their two tolerances.
+ */
+export function validateMeasurementPartitionedSurfaceSelfIntersectionV1(
+  positions: Float32Array,
+  indices: Uint32Array,
+  partitions: readonly MeasurementSurfaceContactPartitionV1[],
+  budget?: MeasurementPartitionedSurfaceContactBudgetV1,
+): MeasurementPartitionedSurfaceSelfIntersectionReportV1 {
+  return validatePartitionedSurface(positions, indices, partitions, false, budget).report;
+}
+
+/** Tests the first partition against every cut piece, retaining original triangle ordinals. */
+export function validateMeasurementReferenceSurfaceIntersectionsV1(
+  positions: Float32Array,
+  indices: Uint32Array,
+  partitions: readonly MeasurementSurfaceContactPartitionV1[],
+  budget?: MeasurementPartitionedSurfaceContactBudgetV1,
+): MeasurementPartitionedSurfaceSelfIntersectionReportV1 {
+  return validatePartitionedSurface(positions, indices, partitions, true, budget).report;
+}
+
+/**
+ * Certifies unsigned clearance from the first partition. The caller separately establishes the
+ * outside of a closed body, including one sign witness per connected component of the cut cloth.
+ */
+export function validateMeasurementReferenceSurfaceClearanceV1(
+  positions: Float32Array,
+  indices: Uint32Array,
+  partitions: readonly MeasurementSurfaceContactPartitionV1[],
+  minimumClearanceM: number,
+  budget?: MeasurementPartitionedSurfaceContactBudgetV1,
+): MeasurementReferenceSurfaceClearanceReportV1 {
+  if (!Number.isFinite(minimumClearanceM) || minimumClearanceM <= 0)
+    throw new RangeError('Reference clearance must be positive and finite.');
+  const { report, candidatePairKeys, triangleEpsilonsM, referenceTriangleCount } =
+    validatePartitionedSurface(positions, indices, partitions, true, budget, minimumClearanceM);
+  const unprovenPairs: MeasurementReferenceSurfaceClearanceReportV1['unprovenPairs'][number][] = [];
+  let unprovenPairCount = 0;
+  if (report.passed) {
+    const cache: Array<Triangle | undefined> = new Array(report.triangleCount);
+    for (const key of candidatePairKeys) {
+      const a = Math.floor(key / report.triangleCount);
+      const b = key - a * report.triangleCount;
+      const first = (cache[a] ??= triangle(positions, indices, a));
+      const second = (cache[b] ??= triangle(positions, indices, b));
+      const lowerBoundM = triangleSeparationLowerBoundM(
+        first,
+        second,
+        Math.max(triangleEpsilonsM[a], triangleEpsilonsM[b]),
+        minimumClearanceM,
+      );
+      if (lowerBoundM >= minimumClearanceM) continue;
+      unprovenPairCount++;
+      if (unprovenPairs.length < 64)
+        unprovenPairs.push(
+          Object.freeze({
+            referenceTriangle: a,
+            cutTriangle: b - referenceTriangleCount,
+            separationLowerBoundM: lowerBoundM,
+          }),
+        );
+    }
+  }
+  return Object.freeze({
+    version: 'measurement-reference-surface-clearance/v1',
+    minimumClearanceM,
+    passed: report.passed && unprovenPairCount === 0,
+    crossings: report,
+    unprovenPairCount,
+    unprovenPairs: Object.freeze(unprovenPairs),
   });
 }
 

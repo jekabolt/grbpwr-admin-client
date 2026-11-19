@@ -1,5 +1,8 @@
+import { adjustedSavedDartFeetV1, movedSavedFishEyePointsV1 } from './draft-cad-saved-dart-tip-v1';
+import { activeDraftCadTransactionsV1, parallelOpeningAxisV1 } from './draft-cad-session-v1';
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
-import type { PtMm } from 'lib/pattern-import/types';
+import { signedArea } from 'lib/pattern-import/semantics/geom';
+import type { AuthoredNotchShape, PtMm } from 'lib/pattern-import/types';
 
 import type {
   PatternImportDxfPhaseEDraftCadBoundaryAnchorV1,
@@ -8,6 +11,22 @@ import type {
   PatternImportDxfPhaseEDraftCadTargetV1,
   PatternImportDxfPhaseEDraftCadToolV1,
 } from './draft-cad-session-v1';
+
+import {
+  resizeDraftStraightEdgeV1,
+  selectDraftSharpCornerV1,
+} from './draft-cad-edge-length-geometry-v1';
+import {
+  editFixedEndAuthoredOutlineCorner,
+  readAuthoredOutlineCorner,
+  readPairedAuthoredOutlineCorner,
+  roundDraftConvexOrthogonalCornerV1,
+} from 'lib/pattern-import/manifest/authored-outline-corner';
+import { selectDraftCutAllowanceOffsetV1 } from './draft-cad-allowance-offset-geometry-v1';
+import {
+  draftOutlineMoveHistoryV1,
+  draftOutlineMovePositionsV1,
+} from './draft-cad-outline-move-history-v1';
 
 export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_PREVIEW_V1 =
   'pattern-import-dxf-phase-e-draft-cad-preview/1' as const;
@@ -59,6 +78,7 @@ export type PatternImportDxfPhaseEDraftCadPreviewPrimitiveV1 =
       Readonly<{
         pointMm: PtMm;
         indicator: 'draft' | 'point-only' | 'drill' | 'cross' | 'text';
+        text?: string;
       }>)
   | (PrimitiveBase<'notch'> &
       Readonly<{
@@ -66,6 +86,7 @@ export type PatternImportDxfPhaseEDraftCadPreviewPrimitiveV1 =
         indicator: 'single' | 'double' | 'triple' | 'v';
         depthMm: number;
         sourceAnchor: PatternImportDxfPhaseEDraftCadBoundaryAnchorV1;
+        strokes?: readonly (readonly [PtMm, PtMm])[];
       }>)
   | (PrimitiveBase<'dart'> &
       Readonly<{
@@ -178,13 +199,19 @@ function rectangleCorners(
   );
 }
 
-type ExactAnchorSegment = Readonly<{ fromMm: PtMm; toMm: PtMm; pointMm: PtMm }>;
+type ExactAnchorSegment = Readonly<{
+  fromMm: PtMm;
+  toMm: PtMm;
+  pointMm: PtMm;
+  cutOrientation: number;
+}>;
 
 function exactAnchorSegment(
   session: PatternImportDxfPhaseEDraftCadSessionV1,
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1,
   target: PatternImportDxfPhaseEDraftCadTargetV1,
   anchor: PatternImportDxfPhaseEDraftCadBoundaryAnchorV1,
+  includeCutOrientation = false,
 ): ExactAnchorSegment | null {
   const catalogPiece = session.source.catalog.pieces.find(
     (piece) => piece.pieceId === target.pieceId && piece.pieceLineKey === target.pieceLineKey,
@@ -217,13 +244,44 @@ function exactAnchorSegment(
   if (!from || !to || !finitePoint(from.pointMm) || !finitePoint(to.pointMm)) return null;
   const fromMm = clonePoint(from.pointMm);
   const toMm = clonePoint(to.pointMm);
+  const ordered = (indexes[0]! + 1) % catalogContour.boundaryVertices.length === indexes[1];
   return Object.freeze({
     fromMm,
     toMm,
+    cutOrientation:
+      includeCutOrientation && projectedContour?.closed && projectedContour.role === 'cut-boundary'
+        ? Math.sign(signedArea(projectedContour.vertices.map(({ pointMm }) => pointMm))) *
+          (ordered ? 1 : -1)
+        : 0,
     pointMm: clonePoint({
       x: fromMm.x + (toMm.x - fromMm.x) * anchor.progress,
       y: fromMm.y + (toMm.y - fromMm.y) * anchor.progress,
     }),
+  });
+}
+
+function compoundNotchStrokes(
+  shape: AuthoredNotchShape,
+  depthMm: number,
+  progress: number,
+  { fromMm, toMm, pointMm, cutOrientation }: ExactAnchorSegment,
+) {
+  const dx = toMm.x - fromMm.x;
+  const dy = toMm.y - fromMm.y;
+  const length = Math.hypot(dx, dy);
+  const spacingMm = 3;
+  const extent = shape === 'triple' ? spacingMm : spacingMm / 2;
+  if (!cutOrientation || Math.min(progress, 1 - progress) * length <= extent) return null;
+  const x = dx / length;
+  const y = dy / length;
+  const offsets = shape === 'triple' ? [-extent, 0, extent] : [-extent, extent];
+  return offsets.map((offset) => {
+    const at = { x: pointMm.x + offset * x, y: pointMm.y + offset * y };
+    const start = shape === 'v' ? pointMm : at;
+    return [
+      at,
+      { x: start.x - y * depthMm * cutOrientation, y: start.y + x * depthMm * cutOrientation },
+    ] as const;
   });
 }
 
@@ -255,9 +313,9 @@ export function buildPatternImportDxfPhaseEDraftCadPreviewV1(
       previewReady: false,
     });
 
-  const commands = session.history
-    .slice(0, session.cursor)
-    .flatMap((transaction) => transaction.commands);
+  const commands = activeDraftCadTransactionsV1(session).flatMap(({ commands }) => commands);
+  const outlineMoves = draftOutlineMoveHistoryV1(commands);
+  const lastOutlineMove = outlineMoves?.at(-1);
   const primitives: PatternImportDxfPhaseEDraftCadPreviewPrimitiveV1[] = [];
   const blockers: PatternImportDxfPhaseEDraftCadPreviewBlockerV1[] = [];
   let bounds: MutableBounds | null = null;
@@ -399,7 +457,17 @@ export function buildPatternImportDxfPhaseEDraftCadPreviewV1(
             : command.tool === 'point-only'
               ? ('point-only' as const)
               : command.payload.kind;
-        primitives.push(deepFreeze({ ...base, kind: 'point' as const, pointMm, indicator }));
+        primitives.push(
+          deepFreeze({
+            ...base,
+            kind: 'point' as const,
+            pointMm,
+            indicator,
+            ...(command.tool === 'mark' && command.payload.kind === 'text' && command.payload.text
+              ? { text: command.payload.text }
+              : {}),
+          }),
+        );
         bounds = extend(bounds, pointMm);
         break;
       }
@@ -409,6 +477,7 @@ export function buildPatternImportDxfPhaseEDraftCadPreviewV1(
           projection,
           command.target,
           command.payload.anchor,
+          command.payload.kind !== 'single',
         );
         if (!segment) {
           blockers.push(
@@ -420,17 +489,32 @@ export function buildPatternImportDxfPhaseEDraftCadPreviewV1(
           );
           break;
         }
+        const { kind, depthMm, anchor } = command.payload;
+        const strokes =
+          kind === 'single' ? null : compoundNotchStrokes(kind, depthMm, anchor.progress, segment);
+        if (kind !== 'single' && !strokes) {
+          blockers.push(
+            commandBlocker(
+              command,
+              'invalid-command-geometry',
+              'Choose a cut edge with room for the full notch.',
+            ),
+          );
+          break;
+        }
         primitives.push(
           deepFreeze({
             ...base,
             kind: 'notch' as const,
             pointMm: segment.pointMm,
-            indicator: command.payload.kind,
-            depthMm: command.payload.depthMm,
-            sourceAnchor: structuredClone(command.payload.anchor),
+            indicator: kind,
+            depthMm,
+            sourceAnchor: structuredClone(anchor),
+            ...(strokes ? { strokes } : {}),
           }),
         );
         bounds = extend(bounds, segment.pointMm);
+        if (strokes) bounds = extendPoints(bounds, strokes.flat());
         break;
       }
       case 'dart': {
@@ -471,17 +555,41 @@ export function buildPatternImportDxfPhaseEDraftCadPreviewV1(
           );
           break;
         }
+        const { savedTip, savedIntakeSourcePathId, intakeMm } = command.payload;
+        const adjusted =
+          savedIntakeSourcePathId !== undefined && savedTip
+            ? adjustedSavedDartFeetV1([segment.fromMm, segment.toMm], savedTip.original, intakeMm)
+            : null;
+        if (
+          savedIntakeSourcePathId !== undefined &&
+          (!adjusted ||
+            savedTip?.original[1]?.x !== command.payload.apexMm.x ||
+            savedTip?.original[1]?.y !== command.payload.apexMm.y)
+        ) {
+          blockers.push(
+            commandBlocker(
+              command,
+              'invalid-command-geometry',
+              'The new intake must keep the saved apex and center on the original cut edge.',
+            ),
+          );
+          break;
+        }
         const ux = dx / edgeLengthMm;
         const uy = dy / edgeLengthMm;
-        const half = command.payload.intakeMm / 2;
-        const baseLeftMm = clonePoint({
-          x: segment.pointMm.x - ux * half,
-          y: segment.pointMm.y - uy * half,
-        });
-        const baseRightMm = clonePoint({
-          x: segment.pointMm.x + ux * half,
-          y: segment.pointMm.y + uy * half,
-        });
+        const half = intakeMm / 2;
+        const baseLeftMm = clonePoint(
+          adjusted?.[0] ?? {
+            x: segment.pointMm.x - ux * half,
+            y: segment.pointMm.y - uy * half,
+          },
+        );
+        const baseRightMm = clonePoint(
+          adjusted?.[1] ?? {
+            x: segment.pointMm.x + ux * half,
+            y: segment.pointMm.y + uy * half,
+          },
+        );
         const apexMm = clonePoint(command.payload.apexMm);
         primitives.push(
           deepFreeze({
@@ -495,6 +603,213 @@ export function buildPatternImportDxfPhaseEDraftCadPreviewV1(
           }),
         );
         bounds = extendPoints(bounds, [baseLeftMm, baseRightMm, apexMm]);
+        break;
+      }
+      case 'move-point':
+      case 'delete-point': {
+        const { contourId, vertexId, sizeToken } = command.payload;
+        const destination = command.tool === 'move-point' ? command.payload.pointMm : null;
+        const piece = projection.pieces.find(
+          ({ pieceId, pieceLineKey }) =>
+            pieceId === command.target.pieceId && pieceLineKey === command.target.pieceLineKey,
+        );
+        const contour = piece?.contours.find((item) => item.contourId === contourId);
+        const index = contour?.vertices.findIndex((vertex) => vertex.vertexId === vertexId) ?? -1;
+        if (
+          !contour?.closed ||
+          contour.role === 'hole' ||
+          index < 0 ||
+          projection.sizeToken !== sizeToken ||
+          (destination && !finitePoint(destination))
+        ) {
+          blockers.push(
+            commandBlocker(
+              command,
+              'anchor-unavailable',
+              'Choose one exact outline vertex in the active size.',
+            ),
+          );
+          break;
+        }
+        const count = contour.vertices.length;
+        const pointsMm = [
+          contour.vertices[(index + count - 1) % count]!.pointMm,
+          ...(destination ? [destination] : []),
+          contour.vertices[(index + 1) % count]!.pointMm,
+        ].map(clonePoint);
+        const finalPositions =
+          command === lastOutlineMove && outlineMoves
+            ? draftOutlineMovePositionsV1(outlineMoves, contour)
+            : null;
+        const path = finalPositions
+          ? contour.vertices.map(({ vertexId, pointMm }) =>
+              clonePoint(finalPositions.get(vertexId) ?? pointMm),
+            )
+          : pointsMm;
+        primitives.push(
+          deepFreeze({
+            ...base,
+            kind: 'path' as const,
+            pointsMm: path,
+            closed: Boolean(finalPositions),
+            role: 'outline' as const,
+            stroke: 'solid' as const,
+          }),
+        );
+        if (!outlineMoves || command === lastOutlineMove) bounds = extendPoints(bounds, path);
+        break;
+      }
+      case 'round-corner': {
+        const { contourId, vertexId, setbackMm, sizeToken, savedCorner, fixedEnd } =
+          command.payload;
+        const piece = projection.pieces.find(
+          ({ pieceId, pieceLineKey }) =>
+            pieceId === command.target.pieceId && pieceLineKey === command.target.pieceLineKey,
+        );
+        const contour = piece?.contours.find((item) => item.contourId === contourId);
+        const points = contour?.vertices.map(({ pointMm }) => pointMm);
+        const index = contour?.vertices.findIndex(({ vertexId: id }) => id === vertexId) ?? -1;
+        const prior =
+          savedCorner &&
+          points &&
+          (fixedEnd
+            ? readPairedAuthoredOutlineCorner(points, points, savedCorner)
+            : readAuthoredOutlineCorner(points, savedCorner));
+        const rounded =
+          contour?.closed &&
+          contour.role === 'cut-boundary' &&
+          projection.sizeToken === sizeToken &&
+          points &&
+          (!savedCorner || (prior && prior.start === index))
+            ? fixedEnd && savedCorner
+              ? editFixedEndAuthoredOutlineCorner(points, points, savedCorner, fixedEnd, setbackMm)
+              : roundDraftConvexOrthogonalCornerV1(
+                  prior ? prior.originalOutline : points,
+                  index,
+                  setbackMm,
+                )
+            : null;
+        if (!rounded) {
+          blockers.push(
+            commandBlocker(
+              command,
+              'anchor-unavailable',
+              'Choose a right-angle corner on an exact convex saved outline and keep a straight rail on both sides.',
+            ),
+          );
+          break;
+        }
+        const pointsMm = rounded.ring.map(clonePoint);
+        primitives.push(
+          deepFreeze({
+            ...base,
+            kind: 'path' as const,
+            pointsMm,
+            closed: true,
+            role: 'outline' as const,
+            stroke: 'solid' as const,
+          }),
+        );
+        bounds = extendPoints(bounds, pointsMm);
+        break;
+      }
+      case 'sharpen-corner': {
+        const { edge, sizeToken } = command.payload;
+        const piece = projection.pieces.find(
+          ({ pieceId, pieceLineKey }) =>
+            pieceId === command.target.pieceId && pieceLineKey === command.target.pieceLineKey,
+        );
+        const contour = piece?.contours.find(({ contourId }) => contourId === edge.contourId);
+        const candidate =
+          projection.sizeToken === sizeToken &&
+          exactAnchorSegment(session, projection, command.target, edge) &&
+          selectDraftSharpCornerV1(contour, edge.boundaryVertexIds);
+        if (!candidate) {
+          blockers.push(
+            commandBlocker(
+              command,
+              'anchor-unavailable',
+              'Choose an exact bevel between perpendicular straight sides in the current size.',
+            ),
+          );
+          break;
+        }
+        const { before, corner, after } = candidate;
+        const pointsMm = [before, corner, after].map(clonePoint);
+        primitives.push(
+          deepFreeze({
+            ...base,
+            kind: 'path' as const,
+            pointsMm,
+            closed: false,
+            role: 'outline' as const,
+            stroke: 'solid' as const,
+          }),
+        );
+        bounds = extendPoints(bounds, pointsMm);
+        break;
+      }
+      case 'edge-length': {
+        const { edge, fixed, lengthMm, sizeToken } = command.payload;
+        const segment = exactAnchorSegment(session, projection, command.target, edge);
+        const resized =
+          segment && projection.sizeToken === sizeToken
+            ? resizeDraftStraightEdgeV1(segment.fromMm, segment.toMm, fixed, lengthMm)
+            : null;
+        if (!resized) {
+          blockers.push(
+            commandBlocker(
+              command,
+              'anchor-unavailable',
+              'Edge length requires its exact endpoints in the current size.',
+            ),
+          );
+          break;
+        }
+        primitives.push(
+          deepFreeze({
+            ...base,
+            kind: 'path' as const,
+            pointsMm: resized.map(clonePoint),
+            closed: false,
+            role: 'outline' as const,
+            stroke: 'dashed' as const,
+          }),
+        );
+        bounds = extendPoints(bounds, resized);
+        break;
+      }
+      case 'allowance-offset': {
+        const { edge, offsetMm, sizeToken } = command.payload;
+        const piece = projection.pieces.find(
+          ({ pieceId, pieceLineKey }) =>
+            pieceId === command.target.pieceId && pieceLineKey === command.target.pieceLineKey,
+        );
+        const contour = piece?.contours.find(({ contourId }) => contourId === edge.contourId);
+        const offset =
+          sizeToken === projection.sizeToken &&
+          selectDraftCutAllowanceOffsetV1(contour, edge.boundaryVertexIds, offsetMm);
+        if (!offset) {
+          blockers.push(
+            commandBlocker(
+              command,
+              'anchor-unavailable',
+              'Choose a cut edge with two exact right-angle joins and a representable offset.',
+            ),
+          );
+          break;
+        }
+        primitives.push(
+          deepFreeze({
+            ...base,
+            kind: 'path' as const,
+            pointsMm: offset.ring.map(clonePoint),
+            closed: true,
+            role: 'outline' as const,
+            stroke: 'dashed' as const,
+          }),
+        );
+        bounds = extendPoints(bounds, offset.ring);
         break;
       }
       case 'add-point': {
@@ -528,6 +843,34 @@ export function buildPatternImportDxfPhaseEDraftCadPreviewV1(
         break;
       }
       case 'fish-eye': {
+        if (command.payload.savedMove) {
+          const pointsMm = movedSavedFishEyePointsV1(
+            command.payload.savedMove.original,
+            command.payload.centerMm,
+          );
+          if (!pointsMm) {
+            blockers.push(
+              commandBlocker(
+                command,
+                'invalid-command-geometry',
+                'Choose a different exact centre for the saved fish-eye.',
+              ),
+            );
+            break;
+          }
+          primitives.push(
+            deepFreeze({
+              ...base,
+              kind: 'path' as const,
+              pointsMm,
+              closed: true,
+              role: 'internal' as const,
+              stroke: 'dashed' as const,
+            }),
+          );
+          bounds = extendPoints(bounds, pointsMm);
+          break;
+        }
         const centerMm = clonePoint(command.payload.centerMm);
         if (
           !finitePoint(centerMm) ||
@@ -544,26 +887,28 @@ export function buildPatternImportDxfPhaseEDraftCadPreviewV1(
           );
           break;
         }
+        const { axisMm, intakeMm, rotationDeg } = command.payload;
+        const radians = (rotationDeg * Math.PI) / 180;
+        const ux = Math.cos(radians);
+        const uy = Math.sin(radians);
+        const half = intakeMm / 2;
+        const pointsMm = [
+          { x: centerMm.x + ux * axisMm, y: centerMm.y + uy * axisMm },
+          { x: centerMm.x - uy * half, y: centerMm.y + ux * half },
+          { x: centerMm.x - ux * axisMm, y: centerMm.y - uy * axisMm },
+          { x: centerMm.x + uy * half, y: centerMm.y - ux * half },
+        ];
         primitives.push(
           deepFreeze({
             ...base,
-            kind: 'ellipse' as const,
-            centerMm,
-            radiusXmm: command.payload.axisMm,
-            radiusYmm: command.payload.intakeMm / 2,
-            rotationDeg: command.payload.rotationDeg,
+            kind: 'path' as const,
+            pointsMm,
+            closed: true,
+            role: 'internal' as const,
+            stroke: 'dashed' as const,
           }),
         );
-        bounds = extendPoints(bounds, [
-          {
-            x: centerMm.x - command.payload.axisMm,
-            y: centerMm.y - command.payload.axisMm,
-          },
-          {
-            x: centerMm.x + command.payload.axisMm,
-            y: centerMm.y + command.payload.axisMm,
-          },
-        ]);
+        bounds = extendPoints(bounds, pointsMm);
         break;
       }
       case 'spread': {
@@ -574,6 +919,34 @@ export function buildPatternImportDxfPhaseEDraftCadPreviewV1(
             candidate.target.pieceId === command.target.pieceId &&
             candidate.target.pieceLineKey === command.target.pieceLineKey,
         );
+        if (command.payload.mode === 'parallel') {
+          const axis = cut?.tool === 'cut' && parallelOpeningAxisV1(cut.payload.pointsMm);
+          if (!axis || cut?.tool !== 'cut' || !(command.payload.amountMm > 0)) {
+            blockers.push(
+              commandBlocker(
+                command,
+                'anchor-unavailable',
+                'Choose a registered horizontal or vertical Cut on this piece.',
+              ),
+            );
+            break;
+          }
+          const delta =
+            command.payload.amountMm * (command.payload.movingSide === 'positive' ? 1 : -1);
+          const pointsMm = cut.payload.pointsMm.map((p) => ({ ...p, [axis]: p[axis] + delta }));
+          primitives.push(
+            deepFreeze({
+              ...base,
+              kind: 'path' as const,
+              pointsMm,
+              closed: false,
+              role: 'construction' as const,
+              stroke: 'dashed' as const,
+            }),
+          );
+          bounds = extendPoints(bounds, pointsMm);
+          break;
+        }
         const pivotMm = clonePoint(command.payload.pivotMm);
         if (!cut || !finitePoint(pivotMm) || !(command.payload.amountMm > 0)) {
           blockers.push(

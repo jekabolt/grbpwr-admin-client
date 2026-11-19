@@ -323,6 +323,18 @@ function featureSide(
   return sides.size === 1 ? [...sides][0]! : null;
 }
 
+function containsHole(polygon: readonly PtMm[], hole: readonly PtMm[]): boolean {
+  return hole.every((from, index) => {
+    const to = hole[(index + 1) % hole.length]!;
+    return (
+      pointLocation(from, polygon) === 1 &&
+      !polygon.some((a, edge) =>
+        segmentsIntersect(from, to, a, polygon[(edge + 1) % polygon.length]!),
+      )
+    );
+  });
+}
+
 function bbox(points: readonly PtMm[]) {
   return {
     minX: Math.min(...points.map(({ x }) => x)),
@@ -332,7 +344,7 @@ function bbox(points: readonly PtMm[]) {
   };
 }
 
-function splitSize(
+export function partitionDraftCutSizeV1(
   size: PieceSizeSpec,
   from: PtMm,
   to: PtMm,
@@ -343,11 +355,11 @@ function splitSize(
       code: PatternImportDxfPhaseEDraftCadCutGeometryBlockerCodeV1;
       detail: string;
     }> {
-  if (size.cutLoops?.length || size.continuity || size.repair || size.kinks?.length)
+  if (size.continuity || size.repair || size.kinks?.length)
     return {
       ok: false,
       code: 'unsupported-piece-geometry',
-      detail: `Size ${size.sizeToken} carries derived loops or repair evidence that Cut cannot repartition losslessly.`,
+      detail: `Size ${size.sizeToken} carries repair evidence that Cut cannot repartition losslessly.`,
     };
   if (size.seam && !pointsExactlyEqual(size.seam, size.cut))
     return {
@@ -358,14 +370,17 @@ function splitSize(
   const split = splitPolygon(size.cut, from, to);
   if (!split.ok) return split;
   const [left, right] = split.polygons;
+  const { cutLoops, pointMarks, textMarks, ...base } = size;
   const output = [
     {
-      ...structuredClone(size),
+      ...structuredClone(base),
       cut: left.map((point) => ({ ...point })),
       seam: size.seam ? left.map((point) => ({ ...point })) : null,
       notches: [],
       drills: [],
       internal: [],
+      ...(textMarks?.length ? { textMarks: [] } : {}),
+      ...(pointMarks?.length ? { pointMarks: [] } : {}),
       grain: null,
       fold: null,
       offset: null,
@@ -374,12 +389,14 @@ function splitSize(
       areaMm2: Math.abs(areaSigned(left)),
     },
     {
-      ...structuredClone(size),
+      ...structuredClone(base),
       cut: right.map((point) => ({ ...point })),
       seam: size.seam ? right.map((point) => ({ ...point })) : null,
       notches: [],
       drills: [],
       internal: [],
+      ...(textMarks?.length ? { textMarks: [] } : {}),
+      ...(pointMarks?.length ? { pointMarks: [] } : {}),
       grain: null,
       fold: null,
       offset: null,
@@ -388,6 +405,31 @@ function splitSize(
       areaMm2: Math.abs(areaSigned(right)),
     },
   ] as [PieceSizeSpec, PieceSizeSpec];
+  for (const loop of cutLoops ?? []) {
+    const hole = openPolygon(loop);
+    const area = areaSigned(hole);
+    if (
+      hole.length < 3 ||
+      hole.some((point) => !finitePoint(point)) ||
+      !(area < -EPS) ||
+      selfIntersects(hole)
+    )
+      return {
+        ok: false,
+        code: 'unsupported-piece-geometry',
+        detail: `Size ${size.sizeToken} has a secondary cut loop without a simple clockwise hole boundary.`,
+      };
+    const [owner, secondOwner] = output.filter((derived) => containsHole(derived.cut, hole));
+    if (!owner || secondOwner)
+      return {
+        ok: false,
+        code: 'feature-partition-ambiguous',
+        detail: `A hole in size ${size.sizeToken} crosses or touches a resulting cut boundary.`,
+      };
+    (owner.cutLoops ??= []).push(structuredClone(loop));
+    owner.areaMm2 += area;
+  }
+  const notchOwners = new Map<string, number>();
   for (const notch of size.notches) {
     const side = featureSide([notch.at, ...notch.seg], split.polygons);
     if (side === null)
@@ -396,6 +438,17 @@ function splitSize(
         code: 'feature-partition-ambiguous',
         detail: `A notch in size ${size.sizeToken} lies on the cut chord.`,
       };
+    const id = notch.authoredGroup?.groupId;
+    if (id) {
+      const owner = notchOwners.get(id);
+      if (owner !== undefined && owner !== side)
+        return {
+          ok: false,
+          code: 'feature-partition-ambiguous',
+          detail: `An authored notch group in size ${size.sizeToken} crosses the cut chord.`,
+        };
+      notchOwners.set(id, side);
+    }
     output[side].notches.push(structuredClone(notch));
   }
   for (const drill of size.drills) {
@@ -407,6 +460,26 @@ function splitSize(
         detail: `A drill in size ${size.sizeToken} lies on the cut chord.`,
       };
     output[side].drills.push(structuredClone(drill));
+  }
+  for (const mark of textMarks ?? []) {
+    const side = featureSide([mark.at], split.polygons);
+    if (side === null)
+      return {
+        ok: false,
+        code: 'feature-partition-ambiguous',
+        detail: `A text anchor in size ${size.sizeToken} lies on the cut chord.`,
+      };
+    output[side].textMarks!.push(structuredClone(mark));
+  }
+  for (const mark of pointMarks ?? []) {
+    const side = featureSide([mark.at], split.polygons);
+    if (side === null)
+      return {
+        ok: false,
+        code: 'feature-partition-ambiguous',
+        detail: `A construction point in size ${size.sizeToken} lies on the cut chord.`,
+      };
+    output[side].pointMarks!.push(structuredClone(mark));
   }
   for (const internal of size.internal) {
     const side = featureSide(internal.pts, split.polygons);
@@ -519,10 +592,10 @@ export function executePatternImportDxfPhaseEDraftCadCutGeometryV1(
   const fingerprint = fnv1a64(
     `${source.identity}\u0000${command.target.pieceLineKey}\u0000${normalizedCutKey([from!, to!])}`,
   );
-  const identities = [
-    `${source.identity}__CUT_${fingerprint.slice(0, 10)}_A`,
-    `${source.identity}__CUT_${fingerprint.slice(0, 10)}_B`,
-  ] as const;
+  // The exact DXF curve ID encodes the whole block name. Keep the derived name bounded, with
+  // the original identity and line fully represented in the fingerprint and the visible label.
+  const stem = `C${fingerprint.slice(0, 10).toUpperCase()}`;
+  const identities = [`${stem}A`, `${stem}B`] as const;
   if (
     job.pieces.some(({ identity }) => identities.includes(identity as (typeof identities)[number]))
   )
@@ -536,7 +609,7 @@ export function executePatternImportDxfPhaseEDraftCadCutGeometryV1(
     derivedPiece(source, identities[1], 'B'),
   ];
   for (const size of source.sizes) {
-    const result = splitSize(size, from!, to!);
+    const result = partitionDraftCutSizeV1(size, from!, to!);
     if (!result.ok) return blocked(result.code, result.detail, source.identity);
     derived[0]!.sizes.push(result.sizes[0]);
     derived[1]!.sizes.push(result.sizes[1]);

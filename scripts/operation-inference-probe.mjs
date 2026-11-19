@@ -23,15 +23,11 @@
 //   И. РЕГИСТРОНЕЗАВИСИМОСТЬ: на проде регистр смешанный в пределах одной карточки;
 //   К. ЦИКЛ НЕ ВЕШАЕТ: взаимные ссылки узлов заканчиваются признанием «спуск неполон»;
 //   Л. НОРМА ВРЕМЕНИ — гоуст «в прошлый раз», и только от шага ТОГО ЖЕ вида РАНЬШЕ по карточке;
-//   М. ЖИВОЙ DOM: метка «suggested» видна, значение стоит в поле, касание метки снимает и то и
-//      другое, подстановка НЕ помечает форму грязной, а на конфликте метки нет вовсе. Сверх того
-//      (ревью R5): очистка пикером поверх подставленного НЕ возвращает значение под курсором;
-//      смена выбранного шага ОТЗЫВАЕТ неснятую подстановку (значение не живёт дольше метки);
-//      заполненные утюг и нитка не переписываются ЖИВЫМ редактором (гвоздь в шов Ф4 — стирание
-//      через вайтлист имён с `shouldDirty: false` разметочные проверки роундтрипа не поймали бы);
-//      и ни одно монтирование не упало — «метки нет» над крушением не считается молчанием.
+//   М. ЖИВОЙ DOM: подставленное значение видно в настоящем поле и не делает форму грязной.
+//      Оператор может заменить или очистить зону, удалить предложенную нитку, сменить шаг.
+//      Конфликт оставляет зону пустой. Заполненные зона, утюг и нитка сохраняют свой ответ.
 //
-// МУТАЦИИ ЖИВУТ В ПАМЯТИ СБОРЩИКА, А НЕ В ФАЙЛЕ:
+//// МУТАЦИИ ЖИВУТ В ПАМЯТИ СБОРЩИКА, А НЕ В ФАЙЛЕ:
 //   node scripts/operation-inference-probe.mjs                    прогон
 //   node scripts/operation-inference-probe.mjs --mutate-no-descent  узлы не раскрываются —
 //                                                                  цитата А обязана покраснеть
@@ -44,7 +40,7 @@
 //   --mutate-no-descent → 8 провалов: спуск не выходит за первый ярус, шаг с входом-узлом теряет
 //                         все детали, и «конфликт» вырождается в «нет данных» — то есть вывод
 //                         молчит на половине карточки, выглядя исправным. Откатано.
-//   --mutate-first-wins → 6 провалов, включая живой DOM: на конфликте появляется метка и
+//   --mutate-first-wins → 6 провалов, включая живой DOM: на конфликте появляется значение и
 //                         подставляется зона `back` там, где кандидатов трое. Ровно та ложная
 //                         подстановка, ради запрета которой заведён арбитр. Откатано.
 //   --mutate-case       → 16 провалов: заглавные имена прода (`FP_OS`, `SL_OUT_L`) перестают
@@ -714,7 +710,7 @@ head('цитата Л — «в прошлый раз было столько-т�
 }
 
 // ─── ЖИВОЙ DOM ──────────────────────────────────────────────────────────────────────────────────
-head('живой DOM — метка «suggested» стоит рядом со значением и снимается касанием');
+head('живой DOM — подстановка, ручной ответ и отзыв через настоящие контролы');
 
 function resolvePlaywright() {
   const require = createRequire(import.meta.url);
@@ -792,128 +788,110 @@ if (!chromium) {
     operations: ops,
   });
 
-  const has = async (sel) => (await page.locator(sel).count()) > 0;
-  // ОЖИДАНИЕ, КОТОРОЕ НЕ РОНЯЕТ ПРОБУ. Под мутацией метка не появляется НИКОГДА — это и есть
-  // ожидаемая краснота, и она обязана прочитаться строкой FAIL, а не стектрейсом посреди вывода.
-  const settle = async (sel, ms = 12000) => {
-    try {
-      await page.waitForSelector(sel, { timeout: ms });
-    } catch {
-      /* отсутствие органа — тоже результат; его проверяет цитата ниже */
-    }
+  const editor = page.locator('[data-kind-picker="0"]');
+  const field = (name) =>
+    page.locator(`[data-field="operations.0.${name}"]`).getByRole('combobox');
+  const zone = field('zone');
+  const setup = page.locator('[role="button"][aria-expanded]').filter({
+    has: page.getByText('setup', { exact: true }),
+  });
+  const settle = async (locator) => {
+    await locator.waitFor({ timeout: 3000 }).catch(() => {});
   };
-  const zoneOf = async () => (await page.evaluate(() => window.__inference.values()))[0]?.zone;
-  // «Незаполнено» на проводе имеет два написания: ключа нет вовсе (черновик, который никто не
-  // трогал) и явный `UNKNOWN` (мы отозвали подстановку). Проба обязана принимать оба — иначе она
-  // проверяла бы форму записи пустоты, а не пустоту.
-  const unset = (v) => !v || v === 'TECH_CARD_GARMENT_ZONE_UNKNOWN';
+  const controlText = (locator) =>
+    locator.evaluateAll((nodes) => nodes.length === 1 ? (nodes[0].textContent ?? '').trim() : '');
+  const current = async () => (await page.evaluate(() => window.__inference.values()))[0];
+  const zoneOf = async () => (await current())?.zone;
+  const unset = (v) => !v || v === Z('UNKNOWN');
 
-  // (1) Кандидат один — значение стоит в поле, и рядом метка.
+  async function chooseZone(label) {
+    if ((await zone.count()) !== 1) return false;
+    await zone.press('Enter');
+    const option = page.getByRole('option', { name: label, exact: true });
+    await settle(option);
+    if (!(await option.isVisible())) {
+      await page.keyboard.press('Escape');
+      return false;
+    }
+    await option.press('Enter');
+    return true;
+  }
+
+  async function emptyZoneControl() {
+    if ((await zone.count()) !== 1) return false;
+    return (await zone.getAttribute('data-placeholder')) !== null || (await controlText(zone)) === '— zone —';
+  }
+
+  async function openSetup() {
+    await settle(editor);
+    if ((await setup.getAttribute('aria-expanded')) === 'false') await setup.click();
+  }
+
   await page.evaluate((c) => window.__inference.mount(c), formCard([sew(['p-sl-l', 'p-sl-r'])]));
-  await settle('[data-suggested="zone"]');
+  await settle(zone.filter({ hasText: /^sleeve$/i }));
   ck(pageErrors.length === 0, 'редактор смонтировался без исключений', pageErrors[0] ?? '');
-  ck(await has('[data-suggested="zone"]'), 'метка «suggested» нарисована у зоны');
-  const markText = (
-    (await has('[data-suggested="zone"]'))
-      ? ((await page.locator('[data-suggested="zone"]').first().textContent()) ?? '')
-      : ''
-  )
-    .trim()
-    .toLowerCase();
-  ck(markText.includes('suggested'), 'метка называет себя подстановкой', markText);
-  ck(markText.includes('sleeve'), 'метка называет подставленное значение', markText);
+  ck((await controlText(zone)).toLowerCase() === 'sleeve', 'подставленный рукав виден в выборе зоны');
   ck((await zoneOf()) === Z('SLEEVE'), 'значение действительно стоит в форме', await zoneOf());
   ck(
     (await page.evaluate(() => window.__inference.dirty())) === false,
     'подстановка НЕ пометила форму грязной',
   );
 
-  // (2) Касание метки снимает и метку, и значение.
-  if (await has('[data-suggested="zone"]')) {
-    await page.locator('[data-suggested="zone"]').first().click();
-    try {
-      await page.waitForFunction(
-        () => document.querySelectorAll('[data-suggested="zone"]').length === 0,
-        undefined,
-        { timeout: 12000 },
-      );
-    } catch {
-      /* метка не ушла — это провал цитаты ниже, а не крушение пробы */
-    }
-  }
-  ck(!(await has('[data-suggested="zone"]')), 'метка снята касанием');
+  ck(await chooseZone('hem'), 'оператор выбирает свою зону поверх подставленной');
+  await page.waitForTimeout(250);
   ck(
-    (await zoneOf()) === 'TECH_CARD_GARMENT_ZONE_UNKNOWN',
-    'вместе с меткой ушло и подставленное значение',
+    (await zoneOf()) === Z('HEM') && (await controlText(zone)).toLowerCase() === 'hem',
+    'контрол и форма сохраняют ручной ответ hem',
     String(await zoneOf()),
   );
 
-  // (3) АНТИ-ЛОЖНАЯ ПОЛОВИНА В DOM: конфликт — метки нет вовсе, поле пустое.
+  // Conflicting evidence leaves the actual zone input empty.
+  await page.evaluate((c) => window.__inference.mount(c), formCard([sew(['p-sl-l', 'p-fp', 'p-bp'])]));
+  await settle(zone);
+  await page.waitForTimeout(250);
+  ck(unset(await zoneOf()), 'при конфликте форма оставляет зону пустой', String(await zoneOf()));
+  ck(await emptyZoneControl(), 'при конфликте пикер показывает пустую зону', await controlText(zone));
+
   await page.evaluate(
     (c) => window.__inference.mount(c),
-    formCard([sew(['p-sl-l', 'p-fp', 'p-bp'])]),
+    formCard([sew(['p-sl-l', 'p-sl-r'], { zone: Z('HEM') })]),
   );
-  await settle('[data-kind-picker]');
-  await page.waitForTimeout(400);
-  ck(!(await has('[data-suggested="zone"]')), 'на конфликте метки нет');
-  ck(unset(await zoneOf()), 'и зона осталась незаполненной', String(await zoneOf()));
-
-  // (4) Заполненную зону подстановка не трогает — ответ человека старше вывода.
-  await page.evaluate(
-    (c) => window.__inference.mount(c),
-    formCard([sew(['p-sl-l', 'p-sl-r'], { zone: 'TECH_CARD_GARMENT_ZONE_HEM' })]),
+  await settle(zone);
+  ck(
+    (await zoneOf()) === Z('HEM') && (await controlText(zone)).toLowerCase() === 'hem',
+    'заполненная зона не переписана в форме и в контроле',
+    String(await zoneOf()),
   );
-  await settle('[data-kind-picker]');
-  await page.waitForTimeout(400);
-  ck((await zoneOf()) === Z('HEM'), 'заполненная зона не переписана', String(await zoneOf()));
-  ck(!(await has('[data-suggested="zone"]')), 'и метки над чужим ответом нет');
 
-  // (5) Человек ОЧИСТИЛ поле пикером («— zone —») поверх подставленного. Пустота — тоже его
-  // ответ: подстановка не возвращается под курсором, метка уходит. До починки ревью R5 значение
-  // вставало обратно тем же кадром, селект выглядел сломанным, и единственным работающим жестом
-  // снятия оставалась метка.
+  // The empty picker choice is also an explicit human answer.
   await page.evaluate((c) => window.__inference.mount(c), formCard([sew(['p-sl-l', 'p-sl-r'])]));
-  await settle('[data-suggested="zone"]');
-  if (await has('[data-suggested="zone"]')) {
-    await page.getByRole('combobox').filter({ hasText: 'sleeve' }).first().click();
-    await page.getByRole('option', { name: '— zone —' }).click();
-    await page.waitForTimeout(500);
-  }
+  await settle(zone.filter({ hasText: /^sleeve$/i }));
+  ck((await zoneOf()) === Z('SLEEVE'), 'до очистки в форме подставленный рукав', String(await zoneOf()));
+  ck(await chooseZone('— zone —'), 'пустая зона доступна в настоящем пикере');
+  await page.waitForTimeout(300);
   ck(
-    unset(await zoneOf()),
-    'очищенная пикером зона осталась пустой — подстановка не вернулась',
+    unset(await zoneOf()) && (await emptyZoneControl()),
+    'очищенная зона остаётся пустой в форме и в контроле',
     String(await zoneOf()),
   );
-  ck(!(await has('[data-suggested="zone"]')), 'и метка ушла вместе со значением');
 
-  // (6) ПОДСТАВЛЕННОЕ НЕ ЖИВЁТ ДОЛЬШЕ СВОЕЙ МЕТКИ. Смена выбранного шага размонтирует редактор
-  // вместе с меткой — и обязана отозвать неснятую подстановку: иначе значение оставалось бы в
-  // форме БЕЗ метки, при следующем открытии шага сходило бы за ответ человека («чужой ответ не
-  // трогаем») и уезжало с сохранением немаркированным фактом (найдено ревью R5).
+  // Selection changes revoke temporary values in the editor that was unmounted.
   await page.evaluate(
     (c) => window.__inference.mount(c),
     formCard([sew(['p-sl-l', 'p-sl-r']), sew(['p-fp'])]),
   );
-  await settle('[data-suggested="zone"]');
+  await settle(zone.filter({ hasText: /^sleeve$/i }));
   ck((await zoneOf()) === Z('SLEEVE'), 'перед сменой шага подсказка стоит', String(await zoneOf()));
-  await page.locator('[role="button"][aria-current="false"]').first().click();
-  try {
-    await page.waitForFunction(
-      () => {
-        const z = window.__inference.values()[0]?.zone;
-        return !z || z === 'TECH_CARD_GARMENT_ZONE_UNKNOWN';
-      },
-      undefined,
-      { timeout: 12000 },
-    );
-  } catch {
-    /* не отозвано — это провал цитаты ниже, а не крушение пробы */
-  }
-  ck(
-    unset((await page.evaluate(() => window.__inference.values()))[0]?.zone),
-    'смена шага отозвала неснятую подстановку — значение не живёт дольше метки',
-    String((await page.evaluate(() => window.__inference.values()))[0]?.zone),
-  );
+  await page.locator('[data-rail-step="1"]').click();
+  await page.waitForFunction(
+    () => {
+      const z = window.__inference.values()[0]?.zone;
+      return !z || z === 'TECH_CARD_GARMENT_ZONE_UNKNOWN';
+    },
+    undefined,
+    { timeout: 3000 },
+  ).catch(() => {});
+  ck(unset(await zoneOf()), 'смена шага отозвала временную зону предыдущего шага', String(await zoneOf()));
 
   // (7) ШОВ С Ф4, ГВОЗДЁМ ПО ИМЕНИ ИЗ ВАЙТЛИСТА: `pressEquipment` на ЗАПОЛНЕННОМ шаге не
   // переписывается. Исключение выдано подстановке в пустое, а не праву писать по имени: стирание
@@ -937,28 +915,29 @@ if (!chromium) {
     ]),
     construction: PARK_ONE_IRON,
   });
-  await settle('[data-kind-picker]');
-  await page.waitForTimeout(400);
+  await openSetup();
   {
-    const op = (await page.evaluate(() => window.__inference.values()))[0];
+    const op = await current();
     ck(
       op?.pressEquipment === 'TECH_CARD_PRESS_EQUIPMENT_STEAMER',
       'заполненный утюг не переписан единственным профилем парка',
       String(op?.pressEquipment),
     );
-    ck(!(await has('[data-suggested="press"]')), 'и метки над ним нет');
   }
 
-  // (8) А пустому ВТО-шагу единственный профиль парка предложен ПАРОЙ (оборудование + ключ) и с
-  // меткой — половина ответа заставляла бы человека дописывать вторую вторым жестом.
+  // The empty press step takes the single profile as one equipment/key pair.
   await page.evaluate((c) => window.__inference.mount(c), {
     ...formCard([{ operationType: 'TECH_CARD_OPERATION_TYPE_PRESS', inputKeys: ['p-fp'] }]),
     construction: PARK_ONE_IRON,
   });
-  await settle('[data-suggested="press"]');
-  ck(await has('[data-suggested="press"]'), 'пустому ВТО-шагу предложен единственный профиль парка');
+  await openSetup();
+  ck(
+    (await controlText(field('pressProfileKey'))).includes('iron by the window'),
+    'выбранный профиль парка виден в Setup',
+    await controlText(field('pressProfileKey')),
+  );
   {
-    const op = (await page.evaluate(() => window.__inference.values()))[0];
+    const op = await current();
     ck(
       op?.pressEquipment === 'TECH_CARD_PRESS_EQUIPMENT_IRON' && op?.pressProfileKey === 'PR1',
       'оборудование и ключ профиля встали парой',
@@ -966,29 +945,31 @@ if (!chromium) {
     );
   }
 
-  // (9) Нитка тем же гвоздём: привязанная РУКАМИ не тронута и не задвоена, метки над ней нет;
-  // пустому шагу единственная нитка BOM предложена — и названа подстановкой.
+  const thread = page.getByRole('button', { name: 'remove material core-spun 120', exact: true });
   await page.evaluate(
     (c) => window.__inference.mount(c),
     formCard([sew(['p-fp'], { bomLineKeys: ['b-thread'] })]),
   );
-  await settle('[data-kind-picker]');
-  await page.waitForTimeout(400);
-  {
-    const op = (await page.evaluate(() => window.__inference.values()))[0];
-    ck(
-      JSON.stringify(op?.bomLineKeys) === '["b-thread"]',
-      'привязанная руками нитка не тронута и не задвоена',
-      JSON.stringify(op?.bomLineKeys),
-    );
-    ck(!(await has('[data-suggested="thread"]')), 'и метки над ней нет');
-  }
-  await page.evaluate((c) => window.__inference.mount(c), formCard([sew(['p-fp'])]));
-  await settle('[data-suggested="thread"]');
-  ck(await has('[data-suggested="thread"]'), 'единственная нитка BOM предложена — и названа подстановкой');
+  await settle(thread);
+  ck(
+    JSON.stringify((await current())?.bomLineKeys) === '["b-thread"]' && (await thread.count()) === 1,
+    'ручная связка нитки сохраняется одной записью и одной плиткой',
+  );
 
-  // (10) Ни одно монтирование не уронило редактор. Без этой строки «метки нет» над крушением
-  // читалось бы молчанием вывода — ложная зелень той же породы, что textContent-склейка.
+  await page.evaluate((c) => window.__inference.mount(c), formCard([sew(['p-fp'])]));
+  await settle(thread);
+  ck(
+    JSON.stringify((await current())?.bomLineKeys) === '["b-thread"]' && (await thread.count()) === 1,
+    'единственная предложенная нитка связана и видна в материалах шага',
+  );
+  if ((await thread.count()) === 1) {
+    await thread.click();
+    await page.waitForTimeout(300);
+  }
+  ck(
+    ((await current())?.bomLineKeys ?? []).length === 0 && (await thread.count()) === 0,
+    'удалённая оператором нитка остаётся снятой',
+  );
   ck(pageErrors.length === 0, 'все монтирования прожиты без исключений', pageErrors[0] ?? '');
 
   await browser.close();

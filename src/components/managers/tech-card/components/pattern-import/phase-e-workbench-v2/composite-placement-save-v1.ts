@@ -50,6 +50,7 @@ import {
   decodePatternImportDxfProductCompositeSidecarV4,
   readPatternImportDxfProductCompositeComponentBytesV4,
 } from './composite-sidecar-v4';
+import { PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7 } from './composite-sidecar-v7';
 
 export type PatternImportDxfProductCompositePlacementSaveCurrentV1 = Readonly<{
   authority: PatternImportDxfProductCompositeSidecarBindingsV3;
@@ -352,6 +353,11 @@ function createPlacementSaver(
         };
         await revalidate();
         const envelope = await get();
+        if (envelope.mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7)
+          return blocked(
+            'fullgraph-reissue-required',
+            'Placement changed under Composite V7. The nested placement and registered fullgraph must be reissued through the V7 transition lane; the legacy writer will not overwrite them.',
+          );
         if (
           envelope.mediaType !== PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V3 &&
           envelope.mediaType !== PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V4

@@ -7,6 +7,8 @@
 // Contract gap this fills (proposed for 08-CONTRACT §4.1 in reports/F8.md): for kind 'dxf' with
 // `presegmented`, the worker runs `dxfFastPath` instead of assemble → chains → pieces.
 
+import { AUTHORED_TEXT_LAYER } from '../../manifest/authored-text';
+import { nativeCutHolesOf } from './native-cut-holes';
 import type {
   AllowanceDecision,
   Chain,
@@ -340,7 +342,7 @@ export function dxfFastPath(read: DxfRead, seg: DxfSegmentation, rulGraded = fal
     bbox: read.meta.extents,
     missing: [],
     paths: page.paths,
-    texts: page.texts,
+    texts: page.texts.filter((text) => text.layer !== AUTHORED_TEXT_LAYER),
     rasters: page.rasters,
     styles: page.styles,
     warnings: [...read.doc.warnings, ...seg.warnings],
@@ -406,7 +408,11 @@ function candidateOf(
     features.push({
       kind: 'notch',
       at: n.at,
-      seg: [n.at, { x: n.at.x + n.dir.x * n.depthMm, y: n.at.y + n.dir.y * n.depthMm }],
+      seg: [
+        n.at,
+        n.authoredEnd ?? { x: n.at.x + n.dir.x * n.depthMm, y: n.at.y + n.dir.y * n.depthMm },
+      ],
+      ...(n.authoredGroup ? { authoredGroup: n.authoredGroup } : {}),
       depthMm: n.depthMm,
       origin: n.source === 'derived' ? 'derived' : 'detected',
       ranges: n.paths.map(range),
@@ -423,17 +429,21 @@ function candidateOf(
       ranges: [range(d.path)],
       confidence: 1,
     } satisfies DrillFeature);
-  const page = read.doc.pages[0];
+  const cutHoles = nativeCutHolesOf(read, p, rank, outerIsSeam, rulGraded, pathById, features);
   for (const [ids, role] of Object.entries(p.roles)) {
     const id = Number(ids);
     const path = pathById.get(id);
-    if (!path) continue;
+    if (!path || cutHoles?.has(id)) continue;
     if (role === 'internal' || role === 'hole') {
+      const authoredQuadratic = p.authoredQuadraticByPath?.get(id);
+      const authoredTurnAllowance = p.authoredTurnAllowanceByPath?.get(id);
       features.push({
         kind: 'internal',
         pts: path.pts,
         closed: path.closed,
-        label: role === 'hole' ? 'hole' : undefined,
+        label: role === 'hole' ? 'hole' : p.authoredInternalLabels?.get(id),
+        ...(authoredQuadratic ? { authoredQuadratic } : {}),
+        ...(authoredTurnAllowance ? { authoredTurnAllowance } : {}),
         origin: 'detected',
         ranges: [range(id)],
         confidence: 1,
@@ -451,6 +461,7 @@ function candidateOf(
     }
   }
   const area = outer?.areaMm2 ?? 0;
+  const savedName = read.meta.pieceNamesByBlock?.get(p.block);
   const cand: DxfPieceCandidate = {
     seed,
     rank: Math.max(0, rank),
@@ -460,7 +471,7 @@ function candidateOf(
       .filter((id) => !wallIds.has(id))
       .map((id) => chainOf.get(id)!)
       .filter((x) => x != null),
-    textsInside: group.texts,
+    textsInside: p.texts,
     outcome: !outer ? 'leak' : area < PATIMPORT.minPieceAreaMm2 ? 'tiny' : 'closed',
     areaMm2: area,
     bbox:
@@ -471,12 +482,19 @@ function candidateOf(
       block: p.block,
       group: p.group,
       identity: p.identity,
+      ...(savedName?.identity === p.identity ? { savedDisplayName: savedName.displayName } : {}),
       size: p.size,
       sizeSource: p.sizeSource,
       identitySource: p.identitySource,
       ...(read.meta.generatedFusing ? { generatedFusing: true } : {}),
+      ...(cutHoles ? { nativeCutHoles: true } : {}),
       features,
       outerIsSeam: outerIsSeam && !!p.seam,
+      ...(p.zeroAllowanceSeam ? { zeroAllowanceSeam: true as const } : {}),
+      ...(p.authoredAllowanceCorner ? { authoredAllowanceCorner: p.authoredAllowanceCorner } : {}),
+      ...(p.authoredOutlineCorner ? { authoredOutlineCorner: p.authoredOutlineCorner } : {}),
+      ...(p.textMarks?.length ? { textMarks: p.textMarks } : {}),
+      ...(p.pointMarks?.length ? { pointMarks: p.pointMarks } : {}),
       ...(p.seamPair ? { seamPairMm: p.seamPair.offsetMm } : {}),
       ...(p.instances ? { instances: p.instances } : {}),
       // D3: the block's QUANTITY label is the CAD's word on the count (semantics reads it)

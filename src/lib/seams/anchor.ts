@@ -18,7 +18,10 @@ import {
   type StoredSeamStatus,
 } from './types';
 
-const r = (x: number, d: number) => Math.round(x * 10 ** d) / 10 ** d;
+const r = (x: number, d: number) => {
+  const rounded = Math.round(x * 10 ** d) / 10 ** d;
+  return rounded === 0 ? 0 : rounded;
+};
 export const pieceOfId = (id: EdgeId) => id.slice(0, id.lastIndexOf('#'));
 
 /** The anchor of one run of one piece. `range` = sewn shares of the run ([0, 1] = whole). */

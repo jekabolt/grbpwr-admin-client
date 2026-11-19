@@ -338,6 +338,12 @@ export function answerRecordOf(
       ...(by.some(byAutopilot) ? { auto: true } : {}),
     });
   };
+  const omissions = s.fabrics?.dxfOmissions;
+  if (omissions?.seeds.length)
+    push('fabrics', 'dxf-omitted-families', 'DXF import selection', {
+      scopeKey: omissions.scopeKey,
+      seeds: [...omissions.seeds].sort((a, b) => a - b),
+    });
   const files = s.files;
   const fileName = (id: FileId) => files.find((f) => f.id === id)?.name ?? `file ${id}`;
 
@@ -592,7 +598,11 @@ export function answerRecordOf(
   const defaulted = defaultedFabrics(s.fabrics, card.scopes.length, false, exported);
   const fabSeeds = !s.fabrics
     ? new Set<SeedId>()
-    : new Set<SeedId>(i.assignment != null ? exported : defaulted);
+    : new Set<SeedId>(
+        (i.assignment != null ? exported : defaulted).filter(
+          (seed) => !omissions?.seeds.includes(seed),
+        ),
+      );
   if (fabSeeds.size) push('fabrics', 'fabrics', 'the pieces', { answered: true });
 
   // ── per piece (by its outline) ──

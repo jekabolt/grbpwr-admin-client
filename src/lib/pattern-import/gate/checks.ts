@@ -35,6 +35,7 @@ import {
   reflection,
   sampleAlong,
 } from '../write/geom';
+import { num } from '../write/format';
 import { LAYERS, continuityOfBlock } from '../write/manifest-build';
 import {
   GRAIN_BARB_BACK_MM,
@@ -45,7 +46,7 @@ import {
 } from '../write/plan';
 import { identityProblem } from '../manifest/identity';
 import { f0Off } from '../pieces/identity';
-import { SIZE_RUN, sizeRunProblems } from '../pieces/gfit/silent';
+import { sameDxfRankOutline, SIZE_RUN, sizeRunProblems } from '../pieces/gfit/silent';
 import { foldShapeProblem } from '../semantics/fold';
 import {
   GRAIN_INSIDE_TOL_MM,
@@ -826,9 +827,33 @@ export function g5(ctx: GateCtx): GateCheck {
       const inner = l1.inner ?? [];
       const n4 = inner.filter((p) => p.layer === LAYERS.notch).length;
       const n8 = inner.filter((p) => p.layer === LAYERS.internal).length;
+
       if (n4 !== s.notches.length) bad(`card parser keeps ${n4} of ${s.notches.length} notches`);
-      if (!r12 && n8 !== s.drills.length + wantInternal)
-        bad(`card parser keeps ${n8} of ${s.drills.length + wantInternal} layer-8 paths`);
+      const confirmedMirror = !!(b.spec.halfFold && !b.spec.unfoldedFold && s.fold);
+      if (!r12 && confirmedMirror && s.fold) {
+        const kept = inner.filter((p) => p.layer === AAMA_MIRROR_LAYER);
+        const expected = [
+          s.fold.a,
+          { x: (s.fold.a.x + s.fold.b.x) / 2, y: (s.fold.a.y + s.fold.b.y) / 2 },
+          s.fold.b,
+        ];
+        const p = kept[0];
+        if (
+          mirror.length !== 1 ||
+          kept.length !== 1 ||
+          !p ||
+          p.closed ||
+          p.pts.length !== expected.length ||
+          !p.pts.every(
+            (v, i) =>
+              num((v.x + (l1.originX ?? 0)) * 10) === num(expected[i]!.x) &&
+              num((v.y + (l1.originY ?? 0)) * 10) === num(expected[i]!.y),
+          )
+        )
+          bad('card parser lost the directed confirmed half axis on layer 6');
+      }
+      const expected8 = s.drills.length + wantInternal - Number(confirmedMirror);
+      if (!r12 && n8 !== expected8) bad(`card parser keeps ${n8} of ${expected8} layer-8 paths`);
     }
   }
   // SHAPE (owner 16.10): one piece, one shape — the sizes of an identity carry the same features
@@ -1025,6 +1050,7 @@ export function g8(ctx: GateCtx): GateCheck {
   const failed: string[] = [];
   const notes: string[] = [];
   let worstSizes = 0;
+  let preservedDxfPairs = 0;
   const rankOf = new Map(ctx.m.sizes.map((s) => [s.token, s.rank]));
   const byId = new Map<string, BlockInfo[]>();
   for (const b of ctx.blocks) {
@@ -1058,8 +1084,24 @@ export function g8(ctx: GateCtx): GateCheck {
     let bad = false;
     let silent = false;
     let grossAreaLoss = false;
+    const coincident = new Map<string, string>();
     for (let i = 1; i < rows.length; i++) {
-      if (!(rows[i].area > rows[i - 1].area)) {
+      const prev = rows[i - 1];
+      const row = rows[i];
+      const sourceRank = ev?.[row.b.block]?.coincidentDxfRank;
+      if (
+        sourceRank != null &&
+        sourceRank === prev.b.size?.rank &&
+        prev.c &&
+        row.c &&
+        sameDxfRankOutline(prev.c, row.c)
+      ) {
+        coincident.set(row.b.block, prev.b.block);
+        preservedDxfPairs++;
+      }
+    }
+    for (let i = 1; i < rows.length; i++) {
+      if (!(rows[i].area > rows[i - 1].area) && !coincident.has(rows[i].b.block)) {
         bad = true;
         if (rows[i].area < rows[i - 1].area * (1 - PATIMPORT.areaGrowthTolerance))
           grossAreaLoss = true;
@@ -1078,6 +1120,7 @@ export function g8(ctx: GateCtx): GateCheck {
     for (const p of sizeRunProblems(
       rows.flatMap((r) => (r.c ? [{ key: r.b.block, rank: r.rank, ring: r.c }] : [])),
     )) {
+      if (p.kind === 'collapse' && coincident.get(p.keys[1]) === p.keys[0]) continue;
       // one outline the drawing draws once for both sizes (neither draws a line of its own beside
       // it): the run shares it by design — G8's area order says the rest
       if (p.kind === 'collapse' && ev && p.keys.every((k) => ev[k]?.drawsOwn === false)) continue;
@@ -1116,10 +1159,15 @@ export function g8(ctx: GateCtx): GateCheck {
     failed,
     exactSourceGeometry ? 'warn' : worstSizes > 2 ? 'block' : failed.length ? 'warn' : 'block',
     (notes.join('; ') ||
-      'area and outline length grow with size rank for every identity, no two sizes on one outline') +
+      (preservedDxfPairs
+        ? 'the drawn size run passes'
+        : 'area and outline length grow with size rank for every identity, no two sizes on one outline')) +
+      (preservedDxfPairs
+        ? ` · ${preservedDxfPairs} identical DXF rank pairs preserved as drawn`
+        : '') +
       grade,
     null,
-    `on the drawn line: increasing area (loss > ${PATIMPORT.areaGrowthTolerance * 100}% blocks when > 2 sizes); perimeter: no drop > ${SIZE_RUN.dropMm} mm / ${SIZE_RUN.dropShare * 100} %, no step > ${SIZE_RUN.spikeMul}× / +${SIZE_RUN.spikeAddMm} mm the run's median; no two sizes on one outline`,
+    `on the drawn line: increasing area (loss > ${PATIMPORT.areaGrowthTolerance * 100}% blocks when > 2 sizes); perimeter: no drop > ${SIZE_RUN.dropMm} mm / ${SIZE_RUN.dropShare * 100} %, no step > ${SIZE_RUN.spikeMul}× / +${SIZE_RUN.spikeAddMm} mm the run's median; ${preservedDxfPairs ? 'coincident ranks require distinct labelled DXF blocks' : 'no two sizes on one outline'}`,
   );
 }
 

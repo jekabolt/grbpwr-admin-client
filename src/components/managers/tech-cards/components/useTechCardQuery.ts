@@ -5,6 +5,9 @@ import {
   common_SkuSeason,
   common_TechCardInsert,
   common_TechCardStage,
+  type GuardedNativePieceJoin,
+  type GuardedZeroOperationPieceRename,
+  type UpdateTechCardRequest,
 } from 'api/proto-http/admin';
 import {
   openFindingCount,
@@ -13,6 +16,7 @@ import {
 } from 'components/managers/tech-card/components/finding-seen';
 import { styleReadViewKeys } from 'components/managers/tech-card/components/useStyleReadViews';
 import { wakeSeamHints } from 'lib/seam-hints/wake';
+import { retireExactNSeamSessionsForDocumentWrite } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/exact-n-seam-production-session-store-v2';
 import { useMemo } from 'react';
 
 export type TechCardFilter = {
@@ -402,6 +406,21 @@ export function useExitTechCardGuide(id: number | undefined) {
   });
 }
 
+export async function updateTechCardDocument(request: UpdateTechCardRequest) {
+  const saved = await adminService.UpdateTechCard(request);
+  const { id, expectedLockVersion } = request;
+  // The ordinary document writer replaces pattern-row revisions and removes their sidecars. Use
+  // the lock of the accepted write, before any fresh query or semantic-session reconstruction.
+  if (
+    (request.techCard || request.guardedPieceJoin || request.guardedAssemblyPatternUpdate) &&
+    id !== undefined &&
+    expectedLockVersion !== undefined &&
+    saved.lockVersion === expectedLockVersion + 1
+  )
+    retireExactNSeamSessionsForDocumentWrite(id, expectedLockVersion);
+  return saved;
+}
+
 export function useUpdateTechCard() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -411,20 +430,50 @@ export function useUpdateTechCard() {
       expectedLockVersion,
       snapshotReason = '',
       saveSessionId,
-    }: {
-      id: number;
-      techCard: common_TechCardInsert;
-      expectedLockVersion: number;
-      snapshotReason?: string;
-      saveSessionId: string;
-    }) =>
-      adminService.UpdateTechCard({
+      expectedServerAssemblyRevision,
+      guardedPieceRename,
+      guardedPieceJoin,
+    }: { id: number; expectedLockVersion: number } & (
+      | {
+          techCard: common_TechCardInsert;
+          snapshotReason?: string;
+          saveSessionId: string;
+          expectedServerAssemblyRevision?: string;
+          guardedPieceRename?: never;
+          guardedPieceJoin?: never;
+        }
+      | {
+          techCard?: never;
+          snapshotReason?: never;
+          saveSessionId?: never;
+          expectedServerAssemblyRevision?: never;
+          guardedPieceRename: GuardedZeroOperationPieceRename;
+          guardedPieceJoin?: never;
+        }
+      | {
+          techCard?: never;
+          snapshotReason?: never;
+          saveSessionId?: never;
+          expectedServerAssemblyRevision?: never;
+          guardedPieceRename?: never;
+          guardedPieceJoin: GuardedNativePieceJoin;
+        }
+    )) => {
+      const guardedAssemblyPatternUpdate =
+        techCard && expectedServerAssemblyRevision !== undefined
+          ? { techCard, expectedServerAssemblyRevision }
+          : undefined;
+      return updateTechCardDocument({
         id,
-        techCard,
+        techCard: guardedAssemblyPatternUpdate ? undefined : techCard,
         expectedLockVersion,
         snapshotReason,
         saveSessionId,
-      }),
+        guardedPieceRename,
+        guardedPieceJoin,
+        guardedAssemblyPatternUpdate,
+      });
+    },
     onSuccess: (_data, variables) => {
       // Operations or patterns may have moved: the card's hints map catches up by itself (§5a).
       wakeSeamHints(variables.id);

@@ -126,6 +126,96 @@ const MEANING: { value: LineMeaning; label: string }[] = [
   { value: 'cut', label: 'cut line' },
   { value: 'both', label: 'both drawn' },
 ];
+
+function PieceAllowanceCells({
+  pieceNumber,
+  allowance,
+  onChange,
+  disabled,
+}: {
+  pieceNumber: number;
+  allowance: AllowanceDecision;
+  onChange: (allowance: AllowanceDecision) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <>
+      <td data-align='left'>
+        <NativeSelect
+          value={allowance.meaning}
+          onChange={(v) =>
+            onChange({ ...allowance, meaning: v as LineMeaning, origin: 'operator' })
+          }
+          aria-label={`line meaning of piece ${pieceNumber}`}
+          className='w-24'
+          options={MEANING}
+          disabled={disabled}
+        />
+      </td>
+      <td>
+        <NumberField
+          value={allowance.allowanceMm}
+          min={0}
+          aria-label={`allowance of piece ${pieceNumber}`}
+          className='ml-auto w-16'
+          onCommit={(v) => onChange({ ...allowance, allowanceMm: v ?? 0, origin: 'operator' })}
+          disabled={disabled}
+        />
+      </td>
+    </>
+  );
+}
+
+function OffsetTopologyAllowanceAnswer({
+  pieceNumber,
+  allowance,
+  busy,
+  apply,
+}: {
+  pieceNumber: number;
+  allowance: AllowanceDecision;
+  busy: boolean;
+  apply: (allowance: AllowanceDecision) => void;
+}) {
+  // A semantics re-run can replace the question. Submit both fields as one answer.
+  const [draft, setDraft] = useState(allowance);
+  return (
+    <div className='flex flex-col items-start gap-2'>
+      <DataTable>
+        <thead>
+          <tr>
+            <th data-align='left'>line</th>
+            <th>allow., mm</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <PieceAllowanceCells
+              pieceNumber={pieceNumber}
+              allowance={draft}
+              onChange={setDraft}
+              disabled={busy}
+            />
+          </tr>
+        </tbody>
+      </DataTable>
+      <Button
+        type='button'
+        variant='secondary'
+        size='xs'
+        disabled={
+          busy ||
+          draft.allowanceMm < 0 ||
+          (draft.meaning === allowance.meaning && draft.allowanceMm === allowance.allowanceMm)
+        }
+        onClick={() => apply(draft)}
+      >
+        Apply line and allowance
+      </Button>
+    </div>
+  );
+}
+
 const REASON: Record<string, string> = {
   'no-grain': 'no grainline',
   'offset-hull': 'offset collapsed',
@@ -1544,6 +1634,17 @@ export function DetailsStep({
             </Button>
           </span>
         );
+      } else if (p.reason === 'offset-topology') {
+        why = b?.detail ?? null;
+        answers = (
+          <OffsetTopologyAllowanceAnswer
+            key={p.key}
+            pieceNumber={mark(seed)}
+            allowance={rowData(seed).allowance}
+            busy={busy}
+            apply={(allowance) => void override(seed, { allowance })}
+          />
+        );
       } else if (p.reason === 'grammar' || p.reason === 'duplicate-identity') {
         why = b?.detail ?? null;
         answers = (
@@ -2399,40 +2500,11 @@ export function DetailsStep({
                               <MarkBox n={mark(f.seed)} />
                             </td>
                             <td data-align='left'>{codeOf(f.seed)}</td>
-                            <td data-align='left'>
-                              <NativeSelect
-                                value={d.allowance.meaning}
-                                onChange={(v) =>
-                                  override(f.seed, {
-                                    allowance: {
-                                      ...d.allowance,
-                                      meaning: v as LineMeaning,
-                                      origin: 'operator',
-                                    },
-                                  })
-                                }
-                                aria-label={`line meaning of piece ${mark(f.seed)}`}
-                                className='w-24'
-                                options={MEANING}
-                              />
-                            </td>
-                            <td>
-                              <NumberField
-                                value={d.allowance.allowanceMm}
-                                min={0}
-                                aria-label={`allowance of piece ${mark(f.seed)}`}
-                                className='ml-auto w-16'
-                                onCommit={(v) =>
-                                  override(f.seed, {
-                                    allowance: {
-                                      ...d.allowance,
-                                      allowanceMm: v ?? 0,
-                                      origin: 'operator',
-                                    },
-                                  })
-                                }
-                              />
-                            </td>
+                            <PieceAllowanceCells
+                              pieceNumber={mark(f.seed)}
+                              allowance={d.allowance}
+                              onChange={(allowance) => void override(f.seed, { allowance })}
+                            />
                           </tr>
                         );
                       })}

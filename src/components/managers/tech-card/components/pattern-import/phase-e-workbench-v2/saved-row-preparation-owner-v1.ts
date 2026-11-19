@@ -118,6 +118,17 @@ export type PatternImportDxfPhaseESavedRowAuthoritativeAssemblyEvidenceV1 = Read
   }>;
 }>;
 
+export type PatternImportDxfPhaseESavedRowInitialAssemblyEvidenceV1 = Omit<
+  PatternImportDxfPhaseESavedRowAuthoritativeAssemblyEvidenceV1,
+  'exactTopology'
+> &
+  Readonly<{ exactTopology: null; semanticV1Sha256: string }>;
+
+type ReadAssemblyEvidence<T> = (
+  expected: Readonly<{ row: DxfProductSavedRowIdentityV1; selectedOperationNumber: number }>,
+  signal: AbortSignal,
+) => Promise<T>;
+
 export type PatternImportDxfPhaseESavedRowPreparationHostV1 = Readonly<{
   /** A fresh host capability is requested for every preparation generation. */
   createSavedReprocessHost: () => DxfProductSavedReprocessHostV1;
@@ -125,13 +136,8 @@ export type PatternImportDxfPhaseESavedRowPreparationHostV1 = Readonly<{
    * Must be backed by a future server transactional read. A GetTechCard projection, local form or
    * optimistic seam overlay cannot satisfy this capability.
    */
-  readAuthoritativeAssembly: (
-    expected: Readonly<{
-      row: DxfProductSavedRowIdentityV1;
-      selectedOperationNumber: number;
-    }>,
-    signal: AbortSignal,
-  ) => Promise<PatternImportDxfPhaseESavedRowAuthoritativeAssemblyEvidenceV1>;
+  readAuthoritativeAssembly: ReadAssemblyEvidence<PatternImportDxfPhaseESavedRowAuthoritativeAssemblyEvidenceV1>;
+  readInitialAssembly?: ReadAssemblyEvidence<PatternImportDxfPhaseESavedRowInitialAssemblyEvidenceV1>;
   crypto?: Pick<Crypto, 'subtle'>;
 }>;
 
@@ -272,13 +278,38 @@ export type PatternImportDxfPhaseESavedRowPreparedV1 = Readonly<{
   readonly [preparedBrand]: never;
 }>;
 
-export type PatternImportDxfPhaseESavedRowPreparationResultV1 =
+const INITIAL_PREPARATION_CLAIMS = Object.freeze({
+  ...PATTERN_IMPORT_DXF_PHASE_E_SAVED_ROW_PREPARATION_CLAIMS_V1,
+  verifiedCompositeExactTopologyReadBeforeAndAfter: false as const,
+  compilerSourceOwnerHeldPrivately: false as const,
+  confirmedCompilerSourceOneShot: false as const,
+  semanticV1VerifiedBeforeAndAfter: true as const,
+});
+
+export type PatternImportDxfPhaseESavedRowInitialPreparedV1 = Omit<
+  PatternImportDxfPhaseESavedRowPreparedV1,
+  'exactTopology' | 'claims'
+> &
+  Readonly<{
+    exactTopology: null;
+    semanticV1Sha256: string;
+    claims: typeof INITIAL_PREPARATION_CLAIMS;
+  }>;
+
+export type PatternImportDxfPhaseESavedRowWorkbenchPreparedV1 =
+  | PatternImportDxfPhaseESavedRowPreparedV1
+  | PatternImportDxfPhaseESavedRowInitialPreparedV1;
+
+export type PatternImportDxfPhaseESavedRowPreparationResultV1<
+  Prepared extends
+    PatternImportDxfPhaseESavedRowWorkbenchPreparedV1 = PatternImportDxfPhaseESavedRowPreparedV1,
+> =
   | Readonly<{
       ok: true;
       preparationGeneration: number;
-      prepared: PatternImportDxfPhaseESavedRowPreparedV1;
+      prepared: Prepared;
       blockers: readonly [];
-      claims: typeof PATTERN_IMPORT_DXF_PHASE_E_SAVED_ROW_PREPARATION_CLAIMS_V1;
+      claims: Prepared['claims'];
     }>
   | Readonly<{
       ok: false;
@@ -828,12 +859,16 @@ function validateAssemblyEvidence(
   candidate: unknown,
   request: PatternImportDxfPhaseESavedRowPreparationRequestV1,
   phase: 'before' | 'after',
+  initial: boolean,
 ): Readonly<{
   snapshot: AssemblyContext;
   adapted: SuccessfulAdapter;
   serverAssemblyRevision: string;
   serverTopologySha256: string;
-  exactTopology: PatternImportDxfPhaseESavedRowAuthoritativeAssemblyEvidenceV1['exactTopology'];
+  exactTopology:
+    | PatternImportDxfPhaseESavedRowAuthoritativeAssemblyEvidenceV1['exactTopology']
+    | null;
+  semanticV1Sha256: string | null;
 }> {
   const evidence = descriptorRecord(candidate, [
     'schemaVersion',
@@ -844,6 +879,7 @@ function validateAssemblyEvidence(
     'selectedOperationNumber',
     'assembly',
     'exactTopology',
+    ...(initial ? ['semanticV1Sha256'] : []),
   ]);
   if (
     !evidence ||
@@ -882,59 +918,73 @@ function validateAssemblyEvidence(
       phase === 'before' ? 'saved-row-mismatch-before-prepare' : 'saved-row-stale-after-prepare',
       `The saved row no longer exact-matches all eight identity fields ${phase} prepare.`,
     );
-  const exact = descriptorRecord(exactTopology, [
-    'carrier',
-    'seal',
-    'compositeSha256',
-    'compositeByteLength',
-  ]);
-  const carrier = descriptorRecord(exact?.carrier, [
-    'schemaVersion',
-    'status',
-    'bindings',
-    'sides',
-    'claims',
-  ]);
-  const bindings = descriptorRecord(carrier?.bindings, [
-    'row',
-    'serverAssemblyRevision',
-    'assemblyTopologySha256',
-    'selectedOperation',
-    'catalogCanonicalSha256',
-    'proposalFingerprint',
-    'phaseEAggregatePlanSha256',
-  ]);
-  const selectedOperation = descriptorRecord(bindings?.selectedOperation, [
-    'sourceOperationNumber',
-    'authoringOperationId',
-    'localOperationOrder',
-    'seamIds',
-  ]);
-  const carrierRow = detachRow(bindings?.row);
-  if (
-    !exact ||
-    !carrier ||
-    !bindings ||
-    !selectedOperation ||
-    !carrierRow ||
-    !same(carrierRow, request.row) ||
-    bindings.serverAssemblyRevision !== evidence.serverAssemblyRevision ||
-    bindings.assemblyTopologySha256 !== evidence.serverTopologySha256 ||
-    selectedOperation.sourceOperationNumber !== request.selectedOperationNumber ||
-    selectedOperation.localOperationOrder !== 0 ||
-    !Array.isArray(selectedOperation.seamIds) ||
-    selectedOperation.seamIds.length !== 2 ||
-    typeof exact.compositeSha256 !== 'string' ||
-    !SHA256.test(exact.compositeSha256) ||
-    !Number.isSafeInteger(exact.compositeByteLength) ||
-    Number(exact.compositeByteLength) <= 0
-  )
-    fail(
-      phase === 'before'
-        ? 'assembly-authority-receipt-invalid'
-        : 'assembly-topology-stale-after-prepare',
-      `The verified serialized exact-topology carrier is invalid ${phase} prepare.`,
-    );
+  let semanticV1Sha256: string | null = null;
+  if (initial) {
+    if (
+      evidence.exactTopology !== null ||
+      typeof evidence.semanticV1Sha256 !== 'string' ||
+      !SHA256.test(evidence.semanticV1Sha256)
+    )
+      fail(
+        'assembly-authority-receipt-invalid',
+        `A current standalone Product Semantic V1 is required ${phase} first two-seam preparation.`,
+      );
+    semanticV1Sha256 = evidence.semanticV1Sha256;
+  } else {
+    const exact = descriptorRecord(exactTopology, [
+      'carrier',
+      'seal',
+      'compositeSha256',
+      'compositeByteLength',
+    ]);
+    const carrier = descriptorRecord(exact?.carrier, [
+      'schemaVersion',
+      'status',
+      'bindings',
+      'sides',
+      'claims',
+    ]);
+    const bindings = descriptorRecord(carrier?.bindings, [
+      'row',
+      'serverAssemblyRevision',
+      'assemblyTopologySha256',
+      'selectedOperation',
+      'catalogCanonicalSha256',
+      'proposalFingerprint',
+      'phaseEAggregatePlanSha256',
+    ]);
+    const selectedOperation = descriptorRecord(bindings?.selectedOperation, [
+      'sourceOperationNumber',
+      'authoringOperationId',
+      'localOperationOrder',
+      'seamIds',
+    ]);
+    const carrierRow = detachRow(bindings?.row);
+    if (
+      !exact ||
+      !carrier ||
+      !bindings ||
+      !selectedOperation ||
+      !carrierRow ||
+      !same(carrierRow, request.row) ||
+      bindings.serverAssemblyRevision !== evidence.serverAssemblyRevision ||
+      bindings.assemblyTopologySha256 !== evidence.serverTopologySha256 ||
+      selectedOperation.sourceOperationNumber !== request.selectedOperationNumber ||
+      selectedOperation.localOperationOrder !== 0 ||
+      !Array.isArray(selectedOperation.seamIds) ||
+      selectedOperation.seamIds.length !== 2 ||
+      typeof exact.compositeSha256 !== 'string' ||
+      !SHA256.test(exact.compositeSha256) ||
+      !Number.isSafeInteger(exact.compositeByteLength) ||
+      Number(exact.compositeByteLength) <= 0
+    )
+      fail(
+        phase === 'before'
+          ? 'assembly-authority-receipt-invalid'
+          : 'assembly-topology-stale-after-prepare',
+        `The verified serialized exact-topology carrier is invalid ${phase} prepare.`,
+      );
+  }
   const adapted = adaptPatternImportDxfPhaseEWorkbenchExistingAssemblyMultiseamV2(
     assembly,
     request.selectedOperationNumber,
@@ -949,7 +999,8 @@ function validateAssemblyEvidence(
     adapted,
     serverAssemblyRevision: evidence.serverAssemblyRevision,
     serverTopologySha256: evidence.serverTopologySha256,
-    exactTopology: exactTopology!,
+    exactTopology,
+    semanticV1Sha256,
   });
 }
 
@@ -974,6 +1025,7 @@ async function verifyServerTopologySha256(
 type CapturedPreparationHost = Readonly<{
   createSavedReprocessHost: () => DxfProductSavedReprocessHostV1;
   readAuthoritativeAssembly: PatternImportDxfPhaseESavedRowPreparationHostV1['readAuthoritativeAssembly'];
+  readInitialAssembly?: PatternImportDxfPhaseESavedRowPreparationHostV1['readInitialAssembly'];
   crypto: Pick<Crypto, 'subtle'>;
 }>;
 
@@ -1048,6 +1100,8 @@ function capturePreparationHost(value: unknown): CapturedPreparationHost | null 
       return null;
     const expected = ['createSavedReprocessHost', 'readAuthoritativeAssembly'];
     if (Object.prototype.hasOwnProperty.call(descriptors, 'crypto')) expected.push('crypto');
+    if (Object.prototype.hasOwnProperty.call(descriptors, 'readInitialAssembly'))
+      expected.push('readInitialAssembly');
     const actual = (keys as string[]).sort();
     expected.sort();
     if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index]))
@@ -1058,7 +1112,13 @@ function capturePreparationHost(value: unknown): CapturedPreparationHost | null 
     }
     const create = descriptors.createSavedReprocessHost.value;
     const read = descriptors.readAuthoritativeAssembly.value;
-    if (typeof create !== 'function' || typeof read !== 'function') return null;
+    const readInitial = descriptors.readInitialAssembly?.value;
+    if (
+      typeof create !== 'function' ||
+      typeof read !== 'function' ||
+      (descriptors.readInitialAssembly && typeof readInitial !== 'function')
+    )
+      return null;
     const cryptoCandidate = descriptors.crypto?.value ?? globalThis.crypto;
     const crypto = captureCryptoProvider(cryptoCandidate);
     if (!crypto) return null;
@@ -1071,6 +1131,16 @@ function capturePreparationHost(value: unknown): CapturedPreparationHost | null 
         Reflect.apply(read, undefined, [expectedRow, signal]) as ReturnType<
           PatternImportDxfPhaseESavedRowPreparationHostV1['readAuthoritativeAssembly']
         >,
+      ...(typeof readInitial === 'function' && {
+        readInitialAssembly: (
+          expectedRow: Parameters<ReadAssemblyEvidence<unknown>>[0],
+          signal: AbortSignal,
+        ) =>
+          Reflect.apply(readInitial, undefined, [
+            expectedRow,
+            signal,
+          ]) as Promise<PatternImportDxfPhaseESavedRowInitialAssemblyEvidenceV1>,
+      }),
       crypto,
     };
     return Object.freeze(captured);
@@ -1150,6 +1220,7 @@ export function createPatternImportDxfPhaseESavedRowPreparationOwnerV1(
   let disposed = false;
   let preparationGeneration = 0;
   let active: ActivePreparation | null = null;
+  let currentInitial: PatternImportDxfPhaseESavedRowInitialPreparedV1 | null = null;
   const preparedCompilerSources = new WeakMap<object, PreparedCompilerSourceState>();
   const livePreparedSources = new Set<object>();
 
@@ -1167,6 +1238,7 @@ export function createPatternImportDxfPhaseESavedRowPreparationOwnerV1(
 
   const invalidate = (reason: NonNullable<ActivePreparation['invalidatedBy']>) => {
     revokePreparedSources();
+    currentInitial = null;
     if (!active) return;
     active.invalidatedBy = reason;
     active.controller.abort();
@@ -1175,9 +1247,12 @@ export function createPatternImportDxfPhaseESavedRowPreparationOwnerV1(
     active = null;
   };
 
-  const prepare = async (
+  const runPreparation = async (
     candidate: unknown,
-  ): Promise<PatternImportDxfPhaseESavedRowPreparationResultV1> => {
+    initial: boolean,
+  ): Promise<
+    PatternImportDxfPhaseESavedRowPreparationResultV1<PatternImportDxfPhaseESavedRowWorkbenchPreparedV1>
+  > => {
     if (disposed) return blocked(new PreparationFailure('owner-disposed', 'Owner disposed.'), null);
     invalidate('superseded');
     preparationGeneration += 1;
@@ -1196,9 +1271,17 @@ export function createPatternImportDxfPhaseESavedRowPreparationOwnerV1(
     try {
       const request = detachRequest(candidate);
       assertCurrent();
-      let beforeEvidence: PatternImportDxfPhaseESavedRowAuthoritativeAssemblyEvidenceV1;
+      const read = initial
+        ? capturedHost.readInitialAssembly
+        : capturedHost.readAuthoritativeAssembly;
+      if (!read)
+        fail(
+          'assembly-authority-receipt-invalid',
+          'A current Product Semantic V1 read capability is required for initial authoring.',
+        );
+      let beforeEvidence: Awaited<ReturnType<typeof read>>;
       try {
-        beforeEvidence = await capturedHost.readAuthoritativeAssembly(
+        beforeEvidence = await read(
           { row: request.row, selectedOperationNumber: request.selectedOperationNumber },
           ticket.controller.signal,
         );
@@ -1210,7 +1293,7 @@ export function createPatternImportDxfPhaseESavedRowPreparationOwnerV1(
         );
       }
       assertCurrent();
-      const before = validateAssemblyEvidence(beforeEvidence, request, 'before');
+      const before = validateAssemblyEvidence(beforeEvidence, request, 'before', initial);
       assertCurrent();
       const topologySha256 = await verifyServerTopologySha256(
         before,
@@ -1333,6 +1416,7 @@ export function createPatternImportDxfPhaseESavedRowPreparationOwnerV1(
         catalogCanonicalSha256: catalog.canonicalSha256,
         serverAssemblyRevision: before.serverAssemblyRevision,
         assemblyTopologySha256: topologySha256,
+        ...(before.semanticV1Sha256 ? { semanticV1Sha256: before.semanticV1Sha256 } : {}),
       };
       const documentDigest = await sha256(
         'pattern-import-dxf-phase-e-saved-row-document/1',
@@ -1365,9 +1449,9 @@ export function createPatternImportDxfPhaseESavedRowPreparationOwnerV1(
         fail('workbench-state-blocked', 'The two-seam workbench state could not be created.');
       }
 
-      let afterEvidence: PatternImportDxfPhaseESavedRowAuthoritativeAssemblyEvidenceV1;
+      let afterEvidence: Awaited<ReturnType<typeof read>>;
       try {
-        afterEvidence = await capturedHost.readAuthoritativeAssembly(
+        afterEvidence = await read(
           { row: request.row, selectedOperationNumber: request.selectedOperationNumber },
           ticket.controller.signal,
         );
@@ -1379,7 +1463,7 @@ export function createPatternImportDxfPhaseESavedRowPreparationOwnerV1(
         );
       }
       assertCurrent();
-      const after = validateAssemblyEvidence(afterEvidence, request, 'after');
+      const after = validateAssemblyEvidence(afterEvidence, request, 'after', initial);
       assertCurrent();
       const afterTopologySha256 = await verifyServerTopologySha256(
         after,
@@ -1400,7 +1484,8 @@ export function createPatternImportDxfPhaseESavedRowPreparationOwnerV1(
       if (
         !same(before.snapshot, after.snapshot) ||
         !same(before.adapted.existingAssembly, after.adapted.existingAssembly) ||
-        !same(before.exactTopology, after.exactTopology)
+        !same(before.exactTopology, after.exactTopology) ||
+        before.semanticV1Sha256 !== after.semanticV1Sha256
       )
         fail(
           'assembly-topology-stale-after-prepare',
@@ -1419,7 +1504,7 @@ export function createPatternImportDxfPhaseESavedRowPreparationOwnerV1(
           'The catalog must expose two distinct piece identities.',
         );
       assertCurrent();
-      const prepared = deepFreeze({
+      const common = {
         schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_SAVED_ROW_PREPARED_V1,
         origin: 'verified-saved-row' as const,
         preparationGeneration: ticket.generation,
@@ -1432,7 +1517,6 @@ export function createPatternImportDxfPhaseESavedRowPreparationOwnerV1(
         serverAssemblyRevision: before.serverAssemblyRevision,
         assemblyTopologySha256: topologySha256,
         topology: before.adapted.existingAssembly,
-        exactTopology: before.exactTopology,
         draftCadCompileSource,
         selection: selected.selection,
         catalog,
@@ -1441,6 +1525,26 @@ export function createPatternImportDxfPhaseESavedRowPreparationOwnerV1(
         initialState,
         materialOptions,
         documentAuthority,
+      };
+      if (before.semanticV1Sha256) {
+        const prepared = deepFreeze({
+          ...common,
+          exactTopology: null,
+          semanticV1Sha256: before.semanticV1Sha256,
+          claims: INITIAL_PREPARATION_CLAIMS,
+        }) as PatternImportDxfPhaseESavedRowInitialPreparedV1;
+        currentInitial = prepared;
+        return Object.freeze({
+          ok: true as const,
+          preparationGeneration: ticket.generation,
+          prepared,
+          blockers: Object.freeze([]) as readonly [],
+          claims: INITIAL_PREPARATION_CLAIMS,
+        });
+      }
+      const prepared = deepFreeze({
+        ...common,
+        exactTopology: before.exactTopology!,
         claims: PATTERN_IMPORT_DXF_PHASE_E_SAVED_ROW_PREPARATION_CLAIMS_V1,
       }) as PatternImportDxfPhaseESavedRowPreparedV1;
       genuinePrepared.add(prepared);
@@ -1465,6 +1569,14 @@ export function createPatternImportDxfPhaseESavedRowPreparationOwnerV1(
       if (active === ticket) active = null;
     }
   };
+
+  // The restore API keeps its original strict type and never exposes first-authoring state.
+  const prepare = (candidate: unknown) =>
+    runPreparation(candidate, false) as Promise<PatternImportDxfPhaseESavedRowPreparationResultV1>;
+  const prepareInitial = (candidate: unknown) =>
+    runPreparation(candidate, true) as Promise<
+      PatternImportDxfPhaseESavedRowPreparationResultV1<PatternImportDxfPhaseESavedRowInitialPreparedV1>
+    >;
 
   const consumeConfirmedCompilerSource = async <T>(
     request: PatternImportDxfPhaseESavedRowConfirmedCompilerSourceRequestV1,
@@ -1570,6 +1682,10 @@ export function createPatternImportDxfPhaseESavedRowPreparationOwnerV1(
   return Object.freeze({
     schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_SAVED_ROW_PREPARATION_OWNER_V1,
     prepare,
+    prepareInitial,
+    isCurrentInitial(prepared: PatternImportDxfPhaseESavedRowInitialPreparedV1) {
+      return !disposed && currentInitial === prepared;
+    },
     consumeConfirmedCompilerSource,
     cancel() {
       invalidate('cancelled');

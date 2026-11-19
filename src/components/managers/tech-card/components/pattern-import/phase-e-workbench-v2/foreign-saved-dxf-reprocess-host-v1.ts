@@ -1,3 +1,4 @@
+import { DXF_NATIVE_SEWING_REPLAY_REQUEST_V1 } from 'lib/pattern-import/dxf-native-sewing-replay-v1';
 import {
   DXF_PIPELINE_PROVENANCE_REQUEST_V1,
   type DxfPipelineProvenanceStageOutputV1,
@@ -336,6 +337,14 @@ async function reprocessForeignSavedDxf(
       11,
       'building exact topology replay',
     )) as DxfProductPhaseDReplayStageOutputV1;
+    const nativeSewingReplay = deps.nativeSewingReplay
+      ? await run(
+          'dxf-native-sewing-replay',
+          { schemaVersion: DXF_NATIVE_SEWING_REPLAY_REQUEST_V1 },
+          11,
+          'reading exact native sewing paths',
+        )
+      : undefined;
     const written = attachCanonicalWriterReplay(
       await run(
         'write',
@@ -361,7 +370,11 @@ async function reprocessForeignSavedDxf(
       target,
       adapted.bindings,
     );
-    return Object.freeze({ row: Object.freeze({ ...input.row }), draft });
+    return Object.freeze({
+      row: Object.freeze({ ...input.row }),
+      draft,
+      ...(nativeSewingReplay ? { nativeSewingReplay } : {}),
+    });
   } finally {
     signal.removeEventListener('abort', cancel);
     if (sessionId != null) {

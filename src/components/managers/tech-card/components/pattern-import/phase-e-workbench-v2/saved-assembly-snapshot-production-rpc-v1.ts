@@ -1,4 +1,15 @@
 import { abortableAdminService } from 'api/api';
+import type { AdminService } from 'api/proto-http/admin';
+import { decodePatternImportDxfProductMultiseamPlacementSidecarV2 } from 'lib/cloth/domain/pattern-import-dxf-product-multiseam-placement-sidecar-v2';
+import {
+  PATTERN_IMPORT_DXF_PRODUCT_SEMANTIC_SIDECAR_MEDIA_TYPE_V1,
+  type PatternImportDxfProductSemanticSidecarDocumentV1,
+} from 'lib/cloth/domain/pattern-import-dxf-product-semantic-sidecar-v1';
+import { readCompleteSavedAssemblySourceV1 } from './saved-assembly-complete-source-rpc-v1';
+import {
+  PATTERN_IMPORT_DXF_PHASE_E_SERVER_TRANSACTIONAL_SAVED_ASSEMBLY_V1,
+  type PatternImportDxfPhaseESavedRowPreparationHostV1,
+} from './saved-row-preparation-owner-v1';
 import {
   PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V3,
   decodePatternImportDxfProductCompositeSidecarV3,
@@ -43,6 +54,9 @@ export type PatternImportDxfPhaseESavedAssemblySnapshotProductionRpcV1 = Readonl
     }>;
   compositeCodecContract: PatternImportDxfPhaseESavedAssemblyCompositeCodecContractV1;
   authorityAdapter: PatternImportDxfPhaseESavedAssemblyAuthorityTransportAdapterV1;
+  readInitialAssembly: NonNullable<
+    PatternImportDxfPhaseESavedRowPreparationHostV1['readInitialAssembly']
+  >;
   claims: typeof PATTERN_IMPORT_DXF_PHASE_E_SAVED_ASSEMBLY_SNAPSHOT_PRODUCTION_RPC_CLAIMS_V1;
 }>;
 
@@ -93,6 +107,89 @@ export function createPatternImportDxfPhaseESavedAssemblyProductionCompositeCode
   });
 }
 
+type InitialAssemblyClient = Pick<AdminService, 'GetTechCardSavedAssemblySnapshot'>;
+type ReadInitialAssembly =
+  PatternImportDxfPhaseESavedAssemblySnapshotProductionRpcV1['readInitialAssembly'];
+
+/** A standalone, current Product V1 may seed new choices. It cannot restore V3 sides. */
+export function createPatternImportDxfPhaseEInitialSavedAssemblyReaderV1(
+  readCurrentTopology: PatternImportDxfPhaseESavedAssemblyAuthorityTransportAdapterV1['readCurrentAssemblyTopology'],
+  createClient: (signal: AbortSignal) => InitialAssemblyClient,
+  crypto: Pick<Crypto, 'subtle'> | undefined = globalThis.crypto,
+): ReadInitialAssembly {
+  return async (expected, signal) => {
+    const current = await readCurrentTopology(expected, signal);
+    const complete = await readCompleteSavedAssemblySourceV1(
+      createClient(signal),
+      current.row,
+      { expectedServerAssemblyRevision: current.serverAssemblyRevision },
+      signal,
+    );
+    const prior = complete.priorCarrier;
+    if (
+      !prior?.sidecarBytes ||
+      prior.mediaType !== PATTERN_IMPORT_DXF_PRODUCT_SEMANTIC_SIDECAR_MEDIA_TYPE_V1 ||
+      prior.cardLockVersion !== current.row.cardLockVersion
+    )
+      throw new TypeError(
+        'First exact two-seam authoring requires a current standalone Product Semantic V1.',
+      );
+
+    const bytes = Uint8Array.from(atob(prior.sidecarBytes), (character) => character.charCodeAt(0));
+    const decoded = await decodePatternImportDxfProductMultiseamPlacementSidecarV2(bytes, crypto);
+    signal.throwIfAborted();
+    if (
+      !decoded.ok ||
+      decoded.compatibility !== 'legacy-v1-no-placement' ||
+      decoded.legacy.canonicalSha256 !== prior.sidecarSha256
+    )
+      throw new TypeError('The standalone Product Semantic V1 bytes could not be verified.');
+
+    // The decoder has checked exact canonical encoding and the complete V1 document schema.
+    const { product, persistence } = JSON.parse(
+      new TextDecoder('utf-8', { fatal: true }).decode(bytes),
+    ) as PatternImportDxfProductSemanticSidecarDocumentV1;
+    const { row, selectedOperationNumber } = current;
+    const persistedOrder = complete.operations.find(
+      (operation) => operation.operationNumber === selectedOperationNumber,
+    )?.seamKeys;
+    const selectedOrder = current.topology.operations.find(
+      (operation) => operation.number === selectedOperationNumber,
+    )?.seamKeys;
+    if (
+      current.selectedOperationNumber !== expected.selectedOperationNumber ||
+      persistedOrder?.length !== 2 ||
+      selectedOrder?.length !== 2 ||
+      persistedOrder.some((key, index) => key !== selectedOrder[index]) ||
+      product.scopeKey !== row.scopeKey ||
+      product.exportSha256 !== row.sha256 ||
+      product.byteLength !== row.sizeBytes ||
+      persistence.card.techCardId !== row.techCardId ||
+      persistence.card.observedLockVersion !== row.cardLockVersion ||
+      persistence.pattern.lineKey !== row.patternLineKey ||
+      persistence.pattern.scopeKey !== row.scopeKey ||
+      persistence.pattern.url !== row.url ||
+      persistence.pattern.sha256 !== row.sha256 ||
+      persistence.pattern.version !== prior.patternVersion ||
+      persistence.receiptSealSha256 !== prior.postSaveReceiptSha256
+    )
+      throw new TypeError(
+        'Standalone Product Semantic V1 no longer matches the exact saved row and Assembly.',
+      );
+    return Object.freeze({
+      schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_SERVER_TRANSACTIONAL_SAVED_ASSEMBLY_V1,
+      origin: 'server-transactional-saved-assembly' as const,
+      row,
+      selectedOperationNumber,
+      serverAssemblyRevision: current.serverAssemblyRevision,
+      serverTopologySha256: current.assemblyTopologySha256,
+      assembly: current.assembly,
+      exactTopology: null,
+      semanticV1Sha256: decoded.legacy.canonicalSha256,
+    });
+  };
+}
+
 /**
  * The only production binding for GetTechCardSavedAssemblySnapshot. A fresh generated client is
  * built over each caller's AbortSignal; no unabortable adminService or GetTechCard fallback exists.
@@ -123,6 +220,11 @@ export function createPatternImportDxfPhaseESavedAssemblySnapshotProductionRpcV1
     bridge,
     compositeCodecContract,
     authorityAdapter,
+    readInitialAssembly: createPatternImportDxfPhaseEInitialSavedAssemblyReaderV1(
+      authorityAdapter.readCurrentAssemblyTopology,
+      abortableAdminService,
+      crypto,
+    ),
     claims: PATTERN_IMPORT_DXF_PHASE_E_SAVED_ASSEMBLY_SNAPSHOT_PRODUCTION_RPC_CLAIMS_V1,
   });
 }

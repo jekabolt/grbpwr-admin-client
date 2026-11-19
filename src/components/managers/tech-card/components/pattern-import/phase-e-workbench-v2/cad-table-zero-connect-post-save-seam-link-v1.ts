@@ -250,9 +250,10 @@ function echoedSemanticsMatch(expected: StoredSeam, echoed: StoredSeam): boolean
  * returned command is data only: its caller must use the existing strict seam writer and provide
  * that writer's verified echo to the completion transition below.
  */
-export function preparePatternImportDxfPhaseEZeroConnectPostSaveSeamLinkV1(
-  input: PatternImportDxfPhaseEZeroConnectPostSaveSeamLinkInputV1,
-): PatternImportDxfPhaseEZeroConnectPostSaveSeamPrepareResultV1 {
+/** Projects only the exact selected geometry. The caller must separately prove operation ownership. */
+export function preparePatternImportDxfPhaseEZeroConnectStoredSeamV1(
+  input: Omit<PatternImportDxfPhaseEZeroConnectPostSaveSeamLinkInputV1, 'savedOperation'>,
+) {
   try {
     if (
       !input ||
@@ -261,21 +262,7 @@ export function preparePatternImportDxfPhaseEZeroConnectPostSaveSeamLinkV1(
     )
       return blocked(
         'post-save-envelope-invalid',
-        'Post-save seam linking requires current exact authority and explicit rowFromHand context.',
-      );
-    if (!savedOperationValid(input.savedOperation))
-      return blocked(
-        'saved-operation-receipt-invalid',
-        'A same-session save receipt with one positive positional operation number is required.',
-      );
-    if (
-      input.savedOperation.historyKey !== input.candidate?.operation?.sessionOperationId ||
-      input.candidate.operation.operationNumber !== 0 ||
-      input.candidate.operation.authoringOperationId !== null
-    )
-      return blocked(
-        'saved-operation-correlation-mismatch',
-        'The saved operation receipt does not correlate to this session-only zero-connect candidate.',
+        'Seam preparation requires current exact authority and explicit rowFromHand context.',
       );
     if (!DIRECTIONS.has(input.direction))
       return blocked(
@@ -320,6 +307,46 @@ export function preparePatternImportDxfPhaseEZeroConnectPostSaveSeamLinkV1(
         'The admitted crosswalk could not produce one current rowFromHand StoredSeam.',
       );
 
+    return Object.freeze({ ok: true as const, storedSeam, crosswalk: crosswalk.receipt });
+  } catch {
+    return blocked(
+      'post-save-envelope-invalid',
+      'The selected seam geometry must be readable current data.',
+    );
+  }
+}
+
+export function preparePatternImportDxfPhaseEZeroConnectPostSaveSeamLinkV1(
+  input: PatternImportDxfPhaseEZeroConnectPostSaveSeamLinkInputV1,
+): PatternImportDxfPhaseEZeroConnectPostSaveSeamPrepareResultV1 {
+  try {
+    if (
+      !input ||
+      typeof input.nameOf !== 'function' ||
+      (input.grainDeg !== null && typeof input.grainDeg?.get !== 'function')
+    )
+      return blocked(
+        'post-save-envelope-invalid',
+        'Post-save seam linking requires current exact authority and explicit rowFromHand context.',
+      );
+    if (!savedOperationValid(input.savedOperation))
+      return blocked(
+        'saved-operation-receipt-invalid',
+        'A same-session save receipt with one positive positional operation number is required.',
+      );
+    if (
+      input.savedOperation.historyKey !== input.candidate?.operation?.sessionOperationId ||
+      input.candidate.operation.operationNumber !== 0 ||
+      input.candidate.operation.authoringOperationId !== null
+    )
+      return blocked(
+        'saved-operation-correlation-mismatch',
+        'The saved operation receipt does not correlate to this session-only zero-connect candidate.',
+      );
+    const prepared = preparePatternImportDxfPhaseEZeroConnectStoredSeamV1(input);
+    if (!prepared.ok) return prepared;
+    const { storedSeam, crosswalk } = prepared;
+
     const operation = Object.freeze({
       historyKey: input.savedOperation.historyKey,
       operationNumber: input.savedOperation.operationNumber,
@@ -328,7 +355,7 @@ export function preparePatternImportDxfPhaseEZeroConnectPostSaveSeamLinkV1(
     const crosswalkReady = Object.freeze({
       status: 'post-save-crosswalk-ready' as const,
       operation,
-      crosswalk: crosswalk.receipt,
+      crosswalk,
     });
     const rows = Object.freeze([storedSeam]) as readonly [StoredSeam];
     return Object.freeze({

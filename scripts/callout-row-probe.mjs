@@ -154,10 +154,19 @@ check('объяснений в ряду нет', !/one style only/i.test(await p
 // R28, R29.
 const stitch = await page.$eval(`${B('stitch602')} [data-callout-purpose="stitch"]`, (el) => {
   const [a, b] = el.querySelectorAll('button[role="combobox"], button');
-  return { a: a?.innerText.trim(), pict: !!a?.querySelector('[data-stitch-pictogram]'), b: b?.innerText.trim() };
+  return {
+    a: a?.innerText.trim(),
+    pict: !!a?.querySelector('[data-stitch-pictogram]'),
+    b: b?.innerText.trim(),
+    seamLabel: b?.getAttribute('aria-label'),
+  };
 });
 check('R29 выбранный стежок — пиктограмма + номер + имя (602 не из списка)', stitch.pict && stitch.a === '602 coverstitch', JSON.stringify(stitch));
-check('R28 второй выбор читается швом', stitch.b === 'seam', JSON.stringify(stitch));
+check(
+  'R28 второй выбор читается швом',
+  stitch.b?.toLowerCase() === 'seam' && stitch.seamLabel === 'seam',
+  JSON.stringify(stitch),
+);
 const seamSet = await page.$eval(`${B('stitch')} [data-callout-purpose="stitch"]`, (el) => [...el.querySelectorAll('button')].map((b) => b.innerText.trim()));
 check('R28 выбранный шов — «seam · …»', seamSet.some((t) => /^seam · \S/.test(t)), JSON.stringify(seamSet));
 

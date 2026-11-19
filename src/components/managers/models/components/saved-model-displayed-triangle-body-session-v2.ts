@@ -1,3 +1,10 @@
+import type { XpbdDeviceLease } from 'lib/cloth/runtime/webgpu/xpbd-device-session';
+import type {
+  DxfGarmentObservedWebgpuReplayRequestV1,
+  DxfGarmentObservedWebgpuReplayOwnerV1,
+  DxfGarmentObservedWebgpuReplayReportV1,
+} from 'components/cloth-simulation-spike/dxf-garment-observed-webgpu-replay-v1';
+import type { SavedModelObservedPlacementTargetV1 } from 'lib/cloth/domain/saved-model-observed-placement-target-codec-v1';
 import type { common_Model } from 'api/proto-http/admin';
 import { patternImportDxfProductPlacementWireCodecV1 } from 'lib/cloth/domain/pattern-import-dxf-product-multiseam-placement-sidecar-v2';
 import type { SavedModelObservedPlacementTargetResultV1 } from 'lib/cloth/domain/saved-model-observed-placement-target-codec-v1';
@@ -53,6 +60,188 @@ interface Generation {
   unsubscribeSource: (() => void) | null;
   unsubscribeLifetime: (() => void) | null;
   pending: Promise<void> | null;
+}
+
+/** Fixed numeric dispatch only. These results do not grant saved graph/product authority. */
+export type CurrentSavedModelGenericObservedReplayRequestV1 = Omit<
+  DxfGarmentObservedWebgpuReplayRequestV1,
+  'bodyOwner' | 'bodyBinding'
+> &
+  Readonly<{
+    expectedObservedTarget: Readonly<{
+      target: SavedModelObservedPlacementTargetV1;
+      canonicalSha256: string;
+    }>;
+  }>;
+export type CurrentSavedModelGenericObservedReplayResultV1 = Readonly<{
+  ok: boolean;
+  owner: DxfGarmentObservedWebgpuReplayOwnerV1 | null;
+  report: DxfGarmentObservedWebgpuReplayReportV1 | null;
+  blockers: readonly string[];
+}>;
+type GenericReplayDispatch = (
+  frameCount: 16 | 32,
+  request: CurrentSavedModelGenericObservedReplayRequestV1,
+  previous16: unknown,
+  lease: XpbdDeviceLease,
+  signal?: AbortSignal,
+) => Promise<CurrentSavedModelGenericObservedReplayResultV1>;
+const genericReplaySessions = new WeakMap<object, GenericReplayDispatch>();
+const genericTargetSessions = new WeakMap<
+  object,
+  (signal?: AbortSignal) => Promise<SavedModelObservedPlacementTargetResultV1>
+>();
+type GenericTargetCurrentness = {
+  session: object | null;
+  check: ((signal?: AbortSignal) => void) | null;
+  checking: boolean;
+};
+const genericTargetProjections = new WeakMap<object, GenericTargetCurrentness>();
+const genericTargetWeakGet = WeakMap.prototype.get;
+const genericTargetWeakSet = WeakMap.prototype.set;
+
+/**
+ * Synchronous currentness of one exact successful fixed generic projection. The detached target
+ * metadata is not authority; copied/proxied results, sessions, methods and hashes cannot qualify.
+ * Caller cancellation refuses this check only and never disposes the borrowed displayed body.
+ */
+export function isCurrentSavedModelGenericObservedTargetV1(
+  session: unknown,
+  projection: unknown,
+  signal?: AbortSignal,
+): boolean {
+  if (!session || typeof session !== 'object' || !projection || typeof projection !== 'object')
+    return false;
+  const record = genericTargetWeakGet.call(genericTargetProjections, projection) as
+    | GenericTargetCurrentness
+    | undefined;
+  if (!record || record.session !== session || !record.check || record.checking) return false;
+  const check = record.check;
+  record.checking = true;
+  try {
+    checkSignal(signal);
+    check(signal);
+    // Genuine source polls can reenter host code, revoke the turn or abort this caller.
+    checkSignal(signal);
+    return record.session === session && record.check === check;
+  } catch {
+    return false;
+  } finally {
+    record.checking = false;
+  }
+}
+
+export function projectCurrentSavedModelGenericObservedTargetV1(
+  session: unknown,
+  signal?: AbortSignal,
+) {
+  const project =
+    session && typeof session === 'object' ? genericTargetSessions.get(session) : undefined;
+  return project
+    ? project(signal)
+    : Promise.resolve(
+        Object.freeze({
+          ok: false as const,
+          target: null,
+          code: 'body-unavailable' as const,
+          detail: 'A genuine current observed body session is required.',
+        }),
+      );
+}
+export function runCurrentSavedModelGenericObserved16V1(
+  session: unknown,
+  request: CurrentSavedModelGenericObservedReplayRequestV1,
+  lease: XpbdDeviceLease,
+  signal?: AbortSignal,
+) {
+  const run =
+    session && typeof session === 'object' ? genericReplaySessions.get(session) : undefined;
+  return run
+    ? run(16, request, null, lease, signal)
+    : Promise.resolve(genericReplayBlocked('A genuine current observed body session is required.'));
+}
+export function runCurrentSavedModelGenericObserved32V1(
+  session: unknown,
+  request: CurrentSavedModelGenericObservedReplayRequestV1,
+  genuine16: unknown,
+  lease: XpbdDeviceLease,
+  signal?: AbortSignal,
+) {
+  const run =
+    session && typeof session === 'object' ? genericReplaySessions.get(session) : undefined;
+  return run
+    ? run(32, request, genuine16, lease, signal)
+    : Promise.resolve(genericReplayBlocked('A genuine current observed body session is required.'));
+}
+function genericReplayBlocked(detail: string): CurrentSavedModelGenericObservedReplayResultV1 {
+  return Object.freeze({ ok: false, owner: null, report: null, blockers: Object.freeze([detail]) });
+}
+/** Check every own descriptor before native detachment; no caller callback/getter is invoked. */
+function captureGenericReplayRequestV1<T>(input: T): T {
+  let nodes = 0,
+    byteCount = 0,
+    text = 0;
+  const active = new Set<object>();
+  const tp = Object.getPrototypeOf(Float32Array.prototype);
+  const byteLength = Object.getOwnPropertyDescriptor(tp, 'byteLength')!.get!;
+  const buffer = Object.getOwnPropertyDescriptor(tp, 'buffer')!.get!;
+  const abLength = Object.getOwnPropertyDescriptor(ArrayBuffer.prototype, 'byteLength')!.get!;
+  const visit = (value: unknown, depth: number) => {
+    if (++nodes > 3000000 || depth > 48)
+      throw new TypeError('Generic request exceeds shape bound.');
+    if (value === null || value === undefined || typeof value === 'boolean') return;
+    if (typeof value === 'number' && Number.isFinite(value)) return;
+    if (typeof value === 'string') {
+      text += value.length;
+      if (value.length > 65536 || text > 16 * 1024 * 1024)
+        throw new TypeError('Generic text exceeds bounds.');
+      return;
+    }
+    if (!value || typeof value !== 'object' || active.has(value))
+      throw new TypeError('Generic request requires acyclic data.');
+    const prototype = Object.getPrototypeOf(value);
+    if (
+      [Float32Array.prototype, Uint32Array.prototype, ArrayBuffer.prototype].includes(prototype)
+    ) {
+      const ab = prototype === ArrayBuffer.prototype;
+      const source = ab ? value : buffer.call(value);
+      const n = ab ? abLength.call(source) : byteLength.call(value);
+      byteCount += n;
+      if (
+        Object.getPrototypeOf(source) !== ArrayBuffer.prototype ||
+        n > 32 * 1024 * 1024 ||
+        byteCount > 128 * 1024 * 1024
+      )
+        throw new TypeError('Generic shared/oversized storage refused.');
+      const keys = Reflect.ownKeys(value);
+      if (ab ? keys.length !== 0 : keys.length !== n / 4 || keys.some((k, i) => k !== String(i)))
+        throw new TypeError('Decorated generic buffers refused.');
+      return;
+    }
+    const array = Array.isArray(value);
+    if (prototype !== (array ? Array.prototype : Object.prototype))
+      throw new TypeError('Generic request requires plain data.');
+    const ds = Object.getOwnPropertyDescriptors(value);
+    if (array && (ds.length.value > 500000 || Reflect.ownKeys(ds).length !== ds.length.value + 1))
+      throw new TypeError('Generic arrays must be dense/bounded.');
+    active.add(value);
+    for (const key of Reflect.ownKeys(ds)) {
+      if (array && key === 'length') continue;
+      const d = ds[key as string];
+      if (
+        typeof key !== 'string' ||
+        key === '__proto__' ||
+        !('value' in d) ||
+        !d.enumerable ||
+        (array && !/^(0|[1-9][0-9]*)$/.test(key))
+      )
+        throw new TypeError('Generic request accessors/hidden fields refused.');
+      visit(d.value, depth + 1);
+    }
+    active.delete(value);
+  };
+  visit(input, 0);
+  return structuredClone(input);
 }
 
 const sessions = new WeakMap<
@@ -444,6 +633,7 @@ export function createSavedModelDisplayedTriangleBodySessionV2(
   let generation = 0;
   let active: Generation | null = null;
   const listeners = new Set<() => void>();
+  const genericTargetRecords = new Set<GenericTargetCurrentness>();
   let store: SavedModelDisplayedTriangleBodySessionSnapshotV2 = Object.freeze({
     status: 'idle',
     generation,
@@ -479,6 +669,11 @@ export function createSavedModelDisplayedTriangleBodySessionV2(
   const release = (turn = active) => {
     if (!turn || active !== turn) return;
     active = null;
+    for (const record of genericTargetRecords) {
+      record.session = null;
+      record.check = null;
+    }
+    genericTargetRecords.clear();
     turn.unsubscribeSource?.();
     turn.unsubscribeLifetime?.();
     turn.unsubscribeSource = turn.unsubscribeLifetime = null;
@@ -849,6 +1044,60 @@ export function createSavedModelDisplayedTriangleBodySessionV2(
     }
   };
 
+  // This additional fixed dispatcher leaves the legacy V3 projection API/DTO untouched.
+  const projectCurrentGenericPlacementTarget = async (
+    signal?: AbortSignal,
+  ): Promise<SavedModelObservedPlacementTargetResultV1> => {
+    const turn = active;
+    const binding = turn?.binding;
+    if (!turn || !binding) return projectCurrentPlacementTarget(signal);
+    let revoke: (() => void) | null = null;
+    try {
+      requireCurrent(turn, signal);
+      const projected = await projectCurrentPlacementTarget(signal);
+      requireCurrent(turn, signal);
+      if (!projected.ok) return projected;
+      if (turn.binding !== binding)
+        throw new DOMException(
+          'Displayed-body binding changed during target projection.',
+          'AbortError',
+        );
+      const record: GenericTargetCurrentness = {
+        session,
+        checking: false,
+        check(callerSignal) {
+          requireCurrent(turn, callerSignal);
+          if (turn.binding !== binding || active !== turn || disposed)
+            throw new DOMException(
+              'Displayed-body target belongs to a previous turn.',
+              'AbortError',
+            );
+        },
+      };
+      revoke = () => {
+        // Do not let a retained historical DTO keep the old session/owner closure alive.
+        record.session = null;
+        record.check = null;
+        genericTargetRecords.delete(record);
+      };
+      genericTargetWeakSet.call(genericTargetProjections, projected, record);
+      // The existing turn release clears these records without adding one abort listener per read.
+      genericTargetRecords.add(record);
+      requireCurrent(turn, signal);
+      if (record.session !== session || !record.check || turn.binding !== binding)
+        throw new DOMException('Displayed-body target expired before publication.', 'AbortError');
+      return projected;
+    } catch (error) {
+      revoke?.();
+      return Object.freeze({
+        ok: false,
+        target: null,
+        code: 'body-unavailable',
+        detail: reason(error),
+      });
+    }
+  };
+
   const issueCurrentObservedPlacementV3 = async (
     sourceSession: unknown,
     value: CurrentSavedModelObservedPlacementIssueRequestV3,
@@ -1176,6 +1425,109 @@ export function createSavedModelDisplayedTriangleBodySessionV2(
       signal,
     ) as Promise<RuntimeHandoffResult>;
 
+  const runCurrentGenericObserved: GenericReplayDispatch = async (
+    frameCount,
+    input,
+    previous16,
+    lease,
+    signal,
+  ) => {
+    const turn = active;
+    if (!turn?.binding) return genericReplayBlocked('No current displayed body is bound.');
+    const operation = new AbortController();
+    let result: CurrentSavedModelGenericObservedReplayResultV1 | null = null;
+    let api:
+      | typeof import('components/cloth-simulation-spike/dxf-garment-observed-webgpu-replay-v1')
+      | null = null;
+    let retained = false;
+    const cancel = () => operation.abort();
+    const unlinks: Array<() => void> = [];
+    const unlink = () => {
+      unlinks.splice(0).forEach((f) => f());
+    };
+    const link = (s: AbortSignal) => {
+      checkSignal(s);
+      unlinks.push(() => EventTarget.prototype.removeEventListener.call(s, 'abort', cancel));
+      EventTarget.prototype.addEventListener.call(s, 'abort', cancel, { once: true });
+      checkSignal(s);
+    };
+    try {
+      checkSignal(signal);
+      const request = captureGenericReplayRequestV1(input);
+      const { expectedObservedTarget, ...numeric } = request;
+      if (
+        !expectedObservedTarget ||
+        Object.keys(expectedObservedTarget).sort().join(',') !== 'canonicalSha256,target'
+      )
+        throw new TypeError('Exact expected observed target required.');
+      link(turn.controller.signal);
+      if (signal) link(signal);
+      requireCurrent(turn, operation.signal);
+      const targetModule = await import(
+        'components/cloth-simulation-spike/saved-model-observed-placement-target-v1'
+      );
+      requireCurrent(turn, operation.signal);
+      const checked = await targetModule.validateSavedModelObservedPlacementTargetV1(
+        expectedObservedTarget.target,
+        expectedObservedTarget.canonicalSha256,
+        operation.signal,
+      );
+      requireCurrent(turn, operation.signal);
+      if (!checked.ok) throw new Error(checked.detail);
+      const match = async () => {
+        const projected = await projectCurrentPlacementTarget(operation.signal);
+        requireCurrent(turn, operation.signal);
+        if (
+          !projected.ok ||
+          projected.canonicalSha256 !== checked.canonicalSha256 ||
+          patternImportDxfProductPlacementWireCodecV1.canonical(projected.target) !==
+            patternImportDxfProductPlacementWireCodecV1.canonical(checked.target)
+        )
+          throw new Error('Current observed target differs from explicit physical initialization.');
+      };
+      await match();
+      requireCurrent(turn, operation.signal);
+      api = await import('components/cloth-simulation-spike/dxf-garment-observed-webgpu-replay-v1');
+      requireCurrent(turn, operation.signal);
+      const fixedRequest = { ...numeric, bodyOwner: turn.owner, bodyBinding: turn.binding };
+      result =
+        frameCount === 16
+          ? await api.runDxfGarmentObservedWebgpu16ReplayV1(fixedRequest, lease, operation.signal)
+          : await api.runDxfGarmentObservedWebgpu32ReplayV1(
+              fixedRequest,
+              previous16,
+              lease,
+              operation.signal,
+            );
+      requireCurrent(turn, operation.signal);
+      if (!result.ok || !result.owner) return result;
+      await match();
+      requireCurrent(turn, operation.signal);
+      const lifetime = api.getDxfGarmentObservedWebgpuReplayLifetimeV1(result.owner);
+      if (!lifetime) throw new Error('Numeric replay expired before body-session publication.');
+      unlinks.push(() => EventTarget.prototype.removeEventListener.call(lifetime, 'abort', unlink));
+      EventTarget.prototype.addEventListener.call(lifetime, 'abort', unlink, { once: true });
+      requireCurrent(turn, operation.signal);
+      checkSignal(lifetime);
+      retained = true;
+      return result;
+    } catch (error) {
+      operation.abort();
+      if (result?.owner) api?.disposeDxfGarmentObservedWebgpuReplayV1(result.owner);
+      return Object.freeze({
+        ok: false,
+        owner: null,
+        report: result?.report ?? null,
+        blockers: Object.freeze([reason(error)]),
+      });
+    } finally {
+      if (!retained) {
+        operation.abort();
+        unlink();
+      }
+    }
+  };
+
   const session = Object.freeze({
     /** Stable useSyncExternalStore identity. Reading this does not claim freshness. */
     getSnapshot: () => store,
@@ -1209,6 +1561,8 @@ export function createSavedModelDisplayedTriangleBodySessionV2(
       return true;
     },
   });
+  genericReplaySessions.set(session, runCurrentGenericObserved);
+  genericTargetSessions.set(session, projectCurrentGenericPlacementTarget);
   sessions.set(session, buildCurrentSavedPlacementPair);
   garmentPairSessions.set(session, buildCurrentSavedGarmentPair);
   observedPlacementGarmentPairSessions.set(session, buildCurrentObservedPlacementGarmentPair);

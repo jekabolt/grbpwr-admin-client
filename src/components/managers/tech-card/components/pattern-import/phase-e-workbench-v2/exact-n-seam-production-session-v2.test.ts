@@ -20,12 +20,13 @@ import {
   subscribePatternImportDxfProductExactNSeamProductionSessionV2,
 } from './exact-n-seam-production-session-v2';
 import type { PatternImportDxfPhaseEExactNAssemblyOrderSessionV2 } from './exact-n-seam-production-mount-v2';
+import { retireExactNSeamSessionsForDocumentWrite } from './exact-n-seam-production-session-store-v2';
 
-function durableSession(): PatternImportDxfPhaseEExactNAssemblyOrderSessionV2 {
+function durableSession(cardLockVersion = 10): PatternImportDxfPhaseEExactNAssemblyOrderSessionV2 {
   return {
     selectionOwner: Object.freeze({ exactSelection: true }),
     current: Object.freeze({
-      row: Object.freeze({ techCardId: 11 }),
+      row: Object.freeze({ techCardId: 11, cardLockVersion }),
       selectedOperation: Object.freeze({
         sourceOperationNumber: 7,
         seamIds: Object.freeze(['seam-side']),
@@ -74,5 +75,26 @@ describe('exact-N production session durable reload ingress', () => {
       false,
     );
     expect(readPatternImportDxfProductExactNSeamProductionSessionV2(11)).toBeNull();
+  });
+
+  it('keeps a genuinely newer selection and declines late publication from the replaced lock', () => {
+    const old = durableSession();
+    const later = durableSession(11);
+    const publish = (session: PatternImportDxfPhaseEExactNAssemblyOrderSessionV2) => {
+      mount.readPatch.mockReturnValueOnce({ bindings: session.current, seams: [] });
+      return publishPatternImportDxfProductExactNSeamDurableReloadSessionV2(session, {} as never);
+    };
+    expect(publish(old)).toBe(true);
+    expect(publish(later)).toBe(true);
+    const listener = vi.fn();
+    const unsubscribe = subscribePatternImportDxfProductExactNSeamProductionSessionV2(11, listener);
+    try {
+      retireExactNSeamSessionsForDocumentWrite(11, 10);
+      expect(publish(old)).toBe(false);
+      expect(listener).not.toHaveBeenCalled();
+      expect(readPatternImportDxfProductExactNSeamProductionSessionV2(11)).toEqual(later);
+    } finally {
+      unsubscribe();
+    }
   });
 });

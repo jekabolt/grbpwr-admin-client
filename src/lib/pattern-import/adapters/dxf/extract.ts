@@ -8,6 +8,7 @@
 // Accounting: every record of BLOCKS/ENTITIES ends in exactly one bucket of the tally —
 // rendered / structural / dropped-with-a-reason. Nothing disappears silently.
 
+import { captureOwnNativeCutHoles } from './native-cut-holes';
 import type {
   Affine,
   ExtractFn,
@@ -24,6 +25,7 @@ import type {
   StyleId,
 } from '../../types';
 import { PATIMPORT } from '../../types';
+import { readManifestBytes } from '../../manifest';
 import {
   createDxfCurveSampleV1,
   createDxfInsertInstancePathV1,
@@ -222,16 +224,30 @@ type ProvenanceCapture = {
 
 type StraightEdgeCapture = {
   readonly sourceFileId: string;
+  readonly selectedPathIds?: ReadonlySet<PathId>;
   readonly candidates: DxfSourceNativeStraightEdgeDecodedCandidateV1[];
   readonly blockers: DxfSourceNativeStraightEdgeDecodedBlockerV1[];
   readonly identities: Set<string>;
   descriptorOverflow: boolean;
   blockerOverflow: boolean;
+  /** Completeness ledger is independent of the capped presentation diagnostics. */
+  readonly pathCoverage: Map<PathId, { pointCount: number; closed: boolean; rejected: boolean }>;
+  globalCoverageFailure: boolean;
 };
 
 const MAX_STRAIGHT_EDGE_DESCRIPTORS = 100_000;
 const MAX_STRAIGHT_EDGE_BLOCKERS = 4_096;
+const MAX_STRAIGHT_EDGE_PATH_COVERAGE = 100_000;
 const MAX_STRAIGHT_EDGE_COORDINATE_ABS_MM = 1_000_000_000;
+
+// The ordinary decoder owns these path objects. Only all-straight, unresampled source intervals qualify.
+const nativeCutAndFoldPolylines = new WeakSet<IRPath>();
+const nativeStraightL8Polylines = new WeakSet<IRPath>();
+const nativeAuthoredOutlinePolylines = new WeakMap<IRPath, readonly PtMm[]>();
+export const nativeAuthoredOutlinePoints = (path: IRPath) =>
+  nativeAuthoredOutlinePolylines.get(path);
+export const isNativeStraightL8Polyline = (path: IRPath) => nativeStraightL8Polylines.has(path);
+export const isNativeCutOrFoldPolyline = (path: IRPath) => nativeCutAndFoldPolylines.has(path);
 
 class Builder {
   paths: IRPath[] = [];
@@ -266,6 +282,10 @@ class Builder {
     readonly opts: ExtractOpts,
     readonly provenanceCapture: ProvenanceCapture | null = null,
     readonly straightEdgeCapture: StraightEdgeCapture | null = null,
+    readonly productManifestPresent = false,
+    readonly authoredOutlineCornerByBlock?: DxfMeta['authoredOutlineCornerByBlock'],
+    readonly authoredTurnBlocks?: ReadonlySet<string>,
+    readonly authoredAllowanceCornerByBlock?: DxfMeta['authoredAllowanceCornerByBlock'],
   ) {
     for (const l of raw.layers) this.addLayer(l.name);
     const handleCounts = new Map<string, number>();
@@ -462,7 +482,12 @@ class Builder {
     primitiveSegmentIndex: number | null = null,
   ): void {
     const capture = this.straightEdgeCapture;
-    if (!capture || capture.blockerOverflow) return;
+    if (!capture) return;
+    // Never let the diagnostic cap erase a rejection on a later selected path.
+    const coverage = pathId === null ? undefined : capture.pathCoverage.get(pathId);
+    if (coverage) coverage.rejected = true;
+    else capture.globalCoverageFailure = true;
+    if (capture.blockerOverflow) return;
     if (capture.blockers.length >= MAX_STRAIGHT_EDGE_BLOCKERS) {
       capture.blockerOverflow = true;
       return;
@@ -506,6 +531,18 @@ class Builder {
   ): void {
     const capture = this.straightEdgeCapture;
     if (!capture) return;
+    if (
+      capture.pathCoverage.size >= MAX_STRAIGHT_EDGE_PATH_COVERAGE ||
+      capture.pathCoverage.has(pathId)
+    )
+      capture.globalCoverageFailure = true;
+    else
+      capture.pathCoverage.set(pathId, {
+        pointCount: em.pts.length,
+        closed: em.closed,
+        rejected: false,
+      });
+    if (capture.selectedPathIds && !capture.selectedPathIds.has(pathId)) return;
     if (e.handle && this.duplicateEntityHandles.has(e.handle.toUpperCase())) {
       this.straightEdgeBlocker(
         'identity-rejected',
@@ -755,6 +792,47 @@ class Builder {
         block: ctx.block,
       },
     });
+    if (
+      this.productManifestPresent &&
+      (e.layer === '1' || e.layer === '6' || e.layer === '8' || e.layer === '14') &&
+      (e.type === 'POLYLINE' || e.type === 'LWPOLYLINE') &&
+      em.straightEdgeFacts?.length === (em.closed ? em.pts.length : em.pts.length - 1) &&
+      em.straightEdgeFacts.every(
+        (f, i): f is Extract<NativeStraightEdgeFact, { kind: 'line' }> =>
+          f.kind === 'line' &&
+          f.startPointIndex === i &&
+          f.endPointIndex === (i + 1) % em.pts.length,
+      )
+    ) {
+      const path = this.paths[id]!;
+      if (e.layer === '8') nativeStraightL8Polylines.add(path);
+      else if (e.layer === '1' || e.layer === '6') nativeCutAndFoldPolylines.add(path);
+      if (
+        ((em.closed && (e.layer === '1' || e.layer === '14')) || (!em.closed && e.layer === '8')) &&
+        ctx.group.kind === 'insert' &&
+        ctx.block !== null &&
+        ctx.block === ctx.group.block &&
+        ((em.closed &&
+          (this.authoredOutlineCornerByBlock?.has(ctx.block) ||
+            this.authoredAllowanceCornerByBlock?.has(ctx.block))) ||
+          this.authoredTurnBlocks?.has(ctx.block)) &&
+        em.straightEdgeFacts.every(
+          ({ sourceAffine }) =>
+            sourceAffine.a === ctx.group.transform.a &&
+            sourceAffine.b === ctx.group.transform.b &&
+            sourceAffine.c === ctx.group.transform.c &&
+            sourceAffine.d === ctx.group.transform.d &&
+            sourceAffine.e === ctx.group.transform.e &&
+            sourceAffine.f === ctx.group.transform.f,
+        )
+      )
+        nativeAuthoredOutlinePolylines.set(path, [
+          ...em.straightEdgeFacts.map(({ nativeStart }) => nativeStart),
+          ...(!em.closed && em.straightEdgeFacts.length
+            ? [em.straightEdgeFacts.at(-1)!.nativeEnd]
+            : []),
+        ]);
+    }
     this.pathEntity.push(e.type);
     const provenance = this.capturePathProvenance(id, e, ctx, em);
     this.captureStraightEdgeAuthority(id, e, ctx, em, provenance);
@@ -809,7 +887,13 @@ class Builder {
   }
 
   drop(key: string, reason: string) {
-    if (!this.rendered.has(key) && !this.structural.has(key)) this.dropped.set(key, reason);
+    if (!this.rendered.has(key) && !this.structural.has(key)) {
+      this.dropped.set(key, reason);
+      // Paper-space exclusion is explicit. Any other unscoped source loss has no path identity
+      // against which a selected-path consumer could prove completeness.
+      if (this.straightEdgeCapture && reason !== 'paper-space entity (layout, not the drawing)')
+        this.straightEdgeCapture.globalCoverageFailure = true;
+    }
   }
 }
 
@@ -1408,7 +1492,7 @@ function textOf(
   // TEXT / ATTRIB / ATTDEF — OCS
   const m = mul(ctx.M, ocsOf(tg));
   const value =
-    e.type === 'ATTDEF' && rawStr(tg, 1) === '' ? (str(tg, 2) ?? '') : (rawStr(tg, 1) ?? '');
+    e.type === 'ATTDEF' && rawStr(tg, 1) === '' ? str(tg, 2) ?? '' : rawStr(tg, 1) ?? '';
   const text = decodeTextValue(value);
   const h = numOr(tg, 40, 2.5);
   const rot = (numOr(tg, 50, 0) * Math.PI) / 180;
@@ -1475,6 +1559,7 @@ function walk(list: RawEntity[], ctx: Ctx, b: Builder, newGroupPerInsert: boolea
         continue;
       }
       if (ctx.depth >= MAX_DEPTH) {
+        if (b.straightEdgeCapture) b.straightEdgeCapture.globalCoverageFailure = true;
         b.drop(key, `nested deeper than ${MAX_DEPTH} levels`);
         continue;
       }
@@ -1567,6 +1652,7 @@ function walk(list: RawEntity[], ctx: Ctx, b: Builder, newGroupPerInsert: boolea
         }
       }
       if (placed < cols * rows) {
+        if (b.straightEdgeCapture) b.straightEdgeCapture.globalCoverageFailure = true;
         if (!b.budgetWarned) {
           b.budgetWarned = true;
           b.warnings.push(`more than ${MAX_INSTANCES} block instances — the rest are not expanded`);
@@ -1635,7 +1721,7 @@ function walk(list: RawEntity[], ctx: Ctx, b: Builder, newGroupPerInsert: boolea
           angleDeg,
           z: numOr(e.tags, 30, 0) * scaleOf(ctx.M),
           thickness: numOr(e.tags, 39, 0),
-          layer: b.paths[id] ? (b.styles[b.paths[id].style].layer ?? e.layer) : e.layer,
+          layer: b.paths[id] ? b.styles[b.paths[id].style].layer ?? e.layer : e.layer,
         };
       }
     }
@@ -1881,6 +1967,34 @@ async function readDxfInternal(
   const version = raw.header['$ACADVER']?.[0]?.value.trim() ?? null;
   progress?.(1, 3, 'expand');
 
+  const productManifestPresent =
+    manifest && dec.binary === null && !file.generatedFusing && !dec.generatedFusing;
+  let conversion: ReturnType<typeof readManifestBytes> = null;
+  if (productManifestPresent) {
+    try {
+      conversion = readManifestBytes(file.bytes);
+    } catch {
+      // The native read follows the ordinary foreign-file rules if the manifest is invalid.
+    }
+  }
+  const authoredOutlineCornerByBlock = new Map(
+    (conversion?.blocks ?? []).flatMap(
+      ({ block, authoredOutlineCorner, authoredFixedEndOutlineCorner }) => {
+        const corner = authoredOutlineCorner ?? authoredFixedEndOutlineCorner;
+        return corner ? [[block, corner]] : [];
+      },
+    ),
+  );
+  const authoredAllowanceCornerByBlock = new Map(
+    (conversion?.blocks ?? []).flatMap(({ block, authoredAllowanceCorner }) =>
+      authoredAllowanceCorner ? [[block, authoredAllowanceCorner]] : [],
+    ),
+  );
+  const authoredTurnBlocks = new Set(
+    conversion?.blocks
+      .filter((block) => block.authoredInternal?.some((line) => line.turnAllowance))
+      .map(({ block }) => block),
+  );
   const b = new Builder(
     file.id,
     raw,
@@ -1893,8 +2007,15 @@ async function readDxfInternal(
     },
     provenanceCapture,
     straightEdgeCapture,
+    productManifestPresent,
+    authoredOutlineCornerByBlock,
+    authoredTurnBlocks,
+    authoredAllowanceCornerByBlock,
   );
   b.warnings.push(...raw.warnings);
+  // Unscoped parser recovery cannot establish selected-path completeness.
+  if (straightEdgeCapture && raw.warnings.length > 0)
+    straightEdgeCapture.globalCoverageFailure = true;
   if (dec.fallback) b.warnings.push(`the file is not UTF-8 — decoded as ${dec.encoding}`);
   if (units.source === 'guess') b.warnings.push(units.evidence);
   const M0 = scale(units.mmPerUnit, units.mmPerUnit);
@@ -1955,7 +2076,10 @@ async function readDxfInternal(
     r.pageCover = pageW * pageH > 0 ? Math.min(1, a / (pageW * pageH)) : 0;
   }
   const tally = tallyOf(raw, b, tok.innerComments);
-  if (!tally.balanced) b.warnings.push('entity tally does not balance — see meta.tally');
+  if (!tally.balanced) {
+    b.warnings.push('entity tally does not balance — see meta.tally');
+    if (straightEdgeCapture) straightEdgeCapture.globalCoverageFailure = true;
+  }
   const dialect = detectDialect(raw, modelLabels, manifest, version);
   // A10: piece blocks with a boundary on layer 1 (AAMA / ASTM: 1 = cut line, 14 = sew line)
   const cutBlocks = raw.blockOrder.filter((bl) =>
@@ -1992,6 +2116,55 @@ async function readDxfInternal(
     pages: [page],
     warnings: b.warnings,
   };
+  let pieceNamesByBlock: DxfMeta['pieceNamesByBlock'];
+  let halfFoldBlocks: DxfMeta['halfFoldBlocks'];
+  let zeroAllowanceSeamBlocks: DxfMeta['zeroAllowanceSeamBlocks'];
+  let authoredInternalByBlock: DxfMeta['authoredInternalByBlock'];
+  let authoredTextByBlock: DxfMeta['authoredTextByBlock'];
+  let authoredNotchesByBlock: DxfMeta['authoredNotchesByBlock'];
+  if (conversion) {
+    const piecesByIdentity = new Map(conversion.pieces.map((piece) => [piece.identity, piece]));
+    pieceNamesByBlock = new Map(
+      conversion.blocks.flatMap(({ block, identity }) => {
+        const piece = piecesByIdentity.get(identity);
+        return piece ? [[block, { identity, displayName: piece.displayName }]] : [];
+      }),
+    );
+    const halfIdentities = new Set(
+      conversion.pieces
+        .filter((p) => p.halfFold && !p.unfoldedFold && !p.pairOf && p.piecesPerGarment === 1)
+        .map((p) => p.identity),
+    );
+    if (halfIdentities.size)
+      halfFoldBlocks = new Set(
+        conversion.blocks
+          .filter((b) => halfIdentities.has(b.identity) && b.contour)
+          .map((b) => b.block),
+      );
+    const zeroAllowancePieces = new Set(
+      conversion.pieces.filter((piece) => piece.allowanceMm === 0).map((piece) => piece.identity),
+    );
+    zeroAllowanceSeamBlocks = new Map(
+      conversion.blocks.flatMap(({ block, contour, hasSeam, identity }) =>
+        hasSeam && contour && zeroAllowancePieces.has(identity) ? [[block, contour]] : [],
+      ),
+    );
+    authoredInternalByBlock = new Map(
+      conversion.blocks.flatMap(({ block, authoredInternal }) =>
+        authoredInternal?.length ? [[block, authoredInternal]] : [],
+      ),
+    );
+    authoredTextByBlock = new Map(
+      conversion.blocks.flatMap(({ block, authoredText }) =>
+        authoredText?.length ? [[block, authoredText]] : [],
+      ),
+    );
+    authoredNotchesByBlock = new Map(
+      conversion.blocks.flatMap(({ block, authoredNotches }) =>
+        authoredNotches?.length ? [[block, authoredNotches]] : [],
+      ),
+    );
+  }
   const meta: DxfMeta = {
     version,
     dialect,
@@ -2001,6 +2174,14 @@ async function readDxfInternal(
     binary: dec.binary,
     units,
     manifest,
+    ...(pieceNamesByBlock?.size ? { pieceNamesByBlock } : {}),
+    ...(halfFoldBlocks?.size ? { halfFoldBlocks } : {}),
+    ...(zeroAllowanceSeamBlocks?.size ? { zeroAllowanceSeamBlocks } : {}),
+    ...(authoredInternalByBlock?.size ? { authoredInternalByBlock } : {}),
+    ...(authoredAllowanceCornerByBlock.size ? { authoredAllowanceCornerByBlock } : {}),
+    ...(authoredOutlineCornerByBlock?.size ? { authoredOutlineCornerByBlock } : {}),
+    ...(authoredTextByBlock?.size ? { authoredTextByBlock } : {}),
+    ...(authoredNotchesByBlock?.size ? { authoredNotchesByBlock } : {}),
     generatedFusing: dec.generatedFusing || file.generatedFusing === true,
     modelLabels,
     groups: b.groups,
@@ -2014,7 +2195,9 @@ async function readDxfInternal(
     insertCount: b.insertCount,
   };
   progress?.(3, 3, 'done');
-  return { doc, meta };
+  const read = { doc, meta };
+  captureOwnNativeCutHoles(read, raw, file.bytes, budgetOf(b.opts));
+  return read;
 }
 
 export async function readDxf(
@@ -2134,6 +2317,16 @@ export type DxfSourceNativeStraightEdgesInternalReadV1 = Readonly<{
   provenance: DxfPathProvenanceReadArtifactV1;
   candidates: readonly DxfSourceNativeStraightEdgeDecodedCandidateV1[];
   blockers: readonly DxfSourceNativeStraightEdgeDecodedBlockerV1[];
+  /** Internal exact ledger; no public projection/capability can manufacture it. */
+  selectedPathCoverage: Readonly<{
+    globalFailure: boolean;
+    paths: readonly Readonly<{
+      sourcePathId: number;
+      pointCount: number;
+      closed: boolean;
+      rejected: boolean;
+    }>[];
+  }>;
 }>;
 
 export async function decodeDxfSourceNativeStraightEdgesInternalV1(
@@ -2141,15 +2334,19 @@ export async function decodeDxfSourceNativeStraightEdgesInternalV1(
   opts: ExtractOpts,
   sourceFileId: string,
   progress?: Progress,
+  selectedPathIds?: ReadonlySet<PathId>,
 ): Promise<DxfSourceNativeStraightEdgesInternalReadV1> {
   const provenanceCapture: ProvenanceCapture = { sourceFileId, paths: [], blockers: [] };
   const straightEdgeCapture: StraightEdgeCapture = {
     sourceFileId,
+    selectedPathIds,
     candidates: [],
     blockers: [],
     identities: new Set(),
     descriptorOverflow: false,
     blockerOverflow: false,
+    pathCoverage: new Map(),
+    globalCoverageFailure: false,
   };
   const read = await readDxfInternal(file, opts, progress, provenanceCapture, straightEdgeCapture);
   const livePathIds = new Set(read.doc.pages.flatMap((page) => page.paths.map(({ id }) => id)));
@@ -2176,6 +2373,15 @@ export async function decodeDxfSourceNativeStraightEdgesInternalV1(
         ({ sourcePathId }) => sourcePathId === null || livePathIds.has(sourcePathId),
       ),
     ),
+    selectedPathCoverage: Object.freeze({
+      globalFailure:
+        straightEdgeCapture.globalCoverageFailure || straightEdgeCapture.descriptorOverflow,
+      paths: Object.freeze(
+        [...straightEdgeCapture.pathCoverage]
+          .filter(([id]) => livePathIds.has(id))
+          .map(([sourcePathId, path]) => Object.freeze({ sourcePathId, ...path })),
+      ),
+    }),
   });
 }
 

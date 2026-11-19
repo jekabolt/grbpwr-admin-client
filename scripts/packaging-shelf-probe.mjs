@@ -2,10 +2,10 @@
 // PACKAGING SHELF + PDF SHEET 05b: the real components in a real browser with production CSS and the
 // real webfont. THE NETWORK IS STUBBED: this is a harness, not beta. No server validates anything here.
 //
-//   A picker: every kind a chip in shelf order, catalog list, search, added dim, use item
-//   B tiles: kind order, per-order defaults, details, qty, garment/order, how, note, colourways
-//   C shelf filter, new item takes the filter's colourway, remove
-//   D packed: ships on hanger / folded, fold select, packed size
+//   A stock pickers for pack, hanger and box: role tabs, search, confirm, owned catalog picks
+//   B desk layout, kind order, exact row ownership, quantity and packed photo undo
+//   C duplicate guard and preserving distinct rows of the same kind
+//   D folded dimensions, shipping mode, box quantity and full-box weight
 //   E the form value and the card write payload (mapFormToTechCardInsert, the one the save sends)
 //   F packaging recipe block is gone, 375 px has no horizontal scroll
 //   G PDF 05b: order, colour column only when something differs, red missing mark, both orientations
@@ -147,13 +147,22 @@ const pkg = (id, name, image) => ({
 const MATERIALS = [
   pkg(301, 'wooden hanger', mediaFull(601, HANGER)),
   pkg(302, 'dust bag - cotton', mediaFull(602, BAG)),
-  pkg(303, 'shipping box - standard', mediaFull(603, BOX)),
+  {
+    ...pkg(303, 'shipping box - standard', mediaFull(603, BOX)),
+    packagingAttrs: { dimensions: '58×41×32' },
+  },
   pkg(304, 'kraft sheet 40'),
   pkg(305, 'care insert card'),
+  pkg(307, 'dust bag - linen'),
   { ...pkg(306, 'silk lining'), materialClass: 'MATERIAL_CLASS_FABRIC' },
 ];
 const AUX = [
-  { id: 41, name: 'garment bag', outputMaterialId: 0 },
+  {
+    id: 41,
+    name: 'garment bag',
+    auxSubtype: 'TECH_CARD_AUX_SUBTYPE_GARMENT_CASE',
+    outputMaterialId: 0,
+  },
   { id: 42, name: 'octagon tote s', outputMaterialId: 77, outputMaterialName: 'octagon s' },
   { id: 43, name: 'Brand Label (PLM seed)', auxSubtype: 'TECH_CARD_AUX_SUBTYPE_BRAND_LABEL' },
   { id: 44, name: 'Care Label (PLM seed)', auxSubtype: 'TECH_CARD_AUX_SUBTYPE_CARE_LABEL' },
@@ -204,6 +213,7 @@ const baseCard = (over = {}, colorways = COLOURS) => ({
     { media: mediaFull(51, HANGER) },
     { media: mediaFull(52, POLY) },
     { media: mediaFull(53, PACK) },
+    { media: mediaFull(54, BOX) },
   ],
   techCard: {
     name: 'probe coat',
@@ -331,34 +341,43 @@ const DIALOG = '[role="dialog"]';
 const items = async (page) => (await page.evaluate(() => window.__ps.form())).packagingItems;
 const chip = (page, scope, word) =>
   page.locator(`${scope} [aria-pressed]`, { hasText: new RegExp(`^\\s*${word}\\s*$`, 'i') });
-const tile = (page, title) => page.locator(`${S} button[title="${title}"]`);
-const addDoor = (page) => page.locator(`${S} button`, { hasText: /^\+ item$/i });
-const openPicker = async (page) => {
-  await addDoor(page).click();
+const shelf = (page) => page.locator(S);
+const shelfButton = (page, name) => shelf(page).getByRole('button', { name, exact: true });
+const addDoor = (page) => shelfButton(page, '+ item');
+const removeItem = (page, name) => shelfButton(page, `remove ${name}`);
+const packRow = (page, name) =>
+  shelf(page).locator('div:has(> input[aria-label="per garment"])').filter({
+    has: page.getByText(name, { exact: true }),
+  });
+const quantity = (page, name) =>
+  packRow(page, name).getByRole('spinbutton', { name: 'per garment' });
+const packedPhoto = (page, index) =>
+  shelf(page).getByRole('img', { name: `packed photo ${index}`, exact: true });
+const openPicker = async (page, trigger = addDoor(page)) => {
+  await trigger.click();
   await page.waitForSelector(DIALOG);
-  await page.waitForTimeout(250);
 };
 const pickerTile = (page, name) => page.locator(`${DIALOG} [title="${name}"]`);
-const useItem = (page) => page.locator(`${DIALOG} button`, { hasText: /^use item$/i });
-const pickAndUse = async (page, name, kindChip) => {
-  await openPicker(page);
-  if (kindChip) await chip(page, DIALOG, kindChip).click();
+const done = (page) => page.getByRole('dialog').getByRole('button', { name: 'done', exact: true });
+const closePicker = (page) => page.waitForSelector(DIALOG, { state: 'detached' });
+const pickAndUse = async (page, trigger, name) => {
+  await openPicker(page, trigger);
   await pickerTile(page, name).click();
-  await useItem(page).click();
-  await page.waitForSelector(DIALOG, { state: 'detached' });
-  await page.waitForTimeout(150);
+  await done(page).click();
+  await closePicker(page);
 };
+const form = (page) => page.evaluate(() => window.__ps.form());
 const noHScroll = (page) =>
   page.evaluate(() => {
     const d = document.documentElement;
     return { sw: d.scrollWidth, cw: d.clientWidth };
   });
-const detail = (page, label) =>
-  page.locator(`${S} div.min-w-0:has(> span:text-is("${label}"))`).last();
-
 // ── A–F, main card ──
 let exitSetup = false;
-const main = await openShelf(baseCard()).catch((e) => {
+const savedCard = baseCard();
+savedCard.techCard.packaging.packedMediaIds = [53, 54];
+savedCard.techCard.packagingItems = [{ ...HANGER_ROW, colorwayIds: [21] }, LEGACY_ROW];
+const main = await openShelf(savedCard).catch((e) => {
   exitSetup = `shelf did not mount: ${String(e).split('\n')[0]}`;
   return null;
 });
@@ -379,343 +398,246 @@ if (exitSetup) {
   ck(/FeatureMono/.test(family), 'setup: the shelf renders in the webfont', family.slice(0, 40));
 
   await step(page, 'P', async () => {
-    const heights = async () =>
-      page.evaluate((S) => {
-        const box = (el) => Math.round(el.getBoundingClientRect().height);
-        const root = document.querySelector(S);
-        const chips = [...root.querySelectorAll('[aria-pressed]')].filter((e) => /on hanger|folded/i.test(e.textContent));
-        const combo = root.querySelector('[role="combobox"]');
-        return {
-          chips: chips.map(box),
-          inputs: [...root.querySelectorAll('label')]
-            .filter((l) => /packed size|net weight|gross weight/i.test(l.textContent))
-            .map((l) => box(document.getElementById(l.htmlFor))),
-          combo: combo ? box(combo) : 0,
-          comboScroll: combo ? combo.scrollHeight - combo.clientHeight : 0,
-        };
-      }, S);
-    const h = await heights();
-    const all = new Set([...h.chips, ...h.inputs]);
-    ck(all.size === 1, 'P ships chips and inputs: one control height', JSON.stringify(h));
-    const thumb = await page.locator(`${S} img[alt="packed photo"]`).boundingBox();
-    ck(thumb && thumb.height <= [...all][0], 'P stored packed photo: the control footprint', JSON.stringify(thumb));
-    const net = await page.locator(S).getByLabel('net weight (g)', { exact: true }).boundingBox();
-    const size = await page.locator(S).getByLabel('packed size', { exact: true }).boundingBox();
-    const gross = await page.locator(S).getByLabel('gross weight (g)', { exact: true }).boundingBox();
-    ck(gross.y - size.y < 70 && net.y === size.y, 'P no empty gap in the packed grid', `${gross.y - size.y}px`);
+    const heights = async (selectors) =>
+      page.evaluate((selectors) => selectors.map((selector) =>
+        Math.round(document.querySelector(selector)?.getBoundingClientRect().height ?? 0)
+      ), selectors.map((selector) => `${S} ${selector}`));
+    const base = await heights(['[aria-pressed]', 'input[aria-label="per box"]']);
+    ck(base.every((h) => h > 0 && h === base[0]), 'P shipping chips and per-box control align', base.join());
+    const photo1 = await packedPhoto(page, 1).boundingBox();
+    const photo2 = await packedPhoto(page, 2).boundingBox();
+    ck(
+      photo1 && photo2 && photo1.y === photo2.y && photo1.width === photo2.width &&
+        photo1.height === photo2.height && photo1.x + photo1.width < photo2.x,
+      'P saved photos occupy equally sized separate gallery tiles',
+      JSON.stringify([photo1, photo2]),
+    );
     await chip(page, S, 'folded').click();
-    await page.waitForTimeout(100);
-    const f = await heights();
-    ck(f.combo === f.inputs[0], 'P fold select: the same height as the inputs', JSON.stringify(f));
-    await page.mouse.move(0, 0);
+    const folded = await heights([
+      '[role="combobox"]', 'input[aria-label="folded width cm"]', 'input[aria-label="folded height cm"]',
+    ]);
+    ck(folded.every((h) => h > 0 && h === base[0]), 'P fold preset and dimensions share a control height', folded.join());
     await chip(page, S, 'on hanger').click();
-    await page.waitForTimeout(100);
   });
 
   await step(page, 'A0', async () => {
-    const t = tile(page, 'polybag');
+    const photo = packRow(page, 'polybag').getByRole('img', { name: 'polybag' });
     ck(
-      (await t.locator('img').count()) === 1,
-      'A0 a stored item without a pick shows its own mockup on the tile',
+      (await photo.count()) === 1 && (await photo.getAttribute('src')) === pic(POLY).thumbnail.mediaUrl,
+      'A0 a stored item without a catalog pick shows its own exact versioned mockup',
     );
     const before = await items(page);
-    ck(before.length === 2, 'A0 two stored items read into the form', before.map((i) => i.key).join(','));
+    ck(before.map((row) => row.key).join() === 'hanger,polybag', 'A0 stored rows read in order');
     ck(
-      (await chip(page, S, 'black').count()) === 1 && (await chip(page, S, 'bone').count()) === 1,
-      'A0 shelf filter has the two colourways',
+      (await shelf(page).getByRole('spinbutton', { name: 'per box' }).isDisabled()),
+      'A0 a stored per-box number is disabled until a box is picked',
     );
   });
 
   await step(page, 'A1', async () => {
     await page.screenshot({ path: join(OUT, 'shelf-desktop-initial.png'), fullPage: true });
     await openPicker(page);
+    await pickerTile(page, 'dust bag - cotton').waitFor();
+    await pickerTile(page, 'garment bag').waitFor();
     const words = await page
-      .locator(`${DIALOG} [aria-pressed]`)
+      .locator(`${DIALOG} [aria-pressed]:not([title])`)
       .evaluateAll((els) => els.map((e) => e.textContent.trim().toLowerCase()));
     ck(
-      JSON.stringify(words) ===
-        JSON.stringify([
-          'all',
-          'hanger',
-          'shirt board',
-          'collar support',
-          'tissue paper',
-          'silica gel',
-          'insert card',
-          'spare kit bag',
-          'hangtag string',
-          'dust bag',
-          'garment case',
-          'polybag',
-          'sticker',
-          'box',
-          'mailer',
-          'tote bag',
-        ]),
-      'A1 every kind is a chip, in the mockup order',
-      words.join(','),
+      words.join() === [
+        'all', 'shirt board', 'collar support', 'tissue paper', 'silica gel', 'insert card',
+        'spare kit bag', 'hangtag string', 'dust bag', 'garment case', 'polybag', 'sticker',
+        'mailer', 'tote bag',
+      ].join(),
+      'A1 pack tabs list the exact pack roles in order',
+      words.join(),
     );
-    for (const name of ['dust bag - cotton', 'shipping box - standard', 'garment bag', 'octagon tote s'])
+    for (const name of ['dust bag - cotton', 'garment bag', 'octagon tote s', 'kraft sheet 40'])
       ck((await pickerTile(page, name).count()) === 1, `A1 listed: ${name}`);
-    ck((await pickerTile(page, 'silk lining').count()) === 0, 'A1 a non-packaging material is not listed');
-    for (const name of ['Brand Label (PLM seed)', 'Care Label (PLM seed)', 'Size Label (PLM seed)', 'Hangtag (PLM seed)'])
-      ck((await pickerTile(page, name).count()) === 0, `A1 not packaging, not listed: ${name}`);
-    const warn = await pickerTile(page, 'garment bag').innerText();
-    ck(/no output material/i.test(warn), 'A1 aux card without output has the red pill');
-    ck(!/no output material/i.test(await pickerTile(page, 'octagon tote s').innerText()), 'A1 aux with output has none');
-    const added = pickerTile(page, 'wooden hanger');
+    for (const name of [
+      'wooden hanger', 'shipping box - standard', 'silk lining', 'Brand Label (PLM seed)',
+      'Care Label (PLM seed)', 'Size Label (PLM seed)', 'Hangtag (PLM seed)',
+    ]) ck((await pickerTile(page, name).count()) === 0, `A1 excluded from this stock picker: ${name}`);
+    const warn = pickerTile(page, 'garment bag').getByText('no output material', { exact: true });
+    ck((await warn.count()) === 1, 'A1 aux card without output has the warning');
     ck(
-      /added/i.test(await added.innerText()) &&
-        (await added.evaluate((e) => e.tagName)) !== 'BUTTON' &&
-        Number(await added.evaluate((e) => getComputedStyle(e).opacity)) < 1,
-      'A1 a thing covering all colourways is dimmed, added, not pickable',
+      (await pickerTile(page, 'octagon tote s').getByText('no output material', { exact: true }).count()) === 0,
+      'A1 an aux with output has no missing-output warning',
     );
-    ck(await useItem(page).isDisabled(), 'A1 use item waits for a choice');
-    await page.locator(`${DIALOG} input[aria-label="search"]`).fill('octagon');
-    await page.waitForTimeout(100);
+    const warnings = await warn.boundingBox();
+    const tile = await pickerTile(page, 'garment bag').boundingBox();
+    ck(
+      warnings && tile && warnings.x >= tile.x && warnings.x + warnings.width <= tile.x + tile.width,
+      'A1 warning fits inside its own catalog tile',
+      JSON.stringify({ warning: warnings, tile }),
+    );
+    const search = page.getByRole('dialog').getByRole('textbox', { name: 'search' });
+    await search.fill('octagon');
     ck(
       (await pickerTile(page, 'octagon tote s').count()) === 1 &&
         (await pickerTile(page, 'garment bag').count()) === 0,
       'A1 search narrows the list',
     );
-    await page.locator(`${DIALOG} input[aria-label="search"]`).fill('zzz');
-    await page.waitForTimeout(100);
-    const body = await page.locator(DIALOG).innerText();
-    ck(/nothing in the catalog/i.test(body) && /\+ new/i.test(body), 'A1 nothing found: words and + new');
-    await page.locator(`${DIALOG} input[aria-label="search"]`).fill('');
+    await search.fill('zzz');
+    ck((await page.getByRole('dialog').getByText('no items', { exact: true }).count()) === 1, 'A1 no result is explicit');
+    await search.fill('');
     await chip(page, DIALOG, 'collar support').click();
-    await page.waitForTimeout(100);
+    ck((await page.getByRole('dialog').getByText('no items', { exact: true }).count()) === 1, 'A1 empty role remains empty');
+    await chip(page, DIALOG, 'insert card').click();
     ck(
-      (await page.locator(DIALOG).getByRole('button', { name: '+ new', exact: true }).count()) === 1,
-      'A1 a kind with no thing of its own offers + new',
+      (await pickerTile(page, 'care insert card').count()) === 1 &&
+        (await pickerTile(page, 'kraft sheet 40').count()) === 0,
+      'A1 a classified role lists only matching stock',
     );
-    await chip(page, DIALOG, 'hanger').click();
-    await page.waitForTimeout(100);
+    await pickerTile(page, 'care insert card').click();
     ck(
-      (await page.locator(DIALOG).getByRole('button', { name: '+ new', exact: true }).count()) === 0,
-      'A1 a kind with its own thing lists it, no + new',
+      (await pickerTile(page, 'care insert card').getAttribute('aria-pressed')) === 'true' &&
+        (await items(page)).length === 2,
+      'A1 a tentative selection does not write the form',
     );
-    await chip(page, DIALOG, 'shirt board').click();
-    await page.waitForTimeout(100);
-    ck(
-      (await pickerTile(page, 'kraft sheet 40').count()) === 1,
-      'A1 a material with no guessed kind can be used under a chip',
-    );
-    await pickerTile(page, 'kraft sheet 40').click();
-    await page.waitForTimeout(100);
     await page.screenshot({ path: join(OUT, 'picker.png') });
-    await useItem(page).click();
-    await page.waitForSelector(DIALOG, { state: 'detached' });
-    await page.waitForTimeout(150);
+    await done(page).click();
+    await closePicker(page);
     const rows = await items(page);
+    const inserted = rows[1];
+    ck(rows.map((row) => row.key).join() === 'hanger,insert_card,polybag', 'A2 pack item inserted by kind rank');
     ck(
-      rows.map((r) => r.key).join() === 'hanger,shirt_board,polybag',
-      'A2 picked under a chip: that kind, in kind order',
-      rows.map((r) => r.key).join(),
-    );
-    const row = rows.find((r) => r.key === 'shirt_board');
-    ck(
-      row.materialId === 304 && row.auxTechCardId === 0 && row.perOrder === false,
-      'A2 materialId written, not per order',
-      JSON.stringify([row.materialId, row.auxTechCardId, row.perOrder]),
+      inserted.materialId === 305 && inserted.auxTechCardId === 0 && inserted.perOrder === false &&
+        !!inserted.bomLineKey,
+      'A2 confirmed catalog item binds its material and owned BOM line',
     );
   });
 
   await step(page, 'B1', async () => {
-    await pickAndUse(page, 'dust bag - cotton');
-    await pickAndUse(page, 'shipping box - standard');
-    await pickAndUse(page, 'octagon tote s', 'tote bag');
-    await pickAndUse(page, 'garment bag', 'garment case');
+    await openPicker(page);
+    for (const name of ['octagon tote s', 'dust bag - cotton', 'garment bag'])
+      await pickerTile(page, name).click();
+    ck((await items(page)).length === 3, 'B1 multiple tentative choices stay local to picker');
+    await done(page).click();
+    await closePicker(page);
+    await openPicker(page, shelfButton(page, '+ box'));
+    ck(
+      (await pickerTile(page, 'shipping box - standard').count()) === 1 &&
+        (await pickerTile(page, 'dust bag - cotton').count()) === 0,
+      'B1 dedicated box picker separates packaging roles',
+    );
+    await pickerTile(page, 'shipping box - standard').click();
+    await done(page).click();
+    await closePicker(page);
     const rows = await items(page);
+    const by = (kind) => rows.find((row) => row.key === kind);
     ck(
-      rows.map((r) => r.key).join() ===
-        'hanger,shirt_board,dust_bag,garment_case,polybag,box,tote_bag',
-      'B1 tiles in kind order',
-      rows.map((r) => r.key).join(),
+      rows.map((row) => row.key).join() === 'hanger,insert_card,dust_bag,garment_case,polybag,box,tote_bag',
+      'B1 persisted rows keep rank across pack, hanger and carton',
+      rows.map((row) => row.key).join(),
     );
-    const titles = await page
-      .locator(`${S} button[title]`)
-      .evaluateAll((els) => els.map((e) => e.getAttribute('title')));
+    const names = ['care insert card', 'dust bag - cotton', 'garment bag', 'polybag', 'octagon tote s'];
+    const tops = await Promise.all(names.map(async (name) => (await packRow(page, name).boundingBox())?.y));
+    ck(tops.every((top, index) => top > (tops[index - 1] ?? 0)), 'B1 only pack items use the ordered quantity rows', tops.join());
+    ck(by('box')?.perOrder === true && by('tote_bag')?.perOrder === true, 'B1 box and tote default to per order');
+    ck(by('dust_bag')?.perOrder === false, 'B1 dust bag defaults to per garment');
+    ck(by('tote_bag')?.auxTechCardId === 42 && by('tote_bag')?.materialId === 0, 'B1 aux pick sets only auxTechCardId');
     ck(
-      titles.join() ===
-        'wooden hanger,kraft sheet 40,dust bag - cotton,garment bag,polybag,shipping box - standard,octagon tote s',
-      'B1 the DOM follows the form order',
-      titles.join(),
+      by('box')?.pickedName === 'shipping box - standard' &&
+        !!by('box')?.pickedThumbnail?.media?.thumbnail?.mediaUrl &&
+        (await shelf(page).getByRole('img', { name: 'shipping box - standard', exact: true }).count()) === 1,
+      'B1 dedicated carton shows the exact stored picking metadata',
     );
-    const by = (k) => rows.find((r) => r.key === k);
-    ck(by('box').perOrder === true && by('tote_bag').perOrder === true, 'B1 box and tote bag default to order');
-    ck(by('dust_bag').perOrder === false, 'B1 dust bag defaults to garment');
-    ck(by('tote_bag').auxTechCardId === 42 && by('tote_bag').materialId === 0, 'B1 aux pick: auxTechCardId');
-    const spill = await page.locator(`${S} button[title="garment bag"]`).evaluate((tile) => {
-      const box = tile.getBoundingClientRect();
-      return Math.max(...[...tile.querySelectorAll('*')].map((el) => el.getBoundingClientRect().right - box.right));
-    });
-    ck(spill <= 0, 'B1 the red pill stays inside the tile', String(spill));
-    ck(by('box').pickedName === 'shipping box - standard', 'B1 the form keeps the picked name');
-    ck(!!by('box').pickedThumbnail?.media?.thumbnail?.mediaUrl, 'B1 the form keeps the picked thumbnail');
-    ck((await tile(page, 'shipping box - standard').locator('img').count()) === 1, 'B1 the tile shows the picture');
-    ck(/no output material/i.test(await tile(page, 'garment bag').innerText()), 'B1 tile: red pill for aux without output');
-    const count = await page.locator(`${S}`).getByText(/^items$/i).locator('xpath=..').innerText();
-    ck(/7/.test(count), 'B1 items group has the count', count.replace(/\s+/g, ' '));
-    // nothing on any tile is cut off
-    const cut = await page.locator(`${S} button[title] :is(p,span,div)`).evaluateAll((els) =>
-      els
-        .filter((e) => e.children.length === 0 && e.scrollWidth > e.clientWidth + 1 && /\/\s*(garment|order)/i.test(e.textContent))
-        .map((e) => e.textContent),
-    );
-    ck(cut.length === 0, 'B1 the qty / per line is never truncated', cut.join(' | '));
-    ck(
-      /1\s*\/\s*order/i.test(await tile(page, 'shipping box - standard').innerText()) &&
-        /1\s*\/\s*garment/i.test(await tile(page, 'wooden hanger').innerText()),
-      'B1 tile: qty / garment or order',
-    );
+    const group = shelf(page).locator('[data-group-label]').filter({ hasText: 'in the pack' });
+    ck((await group.getByText('5', { exact: true }).count()) === 1, 'B1 group count represents pack items only');
   });
 
   await step(page, 'B2', async () => {
-    await tile(page, 'wooden hanger').click();
-    await page.waitForTimeout(100);
-    const border = await tile(page, 'wooden hanger').evaluate((e) => getComputedStyle(e).borderTopWidth);
-    ck(border === '2px', 'B2 selected tile has the heavy outline', border);
-    const q = detail(page, 'quantity').locator('input');
-    await q.fill('3');
-    await chip(page, `${S}`, 'order').click();
-    await detail(page, 'size').locator('input').fill('44 cm');
-    await detail(page, 'how').locator('input').fill('on the hanger, top button closed');
-    await detail(page, 'note').locator('textarea').fill('one per box');
-    await page.waitForTimeout(100);
-    let row = (await items(page))[0];
+    const before = await items(page);
+    await quantity(page, 'dust bag - cotton').fill('3');
+    const after = await items(page);
+    const index = before.findIndex((item) => item.materialId === 302);
     ck(
-      row.qtyPerGarment === 3 && row.perOrder === true && row.size === '44 cm' && row.note === 'one per box' && row.packing.startsWith('on the hanger'),
-      'B2 qty, order, size, how, note reach the row',
-      JSON.stringify([row.qtyPerGarment, row.perOrder, row.size, row.packing, row.note]),
+      index >= 0 && JSON.stringify(after) === JSON.stringify(
+        before.map((row, rowIndex) => rowIndex === index ? { ...row, qtyPerGarment: 3 } : row)
+      ),
+      'B2 quantity changes exactly one pack row, preserving other facts and the saved colour limit',
     );
+    await shelfButton(page, 'remove photo 1').click();
+    let saved = (await form(page)).packaging;
+    ck(saved.packedMediaIds.join() === '54' && saved.packedMediaId === 54, 'B2 photo remove promotes the next cover');
+    await shelfButton(page, 'undo').click();
+    saved = (await form(page)).packaging;
     ck(
-      row.usage === 'stored usage words' &&
-        JSON.stringify(row.mediaIds) === '[51]' &&
-        row.bomItemId === 17 &&
-        row.bomLineKey === 'BL-1' &&
-        row.materialId === 301,
-      'B2 usage, mediaIds, bomItemId, bomLineKey, materialId preserved',
-      JSON.stringify([row.usage, row.mediaIds, row.bomItemId, row.bomLineKey, row.materialId]),
+      saved.packedMediaIds.join() === '53,54' && saved.packedMediaId === 53,
+      'B2 photo undo preserves exact ordered IDs and the cover',
     );
-    ck(/3\s*\/\s*order/i.test(await tile(page, 'wooden hanger').innerText()), 'B2 tile follows');
-    await chip(page, S, 'garment').click();
-    await page.waitForTimeout(80);
-    row = (await items(page))[0];
-    ck(row.perOrder === false, 'B2 flip back to garment');
-    const colours = detail(page, 'colourways');
-    ck(
-      (await colours.locator('[aria-pressed]').count()) === 3,
-      'B2 details: all + one chip per colourway',
-    );
-    await colours.locator('[aria-pressed]', { hasText: /^black$/i }).click();
-    await page.waitForTimeout(80);
-    row = (await items(page))[0];
-    ck(JSON.stringify(row.colorwayIds) === '[21]', 'B2 colourway set', JSON.stringify(row.colorwayIds));
-    ck(/black/i.test(await tile(page, 'wooden hanger').innerText()), 'B2 tile names the colourway');
-    await page.screenshot({ path: join(OUT, 'details-open.png'), fullPage: true });
-    await colours.locator('[aria-pressed]', { hasText: /^bone$/i }).click();
-    await page.waitForTimeout(80);
-    ck(
-      JSON.stringify((await items(page))[0].colorwayIds) === '[21,22]',
-      'B2 several may be on',
-      JSON.stringify((await items(page))[0].colorwayIds),
-    );
-    await colours.locator('[aria-pressed]', { hasText: /^all$/i }).click();
-    await page.waitForTimeout(80);
-    ck((await items(page))[0].colorwayIds.length === 0, 'B2 all clears the limit');
-    await colours.locator('[aria-pressed]', { hasText: /^black$/i }).click();
-    await page.waitForTimeout(80);
-    await openPicker(page);
-    ck(
-      !/added/i.test(await pickerTile(page, 'wooden hanger').innerText()),
-      'B2 limited to a colourway: no longer dimmed in the picker',
-    );
-    await page.keyboard.press('Escape');
-    await page.waitForSelector(DIALOG, { state: 'detached' });
   });
 
   await step(page, 'C', async () => {
-    await chip(page, `${S} > div`, 'bone').first().click();
-    await page.waitForTimeout(100);
-    ck((await tile(page, 'wooden hanger').count()) === 0, 'C filter bone hides the black-only tile');
-    ck((await tile(page, 'dust bag - cotton').count()) === 1, 'C filter bone keeps an all-colourways tile');
-    const stale = await page.locator(`${S} button[aria-label="remove item"]`).count();
-    ck(stale === 0, 'C details of a filtered-out tile do not stay open');
-    await pickAndUse(page, 'care insert card');
-    let rows = await items(page);
-    const card = rows.find((r) => r.materialId === 305);
-    ck(card?.key === 'insert_card', 'C kind guessed from the name', card?.key);
-    ck(JSON.stringify(card?.colorwayIds) === '[22]', 'C new item takes the filter colourway', JSON.stringify(card?.colorwayIds));
-    await page.locator(`${S} [aria-pressed]`, { hasText: /^all$/i }).first().click();
-    await page.waitForTimeout(100);
-    ck((await tile(page, 'wooden hanger').count()) === 1, 'C filter all shows every tile');
+    const before = await items(page);
+    await openPicker(page);
+    const existing = pickerTile(page, 'dust bag - cotton');
+    ck(
+      /in pack/i.test(await existing.innerText()) &&
+        (await existing.evaluate((e) => e.tagName)) !== 'BUTTON' &&
+        Number(await existing.evaluate((e) => getComputedStyle(e).opacity)) < 1,
+      'C the exact chosen catalog item is dimmed and cannot be picked again',
+    );
+    await done(page).click();
+    await closePicker(page);
+    ck(JSON.stringify(await items(page)) === JSON.stringify(before), 'C closing with no choice preserves the form');
 
-    await tile(page, 'dust bag - cotton').click();
-    await page.waitForTimeout(80);
-    const n = rows.length;
-    await page.locator(`${S} button[aria-label="remove item"]`).click();
-    await page.waitForTimeout(100);
-    rows = await items(page);
+    await pickAndUse(page, addDoor(page), 'dust bag - linen');
+    await quantity(page, 'dust bag - linen').fill('2');
+    const twins = (await items(page)).filter((row) => row.key === 'dust_bag');
     ck(
-      rows.length === n - 1 && !rows.some((r) => r.materialId === 302),
-      'C ✕ removes exactly that row',
-      rows.map((r) => r.key).join(),
+      twins.length === 2 && twins[0].materialId === 302 && twins[0].qtyPerGarment === 3 &&
+        twins[1].materialId === 307 && twins[1].qtyPerGarment === 2 &&
+        twins[0].bomLineKey && twins[1].bomLineKey && twins[0].bomLineKey !== twins[1].bomLineKey,
+      'C distinct materials of the same role keep separate quantity and BOM identity',
     );
-    ck((await tile(page, 'dust bag - cotton').count()) === 0, 'C its tile is gone');
-    // the same thing twice with different colourways
-    await chip(page, `${S} > div`, 'bone').first().click();
-    await page.waitForTimeout(80);
-    await pickAndUse(page, 'wooden hanger');
-    rows = await items(page);
-    const twins = rows.filter((r) => r.materialId === 301);
+    await removeItem(page, 'dust bag - linen').click();
+    const after = await form(page);
     ck(
-      twins.length === 2 && JSON.stringify(twins.map((r) => r.colorwayIds)) === '[[21],[22]]',
-      'C the same hanger twice with different colourways',
-      JSON.stringify(twins.map((r) => r.colorwayIds)),
+      JSON.stringify(after.packagingItems) === JSON.stringify(before) &&
+        !after.bomItems.some((row) => row.lineKey === twins[1].bomLineKey) &&
+        after.bomItems.some((row) => row.lineKey === twins[0].bomLineKey),
+      'C removal preserves the neighbouring same-kind row and its BOM line',
     );
-    await page.locator(`${S} [aria-pressed]`, { hasText: /^all$/i }).first().click();
-    await page.waitForTimeout(80);
-    // the new twin is open: patching it leaves the first alone
-    await detail(page, 'quantity').locator('input').fill('2');
-    await page.waitForTimeout(80);
-    const after = (await items(page)).filter((r) => r.materialId === 301);
-    ck(after[0].qtyPerGarment === 3 && after[1].qtyPerGarment === 2, 'C a twin is patched by its row');
+    ck((await packRow(page, 'dust bag - linen').count()) === 0, 'C deleted row is absent from the shelf');
   });
 
   await step(page, 'D', async () => {
-    ck(
-      (await chip(page, S, 'on hanger').getAttribute('aria-pressed')) === 'true',
-      'D stored on a hanger reads as on hanger',
-    );
-    ck((await page.locator(`${S} [role="combobox"]`).count()) === 0, 'D no fold select on a hanger');
+    ck((await chip(page, S, 'on hanger').getAttribute('aria-pressed')) === 'true', 'D stored on a hanger is selected');
+    const foldPreset = shelf(page).getByRole('combobox');
+    ck((await foldPreset.count()) === 0, 'D folded controls are absent on a hanger');
     await chip(page, S, 'folded').click();
-    await page.waitForTimeout(100);
-    let f = await page.evaluate(() => window.__ps.form());
-    ck(f.packaging.foldingMethod === 'folded in half', 'D folded writes a fold', f.packaging.foldingMethod);
-    await page.locator(`${S} [role="combobox"]`).first().click();
-    const options = await page.locator('[role="option"]').allInnerTexts();
-    ck(
-      !options.some((o) => /hanger/i.test(o)) && options.length === 4,
-      'D fold select: four folds',
-      options.join(','),
-    );
-    await page.locator('[role="option"]', { hasText: /^rolled$/i }).click();
-    await page.waitForTimeout(100);
-    f = await page.evaluate(() => window.__ps.form());
-    ck(f.packaging.foldingMethod === 'rolled', 'D fold select writes', f.packaging.foldingMethod);
+    ck((await form(page)).packaging.foldingMethod === 'folded', 'D folded state asks for an actual fold preset');
+    await foldPreset.click();
+    const options = await page.getByRole('option').allInnerTexts();
+    ck(options.map((option) => option.toLowerCase()).join() === 'in half,in thirds,tri-fold,rolled', 'D exact fold presets', options.join());
+    await page.getByRole('option', { name: 'rolled', exact: true }).click();
+    const width = shelf(page).getByRole('spinbutton', { name: 'folded width cm' });
+    const height = shelf(page).getByRole('spinbutton', { name: 'folded height cm' });
+    ck((await width.inputValue()) === '62' && (await height.inputValue()) === '40', 'D legacy packed string opens as exact dimensions');
+    await width.fill('60');
+    await height.fill('41');
+    let saved = (await form(page)).packaging;
+    ck(saved.foldingMethod === 'rolled' && saved.packedSize === '60 × 41', 'D preset and dimensions write canonical values');
     await chip(page, S, 'on hanger').click();
-    await page.waitForTimeout(100);
-    f = await page.evaluate(() => window.__ps.form());
-    ck(f.packaging.foldingMethod === 'on a hanger', 'D back to hanger');
-    await page.locator(S).getByLabel('packed size', { exact: true }).fill('60 × 40 × 5 cm');
-    await page.waitForTimeout(80);
-    f = await page.evaluate(() => window.__ps.form());
-    ck(f.packaging.packedSize === '60 × 40 × 5 cm', 'D packed size written');
-    ck(f.packaging.packedMediaId === 53, 'D packed photo id kept');
+    saved = (await form(page)).packaging;
     ck(
-      (await page.locator(`${S} img[alt="packed photo"]`).count()) === 1,
-      'D the stored packed photo resolves from the card media',
+      saved.foldingMethod === 'on a hanger' && saved.packedSize === '60 × 41' &&
+        (await width.count()) === 0,
+      'D changing shipping mode keeps the saved fold dimensions',
+    );
+    await shelf(page).getByRole('spinbutton', { name: 'per box' }).fill('24');
+    saved = (await form(page)).packaging;
+    ck(
+      saved.unitsPerBox === 24 && saved.boxDimensions === '58×41×32' &&
+        (await shelf(page).getByText('11.52 kg', { exact: true }).count()) === 1,
+      'D picked carton allows quantity and shows the current calculated full-box weight',
+      JSON.stringify(saved),
+    );
+    ck(
+      (await packedPhoto(page, 1).getAttribute('src')) === pic(PACK).thumbnail.mediaUrl &&
+        (await packedPhoto(page, 2).getAttribute('src')) === pic(BOX).thumbnail.mediaUrl,
+      'D saved photos resolve from the exact card media in order',
     );
   });
 
@@ -725,36 +647,37 @@ if (exitSetup) {
     ck(insert.packagingPicksAware === true, 'E write payload: packagingPicksAware true');
     ck(insert.labelsAware === true, 'E write payload: labelsAware true');
     const out = insert.packagingItems;
-    const hanger = out.find((r) => r.materialId === 301);
-    const aux = out.find((r) => r.auxTechCardId === 42);
-    const legacy = out.find((r) => r.key === 'polybag');
+    const hanger = out.find((row) => row.materialId === 301);
+    const aux = out.find((row) => row.auxTechCardId === 42);
+    const legacy = out.find((row) => row.key === 'polybag');
     ck(
-      hanger.usage === 'stored usage words' && JSON.stringify(hanger.mediaIds) === '[51]' && hanger.bomItemId === 17 && hanger.bomLineKey === 'BL-1',
-      'E wire: usage, mediaIds, bomItemId, bomLineKey',
+      hanger?.usage === 'stored usage words' && hanger?.size === '42 cm' &&
+        JSON.stringify(hanger?.mediaIds) === '[51]' && hanger?.bomItemId === 17 &&
+        hanger?.bomLineKey === 'BL-1' && JSON.stringify(hanger?.colorwayIds) === '[21]',
+      'E wire preserves the saved hanger usage, size, media, BOM and colour scope',
       JSON.stringify(hanger),
     );
-    ck(JSON.stringify(hanger.colorwayIds) === '[21]', 'E wire: colorwayIds');
-    ck(aux.perOrder === true && aux.materialId === 0, 'E wire: perOrder, one pick only');
+    ck(aux?.perOrder === true && aux?.materialId === 0, 'E wire: per order, one pick only');
     ck(
-      legacy.usage === 'one per garment' && JSON.stringify(legacy.mediaIds) === '[52]' && legacy.bomLineKey === 'BL-2' && legacy.materialId === 0 && legacy.auxTechCardId === 0,
-      'E wire: a stored item without a pick stays whole',
+      legacy?.usage === 'one per garment' && legacy?.packing === 'flat' &&
+        legacy?.size === '30 × 40 cm' && JSON.stringify(legacy?.mediaIds) === '[52]' &&
+        legacy?.bomLineKey === 'BL-2' && legacy?.materialId === 0 && legacy?.auxTechCardId === 0,
+      'E wire preserves the whole stored item without a pick',
       JSON.stringify(legacy),
     );
     ck(
-      out.every((r) => !('pickedName' in r) && !('pickedThumbnail' in r)),
-      'E wire: output-only pickedName / pickedThumbnail not sent',
+      out.every((row) => !('pickedName' in row) && !('pickedThumbnail' in row)),
+      'E wire: output-only pickedName and pickedThumbnail are absent',
     );
+    ck(out.every((row) => !(row.materialId && row.auxTechCardId)), 'E wire: at most one of material and aux card');
     ck(
-      out.every((r) => !(r.materialId && r.auxTechCardId)),
-      'E wire: at most one of material and aux card',
-    );
-    ck(
-      insert.packaging.packedSize === '60 × 40 × 5 cm' && insert.packaging.packedMediaId === 53,
-      'E wire: packed size and packed photo',
+      insert.packaging.packedSize === '60 × 41' && insert.packaging.packedMediaId === 53 &&
+        insert.packaging.packedMediaIds.join() === '53,54' && insert.packaging.unitsPerBox === 24 &&
+        insert.packaging.boxDimensions === '58×41×32',
+      'E wire packs exact dimensions, ordered gallery, cover and carton facts',
       JSON.stringify(insert.packaging),
     );
   });
-
   await step(page, 'F', async () => {
     const recipe = page.locator('[data-recipe-block]');
     ck((await recipe.count()) === 0, 'F recipe block is gone');
@@ -774,16 +697,16 @@ if (exitSetup) {
   await step(page, 'M', async () => {
     let d = await noHScroll(page);
     ck(d.sw <= d.cw, 'M 375: shelf has no horizontal scroll', `${d.sw}/${d.cw}`);
-    await tile(page, 'wooden hanger').click();
-    await page.waitForTimeout(150);
+    await chip(page, S, 'folded').click();
+    await shelf(page).getByRole('combobox').waitFor();
     d = await noHScroll(page);
-    ck(d.sw <= d.cw, 'M 375: details open, no horizontal scroll', `${d.sw}/${d.cw}`);
+    ck(d.sw <= d.cw, 'M 375: folded controls fit without horizontal scroll', `${d.sw}/${d.cw}`);
     await page.screenshot({ path: join(OUT, 'shelf-375.png'), fullPage: true });
     await openPicker(page);
     d = await noHScroll(page);
     ck(d.sw <= d.cw, 'M 375: picker, no horizontal scroll', `${d.sw}/${d.cw}`);
     const box = await page.locator(DIALOG).boundingBox();
-    ck(box.x >= 0 && box.x + box.width <= 375, 'M 375: picker fits the width', JSON.stringify(box));
+    ck(box && box.x >= 0 && box.x + box.width <= 375, 'M 375: picker fits the width', JSON.stringify(box));
     await page.screenshot({ path: join(OUT, 'picker-375.png') });
   });
   ck(errors.length === 0, 'M no page errors', errors.join(' | '));
@@ -808,15 +731,16 @@ if (exitSetup) {
       pressed.join(','),
     );
     ck((await page.locator(`${S} [role="combobox"]`).count()) === 0, 'O nothing stored: no fold select yet');
-    const photo = page.locator(`${S} button`, { hasText: /^\+ photo$/i });
-    const b = await photo.boundingBox();
-    const inp = await page.locator(S).getByLabel('packed size', { exact: true }).boundingBox();
-    ck(b && b.height === inp.height && b.width < 120, 'O + photo: a small chip, the same height as inputs', JSON.stringify(b));
-    ck((await photo.evaluate((e) => getComputedStyle(e).borderTopStyle)) === 'dashed', 'O + photo is dashed');
+    const photo = shelfButton(page, '+ photo');
+    const bounds = await photo.boundingBox();
+    ck(
+      bounds && bounds.width > 0 && bounds.width <= 120 && bounds.height > bounds.width,
+      'O empty gallery has one photo tile',
+      JSON.stringify(bounds),
+    );
+    ck((await photo.evaluate((e) => getComputedStyle(e).borderTopStyle)) === 'dashed', 'O photo add tile is dashed');
+    ck((await packedPhoto(page, 1).count()) === 0, 'O empty gallery shows no saved image');
     await page.screenshot({ path: join(OUT, 'shelf-empty.png'), fullPage: true });
-    await tile(page, 'polybag').click();
-    await page.waitForTimeout(100);
-    ck((await detail(page, 'colourways').count()) === 0, 'O one colourway: no colourway chips in details');
   });
   ck(errors.length === 0, 'O no page errors', errors.join(' | '));
   await page.close();
@@ -826,11 +750,16 @@ if (exitSetup) {
 {
   const { page, errors } = await openShelf(baseCard(), { canEdit: false });
   await step(page, 'R', async () => {
-    ck((await addDoor(page).count()) === 0, 'R no + item without rights');
-    await tile(page, 'wooden hanger').click();
-    await page.waitForTimeout(100);
-    ck(await detail(page, 'size').locator('input').isDisabled(), 'R details are disabled');
-    ck((await page.locator(`${S} button[aria-label="remove item"]`).count()) === 0, 'R no remove control');
+    ck((await addDoor(page).count()) === 0, 'R no pack add door without rights');
+    ck(await shelfButton(page, /wooden hanger/).isDisabled(), 'R saved hanger cannot open the picker');
+    ck(await quantity(page, 'polybag').isDisabled(), 'R visible pack quantity cannot be edited');
+    ck(await shelfButton(page, '+ box').isDisabled(), 'R carton picker is disabled');
+    ck(
+      (await shelf(page).getByRole('button', { name: /^(remove|replace|unpick) / }).count()) === 0 &&
+        (await shelfButton(page, '+ photo').count()) === 0 &&
+        (await packedPhoto(page, 1).count()) === 1,
+      'R saved photo remains visible with no shelf mutation controls',
+    );
   });
   ck(errors.length === 0, 'R no page errors', errors.join(' | '));
   await page.close();
@@ -934,7 +863,8 @@ const printed = async (page, name, sheets) => {
 for (const orient of ['port', 'land']) {
   const big = orient === 'port' ? 'pdf-portrait' : 'pdf-landscape';
   {
-    const { page, errors } = await openPdf({ packagingItems: LIMITED }, orient);
+    const mailer = pdfItem('mailer', 'domestic shipping mailer only', { perOrder: true });
+    const { page, errors } = await openPdf({ packagingItems: [...LIMITED, mailer] }, orient);
     await step(page, `G-${orient}`, async () => {
       const f = await sheetFacts(page);
       fits(`G ${orient} limited`, f);
@@ -948,8 +878,13 @@ for (const orient of ['port', 'land']) {
       ck(/per order/i.test(f.rows[4].join(' ')) && /per garment/i.test(f.rows[0].join(' ')), `G ${orient}: per garment / per order`);
       ck(f.rows.every((r) => !/_/.test(r.join(' '))), `G ${orient}: no raw key with an underscore`, f.rows[2].join(' | '));
       const side = await page.locator('.tp-sheet aside').innerText();
-      for (const w of ['62 × 40 × 6 cm', '310 g', '480 g', '60×40×30', 'style + qty'])
-        ck(side.includes(w), `G ${orient}: packed and carton facts: ${w}`);
+      for (const fact of ['62 × 40 × 6 cm', '310 g', '480 g'])
+        ck(side.includes(fact), `G ${orient}: packed garment fact: ${fact}`);
+      ck(
+        !side.includes('60×40×30') && !side.includes('style + qty'),
+        `G ${orient}: shipping carton metadata stays off the printed sidebar`,
+      );
+      ck(!whats.includes(mailer.pickedName), `G ${orient}: shipping-only mailer stays off the table`);
       ck((await page.locator('.tp-sheet aside img').count()) === 1, `G ${orient}: packed photo printed`);
       const inside = await page.locator('.tp-body').innerText();
       ck((inside.match(/inside first/gi) ?? []).length === 1, `G ${orient}: inside first printed once`);

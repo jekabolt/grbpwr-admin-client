@@ -1,12 +1,47 @@
+import { isAuthoredTurnAllowanceVariant } from 'lib/pattern-import/manifest/authored-turn-allowance';
+import type { AuthoredTurnAllowanceVariant } from 'lib/pattern-import/types';
 import {
+  editFixedEndAuthoredOutlineCorner,
+  readAuthoredOutlineCorner,
+  readAuthoredOutlineCornerSetbacks,
+  readPairedAuthoredOutlineCorner,
+} from 'lib/pattern-import/manifest/authored-outline-corner';
+import {
+  draftOutlineMoveHistoryV1,
+  draftOutlineMovePositionsV1,
+} from './draft-cad-outline-move-history-v1';
+import {
+  roundDraftConvexOrthogonalCornerV1,
+  validDraftCornerSetbackV1,
+} from './draft-cad-round-corner-v1';
+import { selectDraftSharpCornerV1 } from './draft-cad-edge-length-geometry-v1';
+import {
+  hasDraftCutAllowanceJoinsV1,
+  selectDraftCutAllowanceOffsetV1,
+} from './draft-cad-allowance-offset-geometry-v1';
+import { parallelOpeningAxisV1, validParallelDisplacementV1 } from './draft-cad-session-v1';
+import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
+  type ChangeEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
-import type { BoxMm, PtMm } from 'lib/pattern-import/types';
+import {
+  AUTHORED_TEXT_HEIGHT_MM,
+  normalizeAuthoredText,
+} from 'lib/pattern-import/manifest/authored-text';
+import type {
+  AuthoredNotchShape,
+  AuthoredQuadraticGrid,
+  BoxMm,
+  PtMm,
+} from 'lib/pattern-import/types';
+import { num as dxfCoordinate } from 'lib/pattern-import/write/format';
+import { Button, Input, Selector } from 'ui';
 
 import { SHEET_INK, SheetViewport, ptsAttr, vy } from '../sheet-viewport';
 import {
@@ -15,7 +50,12 @@ import {
 } from './draft-cad-preview-v1';
 import { PatternImportDxfPhaseEDraftCadGridRulersV1 } from './draft-cad-grid-rulers-v1';
 import {
+  DRAFT_CAD_CROSS_MARK_HALF_SPAN_MM,
+  listActiveDraftCadNewPiecesV1,
+  permitsDraftCadLocalPieceEditV1,
+  recordDraftCadFrenchCurveHandleV1,
   recordPatternImportDxfPhaseEDraftCadTransactionV1,
+  type DraftCadFrenchCurveHandleV1,
   type PatternImportDxfPhaseEDraftCadCommandV1,
   type PatternImportDxfPhaseEDraftCadSessionV1,
   type PatternImportDxfPhaseEDraftCadToolV1,
@@ -49,6 +89,8 @@ const INPUT_TOOLS = new Set<PatternImportDxfPhaseEDraftCadToolV1>([
   'french-curve',
   'ellipse',
   'add-point',
+  'edge-length',
+  'allowance-offset',
   'fish-eye',
   'spread',
   'gather',
@@ -59,7 +101,6 @@ const INPUT_TOOLS = new Set<PatternImportDxfPhaseEDraftCadToolV1>([
 const TWO_POINT_TOOLS = new Set<PatternImportDxfPhaseEDraftCadToolV1>([
   'rectangle',
   'circle',
-  'pen',
   'cut',
   'guideline',
   'internal-line',
@@ -77,6 +118,9 @@ const THREE_POINT_TOOLS = new Set<PatternImportDxfPhaseEDraftCadToolV1>([
 const EXACT_EDGE_TOOLS = new Set<PatternImportDxfPhaseEDraftCadToolV1>([
   'dart',
   'add-point',
+  'edge-length',
+  'allowance-offset',
+  'sharpen-corner',
   'gather',
   'notch',
 ]);
@@ -86,7 +130,26 @@ export type PatternImportDxfPhaseEDraftCadCanvasPropsV1 = Readonly<{
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
   scopeKey?: string;
   activePieceIndex: number;
+  activeDraftPieceId?: string | null;
   activeTool: PatternImportDxfPhaseEDraftCadToolV1;
+  allowSavedParallelOpening?: boolean;
+  savedDartPaths?: readonly Readonly<{
+    pieceLineKey: string;
+    kind: 'dart' | 'fish-eye';
+    pointsMm: readonly PtMm[];
+  }>[];
+  savedFrenchCurveOnly?: boolean;
+  moveSharedOutline?: boolean;
+  savedRoundCorner?: AuthoredQuadraticGrid;
+  savedTurnAllowance?: boolean;
+  savedAllowanceCornerPreview?: readonly PtMm[];
+  savedAllowanceFoldAxis?: readonly [PtMm, PtMm];
+  savedFrenchCurve?: Readonly<{
+    key: string;
+    primitive: FrenchCurvePrimitive;
+    pointsMm: readonly PtMm[];
+    onEdit: (handle: DraftCadFrenchCurveHandleV1, point: PtMm) => void;
+  }> | null;
   arrangeActive?: boolean;
   panActive?: boolean;
   crossScopeConnectActive?: boolean;
@@ -129,6 +192,17 @@ export type PatternImportDxfPhaseEDraftCadExactVertexOptionV1 = Readonly<{
   pointMm: Readonly<{ x: number; y: number }>;
 }>;
 
+type MovePointDrag = {
+  sourceKey: string;
+  pointerId: number;
+  option: PatternImportDxfPhaseEDraftCadExactVertexOptionV1;
+  startClient: PtMm;
+  screenToSvg: Readonly<Pick<DOMMatrix, 'a' | 'b' | 'c' | 'd'>>;
+  moved: boolean;
+};
+
+const MOVE_POINT_DRAG_SLOP_PX = 4;
+
 type BoundaryPickInput = Readonly<{
   session: PatternImportDxfPhaseEDraftCadSessionV1;
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
@@ -136,17 +210,26 @@ type BoundaryPickInput = Readonly<{
   activeTool: PatternImportDxfPhaseEDraftCadToolV1;
   baseKey: string;
   sequence: number;
+  resize?: Readonly<{ fixed: 'start' | 'end'; lengthMm: number }>;
+  allowanceOffsetMm?: number;
+  turnAllowance?: AuthoredTurnAllowanceVariant;
+  notchKind?: 'single' | AuthoredNotchShape;
 }>;
 
 type PointInput = Readonly<{
+  cutDirection?: 'free' | 'vertical' | 'horizontal';
   session: PatternImportDxfPhaseEDraftCadSessionV1;
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
   activePieceIndex: number;
+  activeDraftPieceId?: string | null;
   activeTool: PatternImportDxfPhaseEDraftCadToolV1;
   pointMm: PtMm;
   pendingPoints: readonly PtMm[];
   pendingDartBase?: PatternImportDxfPhaseEDraftCadCanvasDartBaseV1 | null;
   sequence: number;
+  closePen?: boolean;
+  markKind?: 'drill' | 'cross' | 'text';
+  markText?: string;
 }>;
 
 type ProjectedPiece = PatternImportDxfProductPhaseEAssemblyProjectionV1['pieces'][number];
@@ -275,12 +358,30 @@ export function buildPatternImportDxfPhaseEDraftCadExactVertexOptionsV1(
   session: PatternImportDxfPhaseEDraftCadSessionV1,
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1,
   activePieceIndex: number,
+  outlineOnly = false,
 ): readonly PatternImportDxfPhaseEDraftCadExactVertexOptionV1[] {
   const piece = activeProjectedPiece(session, projection, activePieceIndex);
   if (!piece) return Object.freeze([]);
+  const cut = piece.contours.filter(({ role, closed }) => role === 'cut-boundary' && closed);
+  const outlines = cut.length
+    ? cut
+    : piece.contours.filter(({ role, closed }) => role === 'sewing-boundary' && closed);
+  const moves = outlineOnly
+    ? draftOutlineMoveHistoryV1(
+        session.history.slice(0, session.cursor).flatMap((tx) => tx.commands),
+      )
+    : null;
+  const first = moves?.[0];
+  const positions =
+    first?.target.pieceId === piece.pieceId &&
+    first.target.pieceLineKey === piece.pieceLineKey &&
+    first.payload.sizeToken === projection.sizeToken
+      ? moves
+      : null;
   return Object.freeze(
-    piece.contours.flatMap((contour) =>
-      contour.vertices.map((vertex) =>
+    (outlineOnly ? outlines : piece.contours).flatMap((contour) => {
+      const current = positions && draftOutlineMovePositionsV1(positions, contour);
+      return contour.vertices.map((vertex) =>
         Object.freeze({
           key: `draft-topology-vertex:${encodeURIComponent(contour.contourId)}:${encodeURIComponent(vertex.vertexId)}`,
           anchor: Object.freeze({
@@ -289,10 +390,10 @@ export function buildPatternImportDxfPhaseEDraftCadExactVertexOptionsV1(
             contourId: contour.contourId,
             vertexId: vertex.vertexId,
           }),
-          pointMm: Object.freeze({ ...vertex.pointMm }),
+          pointMm: Object.freeze({ ...(current?.get(vertex.vertexId) ?? vertex.pointMm) }),
         }),
-      ),
-    ),
+      );
+    }),
   );
 }
 
@@ -323,6 +424,193 @@ function nextIds(session: PatternImportDxfPhaseEDraftCadSessionV1, sequence: num
     commandId: `draft-canvas/command/${next}`,
     entityId: `draft-canvas/entity/${next}`,
   } as const;
+}
+
+export function recordDraftParallelOpeningV1(
+  session: PatternImportDxfPhaseEDraftCadSessionV1,
+  target: { pieceId: string; pieceLineKey: string },
+  amount: number,
+  sequence: number,
+) {
+  const commands = session.history.slice(0, session.cursor).flatMap((tx) => tx.commands);
+  const cut = commands.length === 1 ? commands[0] : null;
+  if (
+    cut?.tool !== 'cut' ||
+    cut.target.pieceId !== target.pieceId ||
+    cut.target.pieceLineKey !== target.pieceLineKey ||
+    !parallelOpeningAxisV1(cut.payload.pointsMm) ||
+    !validParallelDisplacementV1(amount)
+  )
+    return null;
+  const ids = nextIds(session, sequence);
+  const recorded = recordPatternImportDxfPhaseEDraftCadTransactionV1(session, {
+    transactionId: ids.transactionId,
+    label: 'Parallel spread',
+    commands: [
+      {
+        commandId: ids.commandId,
+        tool: 'spread',
+        target: cut.target,
+        payload: {
+          mode: 'parallel',
+          cutLineEntityId: cut.payload.entityId,
+          entityId: ids.entityId,
+          amountMm: Math.abs(amount),
+          movingSide: amount > 0 ? 'positive' : 'negative',
+        },
+      },
+    ],
+  });
+  return { recorded, sequence: ids.sequence };
+}
+type OutlinePointEditInput = Pick<
+  PointInput,
+  'session' | 'projection' | 'activePieceIndex' | 'sequence'
+> &
+  Readonly<{ vertexKey: string }>;
+
+export function recordPatternImportDxfPhaseEDraftCadMovePointV1(
+  input: OutlinePointEditInput & Readonly<{ pointMm: PtMm }>,
+): PatternImportDxfPhaseEDraftCadCanvasPointResultV1 {
+  return recordOutlinePointEdit(input, { tool: 'move-point', pointMm: input.pointMm });
+}
+
+export function recordPatternImportDxfPhaseEDraftCadDeletePointV1(
+  input: OutlinePointEditInput,
+): PatternImportDxfPhaseEDraftCadCanvasPointResultV1 {
+  return recordOutlinePointEdit(input, { tool: 'delete-point' });
+}
+
+export function recordPatternImportDxfPhaseEDraftCadRoundCornerV1(
+  input: OutlinePointEditInput &
+    Readonly<{
+      setbackMm: number;
+      savedCorner?: AuthoredQuadraticGrid;
+      fixedEnd?: 'start' | 'end';
+    }>,
+): PatternImportDxfPhaseEDraftCadCanvasPointResultV1 {
+  return recordOutlinePointEdit(input, {
+    tool: 'round-corner',
+    setbackMm: input.setbackMm,
+    savedCorner: input.savedCorner,
+    fixedEnd: input.fixedEnd,
+  });
+}
+function recordOutlinePointEdit(
+  input: OutlinePointEditInput,
+  edit:
+    | Readonly<{ tool: 'move-point'; pointMm: PtMm }>
+    | Readonly<{ tool: 'delete-point' }>
+    | Readonly<{
+        tool: 'round-corner';
+        setbackMm: number;
+        savedCorner?: AuthoredQuadraticGrid;
+        fixedEnd?: 'start' | 'end';
+      }>,
+): PatternImportDxfPhaseEDraftCadCanvasPointResultV1 {
+  const { session, projection, activePieceIndex, sequence } = input;
+  const fail = (blocker: string) => ({
+    session,
+    pendingPoints: [],
+    pendingDartBase: null,
+    sequence,
+    recorded: false,
+    blocker,
+  });
+  const option = buildPatternImportDxfPhaseEDraftCadExactVertexOptionsV1(
+    session,
+    projection,
+    activePieceIndex,
+    true,
+  ).find(({ key }) => key === input.vertexKey);
+  if (!option) return fail('Choose one exact outline point from the current size.');
+
+  const ids = nextIds(session, sequence);
+  const { pieceId, pieceLineKey, contourId, vertexId } = option.anchor;
+  const target = { pieceId, pieceLineKey };
+  const payload = { entityId: ids.entityId, contourId, vertexId, sizeToken: projection.sizeToken };
+  let command: PatternImportDxfPhaseEDraftCadCommandV1;
+  if (edit.tool === 'move-point') {
+    if (!Number.isFinite(edit.pointMm.x) || !Number.isFinite(edit.pointMm.y))
+      return fail('Enter finite X and Y coordinates in millimetres.');
+    const pointMm = {
+      x: Number(dxfCoordinate(edit.pointMm.x)),
+      y: Number(dxfCoordinate(edit.pointMm.y)),
+    };
+    if (pointMm.x === option.pointMm.x && pointMm.y === option.pointMm.y)
+      return fail('Enter a different finite X and Y in millimetres.');
+    command = {
+      commandId: ids.commandId,
+      tool: 'move-point',
+      target,
+      payload: { ...payload, pointMm },
+    };
+  } else if (edit.tool === 'round-corner') {
+    const contour = activeProjectedPiece(session, projection, activePieceIndex)?.contours.find(
+      (candidate) => candidate.contourId === contourId,
+    );
+    const points = contour?.vertices.map(({ pointMm }) => pointMm);
+    const index = contour?.vertices.findIndex((vertex) => vertex.vertexId === vertexId) ?? -1;
+    const prior =
+      edit.savedCorner &&
+      points &&
+      (edit.fixedEnd
+        ? readPairedAuthoredOutlineCorner(points, points, edit.savedCorner)
+        : readAuthoredOutlineCorner(points, edit.savedCorner));
+    const rounded =
+      points &&
+      (!edit.savedCorner || prior?.start === index) &&
+      (edit.fixedEnd
+        ? edit.savedCorner &&
+          editFixedEndAuthoredOutlineCorner(
+            points,
+            points,
+            edit.savedCorner,
+            edit.fixedEnd,
+            edit.setbackMm,
+          )
+        : (!prior || prior.setbackMm !== edit.setbackMm) &&
+          roundDraftConvexOrthogonalCornerV1(
+            prior ? prior.originalOutline : points,
+            index,
+            edit.setbackMm,
+          ));
+    if (!contour?.closed || contour.role !== 'cut-boundary' || !rounded)
+      return fail('Choose a right-angle corner and keep a straight rail on each side.');
+    command = {
+      commandId: ids.commandId,
+      tool: 'round-corner',
+      target,
+      payload: {
+        ...payload,
+        setbackMm: edit.setbackMm,
+        ...(edit.savedCorner ? { savedCorner: edit.savedCorner } : {}),
+        ...(edit.fixedEnd ? { fixedEnd: edit.fixedEnd } : {}),
+      },
+    };
+  } else {
+    command = { commandId: ids.commandId, tool: 'delete-point', target, payload };
+  }
+  const result = recordPatternImportDxfPhaseEDraftCadTransactionV1(session, {
+    transactionId: ids.transactionId,
+    label:
+      edit.tool === 'move-point'
+        ? 'Move outline point'
+        : edit.tool === 'round-corner'
+          ? 'Round outline corner'
+          : 'Delete outline point',
+    commands: [command],
+  });
+  return result.ok
+    ? {
+        session: result.session,
+        pendingPoints: [],
+        pendingDartBase: null,
+        sequence: ids.sequence,
+        recorded: true,
+        blocker: null,
+      }
+    : fail(result.blocker.detail);
 }
 
 function activeCutLineEntityId(
@@ -392,7 +680,87 @@ export function recordPatternImportDxfPhaseEDraftCadCanvasBoundaryPickV1(
 
   let command: PatternImportDxfPhaseEDraftCadCommandV1;
   let label: string;
-  if (input.activeTool === 'add-point') {
+  if (input.activeTool === 'edge-length') {
+    const resize = input.resize;
+    if (!resize || !Number.isFinite(resize.lengthMm) || resize.lengthMm <= 0)
+      return {
+        session: input.session,
+        pendingPoints: [],
+        pendingDartBase: null,
+        sequence: input.sequence,
+        recorded: false,
+        blocker: 'Enter a positive edge length in millimetres.',
+      };
+    label = 'Set edge length';
+    command = {
+      commandId: ids.commandId,
+      tool: 'edge-length',
+      target,
+      payload: {
+        entityId: ids.entityId,
+        edge: base.anchor,
+        fixed: resize.fixed,
+        lengthMm: resize.lengthMm,
+        sizeToken: input.projection.sizeToken,
+      },
+    };
+  } else if (input.activeTool === 'allowance-offset') {
+    const amount = input.allowanceOffsetMm;
+    const contour = activeProjectedPiece(
+      input.session,
+      input.projection,
+      input.activePieceIndex,
+    )?.contours.find(({ contourId }) => contourId === base.anchor.contourId);
+    if (
+      amount === undefined ||
+      (input.turnAllowance && amount <= 0) ||
+      !selectDraftCutAllowanceOffsetV1(contour, base.anchor.boundaryVertexIds, amount)
+    )
+      return {
+        session: input.session,
+        pendingPoints: [],
+        pendingDartBase: null,
+        sequence: input.sequence,
+        recorded: false,
+        blocker:
+          'Choose a cut edge with two right-angle joins and enter a nonzero offset with up to six decimals.',
+      };
+    label = 'Offset seam allowance';
+    command = {
+      commandId: ids.commandId,
+      tool: 'allowance-offset',
+      target,
+      payload: {
+        entityId: ids.entityId,
+        edge: base.anchor,
+        offsetMm: amount,
+        ...(input.turnAllowance && { turnAllowance: input.turnAllowance }),
+        sizeToken: input.projection.sizeToken,
+      },
+    };
+  } else if (input.activeTool === 'sharpen-corner') {
+    const contour = activeProjectedPiece(
+      input.session,
+      input.projection,
+      input.activePieceIndex,
+    )?.contours.find(({ contourId }) => contourId === base.anchor.contourId);
+    if (!selectDraftSharpCornerV1(contour, base.anchor.boundaryVertexIds))
+      return {
+        session: input.session,
+        pendingPoints: [],
+        pendingDartBase: null,
+        sequence: input.sequence,
+        recorded: false,
+        blocker: 'Choose the bevel between two perpendicular straight sides.',
+      };
+    label = 'Sharpen outline corner';
+    command = {
+      commandId: ids.commandId,
+      tool: 'sharpen-corner',
+      target,
+      payload: { entityId: ids.entityId, edge: base.anchor, sizeToken: input.projection.sizeToken },
+    };
+  } else if (input.activeTool === 'add-point') {
     label = 'Add exact boundary point intent';
     command = {
       commandId: ids.commandId,
@@ -423,7 +791,7 @@ export function recordPatternImportDxfPhaseEDraftCadCanvasBoundaryPickV1(
       payload: {
         entityId: ids.entityId,
         anchor: base.anchor,
-        kind: 'single',
+        kind: input.notchKind ?? 'single',
         depthMm: Math.min(3, edgeLengthMm / 4),
       },
     };
@@ -489,18 +857,33 @@ function commandForPoint(
         command: {
           ...common,
           tool: 'draft-point',
-          payload: { entityId: ids.entityId, pointMm: input.pointMm },
+          payload: {
+            entityId: ids.entityId,
+            pointMm: {
+              x: Number(dxfCoordinate(input.pointMm.x)),
+              y: Number(dxfCoordinate(input.pointMm.y)),
+            },
+          },
         },
       };
-    case 'mark':
+    case 'mark': {
+      const kind = input.markKind ?? 'drill';
+      const label = { drill: 'Add drill mark', cross: 'Add cross mark', text: 'Add text mark' };
+      const text = kind === 'text' ? normalizeAuthoredText(input.markText) : null;
       return {
-        label: 'Add mark',
+        label: label[kind],
         command: {
           ...common,
           tool: 'mark',
-          payload: { entityId: ids.entityId, pointMm: input.pointMm, kind: 'cross' },
+          payload: {
+            entityId: ids.entityId,
+            pointMm: input.pointMm,
+            kind,
+            ...(text ? { text } : {}),
+          },
         },
       };
+    }
     case 'rectangle': {
       const from = input.pendingPoints[0];
       if (!from) return null;
@@ -567,14 +950,27 @@ function commandForPoint(
       };
     }
     case 'pen': {
-      const from = input.pendingPoints[0];
-      if (!from) return null;
+      if (!input.closePen || input.pendingPoints.length < 3) return null;
+      const pieceLineKey = `draft-pen:${ids.sequence}`;
       return {
-        label: 'Draw pen path',
+        label: 'Close Pen outline',
         command: {
           ...common,
           tool: 'pen',
-          payload: { entityId: ids.entityId, pointsMm: [from, input.pointMm], closed: false },
+          payload: {
+            entityId: ids.entityId,
+            pointsMm: input.pendingPoints,
+            closed: true,
+            newPiece: {
+              pieceId: `DRAFTPEN${ids.sequence}`,
+              pieceLineKey,
+              contourId: `${pieceLineKey}:cut`,
+              vertexIds: input.pendingPoints.map((_, index) => `${pieceLineKey}:v${index}`),
+              displayName: `Pen piece ${ids.sequence}`,
+              gradingPolicy: 'ungraded-current-size',
+              placementPolicy: 'separate-writer-block',
+            },
+          },
         },
       };
     }
@@ -586,7 +982,18 @@ function commandForPoint(
         command: {
           ...common,
           tool: 'cut',
-          payload: { entityId: ids.entityId, pointsMm: [from, input.pointMm], keepSide: 'both' },
+          payload: {
+            entityId: ids.entityId,
+            pointsMm: [
+              from,
+              input.cutDirection === 'vertical'
+                ? { ...input.pointMm, x: from.x }
+                : input.cutDirection === 'horizontal'
+                  ? { ...input.pointMm, y: from.y }
+                  : input.pointMm,
+            ],
+            keepSide: 'both',
+          },
         },
       };
     }
@@ -798,15 +1205,19 @@ export function recordPatternImportDxfPhaseEDraftCadCanvasPointV1(
     input.projection,
     input.activePieceIndex,
   );
-  if (!sourcePiece || !projectedPiece)
+  const draftPiece = input.activeDraftPieceId
+    ? listActiveDraftCadNewPiecesV1(input.session).find(
+        ({ pieceId }) => pieceId === input.activeDraftPieceId,
+      )
+    : undefined;
+  const target = input.activeDraftPieceId ? draftPiece : sourcePiece;
+  if (!projectedPiece || !target)
     return {
-      ...failPointInput(
-        input,
-        'The active exact piece is not available in the projection sealed to this Draft session.',
-        [],
-      ),
+      ...failPointInput(input, 'The active piece is unavailable in the current Draft session.', []),
       pendingDartBase: null,
     };
+  if (draftPiece && !permitsDraftCadLocalPieceEditV1(input.activeTool))
+    return failPointInput(input, 'Apply this piece before using the selected tool.', []);
   if (EXACT_EDGE_TOOLS.has(input.activeTool) && input.activeTool !== 'dart')
     return failPointInput(
       input,
@@ -816,8 +1227,8 @@ export function recordPatternImportDxfPhaseEDraftCadCanvasPointV1(
   if (
     input.activeTool === 'spread' &&
     !activeCutLineEntityId(input.session, {
-      pieceId: sourcePiece.pieceId,
-      pieceLineKey: sourcePiece.pieceLineKey,
+      pieceId: target.pieceId,
+      pieceLineKey: target.pieceLineKey,
     })
   )
     return failPointInput(
@@ -840,6 +1251,24 @@ export function recordPatternImportDxfPhaseEDraftCadCanvasPointV1(
       recorded: false,
       blocker: null,
     };
+  if (input.activeTool === 'pen' && !input.closePen) {
+    if (input.pendingPoints.length >= 256)
+      return failPointInput(input, 'Close the Pen outline before adding more than 256 corners.');
+    if (
+      input.pendingPoints.some(
+        ({ x, y }) => Math.hypot(x - input.pointMm.x, y - input.pointMm.y) < 0.1,
+      )
+    )
+      return failPointInput(input, 'Place each Pen corner at a distinct point.');
+    return {
+      session: input.session,
+      pendingPoints: [...input.pendingPoints, input.pointMm],
+      pendingDartBase: null,
+      sequence: input.sequence,
+      recorded: false,
+      blocker: null,
+    };
+  }
   if (TWO_POINT_TOOLS.has(input.activeTool) && input.pendingPoints.length === 0)
     return {
       session: input.session,
@@ -859,10 +1288,16 @@ export function recordPatternImportDxfPhaseEDraftCadCanvasPointV1(
       blocker: null,
     };
 
+  if (
+    input.activeTool === 'mark' &&
+    input.markKind === 'text' &&
+    !normalizeAuthoredText(input.markText)
+  )
+    return failPointInput(input, 'Enter a single text line of up to 255 UTF-8 bytes.');
   const ids = nextIds(input.session, input.sequence);
   const nextCommand = commandForPoint(input, ids, {
-    pieceId: sourcePiece.pieceId,
-    pieceLineKey: sourcePiece.pieceLineKey,
+    pieceId: target.pieceId,
+    pieceLineKey: target.pieceLineKey,
   });
   if (!nextCommand)
     return failPointInput(input, 'The active Draft input does not have enough points.');
@@ -874,8 +1309,7 @@ export function recordPatternImportDxfPhaseEDraftCadCanvasPointV1(
   if (nextCommand.command.tool === 'circle' && !nextCommand.command.payload.radiusMm)
     return failPointInput(input, 'Circle radius must be greater than zero.');
   if (
-    (nextCommand.command.tool === 'pen' ||
-      nextCommand.command.tool === 'cut' ||
+    (nextCommand.command.tool === 'cut' ||
       nextCommand.command.tool === 'guideline' ||
       nextCommand.command.tool === 'internal-line' ||
       nextCommand.command.tool === 'pattern-line') &&
@@ -1101,7 +1535,7 @@ export function patternImportDxfPhaseEDraftCadArrangementSvgTransformV1(
 }
 
 function pointerSvgPoint(
-  event: ReactPointerEvent<SVGGElement>,
+  event: ReactPointerEvent<SVGElement>,
 ): Readonly<{ x: number; y: number }> | null {
   const svg = event.currentTarget.ownerSVGElement;
   const matrix = svg?.getScreenCTM();
@@ -1110,7 +1544,9 @@ function pointerSvgPoint(
   point.x = event.clientX;
   point.y = event.clientY;
   const transformed = point.matrixTransform(matrix.inverse());
-  return Object.freeze({ x: transformed.x, y: transformed.y });
+  return Number.isFinite(transformed.x) && Number.isFinite(transformed.y)
+    ? Object.freeze({ x: transformed.x, y: transformed.y })
+    : null;
 }
 
 export function selectPatternImportDxfPhaseEDraftCadPiecesInLassoV1(
@@ -1226,21 +1662,44 @@ function PreviewPrimitive({
         />
       );
     case 'point': {
+      if (primitive.indicator === 'text' && primitive.text)
+        return (
+          <text
+            {...common}
+            x={primitive.pointMm.x}
+            y={vy(primitive.pointMm.y)}
+            fontSize={AUTHORED_TEXT_HEIGHT_MM}
+            fill={SHEET_INK.blue}
+            stroke='none'
+          >
+            {primitive.text}
+          </text>
+        );
       const r = unit * 3.5;
+      const cross = primitive.indicator === 'cross';
+      const arm = cross ? DRAFT_CAD_CROSS_MARK_HALF_SPAN_MM : r * 1.6;
       return (
         <g {...common} data-point-indicator={primitive.indicator}>
-          <circle cx={primitive.pointMm.x} cy={vy(primitive.pointMm.y)} r={r} />
+          {!cross && <circle cx={primitive.pointMm.x} cy={vy(primitive.pointMm.y)} r={r} />}
           <path
-            d={`M ${primitive.pointMm.x - r * 1.6} ${vy(primitive.pointMm.y)} H ${
-              primitive.pointMm.x + r * 1.6
-            } M ${primitive.pointMm.x} ${vy(primitive.pointMm.y) - r * 1.6} V ${
-              vy(primitive.pointMm.y) + r * 1.6
+            d={`M ${primitive.pointMm.x - arm} ${vy(primitive.pointMm.y)} H ${
+              primitive.pointMm.x + arm
+            } M ${primitive.pointMm.x} ${vy(primitive.pointMm.y) - arm} V ${
+              vy(primitive.pointMm.y) + arm
             }`}
           />
         </g>
       );
     }
     case 'notch': {
+      if (primitive.strokes)
+        return (
+          <g {...common} data-notch-indicator={primitive.indicator}>
+            {primitive.strokes.map((stroke, index) => (
+              <polyline key={index} points={ptsAttr(stroke)} />
+            ))}
+          </g>
+        );
       const r = unit * 4;
       return (
         <path
@@ -1273,36 +1732,198 @@ function PreviewPrimitive({
   }
 }
 
-function toolInstruction(tool: PatternImportDxfPhaseEDraftCadToolV1): string {
-  if (tool === 'pen') return 'Click two points to record one open Pen path intent.';
-  if (tool === 'cut')
-    return 'Click two points to record one dashed split intent; no source contour is changed.';
+type FrenchCurvePrimitive = Extract<
+  PatternImportDxfPhaseEDraftCadPreviewPrimitiveV1,
+  { kind: 'curve' }
+>;
+
+const FRENCH_HANDLES = [
+  { index: 0, label: 'French curve start point' },
+  { index: 1, label: 'French curve control point' },
+  { index: 2, label: 'French curve end point' },
+] as const;
+
+function EditableFrenchCurve({
+  primitive,
+  unit,
+  session,
+  onEdit,
+}: {
+  primitive: FrenchCurvePrimitive;
+  unit: number;
+  session: PatternImportDxfPhaseEDraftCadSessionV1;
+  onEdit: (handle: DraftCadFrenchCurveHandleV1, point: PtMm) => void;
+}) {
+  const drag = useRef<{
+    handle: DraftCadFrenchCurveHandleV1;
+    session: PatternImportDxfPhaseEDraftCadSessionV1;
+    pointerId: number;
+    startSvg: PtMm;
+    clientX: number;
+    clientY: number;
+  } | null>(null);
+  const [preview, setPreview] = useState<{
+    handle: DraftCadFrenchCurveHandleV1;
+    point: PtMm;
+  } | null>(null);
+  const controls = primitive.controlPointsMm.map((point, i) =>
+    preview?.handle === i ? preview.point : point,
+  );
+  const cancel = useCallback(() => {
+    drag.current = null;
+    setPreview(null);
+  }, []);
+  useEffect(cancel, [cancel, session]);
+  const cancelPointer = (event: ReactPointerEvent<SVGElement>) => {
+    if (drag.current?.pointerId === event.pointerId) cancel();
+  };
+  const position = (event: ReactPointerEvent<SVGElement>) => {
+    const current = drag.current;
+    if (current?.pointerId !== event.pointerId || current.session !== session) return null;
+    const cursor = pointerSvgPoint(event);
+    const original = primitive.controlPointsMm[current.handle];
+    if (!cursor || !original) return null;
+    return {
+      handle: current.handle,
+      point: {
+        x: original.x + cursor.x - current.startSvg.x,
+        y: original.y - cursor.y + current.startSvg.y,
+      },
+    };
+  };
+  return (
+    <g data-draft-cad-french-curve={primitive.commandId}>
+      <PreviewPrimitive primitive={{ ...primitive, controlPointsMm: controls }} unit={unit} />
+      <polyline
+        points={ptsAttr(controls)}
+        fill='none'
+        stroke={SHEET_INK.blue}
+        strokeOpacity={0.6}
+        strokeDasharray={`${unit * 4} ${unit * 4}`}
+        pointerEvents='none'
+      />
+      {FRENCH_HANDLES.map(({ index, label }) => (
+        <circle
+          key={index}
+          role='button'
+          tabIndex={0}
+          aria-label={label}
+          aria-keyshortcuts='ArrowUp ArrowDown ArrowLeft ArrowRight'
+          data-draft-cad-french-curve-handle={index}
+          cx={controls[index].x}
+          cy={vy(controls[index].y)}
+          r={unit * 6}
+          className='cursor-move fill-bgColor focus:outline-none focus:fill-textColor'
+          stroke={SHEET_INK.blue}
+          strokeWidth={1.5}
+          vectorEffect='non-scaling-stroke'
+          onPointerDown={(event) => {
+            if (event.button !== 0 || drag.current) return;
+            const startSvg = pointerSvgPoint(event);
+            if (!startSvg) return;
+            event.stopPropagation();
+            event.currentTarget.focus();
+            event.currentTarget.setPointerCapture(event.pointerId);
+            drag.current = {
+              handle: index,
+              session,
+              pointerId: event.pointerId,
+              startSvg,
+              clientX: event.clientX,
+              clientY: event.clientY,
+            };
+          }}
+          onPointerMove={(event) => {
+            const next = position(event);
+            if (next) setPreview(next);
+          }}
+          onPointerUp={(event) => {
+            const current = drag.current;
+            if (current?.pointerId !== event.pointerId) return;
+            event.stopPropagation();
+            const next = position(event);
+            cancel();
+            if (
+              next &&
+              Math.hypot(event.clientX - current.clientX, event.clientY - current.clientY) >= 2
+            )
+              onEdit(next.handle, next.point);
+          }}
+          onPointerCancel={cancelPointer}
+          onLostPointerCapture={cancelPointer}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape' && drag.current) {
+              event.preventDefault();
+              event.stopPropagation();
+              cancel();
+              return;
+            }
+            const offset: Partial<Record<string, PtMm>> = {
+              ArrowLeft: { x: -1, y: 0 },
+              ArrowRight: { x: 1, y: 0 },
+              ArrowUp: { x: 0, y: 1 },
+              ArrowDown: { x: 0, y: -1 },
+            };
+            const delta = offset[event.key];
+            if (!delta || drag.current || event.altKey || event.metaKey || event.ctrlKey) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const point = primitive.controlPointsMm[index];
+            onEdit(index, { x: point.x + delta.x, y: point.y + delta.y });
+          }}
+        />
+      ))}
+    </g>
+  );
+}
+
+function toolInstruction(tool: PatternImportDxfPhaseEDraftCadToolV1, sizeToken: string): string {
+  if (tool === 'pen')
+    return `Place at least three corners, then close the outline to create a piece in size ${sizeToken}.`;
+  if (tool === 'cut') return 'Click two points to split the piece across its grade.';
   if (tool === 'dart')
-    return 'Select an exact highlighted boundary edge, click the apex, then click along the edge direction to set intake.';
-  if (tool === 'guideline') return 'Click two points to record one dashed construction guideline.';
-  if (tool === 'internal-line') return 'Click two points to record one internal line intent.';
-  if (tool === 'pattern-line') return 'Click two points to record one pattern line intent.';
+    return `For size ${sizeToken}, pick an exact edge, then click the apex and intake.`;
+  if (tool === 'guideline')
+    return `Click two points to add a dashed construction guideline in size ${sizeToken}.`;
+  if (tool === 'internal-line')
+    return `Click two points to add an internal line in size ${sizeToken}.`;
+  if (tool === 'pattern-line')
+    return `Click two points to add a pattern line in size ${sizeToken}.`;
   if (tool === 'french-curve')
-    return 'Click the start, control and end points to record one quadratic French curve intent.';
+    return `Click the start, control and end points to add a French curve in size ${sizeToken}. Drag a handle to edit it.`;
   if (tool === 'ellipse')
     return 'Click the centre, major-axis point and minor-radius point to record one ellipse intent.';
+  if (tool === 'delete-point')
+    return `Choose an exact outline point in size ${sizeToken} and confirm Delete point.`;
+  if (tool === 'move-point')
+    return `Drag an exact outline point or click it to enter X and Y in millimetres for size ${sizeToken}.`;
+  if (tool === 'round-corner')
+    return 'Choose one right-angle corner to set the same setback along both sides.';
+  if (tool === 'sharpen-corner')
+    return `Choose a highlighted bevel between perpendicular sides in size ${sizeToken}.`;
+  if (tool === 'allowance-corner')
+    return 'Select a sewing corner and its treatment for all five sizes.';
+  if (tool === 'edge-length') return `Choose an exact edge to set its length in size ${sizeToken}.`;
+  if (tool === 'allowance-offset')
+    return `Choose a straight side to offset its cut line in size ${sizeToken}.`;
   if (tool === 'add-point')
-    return 'Select an exact highlighted boundary edge to insert one midpoint intent after its first vertex.';
+    return 'Select an exact edge to insert its midpoint across the piece’s grade.';
   if (tool === 'fish-eye')
     return 'Click the centre, axis end and intake side to record one fish-eye dart intent.';
   if (tool === 'spread')
-    return 'After an active Cut intent, click its pivot and a second point to set the spread amount.';
+    return 'For pivot spread, click the pivot and a second point. On a saved piece, a horizontal or vertical Cut also supports a parallel opening across the grade.';
   if (tool === 'gather')
     return 'Select an exact highlighted boundary edge to record a visible default 1.5 gather ratio.';
   if (tool === 'pleat')
     return 'Click both fold-line ends and an intake-side point to record a left/right pleat intent.';
   if (tool === 'notch')
-    return 'Select an exact highlighted boundary edge to record one single notch with bounded depth.';
+    return `Select an exact boundary edge to add a single notch in size ${sizeToken}.`;
   if (tool === 'rectangle')
-    return 'Click two exact opposite corners to create one ungraded piece for this size.';
+    return `Click opposite corners to create an ungraded piece in size ${sizeToken}.`;
   if (tool === 'circle') return 'Click a centre and then its radius to record one circle intent.';
-  if (tool === 'point-only' || tool === 'draft-point' || tool === 'mark')
-    return 'Click the exact sheet to record one local Draft intent.';
+  if (tool === 'mark') return `Click the piece to place a drill mark in size ${sizeToken}.`;
+  if (tool === 'point-only' || tool === 'draft-point')
+    return `Click inside the selected piece to place a construction point in size ${sizeToken}.`;
   return `${tool} input is unavailable until a verified pattern geometry kernel is integrated. No command will be recorded.`;
 }
 
@@ -1311,7 +1932,17 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
   projection,
   scopeKey,
   activePieceIndex,
+  activeDraftPieceId = null,
   activeTool,
+  allowSavedParallelOpening = false,
+  savedDartPaths = [],
+  savedFrenchCurve,
+  savedFrenchCurveOnly = false,
+  moveSharedOutline = false,
+  savedRoundCorner,
+  savedTurnAllowance,
+  savedAllowanceCornerPreview,
+  savedAllowanceFoldAxis,
   arrangeActive = false,
   panActive = false,
   crossScopeConnectActive = false,
@@ -1326,9 +1957,28 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
   onTopologyAnchor,
   onCrossScopeEdge,
 }: PatternImportDxfPhaseEDraftCadCanvasPropsV1) {
+  const [markKind, setMarkKind] = useState<'drill' | 'cross' | 'text'>('drill');
+  const [markText, setMarkText] = useState('');
+  const [cutDirection, setCutDirection] = useState<'free' | 'horizontal' | 'vertical'>('free');
+  const [parallelAmount, setParallelAmount] = useState('');
+  const [notchKind, setNotchKind] = useState<'single' | AuthoredNotchShape>('single');
   const [pendingPoints, setPendingPoints] = useState<readonly PtMm[]>([]);
   const [pendingDartBase, setPendingDartBase] =
     useState<PatternImportDxfPhaseEDraftCadCanvasDartBaseV1 | null>(null);
+  const [turnAllowance, setTurnAllowance] = useState<AuthoredTurnAllowanceVariant>();
+  const [resizeLength, setResizeLength] = useState('');
+  const [resizeFixed, setResizeFixed] = useState<'start' | 'end'>('start');
+  const [cornerSetback, setCornerSetback] = useState('4');
+  const [fixedCornerEnd, setFixedCornerEnd] = useState<'linked' | 'start' | 'end'>('linked');
+  const savedSetbacks = savedRoundCorner && readAuthoredOutlineCornerSetbacks(savedRoundCorner);
+  const [outlinePointInput, setOutlinePointInput] = useState<{
+    key: string;
+    x: string;
+    y: string;
+  } | null>(null);
+  const [draggedPoint, setDraggedPoint] = useState<{ key: string; pointMm: PtMm } | null>(null);
+  const movePointDrag = useRef<MovePointDrag | null>(null);
+
   const [inputError, setInputError] = useState<string | null>(null);
   const arrangeGesture = useRef<{
     pieceId: string;
@@ -1342,63 +1992,325 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
     () => buildPatternImportDxfPhaseEDraftCadPreviewV1(session, projection),
     [projection, session],
   );
-  const piece = activeProjectedPiece(session, projection, activePieceIndex);
+  const projectedPiece = activeProjectedPiece(session, projection, activePieceIndex);
+  const piece = activeDraftPieceId ? null : projectedPiece;
   const sourcePiece = session.source.catalog.pieces[activePieceIndex];
+  const draftPiece = activeDraftPieceId
+    ? listActiveDraftCadNewPiecesV1(session).find(({ pieceId }) => pieceId === activeDraftPieceId)
+    : undefined;
+  const target = activeDraftPieceId ? draftPiece : sourcePiece;
+  const commands = session.history.slice(0, session.cursor).flatMap((tx) => tx.commands);
+  const only = commands.length === 1 ? commands[0] : null;
+  const parallelCut =
+    allowSavedParallelOpening &&
+    activeTool === 'spread' &&
+    only?.tool === 'cut' &&
+    only.target.pieceId === target?.pieceId &&
+    only.target.pieceLineKey === target?.pieceLineKey
+      ? only
+      : null;
+  const parallelAxis = parallelCut && parallelOpeningAxisV1(parallelCut.payload.pointsMm);
+  const recordParallel = () => {
+    if (!parallelCut || !parallelAxis) return;
+    const recorded = recordDraftParallelOpeningV1(
+      session,
+      parallelCut.target,
+      Number(parallelAmount),
+      sequence.current,
+    );
+    if (!recorded) return;
+    const result = recorded.recorded;
+    if (!result.ok) {
+      setInputError(result.blocker.detail);
+      return;
+    }
+    sequence.current = recorded.sequence;
+    setParallelAmount('');
+    setInputError(null);
+    onSessionChange(result.session);
+  };
+
+  const lastOutlineMove = draftOutlineMoveHistoryV1(commands)?.at(-1);
   const primitives = preview.primitives.filter(
     (primitive) =>
-      primitive.target.pieceId === sourcePiece?.pieceId &&
-      primitive.target.pieceLineKey === sourcePiece?.pieceLineKey,
+      (!lastOutlineMove ||
+        primitive.tool !== 'move-point' ||
+        primitive.commandId === lastOutlineMove.commandId) &&
+      (primitive.commandId === draftPiece?.commandId ||
+        (primitive.target.pieceId === target?.pieceId &&
+          primitive.target.pieceLineKey === target?.pieceLineKey)),
   );
   const sourceMismatch = preview.blockers.some(
     (blocker) => blocker.code === 'source-projection-mismatch',
   );
-  const dartBases = useMemo(
-    () =>
-      buildPatternImportDxfPhaseEDraftCadCanvasDartBasesV1(session, projection, activePieceIndex),
-    [activePieceIndex, projection, session],
-  );
-  const exactVertexOptions = useMemo(
-    () =>
-      buildPatternImportDxfPhaseEDraftCadExactVertexOptionsV1(
-        session,
-        projection,
-        activePieceIndex,
-      ),
-    [activePieceIndex, projection, session],
-  );
+  const dartBases = useMemo(() => {
+    const bases = buildPatternImportDxfPhaseEDraftCadCanvasDartBasesV1(
+      session,
+      projection,
+      activePieceIndex,
+    );
+    if (
+      (activeTool !== 'sharpen-corner' && activeTool !== 'allowance-offset') ||
+      crossScopeConnectActive
+    )
+      return bases;
+    const piece = activeProjectedPiece(session, projection, activePieceIndex);
+    return bases.filter(({ anchor }) => {
+      const contour = piece?.contours.find(({ contourId }) => contourId === anchor.contourId);
+      return activeTool === 'allowance-offset'
+        ? hasDraftCutAllowanceJoinsV1(contour, anchor.boundaryVertexIds)
+        : Boolean(selectDraftSharpCornerV1(contour, anchor.boundaryVertexIds));
+    });
+  }, [activePieceIndex, activeTool, crossScopeConnectActive, projection, session]);
+  const outlineEditActive =
+    !crossScopeConnectActive &&
+    !activeTopologyTool &&
+    (activeTool === 'move-point' || activeTool === 'delete-point' || activeTool === 'round-corner');
+  const movePointActive = outlineEditActive && activeTool === 'move-point';
+  const exactVertexOptions = useMemo(() => {
+    const options = buildPatternImportDxfPhaseEDraftCadExactVertexOptionsV1(
+      session,
+      projection,
+      activePieceIndex,
+      outlineEditActive,
+    );
+    if (activeTool !== 'round-corner') return options;
+    const contour = activeProjectedPiece(session, projection, activePieceIndex)?.contours.find(
+      ({ role }) => role === 'cut-boundary',
+    );
+    if (!contour) return [];
+    const points = contour.vertices.map(({ pointMm }) => pointMm);
+    const corner =
+      savedRoundCorner && readPairedAuthoredOutlineCorner(points, points, savedRoundCorner);
+    const select = savedRoundCorner
+      ? (index: number) => corner && corner.start === index
+      : (index: number) => roundDraftConvexOrthogonalCornerV1(points, index, 1);
+    const vertexIds = new Set(
+      contour.vertices.flatMap(({ vertexId }, index) => (select(index) ? [vertexId] : [])),
+    );
+    return options.filter(
+      ({ anchor }) => anchor.contourId === contour.contourId && vertexIds.has(anchor.vertexId),
+    );
+  }, [activePieceIndex, activeTool, outlineEditActive, projection, savedRoundCorner, session]);
+  const canUseActiveTool = activeDraftPieceId
+    ? Boolean(draftPiece) && !activeTopologyTool && permitsDraftCadLocalPieceEditV1(activeTool)
+    : crossScopeConnectActive ||
+      !!activeTopologyTool ||
+      outlineEditActive ||
+      INPUT_TOOLS.has(activeTool);
   const interactionEnabled =
-    !arrangeActive &&
-    !panActive &&
-    (crossScopeConnectActive || !!activeTopologyTool || INPUT_TOOLS.has(activeTool)) &&
-    !!piece &&
-    !sourceMismatch;
-  const resetKey = `${activeTool}|${activeTopologyTool ?? ''}|${activePieceIndex}|${session.cursor}|${session.source.revision}|${session.source.catalog.canonicalSha256}|${projection.expectedCatalogCanonicalSha256}|${projection.sizeSelectionCanonicalSha256}|${projection.sourceFileId}`;
+    !arrangeActive && !panActive && canUseActiveTool && !!projectedPiece && !sourceMismatch;
+  const resetKey = `${activeTool}|${activeTopologyTool ?? ''}|${activeDraftPieceId ?? activePieceIndex}|${session.cursor}|${session.source.revision}|${session.source.catalog.canonicalSha256}|${projection.expectedCatalogCanonicalSha256}|${projection.sizeSelectionCanonicalSha256}|${projection.sourceFileId}`;
 
   useEffect(() => {
     setPendingPoints([]);
     setPendingDartBase(null);
+    setParallelAmount('');
+    movePointDrag.current = null;
+    setOutlinePointInput(null);
+    setDraggedPoint(null);
     setInputError(null);
-  }, [resetKey]);
+  }, [arrangeActive, panActive, crossScopeConnectActive, resetKey]);
 
-  const unavailable = !piece
-    ? 'The active exact piece is not available in the projection sealed to this Draft session.'
-    : !activeTopologyTool && !INPUT_TOOLS.has(activeTool)
-      ? toolInstruction(activeTool)
-      : sourceMismatch
-        ? 'The exact projection does not match this Draft session source.'
-        : null;
+  const activeToolInstruction = savedFrenchCurveOnly
+    ? 'Move a start, control or end point.'
+    : activeTool === 'round-corner' && savedRoundCorner
+      ? 'Select the saved corner to adjust its setback.'
+      : activeTool === 'move-point' && moveSharedOutline
+        ? 'Drag an outline point or click it to enter X and Y in millimetres.'
+        : toolInstruction(activeTool, projection.sizeToken);
+  const unavailable = sourceMismatch
+    ? 'The exact projection does not match this Draft session source.'
+    : !projectedPiece || !target
+      ? 'The active piece is unavailable in the current Draft session.'
+      : activeDraftPieceId && !canUseActiveTool
+        ? 'Apply this piece before using the selected tool.'
+        : !canUseActiveTool
+          ? activeToolInstruction
+          : null;
   const bbox = arrangeActive
     ? arrangementViewportBounds(projection, arrangement?.transforms ?? {})
     : viewportBounds(piece, primitives, pendingPoints);
+  const displayTransforms = arrangeActive ? arrangement?.transforms : undefined;
+  const overlayTransform = piece && displayTransforms?.[piece.pieceId];
   const renderedPieces = arrangeActive ? projection.pieces : piece ? [piece] : [];
+  const drawPoint = (pointMm: PtMm, closePen = false) => {
+    const result = recordPatternImportDxfPhaseEDraftCadCanvasPointV1({
+      cutDirection,
+      session,
+      projection,
+      activePieceIndex,
+      activeDraftPieceId,
+      activeTool,
+      pointMm,
+      pendingPoints,
+      pendingDartBase,
+      sequence: sequence.current,
+      closePen,
+      markKind,
+      markText,
+    });
+    setPendingPoints(result.pendingPoints);
+    setPendingDartBase(result.pendingDartBase);
+    setInputError(result.blocker);
+    sequence.current = result.sequence;
+    if (result.recorded) onSessionChange(result.session);
+  };
+  const editFrenchCurve = (
+    primitive: FrenchCurvePrimitive,
+    handle: DraftCadFrenchCurveHandleV1,
+    point: PtMm,
+  ) => {
+    if (
+      !interactionEnabled ||
+      activeTool !== 'french-curve' ||
+      pendingPoints.length ||
+      !Number.isFinite(point.x) ||
+      !Number.isFinite(point.y)
+    )
+      return;
+    const ids = nextIds(session, sequence.current);
+    const result = recordDraftCadFrenchCurveHandleV1(session, {
+      transactionId: ids.transactionId,
+      commandId: primitive.commandId,
+      target: primitive.target,
+      handle,
+      expected: primitive.controlPointsMm,
+      pointMm: { x: Number(dxfCoordinate(point.x)), y: Number(dxfCoordinate(point.y)) },
+    });
+    setInputError(result.ok ? null : result.blocker.detail);
+    if (result.ok && result.session !== session) {
+      sequence.current = ids.sequence;
+      onSessionChange(result.session);
+    }
+  };
+  const chooseCornerEnd = (end: 'linked' | 'start' | 'end') => {
+    setFixedCornerEnd(end);
+    if (savedSetbacks)
+      setCornerSetback(String(end === 'start' ? savedSetbacks.end : savedSetbacks.start));
+    setInputError(null);
+  };
+  const chooseOutlinePoint = (option: PatternImportDxfPhaseEDraftCadExactVertexOptionV1 | null) => {
+    if (option && activeTool === 'round-corner' && savedSetbacks)
+      chooseCornerEnd(savedSetbacks.start === savedSetbacks.end ? 'linked' : 'start');
+    setOutlinePointInput(
+      option ? { key: option.key, x: String(option.pointMm.x), y: String(option.pointMm.y) } : null,
+    );
+    setInputError(null);
+  };
+  const commitOutlinePointEdit = (vertexKey: string, pointMm?: PtMm) => {
+    const input = { session, projection, activePieceIndex, vertexKey, sequence: sequence.current };
+    const result = pointMm
+      ? recordPatternImportDxfPhaseEDraftCadMovePointV1({ ...input, pointMm })
+      : activeTool === 'round-corner'
+        ? recordPatternImportDxfPhaseEDraftCadRoundCornerV1({
+            ...input,
+            setbackMm: Number(cornerSetback),
+            savedCorner: savedRoundCorner,
+            ...(savedRoundCorner && fixedCornerEnd !== 'linked'
+              ? { fixedEnd: fixedCornerEnd }
+              : {}),
+          })
+        : recordPatternImportDxfPhaseEDraftCadDeletePointV1(input);
+    setInputError(result.blocker);
+    if (!result.recorded) return;
+    sequence.current = result.sequence;
+    setOutlinePointInput(null);
+    onSessionChange(result.session);
+  };
+  const clearMovePointDrag = () => {
+    movePointDrag.current = null;
+    setDraggedPoint(null);
+  };
+  const activePointDrag = (event: ReactPointerEvent<SVGElement>) => {
+    const drag = movePointDrag.current;
+    return interactionEnabled &&
+      movePointActive &&
+      drag?.sourceKey === resetKey &&
+      drag.pointerId === event.pointerId
+      ? drag
+      : null;
+  };
+  const dragPosition = (event: ReactPointerEvent<SVGElement>, drag: MovePointDrag): PtMm | null => {
+    const dx = event.clientX - drag.startClient.x;
+    const dy = event.clientY - drag.startClient.y;
+    drag.moved ||= Math.hypot(dx, dy) >= MOVE_POINT_DRAG_SLOP_PX;
+    if (!drag.moved) return null;
+    const { a, b, c, d } = drag.screenToSvg;
+    return {
+      x: drag.option.pointMm.x + a * dx + c * dy,
+      y: drag.option.pointMm.y - (b * dx + d * dy),
+    };
+  };
+  const beginPointDrag = (
+    event: ReactPointerEvent<SVGElement>,
+    option: PatternImportDxfPhaseEDraftCadExactVertexOptionV1,
+  ) => {
+    if (event.button !== 0 || movePointDrag.current) return;
+    const screenToSvg = event.currentTarget.ownerSVGElement?.getScreenCTM()?.inverse();
+    if (
+      !screenToSvg ||
+      ![screenToSvg.a, screenToSvg.b, screenToSvg.c, screenToSvg.d].every(Number.isFinite)
+    )
+      return;
+    event.stopPropagation();
+    event.currentTarget.focus();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    movePointDrag.current = {
+      sourceKey: resetKey,
+      pointerId: event.pointerId,
+      option,
+      screenToSvg,
+      startClient: { x: event.clientX, y: event.clientY },
+      moved: false,
+    };
+  };
+  const updatePointDrag = (event: ReactPointerEvent<SVGElement>) => {
+    const drag = activePointDrag(event);
+    if (!drag) return;
+    event.stopPropagation();
+    const pointMm = dragPosition(event, drag);
+    if (pointMm) setDraggedPoint({ key: drag.option.key, pointMm });
+  };
+  const finishPointDrag = (event: ReactPointerEvent<SVGElement>) => {
+    const drag = activePointDrag(event);
+    if (!drag) return;
+    event.stopPropagation();
+    const pointMm = dragPosition(event, drag);
+    clearMovePointDrag();
+    if (pointMm) commitOutlinePointEdit(drag.option.key, pointMm);
+    else if (!drag.moved) chooseOutlinePoint(drag.option);
+  };
+  const cancelPointDrag = (event: ReactPointerEvent<SVGElement>) => {
+    if (activePointDrag(event)) clearMovePointDrag();
+  };
+  const clearPen = () => {
+    setPendingPoints([]);
+    setInputError(null);
+  };
 
   return (
     <section
       data-draft-cad-canvas-v1=''
+      data-draft-cad-local-piece={draftPiece?.pieceId}
       data-active-tool={activeTool}
       data-active-topology-tool={activeTopologyTool ?? undefined}
       data-draft-cad-input={interactionEnabled ? 'enabled' : 'blocked'}
       data-draft-cad-history-cursor={session.cursor}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape' && activeTool === 'pen' && pendingPoints.length) {
+          event.stopPropagation();
+          clearPen();
+        } else if (
+          event.key === 'Escape' &&
+          outlineEditActive &&
+          (outlinePointInput || movePointDrag.current)
+        ) {
+          event.stopPropagation();
+          clearMovePointDrag();
+          chooseOutlinePoint(null);
+        }
+      }}
       className='flex h-full min-h-0 flex-col gap-2'
     >
       <div className='relative min-h-0 flex-1 overflow-hidden bg-bgColor'>
@@ -1420,10 +2332,11 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
           }}
           className='min-h-0'
           onPick={(key, modifiers) => {
-            if (arrangeActive && !key) {
-              onSelectedPieceIdsChange?.([]);
+            if (arrangeActive) {
+              if (!key) onSelectedPieceIdsChange?.([]);
               return;
             }
+            if (!interactionEnabled) return;
             if (crossScopeConnectActive) {
               const base = dartBases.find((candidate) => candidate.key === key);
               if (base && sourcePiece && scopeKey)
@@ -1442,8 +2355,25 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
               if (option) onTopologyAnchor(option.anchor);
               return;
             }
+            if (outlineEditActive) {
+              chooseOutlinePoint(
+                exactVertexOptions.find((candidate) => candidate.key === key) ?? null,
+              );
+              return;
+            }
             if (!EXACT_EDGE_TOOLS.has(activeTool)) return;
             const base = dartBases.find((candidate) => candidate.key === key) ?? null;
+            if (activeTool === 'edge-length' || activeTool === 'allowance-offset') {
+              setPendingDartBase(base);
+              setResizeLength(
+                base && activeTool === 'edge-length'
+                  ? String(Math.hypot(base.toMm.x - base.fromMm.x, base.toMm.y - base.fromMm.y))
+                  : '',
+              );
+              setResizeFixed('start');
+              setInputError(base ? null : 'Choose an exact edge from the current size.');
+              return;
+            }
             if (activeTool !== 'dart') {
               const result = recordPatternImportDxfPhaseEDraftCadCanvasBoundaryPickV1({
                 session,
@@ -1452,6 +2382,7 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
                 activeTool,
                 baseKey: key,
                 sequence: sequence.current,
+                notchKind,
               });
               setPendingDartBase(null);
               setPendingPoints([]);
@@ -1467,22 +2398,14 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
             );
           }}
           onPoint={(pointMm) => {
-            if (activeTopologyTool) return;
-            const result = recordPatternImportDxfPhaseEDraftCadCanvasPointV1({
-              session,
-              projection,
-              activePieceIndex,
-              activeTool,
-              pointMm,
-              pendingPoints,
-              pendingDartBase,
-              sequence: sequence.current,
-            });
-            setPendingPoints(result.pendingPoints);
-            setPendingDartBase(result.pendingDartBase);
-            setInputError(result.blocker);
-            sequence.current = result.sequence;
-            if (result.recorded) onSessionChange(result.session);
+            if (
+              !interactionEnabled ||
+              activeTopologyTool ||
+              outlineEditActive ||
+              savedFrenchCurveOnly
+            )
+              return;
+            drawPoint(pointMm);
           }}
         >
           {({ box, unit }) => (
@@ -1502,7 +2425,7 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
               />
               {renderedPieces.map((renderedPiece) => {
                 const transform =
-                  arrangement?.transforms[renderedPiece.pieceId] ??
+                  displayTransforms?.[renderedPiece.pieceId] ??
                   PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_IDENTITY_TRANSFORM_V1;
                 const projectionIndex = projection.pieces.findIndex(
                   (candidate) => candidate.pieceId === renderedPiece.pieceId,
@@ -1627,10 +2550,28 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
                         />
                       );
                     })}
+                    {savedDartPaths
+                      .filter(({ pieceLineKey }) => pieceLineKey === renderedPiece.pieceLineKey)
+                      .map(({ kind, pointsMm }) => (
+                        <polyline
+                          key={kind}
+                          data-draft-cad-saved-dart-kind={kind}
+                          points={ptsAttr(
+                            kind === 'fish-eye' ? [...pointsMm, pointsMm[0]!] : pointsMm,
+                          )}
+                          fill='none'
+                          stroke={SHEET_INK.ink}
+                          strokeWidth={1.1}
+                          strokeDasharray={`${unit * 4} ${unit * 3}`}
+                          vectorEffect='non-scaling-stroke'
+                          pointerEvents='none'
+                        />
+                      ))}
                   </g>
                 );
               })}
-              {!activeTopologyTool &&
+              {interactionEnabled &&
+                !activeTopologyTool &&
                 (crossScopeConnectActive || EXACT_EDGE_TOOLS.has(activeTool)) && (
                   <g
                     data-draft-cad-exact-edge-options=''
@@ -1656,6 +2597,16 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
                             vectorEffect='non-scaling-stroke'
                             pointerEvents='none'
                           />
+                          {selected && activeTool === 'edge-length' ? (
+                            <circle
+                              data-draft-cad-fixed-edge-endpoint={resizeFixed}
+                              cx={(resizeFixed === 'start' ? base.fromMm : base.toMm).x}
+                              cy={vy((resizeFixed === 'start' ? base.fromMm : base.toMm).y)}
+                              r={unit * 4}
+                              fill={SHEET_INK.green}
+                              pointerEvents='none'
+                            />
+                          ) : null}
                           <line
                             data-key={base.key}
                             data-draft-cad-dart-edge={
@@ -1680,22 +2631,26 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
                     })}
                   </g>
                 )}
-              {activeTopologyTool ? (
+              {interactionEnabled && (activeTopologyTool || outlineEditActive) ? (
                 <g data-draft-cad-exact-vertex-options=''>
                   {exactVertexOptions.map((option) => {
-                    const selected = topologySession.pendingAnchors.some(
-                      (anchor) =>
-                        anchor.pieceId === option.anchor.pieceId &&
-                        anchor.contourId === option.anchor.contourId &&
-                        anchor.vertexId === option.anchor.vertexId,
-                    );
+                    const isDragging = draggedPoint?.key === option.key;
+                    const marker = isDragging ? draggedPoint.pointMm : option.pointMm;
+                    const selected = outlineEditActive
+                      ? isDragging || outlinePointInput?.key === option.key
+                      : topologySession.pendingAnchors.some(
+                          (anchor) =>
+                            anchor.pieceId === option.anchor.pieceId &&
+                            anchor.contourId === option.anchor.contourId &&
+                            anchor.vertexId === option.anchor.vertexId,
+                        );
                     return (
                       <g key={option.key} data-selected={selected ? '' : undefined}>
                         <circle
                           data-draft-cad-exact-vertex-ink={option.anchor.vertexId}
                           data-screen-radius-px='4.5'
-                          cx={option.pointMm.x}
-                          cy={vy(option.pointMm.y)}
+                          cx={marker.x}
+                          cy={vy(marker.y)}
                           r={unit * 4.5}
                           fill={selected ? SHEET_INK.red : 'var(--color-bgColor)'}
                           fillOpacity={selected ? 0.35 : 0.92}
@@ -1706,6 +2661,14 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
                         />
                         <circle
                           data-key={option.key}
+                          tabIndex={movePointActive ? -1 : undefined}
+                          onPointerDown={
+                            movePointActive ? (event) => beginPointDrag(event, option) : undefined
+                          }
+                          onPointerMove={movePointActive ? updatePointDrag : undefined}
+                          onPointerUp={movePointActive ? finishPointDrag : undefined}
+                          onPointerCancel={movePointActive ? cancelPointDrag : undefined}
+                          onLostPointerCapture={movePointActive ? cancelPointDrag : undefined}
                           data-draft-cad-exact-vertex={option.anchor.vertexId}
                           data-screen-hit-radius-px='10'
                           cx={option.pointMm.x}
@@ -1720,24 +2683,102 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
                   })}
                 </g>
               ) : null}
-              <g data-draft-cad-committed-preview=''>
-                {primitives.map((primitive) => (
-                  <PreviewPrimitive
-                    key={`${primitive.commandId}:${primitive.entityId}`}
-                    primitive={primitive}
+              <g
+                transform={
+                  piece && overlayTransform
+                    ? patternImportDxfPhaseEDraftCadArrangementSvgTransformV1(
+                        piece,
+                        overlayTransform,
+                      )
+                    : undefined
+                }
+              >
+                <g data-draft-cad-committed-preview=''>
+                  {savedFrenchCurve &&
+                    (interactionEnabled &&
+                    activeTool === 'french-curve' &&
+                    !activeTopologyTool &&
+                    !crossScopeConnectActive &&
+                    !pendingPoints.length ? (
+                      <EditableFrenchCurve
+                        primitive={savedFrenchCurve.primitive}
+                        unit={unit}
+                        session={session}
+                        onEdit={savedFrenchCurve.onEdit}
+                      />
+                    ) : (
+                      <polyline
+                        data-draft-cad-saved-french-curve=''
+                        points={ptsAttr(savedFrenchCurve.pointsMm)}
+                        fill='none'
+                        stroke={SHEET_INK.ink}
+                        strokeWidth={1.1}
+                        vectorEffect='non-scaling-stroke'
+                        pointerEvents='none'
+                      />
+                    ))}
+                  {savedAllowanceCornerPreview && (
+                    <polygon
+                      data-draft-cad-allowance-corner-preview=''
+                      points={ptsAttr(savedAllowanceCornerPreview)}
+                      fill='none'
+                      stroke={SHEET_INK.blue}
+                      strokeWidth={1.35}
+                      vectorEffect='non-scaling-stroke'
+                      pointerEvents='none'
+                    />
+                  )}
+                  {savedAllowanceFoldAxis && (
+                    <polyline
+                      data-draft-cad-allowance-fold-axis=''
+                      aria-label='Selected fold edge'
+                      points={ptsAttr(savedAllowanceFoldAxis)}
+                      fill='none'
+                      stroke={SHEET_INK.blue}
+                      strokeWidth={1.35}
+                      strokeDasharray='4 3'
+                      vectorEffect='non-scaling-stroke'
+                      pointerEvents='none'
+                    />
+                  )}
+                  {primitives.map((primitive) =>
+                    primitive.kind === 'curve' &&
+                    primitive.controlPointsMm.length === 3 &&
+                    activeTool === 'french-curve' &&
+                    interactionEnabled &&
+                    !activeTopologyTool &&
+                    !crossScopeConnectActive &&
+                    !pendingPoints.length ? (
+                      <EditableFrenchCurve
+                        key={`${primitive.commandId}:${primitive.entityId}`}
+                        primitive={primitive}
+                        unit={unit}
+                        session={session}
+                        onEdit={(handle, point) => editFrenchCurve(primitive, handle, point)}
+                      />
+                    ) : (
+                      <PreviewPrimitive
+                        key={`${primitive.commandId}:${primitive.entityId}`}
+                        primitive={primitive}
+                        unit={unit}
+                      />
+                    ),
+                  )}
+                </g>
+                {piece ? (
+                  <PatternImportDxfPhaseEDraftCadTopologyOverlayV1
+                    projection={projection}
+                    state={topologySession}
+                    pieceId={piece.pieceId}
                     unit={unit}
                   />
-                ))}
+                ) : null}
               </g>
-              {piece ? (
-                <PatternImportDxfPhaseEDraftCadTopologyOverlayV1
-                  projection={projection}
-                  state={topologySession}
-                  pieceId={piece.pieceId}
-                  unit={unit}
-                />
-              ) : null}
-              <g data-draft-cad-pending-input='' pointerEvents='none'>
+              <g
+                data-draft-cad-pending-input=''
+                pointerEvents='none'
+                visibility={arrangeActive ? 'hidden' : undefined}
+              >
                 {pendingPoints.length > 1 ? (
                   <polyline
                     data-draft-cad-stage-path=''
@@ -1798,8 +2839,306 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
               unavailable ??
               (activeTopologyTool
                 ? 'Choose an exact highlighted vertex from the sealed projection.'
-                : toolInstruction(activeTool))}
+                : activeTool === 'mark' && markKind !== 'drill'
+                  ? `Click inside the piece to place the ${markKind} mark in size ${projection.sizeToken}.`
+                  : activeTool === 'notch' && notchKind !== 'single'
+                    ? `Select an exact cut edge with space for the notch in size ${projection.sizeToken}.`
+                    : activeToolInstruction)}
       </div>
+      {activeTool === 'cut' && interactionEnabled && (
+        <Selector
+          label='Cut direction'
+          compact
+          value={cutDirection}
+          onChange={(v: string) =>
+            setCutDirection(v === 'vertical' || v === 'horizontal' ? v : 'free')
+          }
+          options={[
+            { value: 'free', label: 'Free cut' },
+            { value: 'vertical', label: 'Vertical cut' },
+            { value: 'horizontal', label: 'Horizontal cut' },
+          ]}
+        />
+      )}
+      {parallelAxis && interactionEnabled && (
+        <div className='flex items-end gap-2'>
+          <label className='text-micro'>
+            Parallel opening along {parallelAxis.toUpperCase()} (signed mm)
+            <Input
+              type='number'
+              step='0.000001'
+              aria-description={`Positive moves the higher ${parallelAxis.toUpperCase()} side. Negative moves the lower side.`}
+              value={parallelAmount}
+              onChange={(e: ChangeEvent<HTMLInputElement>) => setParallelAmount(e.target.value)}
+            />
+          </label>
+          <Button
+            type='button'
+            size='xs'
+            disabled={!validParallelDisplacementV1(Number(parallelAmount))}
+            onClick={recordParallel}
+          >
+            Record parallel spread
+          </Button>
+        </div>
+      )}
+      {activeTool === 'notch' && interactionEnabled ? (
+        <div className='flex items-center gap-2 text-small' role='group' aria-label='Notch type'>
+          Notch type
+          <Selector
+            label='Notch type'
+            compact
+            value={notchKind}
+            onChange={(value: string) => {
+              setNotchKind(
+                value === 'double' || value === 'triple' || value === 'v' ? value : 'single',
+              );
+              setInputError(null);
+            }}
+            options={[
+              { value: 'single', label: 'Single' },
+              { value: 'double', label: 'Double' },
+              { value: 'triple', label: 'Triple' },
+              { value: 'v', label: 'V notch' },
+            ]}
+          />
+        </div>
+      ) : null}
+      {activeTool === 'mark' && interactionEnabled ? (
+        <div className='flex flex-wrap items-center gap-2 text-small'>
+          <div className='flex items-center gap-2' role='group' aria-label='Mark type'>
+            Mark type
+            <Selector
+              label='Mark type'
+              compact
+              value={markKind}
+              onChange={(value: string) => {
+                setMarkKind(value === 'cross' || value === 'text' ? value : 'drill');
+                setInputError(null);
+              }}
+              options={[
+                { value: 'drill', label: 'Drill' },
+                { value: 'cross', label: `Cross (${DRAFT_CAD_CROSS_MARK_HALF_SPAN_MM * 2} mm)` },
+                { value: 'text', label: 'Text' },
+              ]}
+            />
+          </div>
+          {markKind === 'text' && (
+            <label className='flex items-center gap-2'>
+              Mark text
+              <Input
+                type='text'
+                maxLength={255}
+                value={markText}
+                onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                  setMarkText(event.target.value);
+                  setInputError(null);
+                }}
+              />
+            </label>
+          )}
+        </div>
+      ) : null}
+      {activeTool === 'pen' && pendingPoints.length > 0 && interactionEnabled && (
+        <div className='flex flex-wrap gap-2'>
+          <Button
+            type='button'
+            size='xs'
+            variant='secondary'
+            disabled={pendingPoints.length < 3}
+            onClick={() => drawPoint(pendingPoints[pendingPoints.length - 1]!, true)}
+          >
+            Close Pen outline
+          </Button>
+          <Button type='button' size='xs' variant='secondary' onClick={clearPen}>
+            Cancel outline
+          </Button>
+        </div>
+      )}
+      {movePointActive && outlinePointInput && interactionEnabled && (
+        <div className='flex flex-wrap items-end gap-2'>
+          {(['x', 'y'] as const).map((axis) => (
+            <label key={axis} className='grid gap-1 text-small'>
+              {axis.toUpperCase()} (mm)
+              <Input
+                className='w-28'
+                type='number'
+                step='any'
+                value={outlinePointInput[axis]}
+                onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                  setOutlinePointInput({ ...outlinePointInput, [axis]: event.target.value });
+                  setInputError(null);
+                }}
+              />
+            </label>
+          ))}
+          <Button
+            type='button'
+            size='xs'
+            variant='secondary'
+            disabled={!outlinePointInput.x.trim() || !outlinePointInput.y.trim()}
+            onClick={() =>
+              commitOutlinePointEdit(outlinePointInput.key, {
+                x: Number(outlinePointInput.x),
+                y: Number(outlinePointInput.y),
+              })
+            }
+          >
+            Move point
+          </Button>
+        </div>
+      )}
+      {activeTool === 'round-corner' && outlinePointInput && interactionEnabled && (
+        <div className='flex flex-wrap items-end gap-2'>
+          {savedSetbacks && (
+            <div className='grid gap-1 text-small' role='group' aria-label='Corner endpoint'>
+              Corner endpoint
+              <Selector
+                label='Corner endpoint'
+                compact
+                value={fixedCornerEnd}
+                onChange={(value: string) =>
+                  chooseCornerEnd(value === 'start' || value === 'end' ? value : 'linked')
+                }
+                options={[
+                  ...(savedSetbacks.start === savedSetbacks.end
+                    ? [{ value: 'linked', label: 'Move both ends' }]
+                    : []),
+                  { value: 'start', label: 'Keep start fixed' },
+                  { value: 'end', label: 'Keep end fixed' },
+                ]}
+              />
+            </div>
+          )}
+          <label className='grid gap-1 text-small'>
+            {savedSetbacks && fixedCornerEnd !== 'linked'
+              ? 'Setback on moving side (mm)'
+              : 'Setback on both sides (mm)'}
+            <Input
+              className='w-28'
+              type='number'
+              step='0.000001'
+              min='1'
+              value={cornerSetback}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                setCornerSetback(event.target.value);
+                setInputError(null);
+              }}
+            />
+          </label>
+          <Button
+            type='button'
+            size='xs'
+            variant='secondary'
+            disabled={!validDraftCornerSetbackV1(Number(cornerSetback))}
+            onClick={() => commitOutlinePointEdit(outlinePointInput.key)}
+          >
+            Round corner
+          </Button>
+        </div>
+      )}
+      {activeTool === 'delete-point' && outlinePointInput && interactionEnabled && (
+        <div className='flex gap-2'>
+          <Button
+            type='button'
+            size='xs'
+            variant='secondary'
+            onClick={() => commitOutlinePointEdit(outlinePointInput.key)}
+          >
+            Delete point
+          </Button>
+        </div>
+      )}
+      {(activeTool === 'edge-length' || activeTool === 'allowance-offset') &&
+        pendingDartBase &&
+        interactionEnabled && (
+          <div
+            className='flex flex-wrap items-end gap-2'
+            onKeyDown={(event) => {
+              if (event.key !== 'Escape') return;
+              event.stopPropagation();
+              setPendingDartBase(null);
+              setInputError(null);
+            }}
+          >
+            <label className='grid gap-1 text-small'>
+              {activeTool === 'edge-length' ? 'Edge length (mm)' : 'Allowance offset (mm)'}
+              <Input
+                className='w-28'
+                type='number'
+                min={activeTool === 'edge-length' ? '0' : undefined}
+                step='any'
+                value={resizeLength}
+                onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                  setResizeLength(event.target.value)
+                }
+              />
+            </label>
+            {activeTool === 'edge-length' ? (
+              <div className='grid gap-1 text-small' role='group' aria-label='Fixed endpoint'>
+                Fixed endpoint
+                <Selector
+                  label='Fixed endpoint'
+                  compact
+                  value={resizeFixed}
+                  onChange={(value: string) => setResizeFixed(value === 'end' ? 'end' : 'start')}
+                  options={[
+                    { value: 'start', label: 'Start' },
+                    { value: 'end', label: 'End' },
+                  ]}
+                />
+              </div>
+            ) : (
+              <span className='text-small'>Positive extends the cut. Negative trims it.</span>
+            )}
+            {activeTool === 'allowance-offset' && savedTurnAllowance && (
+              <div role='group' aria-label='Allowance finish'>
+                <Selector
+                  label='Allowance finish'
+                  compact
+                  value={turnAllowance ?? 'offset-only'}
+                  onChange={(value: string) =>
+                    setTurnAllowance(isAuthoredTurnAllowanceVariant(value) ? value : undefined)
+                  }
+                  options={[
+                    { value: 'offset-only', label: 'Offset only' },
+                    { value: 'single-turn-hem', label: 'Single-turn hem' },
+                    { value: 'cut-on-facing', label: 'Cut-on facing' },
+                  ]}
+                />
+              </div>
+            )}
+            <Button
+              type='button'
+              size='xs'
+              variant='secondary'
+              onClick={() => {
+                const result = recordPatternImportDxfPhaseEDraftCadCanvasBoundaryPickV1({
+                  session,
+                  projection,
+                  activePieceIndex,
+                  activeTool,
+                  baseKey: pendingDartBase.key,
+                  sequence: sequence.current,
+                  ...(activeTool === 'edge-length'
+                    ? { resize: { fixed: resizeFixed, lengthMm: Number(resizeLength) } }
+                    : {
+                        allowanceOffsetMm: Number(resizeLength),
+                        ...(savedTurnAllowance && turnAllowance && { turnAllowance }),
+                      }),
+                });
+                setInputError(result.blocker);
+                if (result.recorded) {
+                  sequence.current = result.sequence;
+                  setPendingDartBase(null);
+                  onSessionChange(result.session);
+                }
+              }}
+            >
+              {activeTool === 'edge-length' ? 'Set edge length' : 'Offset allowance'}
+            </Button>
+          </div>
+        )}
       {preview.blockers.length > 0 && (
         <ul data-draft-cad-preview-blockers='' className='space-y-1 text-small text-warning'>
           {preview.blockers.map((blocker, index) => (
