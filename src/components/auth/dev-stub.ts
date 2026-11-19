@@ -46,8 +46,14 @@ const MY_TEAMS = [
   },
 ];
 const created: Record<string, unknown>[] = [];
+// a sign-up of this page load: after the code its person sees only this team, awaiting approval
+let signedUp: { email: string; team: Record<string, unknown> } | null = null;
 
-/** localStorage knobs: stub.teams=empty (first time), stub.signin=google|none (default: both). */
+/**
+ * localStorage knobs: stub.teams=empty (first time), stub.signin=google|none (default: both),
+ * stub.rootToken=0 (the code answers as the old server: no token; 111111 → awaiting, else the
+ * team host). Brand: a website starting with `refuse` → the server's `bad_website`.
+ */
 function knob(key: string): string {
   try {
     return localStorage.getItem(key) ?? '';
@@ -64,6 +70,15 @@ function refuse(status: number, message: string): never {
   throw Object.assign(new Error(message), { status });
 }
 
+function refuseBrand(body: string | null): void {
+  const brand = body ? (JSON.parse(body) as { brand?: { website?: string } }).brand : undefined;
+  if (brand?.website?.startsWith('refuse')) refuse(400, 'bad_website');
+}
+
+function logoUrlOf(logo: string | undefined): string {
+  return logo ? `data:${logo.startsWith('/9j/') ? 'image/jpeg' : 'image/png'};base64,${logo}` : '';
+}
+
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 let slowOnce = true;
 
@@ -76,6 +91,17 @@ export async function stubAnswer(method: string, body: string | null): Promise<u
     case 'SignUp':
       if (TAKEN.has(req.teamSlug)) refuse(409, 'slug taken');
       if (!terms(body)) refuse(400, 'terms not accepted');
+      refuseBrand(body);
+      signedUp = {
+        email: req.email,
+        team: {
+          slug: req.teamSlug,
+          name: req.teamName,
+          role: 'owner',
+          awaitingApproval: true,
+          logoUrl: logoUrlOf(req.logo),
+        },
+      };
       return {};
     case 'ResendVerification':
     case 'RequestPasswordReset':
@@ -83,6 +109,15 @@ export async function stubAnswer(method: string, body: string | null): Promise<u
       return {};
     case 'VerifyEmail':
       if (req.code === '000000' || req.token === 'expired') refuse(400, 'invalid or expired code');
+      if (knob('stub.rootToken') !== '0') {
+        // the new server: signed in at once, the team waits for the operator
+        if (!signedUp)
+          signedUp = {
+            email: req.email || 'mira@fold.studio',
+            team: { slug: 'fold', name: 'fold', role: 'owner', awaitingApproval: true },
+          };
+        return { teamSlug: signedUp.team.slug, awaitingApproval: true, rootToken: TOKEN };
+      }
       // 111111 → the team waits for the operator
       if (req.code === '111111') return { teamSlug: 'linea', awaitingApproval: true };
       return { teamSlug: 'ostra', handoffCode: 'stub-code' };
@@ -107,6 +142,13 @@ export async function stubAnswer(method: string, body: string | null): Promise<u
       if (req.code === 'bad') refuse(400, 'invalid code');
       return { token: TOKEN, teams: [], enterTeamSlug: '' };
     case 'ListMyTeams': {
+      if (signedUp)
+        return {
+          email: signedUp.email,
+          teams: [signedUp.team, ...created],
+          canCreateTeam: true,
+          termsNeeded: false,
+        };
       const first = knob('stub.teams') === 'empty';
       return {
         email: 'mira@ostra.studio',
@@ -119,14 +161,13 @@ export async function stubAnswer(method: string, body: string | null): Promise<u
       if (TAKEN.has(req.teamSlug) || MY_TEAMS.some((t) => t.slug === req.teamSlug))
         refuse(409, 'slug taken');
       if (req.teamSlug === 'badlogo' && req.logo) refuse(400, 'bad_logo');
+      refuseBrand(body);
       const team = {
         slug: req.teamSlug,
         name: req.teamName,
         role: 'owner',
         awaitingApproval: true,
-        logoUrl: req.logo
-          ? `data:${req.logo.startsWith('/9j/') ? 'image/jpeg' : 'image/png'};base64,${req.logo}`
-          : '',
+        logoUrl: logoUrlOf(req.logo),
       };
       created.push(team);
       return { team };
