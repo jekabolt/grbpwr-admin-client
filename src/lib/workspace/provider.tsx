@@ -3,12 +3,12 @@ import { adminService } from 'api/api';
 import { accountsKeys } from 'components/managers/accounts/utils/hooks';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { NAV_GROUPS, ADMIN_GROUP, ROUTES } from 'constants/routes';
-import { isLekaloHost } from 'lib/host';
+import { currentHost, isLekaloHost } from 'lib/host';
 import { useSnackBarStore } from 'lib/stores/store';
 import { type ReactNode, useEffect, useRef } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { onWorkspaceSignal } from './events';
-import { featureForPath, featureOn } from './features';
+import { FEATURE, featureForPath, featureOn } from './features';
 import { PaperBrandProvider } from './paper-brand-context';
 import { useWorkspace } from './use-workspace';
 
@@ -60,7 +60,11 @@ export function FeatureGuard({ children }: { children: ReactNode }) {
   const { workspace, gate } = useWorkspace();
   const { homeRoute } = usePermissions();
   if (gate !== 'gated') return <>{children}</>;
-  const feature = featureForPath(pathname, NAV_ITEMS);
+  // on a team host /main is the team home («my work»), not analytics: always reachable
+  const feature =
+    currentHost().kind === 'team' && pathname === ROUTES.main
+      ? FEATURE.core
+      : featureForPath(pathname, NAV_ITEMS);
   if (featureOn(workspace, feature)) return <>{children}</>;
   const to = homeRoute ?? ROUTES.me;
   if (to === pathname) return <>{children}</>;

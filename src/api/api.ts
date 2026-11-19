@@ -39,7 +39,7 @@ const send = async (
 
   if (import.meta.env.DEV && import.meta.env.VITE_AUTH_STUB && meta) {
     const { stubAnswer } = await import('components/auth/dev-stub');
-    return stubAnswer(meta.method, body);
+    return stubAnswer(meta.method, body, path);
   }
 
   try {
