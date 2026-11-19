@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import type { ListTeamMembersResponse, TeamInvite, TeamMember } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
-import { memberRefusal, normalEmail } from './model';
+import { isOwnerOnly, memberRefusal, normalEmail } from './model';
 
 export const peopleKeys = { list: () => ['people', 'list'] as const };
 
@@ -27,6 +27,9 @@ export function usePeopleActions() {
     patch((d) => ({ ...d, invites: fn(d.invites ?? []) }));
   const reload = () => qc.invalidateQueries({ queryKey: key });
   const hold = () => qc.cancelQueries({ queryKey: key });
+  // owner_only: the screen thought the caller was an owner; reload instead of a toast
+  const refused = (e: unknown, fallback?: string) =>
+    isOwnerOnly(e) ? void reload() : showMessage(memberRefusal(e, fallback), 'error');
 
   const setRole = useMutation({
     mutationFn: (v: { username: string; role: string; was: string }) =>
@@ -37,14 +40,14 @@ export function usePeopleActions() {
     },
     onError: (e, v) => {
       patchMembers((ms) => ms.map((m) => (m.username === v.username ? { ...m, role: v.was } : m)));
-      showMessage(memberRefusal(e), 'error');
+      refused(e);
     },
   });
 
   const remove = useMutation({
     mutationFn: (username: string) => adminService.RemoveTeamMember({ username }),
     onSuccess: (_r, username) => patchMembers((ms) => ms.filter((m) => m.username !== username)),
-    onError: (e) => showMessage(memberRefusal(e, 'not removed'), 'error'),
+    onError: (e) => refused(e, 'not removed'),
   });
 
   /** A new invite, or a changed role of an open one (the server re-sends it). */
@@ -60,18 +63,20 @@ export function usePeopleActions() {
           : [fresh, ...is],
       );
     },
+    // the inline word is the page's; owner_only only reloads
+    onError: (e) => isOwnerOnly(e) && void reload(),
   });
 
   const resend = useMutation({
     mutationFn: (inviteRef: string) => adminService.ResendTeamInvite({ inviteRef }),
     onSuccess: () => reload(),
-    onError: (e) => showMessage(memberRefusal(e, 'not sent'), 'error'),
+    onError: (e) => refused(e, 'not sent'),
   });
 
   const revoke = useMutation({
     mutationFn: (inviteRef: string) => adminService.RevokeTeamInvite({ inviteRef }),
     onSuccess: (_r, ref) => patchInvites((is) => is.filter((i) => i.inviteRef !== ref)),
-    onError: (e) => showMessage(memberRefusal(e, 'not revoked'), 'error'),
+    onError: (e) => refused(e, 'not revoked'),
   });
 
   return { setRole, remove, invite, resend, revoke };

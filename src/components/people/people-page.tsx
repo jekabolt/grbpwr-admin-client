@@ -27,6 +27,7 @@ import {
   inviteErrorWord,
   inviteExpired,
   isLastOwner,
+  isOwnerOnly,
   me,
   memberName,
   openInvites,
@@ -49,8 +50,7 @@ const GROUP =
 
 type Confirm = { kind: 'remove'; member: TeamMember } | { kind: 'leave'; member: TeamMember };
 
-const roleItems = (ownerAllowed: boolean) =>
-  ROLES.map((r) => ({ value: r, label: r, disabled: r === 'owner' && !ownerAllowed }));
+const ROLE_ITEMS = ROLES.map((r) => ({ value: r, label: r }));
 
 /** `/people` on a team host: who is in the team, who is invited, and the invite form. */
 export default function PeoplePage() {
@@ -70,7 +70,9 @@ export default function PeoplePage() {
   const members = people.data?.members ?? [];
   const invites = openInvites(people.data?.invites);
   const self = me(members);
+  // people changes are owner only: a member sees the list without any action
   const owner = self?.role === 'owner';
+  const cols = owner ? 4 : 3;
   const shownInvites =
     invites.length - invites.filter((i) => revoking.has(i.inviteRef ?? '')).length;
 
@@ -104,7 +106,7 @@ export default function PeoplePage() {
       { email, role },
       {
         onSuccess: () => setEmail(''),
-        onError: (x) => setErr(inviteErrorWord(x)),
+        onError: (x) => !isOwnerOnly(x) && setErr(inviteErrorWord(x)),
       },
     );
   };
@@ -112,7 +114,7 @@ export default function PeoplePage() {
   const changeInviteRole = (i: TeamInvite, next: string) =>
     act.invite.mutate(
       { email: i.email ?? '', role: next },
-      { onError: (x) => showMessage(inviteErrorWord(x), 'error') },
+      { onError: (x) => !isOwnerOnly(x) && showMessage(inviteErrorWord(x), 'error') },
     );
 
   const resend = (ref: string) =>
@@ -142,7 +144,7 @@ export default function PeoplePage() {
                   <th className={TH}>person</th>
                   <th className={TH}>role</th>
                   <th className={TH}>seen</th>
-                  <th className={TH} aria-label='actions' />
+                  {owner && <th className={TH} aria-label='actions' />}
                 </tr>
               </thead>
               <tbody className='max-md:block'>
@@ -171,43 +173,49 @@ export default function PeoplePage() {
                         </div>
                       </td>
                       <td className={TD}>
-                        <div className='w-28'>
-                          <Select
-                            name={`role-${m.username}`}
-                            size='sm'
-                            aria-label={`role · ${name}`}
-                            items={roleItems(true)}
-                            value={m.role}
-                            disabled={readOnly || !owner || last}
-                            onValueChange={(v) =>
-                              v !== m.role &&
-                              act.setRole.mutate({
-                                username: m.username ?? '',
-                                role: v,
-                                was: m.role ?? '',
-                              })
-                            }
-                          />
-                        </div>
+                        {owner ? (
+                          <div className='w-28'>
+                            <Select
+                              name={`role-${m.username}`}
+                              size='sm'
+                              aria-label={`role · ${name}`}
+                              items={ROLE_ITEMS}
+                              value={m.role}
+                              disabled={readOnly || last}
+                              onValueChange={(v) =>
+                                v !== m.role &&
+                                act.setRole.mutate({
+                                  username: m.username ?? '',
+                                  role: v,
+                                  was: m.role ?? '',
+                                })
+                              }
+                            />
+                          </div>
+                        ) : (
+                          m.role
+                        )}
                       </td>
                       <td className={TD}>
                         <Text variant='label' size='micro'>
                           {seenWord(m.lastSeenAt)}
                         </Text>
                       </td>
-                      <td className={cn(TD, LAST)}>
-                        <span className='inline-flex justify-end'>
-                          <Button
-                            variant='underline'
-                            disabled={readOnly || (m.you && last)}
-                            onClick={() =>
-                              setConfirm({ kind: m.you ? 'leave' : 'remove', member: m })
-                            }
-                          >
-                            {m.you ? 'leave' : 'remove'}
-                          </Button>
-                        </span>
-                      </td>
+                      {owner && (
+                        <td className={cn(TD, LAST)}>
+                          <span className='inline-flex justify-end'>
+                            <Button
+                              variant='underline'
+                              disabled={readOnly || (m.you && last)}
+                              onClick={() =>
+                                setConfirm({ kind: m.you ? 'leave' : 'remove', member: m })
+                              }
+                            >
+                              {m.you ? 'leave' : 'remove'}
+                            </Button>
+                          </span>
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
@@ -215,7 +223,7 @@ export default function PeoplePage() {
               {invites.length > 0 && (
                 <tbody className='max-md:block'>
                   <tr className='max-md:flex'>
-                    <td colSpan={4} className={GROUP}>
+                    <td colSpan={cols} className={GROUP}>
                       invited {shownInvites}
                     </td>
                   </tr>
@@ -225,7 +233,7 @@ export default function PeoplePage() {
                       return (
                         <UndoRow
                           key={ref}
-                          colSpan={4}
+                          colSpan={cols}
                           name={i.email}
                           onUndo={() => mark(setRevoking, ref, false)}
                           onCommit={() =>
@@ -251,17 +259,21 @@ export default function PeoplePage() {
                           </div>
                         </td>
                         <td className={TD}>
-                          <div className='w-28'>
-                            <Select
-                              name={`invite-role-${ref}`}
-                              size='sm'
-                              aria-label={`role · ${i.email}`}
-                              items={roleItems(owner)}
-                              value={i.role}
-                              disabled={readOnly}
-                              onValueChange={(v) => v !== i.role && changeInviteRole(i, v)}
-                            />
-                          </div>
+                          {owner ? (
+                            <div className='w-28'>
+                              <Select
+                                name={`invite-role-${ref}`}
+                                size='sm'
+                                aria-label={`role · ${i.email}`}
+                                items={ROLE_ITEMS}
+                                value={i.role}
+                                disabled={readOnly}
+                                onValueChange={(v) => v !== i.role && changeInviteRole(i, v)}
+                              />
+                            </div>
+                          ) : (
+                            i.role
+                          )}
                         </td>
                         <td className={TD}>
                           {expired ? (
@@ -270,24 +282,26 @@ export default function PeoplePage() {
                             <Pill tone='attention'>invited</Pill>
                           )}
                         </td>
-                        <td className={cn(TD, LAST)}>
-                          <span className='inline-flex flex-wrap justify-end gap-3'>
-                            <Button
-                              variant='underline'
-                              disabled={readOnly || done || act.resend.isPending}
-                              onClick={() => resend(ref)}
-                            >
-                              {done ? 'sent' : 'resend'}
-                            </Button>
-                            <Button
-                              variant='underline'
-                              disabled={readOnly}
-                              onClick={() => mark(setRevoking, ref, true)}
-                            >
-                              revoke
-                            </Button>
-                          </span>
-                        </td>
+                        {owner && (
+                          <td className={cn(TD, LAST)}>
+                            <span className='inline-flex flex-wrap justify-end gap-3'>
+                              <Button
+                                variant='underline'
+                                disabled={readOnly || done || act.resend.isPending}
+                                onClick={() => resend(ref)}
+                              >
+                                {done ? 'sent' : 'resend'}
+                              </Button>
+                              <Button
+                                variant='underline'
+                                disabled={readOnly}
+                                onClick={() => mark(setRevoking, ref, true)}
+                              >
+                                revoke
+                              </Button>
+                            </span>
+                          </td>
+                        )}
                       </tr>
                     );
                   })}
@@ -296,52 +310,54 @@ export default function PeoplePage() {
             </table>
           </div>
 
-          <form
-            className='mt-1.5 flex flex-wrap items-center gap-2'
-            noValidate
-            onSubmit={submitInvite}
-          >
-            <div className='max-w-[22.5rem] flex-[1_1_13.75rem]'>
-              <Input
-                name='invite-email'
-                type='email'
-                placeholder='email'
-                autoComplete='off'
-                aria-label='invite email'
-                aria-invalid={err ? true : undefined}
-                disabled={readOnly}
-                value={email}
-                onChange={(e: ChangeEvent<HTMLInputElement>) => {
-                  setEmail(e.target.value);
-                  if (err) setErr('');
-                }}
-              />
-            </div>
-            <div className='w-28'>
-              <Select
-                name='invite-role'
-                size='sm'
-                aria-label='invite role'
-                items={roleItems(owner)}
-                value={role}
-                disabled={readOnly}
-                onValueChange={setRole}
-              />
-            </div>
-            <Button
-              variant='main'
-              className='whitespace-nowrap px-3 py-0.5'
-              type='submit'
-              disabled={readOnly || act.invite.isPending}
+          {owner && (
+            <form
+              className='mt-1.5 flex flex-wrap items-center gap-2'
+              noValidate
+              onSubmit={submitInvite}
             >
-              invite
-            </Button>
-            {err && (
-              <Text component='span' variant='errorLabel' size='micro' role='alert'>
-                {err}
-              </Text>
-            )}
-          </form>
+              <div className='max-w-[22.5rem] flex-[1_1_13.75rem]'>
+                <Input
+                  name='invite-email'
+                  type='email'
+                  placeholder='email'
+                  autoComplete='off'
+                  aria-label='invite email'
+                  aria-invalid={err ? true : undefined}
+                  disabled={readOnly}
+                  value={email}
+                  onChange={(e: ChangeEvent<HTMLInputElement>) => {
+                    setEmail(e.target.value);
+                    if (err) setErr('');
+                  }}
+                />
+              </div>
+              <div className='w-28'>
+                <Select
+                  name='invite-role'
+                  size='sm'
+                  aria-label='invite role'
+                  items={ROLE_ITEMS}
+                  value={role}
+                  disabled={readOnly}
+                  onValueChange={setRole}
+                />
+              </div>
+              <Button
+                variant='main'
+                className='whitespace-nowrap px-3 py-0.5'
+                type='submit'
+                disabled={readOnly || act.invite.isPending}
+              >
+                invite
+              </Button>
+              {err && (
+                <Text component='span' variant='errorLabel' size='micro' role='alert'>
+                  {err}
+                </Text>
+              )}
+            </form>
+          )}
         </Section>
       )}
 

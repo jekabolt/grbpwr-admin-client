@@ -1,4 +1,5 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { clearAuthToken } from 'api/auth-headers';
 import type { ListTeamsResponse, PlatformTeam } from 'api/proto-http/admin';
 import { currentHost, goToUrl, teamUrl } from 'lib/host';
 import { useSnackBarStore } from 'lib/stores/store';
@@ -63,6 +64,11 @@ export function useConsoleActions() {
     qc.setQueryData<ListTeamsResponse>(key, (d) => (d ? { ...d, teams: fn(d.teams) } : d));
   const hold = () => qc.cancelQueries({ queryKey: key });
   const fail = (e: unknown) => showMessage(refusalWord(e), 'error');
+  // approve / decline on a row another operator already moved: show it, then the real list
+  const stale = (e: unknown) => {
+    fail(e);
+    qc.invalidateQueries({ queryKey: key });
+  };
 
   // Optimistic: the cell flips now; a refusal flips only that cell back.
   const feature = useMutation({
@@ -97,13 +103,13 @@ export function useConsoleActions() {
       setRows((rows) =>
         patchTeam(rows, slug, (t) => r.team ?? { ...t, status: STATUS.provisioning }),
       ),
-    onError: fail,
+    onError: stale,
   });
 
   const decline = useMutation({
     mutationFn: (slug: string) => platformService.DeclineTeam({ teamSlug: slug }),
     onSuccess: (_r, slug) => setRows((rows) => (rows ?? []).filter((t) => t.slug !== slug)),
-    onError: fail,
+    onError: stale,
   });
 
   // The operator opens the team through its hand-off route with a one-time code.
@@ -113,7 +119,15 @@ export function useConsoleActions() {
       if (!r.handoffCode) return showMessage('no code', 'error');
       goToUrl(teamUrl(slug, `/auth#code=${encodeURIComponent(r.handoffCode)}`));
     },
-    onError: (e) => showMessage(refusalWord(e, 'not opened'), 'error'),
+    onError: (e) => {
+      // a code is only issued to a live console session: a revoked one signs in again
+      if ((e as { status?: number } | null)?.status === 401) {
+        clearAuthToken();
+        qc.clear();
+        return goToUrl(`${window.location.origin}/`);
+      }
+      showMessage(refusalWord(e, 'not opened'), 'error');
+    },
   });
 
   const busy = (m: { isPending: boolean; variables?: unknown }, slug: string) =>

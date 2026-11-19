@@ -4,6 +4,7 @@ import {
   inviteErrorWord,
   inviteExpired,
   isLastOwner,
+  isOwnerOnly,
   me,
   memberRefusal,
   openInvites,
@@ -68,5 +69,10 @@ describe('invites', () => {
     expect(inviteErrorWord(new Error('invalid email'))).toBe('invalid email');
     expect(memberRefusal(new Error('400 last_owner'))).toBe('last owner');
     expect(memberRefusal(new Error('boom'), 'not removed')).toBe('not removed');
+    expect(inviteErrorWord(new Error('already_member'))).toBe('already in team');
+  });
+  it('owner_only is a quiet desync', () => {
+    expect(isOwnerOnly(new Error('owner_only'))).toBe(true);
+    expect(isOwnerOnly(new Error('last_owner'))).toBe(false);
   });
 });

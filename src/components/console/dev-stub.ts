@@ -6,6 +6,9 @@
 //   stub.fail = '1'        every console / people write is refused (optimistic revert)
 //   stub.soleOwner = '1'   the signed-in person is the team's only owner
 //   stub.noTeams = '1'     the console has no teams
+//   stub.member = '1'      the signed-in person is a plain member (no people actions)
+//   stub.ownerOnly = '1'   people writes are refused `owner_only` (demoted a moment ago)
+//   stub.unauth = '1'      EnterTeam answers 401 (console session revoked)
 
 import type {
   FeatureInfo,
@@ -196,7 +199,13 @@ function total(): string {
 
 const now = Date.now();
 let members: TeamMember[] = [
-  { username: 'mira', email: 'mira@ostra.studio', role: 'owner', lastSeenAt: ago(0), you: true },
+  {
+    username: 'mira',
+    email: 'mira@ostra.studio',
+    role: flag('stub.member') ? 'member' : 'owner',
+    lastSeenAt: ago(0),
+    you: true,
+  },
   {
     username: 'tomas',
     email: 'tomas@ostra.studio',
@@ -252,6 +261,13 @@ function failWrite() {
   if (flag('stub.fail')) refuse(500, 'stub refused');
 }
 
+/** People changes are owner only on the server. */
+function ownerWrite() {
+  failWrite();
+  const me = members.find((m) => m.you);
+  if (flag('stub.ownerOnly') || me?.role !== 'owner') refuse(403, 'owner_only');
+}
+
 /** The answer for a console / people method, or `undefined` when this stub does not know it. */
 export function consoleStubAnswer(method: string, body: string | null, path = ''): unknown {
   const req = (body ? JSON.parse(body) : {}) as Record<string, unknown>;
@@ -296,6 +312,7 @@ export function consoleStubAnswer(method: string, body: string | null, path = ''
       teams = teams.filter((t) => t.slug !== slug);
       return {};
     case 'EnterTeam':
+      if (flag('stub.unauth')) refuse(401, 'unauthorized');
       find(slug);
       return { handoffCode: 'stub-code' };
 
@@ -303,13 +320,13 @@ export function consoleStubAnswer(method: string, body: string | null, path = ''
     case 'ListTeamMembers':
       return { members, invites };
     case 'InviteTeamMember': {
-      failWrite();
+      ownerWrite();
       const email = String(req.email ?? '')
         .trim()
         .toLowerCase();
       const role = String(req.role ?? 'member');
       if (!EMAIL.test(email)) refuse(400, 'invalid email');
-      if (members.some((m) => m.email === email)) refuse(409, 'already exists');
+      if (members.some((m) => m.email === email)) refuse(409, 'already_member');
       const fresh: TeamInvite = {
         inviteRef: `ref-${email}`,
         email,
@@ -325,7 +342,7 @@ export function consoleStubAnswer(method: string, body: string | null, path = ''
       return { invite: invites.find((i) => i.email === email) };
     }
     case 'ResendTeamInvite':
-      failWrite();
+      ownerWrite();
       invites = invites.map((i) =>
         i.inviteRef === req.inviteRef
           ? {
@@ -338,11 +355,11 @@ export function consoleStubAnswer(method: string, body: string | null, path = ''
       );
       return {};
     case 'RevokeTeamInvite':
-      failWrite();
+      ownerWrite();
       invites = invites.filter((i) => i.inviteRef !== req.inviteRef);
       return {};
     case 'RemoveTeamMember': {
-      failWrite();
+      ownerWrite();
       const m = members.find((x) => x.username === req.username);
       if (!m) refuse(404, 'member not found');
       if (m.role === 'owner' && owners() === 1) refuse(400, 'last_owner');
@@ -350,7 +367,7 @@ export function consoleStubAnswer(method: string, body: string | null, path = ''
       return {};
     }
     case 'SetTeamMemberRole': {
-      failWrite();
+      ownerWrite();
       const m = members.find((x) => x.username === req.username);
       if (!m) refuse(404, 'member not found');
       if (m.role === 'owner' && req.role !== 'owner' && owners() === 1) refuse(400, 'last_owner');

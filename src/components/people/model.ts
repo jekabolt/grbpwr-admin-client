@@ -39,6 +39,10 @@ export function inviteErrorWord(e: unknown): string {
   return 'not sent';
 }
 
+/** The caller lost (or never had) the owner role: a quiet desync, the list is reloaded. */
+export const isOwnerOnly = (e: unknown) =>
+  (e instanceof Error ? e.message : String(e ?? '')).includes('owner_only');
+
 /** The toast for a refused member write. */
 export function memberRefusal(e: unknown, fallback = 'not saved'): string {
   const msg = e instanceof Error ? e.message : String(e ?? '');
