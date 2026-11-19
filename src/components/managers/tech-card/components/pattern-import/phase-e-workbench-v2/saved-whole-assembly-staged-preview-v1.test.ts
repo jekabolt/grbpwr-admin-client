@@ -6,6 +6,7 @@ const calls = vi.hoisted(() => ({
   advance: vi.fn(),
   resume: vi.fn(),
   projectBody: vi.fn(),
+  auditDrawWinding: vi.fn(),
   prepareStrain: vi.fn(),
   evaluateStrain: vi.fn(),
 }));
@@ -25,6 +26,7 @@ vi.mock('lib/cloth/runtime/cpu/source-cut-surface-projection-v1', () => ({
   prepareSourceCutSurfaceProjectionV1: () => ({
     drawRanges: [{ pieceId: 'piece', triangleOffset: 0, triangleCount: 1 }],
     project: (positions: Float32Array) => Float32Array.of(positions[0], 0, 0, 0, 1, 0, 0, 0, 1),
+    auditDrawWinding: calls.auditDrawWinding,
   }),
 }));
 
@@ -361,6 +363,10 @@ describe('same Workbench staged checkpoint', () => {
     expect(paused.rmsGapMm).toBeNull();
     expect(paused.contact).toEqual(accepted.validated[0]!.contact);
     expect(paused.contact.clothIntersections).toBe(0);
+    expect(calls.auditDrawWinding).toHaveBeenLastCalledWith(
+      accepted.positionsMInvMass,
+      paused.cloth.positionsM,
+    );
     expect(paused.frameWork.safeguard?.firstCappedTrial?.clothIntersections).toBe(1);
   });
 

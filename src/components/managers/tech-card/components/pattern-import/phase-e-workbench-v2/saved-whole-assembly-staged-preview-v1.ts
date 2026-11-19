@@ -75,6 +75,7 @@ export type SavedWholeAssemblyPreviewProgressV1 = Readonly<{
   action: Command['action'];
   activeSeams: ActiveSeams;
   contact: AcceptedFrame['contact'];
+  drawWinding: ReturnType<SurfaceProjection['auditDrawWinding']>;
   maximumGapMm: number;
   rmsGapMm: number | null;
   maximumGapOperationNumber: number | null;
@@ -436,6 +437,7 @@ export async function runSavedWholeAssemblyStagedPreviewV1(
       action: command.action,
       activeSeams: frame.activeSeams,
       contact: frame.contact,
+      drawWinding: surface.auditDrawWinding(carrierPositions, positionsM),
       maximumGapMm: (worst?.maximumGapM ?? 0) * 1000,
       rmsGapMm: stitchStations > 0 ? 1000 * Math.sqrt(squaredGapSumM2 / stitchStations) : null,
       maximumGapOperationNumber: worst?.operationOrder ?? null,

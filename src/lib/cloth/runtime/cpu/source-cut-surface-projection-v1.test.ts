@@ -199,3 +199,36 @@ it('rejects mismatched inputs before exposing a heatmap', () => {
   new Uint8Array(invalidRest.cutTriangleRestFrames).fill(0);
   expect(() => prepareSourceCutPrincipalStrainV1(invalidRest, 4)).toThrow(/rest frame is invalid/);
 });
+
+it('checks same-frame cut winding through reversal of the world normal and a local fold', () => {
+  const draw = prepareSourceCutSurfaceProjectionV1(compileSurface(), 4);
+  const rotated = currentSquare((x, y) => [x, -y, 0.13]);
+  const folded = currentSquare((x, y) => (x !== 0 || y === 0 ? [x, y, 0] : [y, 0, -y / 2]));
+  const consistent = {
+    triangleCount: 3,
+    comparedTriangleCount: 3,
+    oppositeTriangleCount: 0,
+    indeterminateTriangleCount: 0,
+  };
+
+  expect(draw.auditDrawWinding(rotated, draw.project(rotated))).toEqual(consistent);
+  const cut = draw.project(folded);
+  expect(draw.auditDrawWinding(folded, cut)).toEqual(consistent);
+
+  const reversed = cut.slice();
+  reversed.set(cut.subarray(6, 9), 3);
+  reversed.set(cut.subarray(3, 6), 6);
+  expect(draw.auditDrawWinding(folded, reversed)).toEqual({
+    ...consistent,
+    oppositeTriangleCount: 1,
+  });
+
+  const collapsed = cut.slice();
+  collapsed.set(cut.subarray(0, 3), 3);
+  expect(draw.auditDrawWinding(folded, collapsed)).toEqual({
+    ...consistent,
+    comparedTriangleCount: 2,
+    indeterminateTriangleCount: 1,
+  });
+  expect(() => draw.auditDrawWinding(folded, cut.slice(3))).toThrow(/prepared draw order/);
+});

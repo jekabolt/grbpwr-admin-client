@@ -21,6 +21,24 @@ function cutCornerKey(
   throw new RangeError('Cut corner has no supported vertex or edge provenance.');
 }
 
+function writeTriangleAreaVector(
+  positions: Float32Array,
+  a: number,
+  b: number,
+  c: number,
+  normal: Float64Array,
+) {
+  const ux = positions[b] - positions[a];
+  const uy = positions[b + 1] - positions[a + 1];
+  const uz = positions[b + 2] - positions[a + 2];
+  const vx = positions[c] - positions[a];
+  const vy = positions[c + 1] - positions[a + 1];
+  const vz = positions[c + 2] - positions[a + 2];
+  normal[0] = uy * vz - uz * vy;
+  normal[1] = uz * vx - ux * vz;
+  normal[2] = ux * vy - uy * vx;
+}
+
 type CutSurfaceDrawRange = Readonly<{
   pieceId: string;
   triangleOffset: number;
@@ -156,6 +174,14 @@ export function prepareSourceCutSurfaceProjectionV1(
       throw new RangeError('Cut corner is outside the prepared surface.');
     return representatives[expandedCorner];
   };
+  function requireFiniteCarrierPositions(currentPositionsMInvMass: Float32Array) {
+    if (
+      currentPositionsMInvMass.length !== particleCount * 4 ||
+      !currentPositionsMInvMass.every(Number.isFinite)
+    )
+      throw new RangeError('Cut surface requires one finite current state per carrier particle.');
+  }
+
   return Object.freeze({
     drawRanges: Object.freeze(drawRanges),
     cornerRepresentative,
@@ -166,13 +192,61 @@ export function prepareSourceCutSurfaceProjectionV1(
         weights: stencilWeights(representative).slice(),
       };
     },
+    /** Compare draw winding to the source chart on the owning current carrier face.
+     * Supply the carrier state and the actual rendered cut positions from the same accepted frame.
+     * This checks draw registration. It does not measure material inversion across frames.
+     */
+    auditDrawWinding(currentPositionsMInvMass: Float32Array, drawPositionsM: Float32Array) {
+      requireFiniteCarrierPositions(currentPositionsMInvMass);
+      if (drawPositionsM.length !== surfaceLength * 9 || !drawPositionsM.every(Number.isFinite))
+        throw new RangeError('Cut winding requires finite positions in the prepared draw order.');
+
+      let oppositeTriangleCount = 0;
+      let indeterminateTriangleCount = 0;
+      const carrierNormal = new Float64Array(3);
+      const drawnNormal = new Float64Array(3);
+      const tolerance = 8 * Number.EPSILON;
+      for (let triangle = 0; triangle < surfaceLength; triangle++) {
+        const first = triangle * 9;
+        // Barycentric (u, v, w) places a point at a + v (b - a) + w (c - a).
+        // Its coordinates in the ordered carrier face's chart are (v, w).
+        const v1 = cornerWeights[first + 4] - cornerWeights[first + 1];
+        const w1 = cornerWeights[first + 5] - cornerWeights[first + 2];
+        const v2 = cornerWeights[first + 7] - cornerWeights[first + 1];
+        const w2 = cornerWeights[first + 8] - cornerWeights[first + 2];
+        const chartArea = v1 * w2 - w1 * v2;
+        const offset = triangle * 3;
+        writeTriangleAreaVector(
+          currentPositionsMInvMass,
+          particleOffsets[offset],
+          particleOffsets[offset + 1],
+          particleOffsets[offset + 2],
+          carrierNormal,
+        );
+        writeTriangleAreaVector(drawPositionsM, first, first + 3, first + 6, drawnNormal);
+        const x = carrierNormal[0] * drawnNormal[0];
+        const y = carrierNormal[1] * drawnNormal[1];
+        const z = carrierNormal[2] * drawnNormal[2];
+        const worldDot = x + y + z;
+        if (
+          Math.abs(chartArea) <= tolerance * (Math.abs(v1 * w2) + Math.abs(w1 * v2)) ||
+          Math.abs(worldDot) <= tolerance * (Math.abs(x) + Math.abs(y) + Math.abs(z))
+        ) {
+          indeterminateTriangleCount++;
+        } else if (Math.sign(chartArea) !== Math.sign(worldDot)) {
+          oppositeTriangleCount++;
+        }
+      }
+      return Object.freeze({
+        triangleCount: surfaceLength,
+        comparedTriangleCount: surfaceLength - indeterminateTriangleCount,
+        oppositeTriangleCount,
+        indeterminateTriangleCount,
+      });
+    },
     /** Return non-indexed vec3 positions suitable for the existing triangle draw path. */
     project(currentPositionsMInvMass: Float32Array): Float32Array {
-      if (
-        currentPositionsMInvMass.length !== particleCount * 4 ||
-        !currentPositionsMInvMass.every(Number.isFinite)
-      )
-        throw new RangeError('Cut surface requires one finite current state per carrier particle.');
+      requireFiniteCarrierPositions(currentPositionsMInvMass);
       const projected = new Float32Array(surfaceLength * 9);
       for (const [corner, representative] of representatives.entries()) {
         const offset = 3 * corner;

@@ -128,6 +128,12 @@ function frame(number: number, isCurrent: () => boolean) {
       clothIntersections: 0,
       bodyPairsWithoutClearance: 0,
     },
+    drawWinding: {
+      triangleCount: 1,
+      comparedTriangleCount: 1,
+      oppositeTriangleCount: 0,
+      indeterminateTriangleCount: 0,
+    },
     maximumGapMm: 0,
     rmsGapMm: null,
     maximumGapOperationNumber: null,

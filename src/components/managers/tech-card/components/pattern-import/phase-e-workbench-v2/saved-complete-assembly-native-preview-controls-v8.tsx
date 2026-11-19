@@ -628,6 +628,7 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
           }
           data-whole-assembly-rms-gap-mm={wholeProgress.rmsGapMm ?? undefined}
           data-whole-assembly-contact={JSON.stringify(wholeProgress.contact)}
+          data-whole-assembly-draw-winding={JSON.stringify(wholeProgress.drawWinding)}
           data-whole-assembly-maximum-gap-operation={
             wholeProgress.maximumGapOperationNumber ?? undefined
           }
@@ -655,6 +656,12 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
             {wholeProgress.contact.clothIntersections} · Cloth–mannequin intersections{' '}
             {wholeProgress.contact.bodyIntersections} · Pairs with unproved body clearance{' '}
             {wholeProgress.contact.bodyPairsWithoutClearance}
+          </Text>
+          <Text component='p' size='micro'>
+            Cut triangles opposite their carrier winding{' '}
+            {wholeProgress.drawWinding.oppositeTriangleCount} of{' '}
+            {wholeProgress.drawWinding.comparedTriangleCount} compared · Indeterminate{' '}
+            {wholeProgress.drawWinding.indeterminateTriangleCount}
           </Text>
           {showStrain &&
             (displayedStrain ? (
