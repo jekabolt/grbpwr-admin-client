@@ -1,10 +1,10 @@
 import { authService } from 'api/api';
 import type { VerifyEmailResponse } from 'api/proto-http/auth';
 import { goToUrl, teamUrl } from 'lib/host';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Text } from 'ui';
 
+import { AddressField, useSlugCheck } from './address';
 import {
   clearHash,
   errMessage,
@@ -14,11 +14,13 @@ import {
   rememberedEmail,
 } from './api-error';
 import { CODE_LEN, CodeCells, Resend } from './code-cells';
+import { isBadLogo, type PickedLogo } from './logo';
+import { LogoStep } from './logo-step';
+import { ProviderButtons } from './providers';
 import {
   AgreeRow,
   AuthSheet,
   AwaitingApproval,
-  baseSuffix,
   PasswordInput,
   RootSide,
   SheetFoot,
@@ -28,9 +30,7 @@ import {
   SheetSubmit,
   SheetValue,
 } from './sheet';
-import { checkSlug, type SlugCheck, slugify } from './slug';
-
-const DEBOUNCE_MS = 300;
+import { slugify } from './slug';
 
 /** After a confirmed sign-up the team host greets with `email confirmed`. */
 export function signupHandoffUrl(slug: string, code: string): string {
@@ -44,72 +44,127 @@ function afterVerify(r: VerifyEmailResponse, fallbackSlug: string): string | nul
   return null;
 }
 
-function useSlugCheck(slug: string, name: string): SlugCheck {
-  const local = checkSlug(slug);
-  const [remote, setRemote] = useState<{ slug: string; available: boolean } | null>(null);
-  const ask = local.status === 'free';
+/** Step one's values; `back` from the logo step finds them as they were. */
+interface Draft {
+  team: string;
+  address: string;
+  edited: boolean;
+  email: string;
+  password: string;
+  agreed: boolean;
+}
 
-  useEffect(() => {
-    if (!ask) return;
-    let live = true;
-    const t = setTimeout(() => {
-      authService
-        .CheckTeamSlug({ slug, name })
-        .then((r) => live && setRemote({ slug, available: !!r.available }))
-        .catch(() => live && setRemote(null));
-    }, DEBOUNCE_MS);
-    return () => {
-      live = false;
-      clearTimeout(t);
-    };
-  }, [ask, slug, name]);
+const EMPTY: Draft = {
+  team: '',
+  address: '',
+  edited: false,
+  email: '',
+  password: '',
+  agreed: false,
+};
 
-  if (!ask) return local;
-  if (!remote || remote.slug !== slug) return { slug, status: 'checking', word: '' };
-  return remote.available
-    ? { slug, status: 'free', word: 'free' }
-    : { slug, status: 'taken', word: 'taken' };
+/** Which word a failed SignUp / CreateTeam shows (bad_logo: the square turns red instead). */
+export function createError(e: unknown): string {
+  return errMessage(e).includes('taken')
+    ? 'address taken'
+    : isRefusal(e)
+      ? 'check fields'
+      : 'try again';
 }
 
 export function SignUp() {
-  const [step, setStep] = useState<'form' | 'code'>('form');
-  const [email, setEmail] = useState('');
+  const [step, setStep] = useState<'form' | 'logo' | 'code'>('form');
+  const [draft, setDraft] = useState<Draft>(EMPTY);
   const [slug, setSlug] = useState('');
+  const [logo, setLogo] = useState<PickedLogo | null>(null);
+  const [bad, setBad] = useState(false);
+  const [busy, setBusy] = useState<'create' | 'skip' | null>(null);
+  const [error, setError] = useState('');
+
+  const send = async (withLogo: boolean) => {
+    if (busy) return;
+    setBusy(withLogo ? 'create' : 'skip');
+    setError('');
+    try {
+      await authService.SignUp({
+        email: draft.email.trim(),
+        password: draft.password,
+        teamName: draft.team.trim(),
+        teamSlug: slug,
+        termsAccepted: true,
+        logo: withLogo ? logo?.base64 : undefined,
+      });
+      rememberEmail(draft.email.trim());
+      setStep('code');
+    } catch (e) {
+      if (isBadLogo(errMessage(e))) setBad(true);
+      else setError(createError(e));
+    } finally {
+      setBusy(null);
+    }
+  };
 
   if (step === 'code')
-    return <ConfirmCode email={email} slug={slug} onChangeEmail={() => setStep('form')} />;
+    return (
+      <ConfirmCode
+        email={draft.email}
+        slug={slug}
+        onChangeEmail={() => {
+          setError('');
+          setStep('form');
+        }}
+      />
+    );
+  if (step === 'logo')
+    return (
+      <AuthSheet side={<RootSide mode='signup' />}>
+        <LogoStep
+          title='sign up'
+          team={draft.team.trim().toLowerCase()}
+          primary='create team'
+          logo={logo}
+          onLogo={setLogo}
+          bad={bad}
+          onBad={setBad}
+          busy={busy}
+          note={error}
+          onBack={() => {
+            setError('');
+            setStep('form');
+          }}
+          onSend={(withLogo) => void send(withLogo)}
+        />
+      </AuthSheet>
+    );
   return (
     <SignUpForm
-      email={email}
-      onEmail={setEmail}
-      onSent={(sent) => {
-        setSlug(sent);
-        rememberEmail(email.trim());
-        setStep('code');
+      draft={draft}
+      onDraft={setDraft}
+      note={error}
+      onNext={(s) => {
+        setSlug(s);
+        setError('');
+        setStep('logo');
       }}
     />
   );
 }
 
 function SignUpForm({
-  email,
-  onEmail,
-  onSent,
+  draft,
+  onDraft,
+  note,
+  onNext,
 }: {
-  email: string;
-  onEmail: (v: string) => void;
-  onSent: (slug: string) => void;
+  draft: Draft;
+  onDraft: (d: Draft) => void;
+  note: string;
+  onNext: (slug: string) => void;
 }) {
-  const [team, setTeam] = useState('');
-  const [address, setAddress] = useState('');
-  const edited = useRef(false);
-  const [password, setPassword] = useState('');
-  const [agreed, setAgreed] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const slug = edited.current ? address : slugify(team);
+  const { team, email, password, agreed } = draft;
+  const set = (patch: Partial<Draft>) => onDraft({ ...draft, ...patch });
+  const slug = draft.edited ? draft.address : slugify(team);
   const check = useSlugCheck(slug, team.trim());
-  const bad = check.status === 'bad' || check.status === 'taken';
   const ready =
     check.status === 'free' &&
     /.+@.+\..+/.test(email.trim()) &&
@@ -117,36 +172,10 @@ function SignUpForm({
     !!team.trim() &&
     agreed;
 
-  const submit = async () => {
-    if (!ready || busy) return;
-    setBusy(true);
-    setError('');
-    try {
-      await authService.SignUp({
-        email: email.trim(),
-        password,
-        teamName: team.trim(),
-        teamSlug: slug,
-        termsAccepted: true,
-        logo: undefined,
-      });
-      onSent(slug);
-    } catch (e) {
-      setError(
-        errMessage(e).includes('taken')
-          ? 'address taken'
-          : isRefusal(e)
-            ? 'check fields'
-            : 'try again',
-      );
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
     <AuthSheet side={<RootSide mode='signup' />}>
-      <SheetForm title='sign up' note={error} onSubmit={submit}>
+      <SheetForm title='sign up' note={note} onSubmit={() => ready && onNext(slug)}>
+        <ProviderButtons fields={() => ({ target: 'signin' })} />
         <SheetRow label='team'>
           <SheetInput
             name='team'
@@ -154,44 +183,12 @@ function SignUpForm({
             placeholder='ostra'
             autoComplete='organization'
             autoFocus
-            invalid={!edited.current && check.status === 'bad'}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTeam(e.target.value)}
+            invalid={!draft.edited && check.status === 'bad'}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => set({ team: e.target.value })}
           />
         </SheetRow>
         <SheetRow label='address'>
-          <div className='flex min-w-0 items-center gap-2'>
-            <div className='flex min-w-0 flex-1 items-center'>
-              <SheetInput
-                name='address'
-                value={slug}
-                placeholder='your-team'
-                autoComplete='off'
-                aria-label='address'
-                invalid={bad}
-                className='min-w-0 flex-1 font-bold'
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                  edited.current = true;
-                  setAddress(e.target.value.toLowerCase());
-                }}
-              />
-              <Text component='span' variant='label' className='shrink-0 pl-1'>
-                {baseSuffix()}
-              </Text>
-            </div>
-            <Text
-              component='span'
-              size='micro'
-              className={
-                check.status === 'free'
-                  ? 'shrink-0 text-success'
-                  : bad
-                    ? 'shrink-0 text-error'
-                    : 'shrink-0 text-labelColor'
-              }
-            >
-              {check.word}
-            </Text>
-          </div>
+          <AddressField check={check} onChange={(v) => set({ address: v, edited: true })} />
         </SheetRow>
         <SheetRow label='email'>
           <SheetInput
@@ -200,22 +197,20 @@ function SignUpForm({
             value={email}
             placeholder='you@studio.com'
             autoComplete='email'
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => onEmail(e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => set({ email: e.target.value })}
           />
         </SheetRow>
         <SheetRow label='password'>
           <PasswordInput
             value={password}
-            onChange={setPassword}
+            onChange={(v) => set({ password: v })}
             placeholder='8+ characters'
             autoComplete='new-password'
           />
         </SheetRow>
-        <AgreeRow checked={agreed} onChange={setAgreed} />
+        <AgreeRow checked={agreed} onChange={(v) => set({ agreed: v })} />
         <SheetFoot>
-          <SheetSubmit disabled={!ready} loading={busy}>
-            create team
-          </SheetSubmit>
+          <SheetSubmit disabled={!ready}>continue</SheetSubmit>
         </SheetFoot>
       </SheetForm>
     </AuthSheet>

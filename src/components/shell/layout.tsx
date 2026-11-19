@@ -3,7 +3,7 @@ import { authService } from 'api/api';
 import { clearAuthToken } from 'api/auth-headers';
 import { accountsKeys } from 'components/managers/accounts/utils/hooks';
 import { ADMIN_GROUP, ROUTES } from 'constants/routes';
-import { currentHost, isLekaloHost } from 'lib/host';
+import { currentHost, isLekaloHost, rootUrl } from 'lib/host';
 import { cn } from 'lib/utility';
 import { useWorkspace } from 'lib/workspace/use-workspace';
 import { FC, ReactNode, useCallback, useState } from 'react';
@@ -68,6 +68,15 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
         </div>
 
         <div className='flex grow basis-0 items-center justify-end gap-1'>
+          {/* teams mode: back to the root's list of own teams (it asks to log in when needed) */}
+          {team && (
+            <Button
+              asChild
+              className='px-2 underline-offset-2 transition-colors hover:underline hover:opacity-70'
+            >
+              <a href={rootUrl('/login')}>teams</a>
+            </Button>
+          )}
           <Button
             className='flex items-center gap-1.5 px-2 underline-offset-2 transition-colors hover:underline hover:opacity-70'
             onClick={() => setPaletteOpen(true)}

@@ -1,9 +1,12 @@
 import { authService } from 'api/api';
-import { goToUrl, teamUrl } from 'lib/host';
+import { currentHost, goToUrl, teamUrl } from 'lib/host';
 import { useEffect, useState } from 'react';
-import { Loader } from 'ui';
+import { Loader, Section, Text } from 'ui';
 
 import { clearHash, hashParam, isRefusal } from './api-error';
+import { TeamMark } from './logo-step';
+import { teamLogoUrl } from './oauth';
+import { ProviderButtons, signInOptions } from './providers';
 import {
   AgreeRow,
   AuthSheet,
@@ -14,8 +17,38 @@ import {
   SheetRow,
   SheetSubmit,
   SheetValue,
-  TeamSide,
+  Wordmark,
 } from './sheet';
+
+/**
+ * The join sheet's side: the team name, and under it the team's logo as a square (spec O §15) —
+ * the word `lekalo` while it loads, when the team has none, or when it fails. Nothing is reserved.
+ */
+function JoinSide({ name }: { name: string }) {
+  const [src] = useState(() => teamLogoUrl(currentHost().slug));
+  const [loaded, setLoaded] = useState(false);
+  return (
+    <Section className='self-start'>
+      <Wordmark>{name}</Wordmark>
+      {src && (
+        <img
+          src={src}
+          alt=''
+          hidden
+          onLoad={() => setLoaded(true)}
+          onError={() => setLoaded(false)}
+        />
+      )}
+      {loaded ? (
+        <TeamMark src={src} size='side' />
+      ) : (
+        <Text size='micro' variant='label' tracking='label' component='span' className='block'>
+          lekalo
+        </Text>
+      )}
+    </Section>
+  );
+}
 
 type Invite = { teamName: string; email: string; accountExists: boolean };
 
@@ -36,9 +69,9 @@ export function Join() {
     clearHash();
     if (!token) return;
     let live = true;
-    authService
-      .GetInvite({ token })
-      .then((r) => {
+    // the provider buttons come with the form, so nothing jumps in after it
+    Promise.all([authService.GetInvite({ token }), signInOptions()])
+      .then(([r]) => {
         if (!live) return;
         setInvite({
           teamName: r.teamName ?? '',
@@ -75,7 +108,7 @@ export function Join() {
   };
 
   return (
-    <AuthSheet side={<TeamSide name={invite?.teamName || ''} />}>
+    <AuthSheet side={<JoinSide name={invite?.teamName || ''} />}>
       <SheetForm
         title='join'
         note={state === 'expired' ? 'link expired' : note}
@@ -91,6 +124,13 @@ export function Join() {
             <SheetRow label='email'>
               <SheetValue>{invite.email}</SheetValue>
             </SheetRow>
+            <ProviderButtons
+              fields={() => ({
+                target: 'invite',
+                invite_token: token,
+                terms_accepted: agreed ? 'true' : 'false',
+              })}
+            />
             {!invite.accountExists && (
               <SheetRow label='name'>
                 <SheetInput
