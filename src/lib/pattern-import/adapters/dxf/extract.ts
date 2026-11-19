@@ -285,6 +285,7 @@ class Builder {
     readonly productManifestPresent = false,
     readonly authoredOutlineCornerByBlock?: DxfMeta['authoredOutlineCornerByBlock'],
     readonly authoredTurnBlocks?: ReadonlySet<string>,
+    readonly authoredAllowanceCornerByBlock?: DxfMeta['authoredAllowanceCornerByBlock'],
   ) {
     for (const l of raw.layers) this.addLayer(l.name);
     const handleCounts = new Map<string, number>();
@@ -811,7 +812,9 @@ class Builder {
         ctx.group.kind === 'insert' &&
         ctx.block !== null &&
         ctx.block === ctx.group.block &&
-        ((em.closed && this.authoredOutlineCornerByBlock?.has(ctx.block)) ||
+        ((em.closed &&
+          (this.authoredOutlineCornerByBlock?.has(ctx.block) ||
+            this.authoredAllowanceCornerByBlock?.has(ctx.block))) ||
           this.authoredTurnBlocks?.has(ctx.block)) &&
         em.straightEdgeFacts.every(
           ({ sourceAffine }) =>
@@ -1982,6 +1985,11 @@ async function readDxfInternal(
       },
     ),
   );
+  const authoredAllowanceCornerByBlock = new Map(
+    (conversion?.blocks ?? []).flatMap(({ block, authoredAllowanceCorner }) =>
+      authoredAllowanceCorner ? [[block, authoredAllowanceCorner]] : [],
+    ),
+  );
   const authoredTurnBlocks = new Set(
     conversion?.blocks
       .filter((block) => block.authoredInternal?.some((line) => line.turnAllowance))
@@ -2002,6 +2010,7 @@ async function readDxfInternal(
     productManifestPresent,
     authoredOutlineCornerByBlock,
     authoredTurnBlocks,
+    authoredAllowanceCornerByBlock,
   );
   b.warnings.push(...raw.warnings);
   // Unscoped parser recovery cannot establish selected-path completeness.
@@ -2160,6 +2169,7 @@ async function readDxfInternal(
     ...(halfFoldBlocks?.size ? { halfFoldBlocks } : {}),
     ...(zeroAllowanceSeamBlocks?.size ? { zeroAllowanceSeamBlocks } : {}),
     ...(authoredInternalByBlock?.size ? { authoredInternalByBlock } : {}),
+    ...(authoredAllowanceCornerByBlock.size ? { authoredAllowanceCornerByBlock } : {}),
     ...(authoredOutlineCornerByBlock?.size ? { authoredOutlineCornerByBlock } : {}),
     ...(authoredTextByBlock?.size ? { authoredTextByBlock } : {}),
     ...(authoredNotchesByBlock?.size ? { authoredNotchesByBlock } : {}),

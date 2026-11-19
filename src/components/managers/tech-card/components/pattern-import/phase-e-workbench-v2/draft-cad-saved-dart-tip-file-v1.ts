@@ -16,6 +16,7 @@ type SavedGeometryReviewLabel =
   | 'saved corner'
   | 'saved outline points'
   | 'saved shared outline'
+  | 'saved allowance corner'
   | 'saved allowance offset'
   | 'saved edge length';
 const labels = new WeakMap<File, SavedGeometryReviewLabel>();
@@ -34,6 +35,7 @@ export function registerSavedDartTipFileV1(
   if (
     pieceHeading &&
     (label === 'saved allowance offset' ||
+      label === 'saved allowance corner' ||
       label === 'saved edge length' ||
       label === 'saved outline points' ||
       label === 'saved shared outline')

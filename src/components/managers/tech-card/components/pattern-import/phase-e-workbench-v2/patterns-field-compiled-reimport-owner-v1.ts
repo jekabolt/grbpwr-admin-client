@@ -74,6 +74,7 @@ export function registerPatternImportDxfPhaseEPatternsFieldCompiledReimportOwner
             output === 'moved-french-curve' ||
             output === 'parallel-spread' ||
             output === 'allowance-offset' ||
+            output === 'allowance-corner' ||
             output === 'sharpened-corner' ||
             output === 'rounded-outline-corner' ||
             output === 'moved-saved-vertex',

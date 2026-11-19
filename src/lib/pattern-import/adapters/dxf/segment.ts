@@ -1,4 +1,8 @@
 import {
+  decodeAuthoredAllowanceCorner,
+  matchesAuthoredAllowanceCorner,
+} from '../../manifest/authored-allowance-corner';
+import {
   decodeTurnAllowance,
   verifyTurnAllowanceGeometry,
 } from '../../manifest/authored-turn-allowance';
@@ -814,6 +818,38 @@ function blockPiece(
       );
     authoredOutlineCorner = decodeAuthoredQuadratic(rounded, { x: e, y: f });
   }
+  const allowanceCorner = group.block && read.meta.authoredAllowanceCornerByBlock?.get(group.block);
+  let authoredAllowanceCorner;
+  if (allowanceCorner) {
+    const { a, b, c, d, e, f } = group.transform;
+    const seamLayers = paths.filter((path) => layerOfPath(path) === '14');
+    const nativeCut =
+      cutLayerPaths.length === 1 &&
+      cutLayerPaths[0]!.closed &&
+      nativeAuthoredOutlinePoints(cutLayerPaths[0]!);
+    const nativeSeam =
+      seamLayers.length === 1 &&
+      seamLayers[0]!.closed &&
+      nativeAuthoredOutlinePoints(seamLayers[0]!);
+    if (
+      read.meta.units.mmPerUnit !== 1 ||
+      a !== 1 ||
+      b !== 0 ||
+      c !== 0 ||
+      d !== 1 ||
+      !nativeCut ||
+      !nativeSeam ||
+      !matchesAuthoredAllowanceCorner(
+        nativeCut,
+        nativeSeam,
+        decodeAuthoredAllowanceCorner(allowanceCorner),
+      )
+    )
+      throw new Error(
+        `The saved allowance corner in ${group.block} does not reproduce its exact native edges.`,
+      );
+    authoredAllowanceCorner = decodeAuthoredAllowanceCorner(allowanceCorner, { x: e, y: f });
+  }
   let cutEqualsSeam = false;
   if (
     !explicitZeroAllowanceSeam &&
@@ -1072,6 +1108,7 @@ function blockPiece(
     seam,
     seamSource,
     ...(explicitZeroAllowanceSeam ? { zeroAllowanceSeam: true as const } : {}),
+    ...(authoredAllowanceCorner ? { authoredAllowanceCorner } : {}),
     ...(authoredOutlineCorner ? { authoredOutlineCorner } : {}),
     cutEqualsSeam,
     seamToCutMm,

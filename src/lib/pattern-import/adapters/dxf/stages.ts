@@ -489,6 +489,7 @@ function candidateOf(
       features,
       outerIsSeam: outerIsSeam && !!p.seam,
       ...(p.zeroAllowanceSeam ? { zeroAllowanceSeam: true as const } : {}),
+      ...(p.authoredAllowanceCorner ? { authoredAllowanceCorner: p.authoredAllowanceCorner } : {}),
       ...(p.authoredOutlineCorner ? { authoredOutlineCorner: p.authoredOutlineCorner } : {}),
       ...(p.textMarks?.length ? { textMarks: p.textMarks } : {}),
       ...(p.pointMarks?.length ? { pointMarks: p.pointMarks } : {}),

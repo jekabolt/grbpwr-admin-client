@@ -1,3 +1,4 @@
+import { parseAuthoredAllowanceCorner } from './authored-allowance-corner';
 // CONVERSION MANIFEST — embedded in, and read back from, the DXF the converter writes (08-CONTRACT §3).
 //
 // The upload path carries only the DXF bytes, so the file itself is the only durable channel from the
@@ -938,6 +939,23 @@ export function validateManifest(x: unknown): ConversionManifest {
         `${p}.authoredInternal`,
         'a saved turn allowance requires native cut and sewing contours',
       );
+    const authoredAllowanceCorner =
+      b.authoredAllowanceCorner === undefined
+        ? null
+        : parseAuthoredAllowanceCorner(b.authoredAllowanceCorner);
+    if (
+      b.authoredAllowanceCorner !== undefined &&
+      (!authoredAllowanceCorner ||
+        !b.hasSeam ||
+        !b.contour ||
+        b.authoredOutlineCorner !== undefined ||
+        b.authoredFixedEndOutlineCorner !== undefined ||
+        authoredInternal?.some(({ turnAllowance }) => turnAllowance))
+    )
+      fail(
+        `${p}.authoredAllowanceCorner`,
+        'expected one authored join on the native cut and sewing pair',
+      );
     const authoredOutlineCorner =
       b.authoredOutlineCorner === undefined
         ? null
@@ -978,6 +996,7 @@ export function validateManifest(x: unknown): ConversionManifest {
       block: b.block,
       ...(split ? { protectedLineSplit: split } : {}),
       ...(authoredInternal ? { authoredInternal } : {}),
+      ...(authoredAllowanceCorner ? { authoredAllowanceCorner } : {}),
       ...(authoredOutlineCorner ? { authoredOutlineCorner } : {}),
       ...(authoredFixedEndOutlineCorner ? { authoredFixedEndOutlineCorner } : {}),
       ...(authoredText ? { authoredText } : {}),

@@ -142,6 +142,7 @@ export type PatternImportDxfPhaseEDraftCadCanvasPropsV1 = Readonly<{
   moveSharedOutline?: boolean;
   savedRoundCorner?: AuthoredQuadraticGrid;
   savedTurnAllowance?: boolean;
+  savedAllowanceCornerPreview?: readonly PtMm[];
   savedFrenchCurve?: Readonly<{
     key: string;
     primitive: FrenchCurvePrimitive;
@@ -1899,6 +1900,8 @@ function toolInstruction(tool: PatternImportDxfPhaseEDraftCadToolV1, sizeToken: 
     return 'Choose one right-angle corner to set the same setback along both sides.';
   if (tool === 'sharpen-corner')
     return `Choose a highlighted bevel between perpendicular sides in size ${sizeToken}.`;
+  if (tool === 'allowance-corner')
+    return 'Select a sewing corner and its treatment for all five sizes.';
   if (tool === 'edge-length') return `Choose an exact edge to set its length in size ${sizeToken}.`;
   if (tool === 'allowance-offset')
     return `Choose a straight side to offset its cut line in size ${sizeToken}.`;
@@ -1937,6 +1940,7 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
   moveSharedOutline = false,
   savedRoundCorner,
   savedTurnAllowance,
+  savedAllowanceCornerPreview,
   arrangeActive = false,
   panActive = false,
   crossScopeConnectActive = false,
@@ -2711,6 +2715,17 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
                         pointerEvents='none'
                       />
                     ))}
+                  {savedAllowanceCornerPreview && (
+                    <polygon
+                      data-draft-cad-allowance-corner-preview=''
+                      points={ptsAttr(savedAllowanceCornerPreview)}
+                      fill='none'
+                      stroke={SHEET_INK.blue}
+                      strokeWidth={1.35}
+                      vectorEffect='non-scaling-stroke'
+                      pointerEvents='none'
+                    />
+                  )}
                   {primitives.map((primitive) =>
                     primitive.kind === 'curve' &&
                     primitive.controlPointsMm.length === 3 &&

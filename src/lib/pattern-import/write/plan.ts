@@ -1,4 +1,10 @@
 import {
+  authoredAllowanceCornerMarker,
+  decodeAuthoredAllowanceCorner,
+  mapAuthoredAllowanceCorner,
+  matchesAuthoredAllowanceCorner,
+} from '../manifest/authored-allowance-corner';
+import {
   mapAuthoredTurnAllowance,
   turnAllowanceMarker,
   verifyTurnAllowanceGeometry,
@@ -203,6 +209,9 @@ function transformSize(s: PieceSizeSpec, t: Affine): PieceSizeSpec {
   const cut = mapPts(t, s.cut);
   return {
     ...s,
+    ...(s.authoredAllowanceCorner
+      ? { authoredAllowanceCorner: mapAuthoredAllowanceCorner(s.authoredAllowanceCorner, P) }
+      : {}),
     ...(s.authoredOutlineCorner
       ? { authoredOutlineCorner: mapAuthoredQuadratic(s.authoredOutlineCorner, P) }
       : {}),
@@ -474,6 +483,27 @@ export function planBlocks(
         preserveWinding(loop, stripSpikes(simplify(loop, true, WRITE_SIMPLIFY_MM)).ring),
       );
       const seam = seamS ? ccw(seamS.ring) : null;
+      let authoredAllowanceCorner;
+      if (s.authoredAllowanceCorner) {
+        const marker = authoredAllowanceCornerMarker(s.authoredAllowanceCorner);
+        const anchor = marker && decodeAuthoredAllowanceCorner(marker);
+        if (
+          !anchor ||
+          !seam ||
+          cutLoops.length ||
+          w.spec.pairOf ||
+          w.derivedFrom ||
+          s.fold ||
+          s.authoredOutlineCorner ||
+          s.internal.some((path) => path.authoredTurnAllowance) ||
+          anchor.widthMm !== w.spec.allowance.allowanceMm ||
+          !matchesAuthoredAllowanceCorner(cut, seam, anchor, false)
+        )
+          throw new Error(
+            `${who}: the allowance corner no longer matches its exact cut and sewing supports.`,
+          );
+        authoredAllowanceCorner = anchor;
+      }
       const corner = s.authoredOutlineCorner;
       let authoredOutlineCorner;
       if (corner) {
@@ -590,6 +620,7 @@ export function planBlocks(
       const srcT = w.srcT.get(s0.rank) ?? IDENTITY;
       const size: PieceSizeSpec = {
         ...s,
+        ...(authoredAllowanceCorner ? { authoredAllowanceCorner } : {}),
         ...(authoredOutlineCorner ? { authoredOutlineCorner } : {}),
         cut,
         cutLoops,

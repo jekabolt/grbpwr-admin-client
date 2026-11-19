@@ -186,6 +186,7 @@ type DxfExtra = {
     identity?: string;
     outerIsSeam?: boolean;
     zeroAllowanceSeam?: true;
+    authoredAllowanceCorner?: PieceSizeSpec['authoredAllowanceCorner'];
     authoredOutlineCorner?: PieceSizeSpec['authoredOutlineCorner'];
     textMarks?: PieceSizeSpec['textMarks'];
     pointMarks?: PieceSizeSpec['pointMarks'];
@@ -2199,6 +2200,9 @@ export function buildPieceSpecsDetailed(
         cut,
         ...(cutLoops ? { cutLoops } : {}),
         ...(c.dxf?.textMarks?.length ? { textMarks: c.dxf.textMarks } : {}),
+        ...(c.dxf?.authoredAllowanceCorner
+          ? { authoredAllowanceCorner: c.dxf.authoredAllowanceCorner }
+          : {}),
         ...(c.dxf?.authoredOutlineCorner
           ? { authoredOutlineCorner: c.dxf.authoredOutlineCorner }
           : {}),

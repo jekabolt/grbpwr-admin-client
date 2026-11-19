@@ -26,7 +26,11 @@ function ringMatches(ring: readonly PtMm[], native: readonly PtMm[]) {
   );
 }
 /** Every affected size must be a single original block with the same complete straight cut and hole rings. */
-export async function readSavedNativeCutEdgesV1(source: Source, pieceIds: readonly string[]) {
+export async function readSavedNativeCutEdgesV1(
+  source: Source,
+  pieceIds: readonly string[],
+  includeSewing = false,
+) {
   const { draft, nativeRead, row, sourceFileId } = source;
   const scope = one(draft.scopes.filter((s) => s.target.scopeKey === row.scopeKey));
   const page = nativeRead.read.doc.pages[0]!,
@@ -84,6 +88,21 @@ export async function readSavedNativeCutEdgesV1(source: Source, pieceIds: readon
         );
         counts.set(path.id, ring.length);
         if (ring === size.cut) outerPaths.set(size.sizeToken, path.id);
+      }
+      if (includeSewing) {
+        const sewingPaths = group.paths
+          .map((id) => paths.get(id))
+          .filter((p) => p && page.styles[p.style]?.layer === '14');
+        const seam = sewingPaths.length === 1 ? sewingPaths[0] : undefined;
+        requireSource(
+          size.seam &&
+            seam?.closed &&
+            seam.src.block === b.block &&
+            ringMatches(size.seam, seam.pts) &&
+            !counts.has(seam.id),
+          'The saved sewing outline lost its exact directed native ring.',
+        );
+        counts.set(seam.id, size.seam.length);
       }
     }
     return { piece, scope, outerPaths };

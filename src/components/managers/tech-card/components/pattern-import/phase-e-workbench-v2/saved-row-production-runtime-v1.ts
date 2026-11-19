@@ -385,6 +385,7 @@ function createSavedDraftSourceReaderV1(deps: SavedDraftSourceReaderDepsV1) {
         (command?.tool === 'french-curve' && command.payload.savedCurve) ||
         command?.tool === 'cut' ||
         command?.tool === 'sharpen-corner' ||
+        command?.tool === 'allowance-corner' ||
         (command?.tool === 'round-corner' && commands.length === 1 && opening.sharedOutlineBlock) ||
         ((commands.length > 1 || opening.sharedOutlineBlock) && draftOutlineMoveHistoryV1(commands))
       )
@@ -490,8 +491,9 @@ export function createSavedGeometryReviewRuntimeV1(deps: SavedDraftSourceReaderD
 
 /** Verifies the same native allowance pair for a signed row opened from the saved table. */
 export function createSavedPairedAllowanceReviewRuntimeV1(deps: SavedDraftSourceReaderDepsV1) {
-  const { prepareSavedPairedAllowance, dispose } = createSavedDraftSourceReaderV1(deps);
-  return Object.freeze({ prepareSavedPairedAllowance, dispose });
+  const { prepareSavedPairedAllowance, prepareSavedGeometryReview, dispose } =
+    createSavedDraftSourceReaderV1(deps);
+  return Object.freeze({ prepareSavedPairedAllowance, prepareSavedGeometryReview, dispose });
 }
 
 /** Injectable composition used by the production factory and focused tests. */

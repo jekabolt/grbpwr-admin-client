@@ -1,3 +1,4 @@
+import { parseAuthoredAllowanceCorner } from 'lib/pattern-import/manifest/authored-allowance-corner';
 import { isAuthoredTurnAllowanceVariant } from 'lib/pattern-import/manifest/authored-turn-allowance';
 import {
   parseAuthoredOutlineCorner,
@@ -10,6 +11,7 @@ import type { DxfProductPhaseDReplayCarrierV1 } from 'lib/pattern-import/dxf-pro
 import type {
   AuthoredQuadraticGrid,
   AuthoredTurnAllowanceVariant,
+  ManifestAuthoredAllowanceCorner,
   PtMm,
 } from 'lib/pattern-import/types';
 
@@ -26,6 +28,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_TOOLS_V1 = Object.freeze([
   'delete-point',
   'sharpen-corner',
   'round-corner',
+  'allowance-corner',
   'edge-length',
   'allowance-offset',
   'internal-line',
@@ -238,6 +241,15 @@ export type PatternImportDxfPhaseEDraftCadCommandV1 =
         setbackMm: number;
         savedCorner?: AuthoredQuadraticGrid;
         fixedEnd?: 'start' | 'end';
+      }
+    >
+  | Command<
+      'allowance-corner',
+      {
+        entityId: string;
+        sizeToken: string;
+        allRanks: true;
+        corner: ManifestAuthoredAllowanceCorner;
       }
     >
   | Command<
@@ -616,6 +628,12 @@ function validCommand(value: unknown): value is PatternImportDxfPhaseEDraftCadCo
           : (payload.fixedEnd === 'start' || payload.fixedEnd === 'end') &&
             (parseAuthoredOutlineCorner(payload.savedCorner) !== null ||
               parseAuthoredFixedEndOutlineCorner(payload.savedCorner) !== null))
+      );
+    case 'allowance-corner':
+      return (
+        payload.allRanks === true &&
+        stableId(payload.sizeToken) &&
+        parseAuthoredAllowanceCorner(payload.corner) !== null
       );
     case 'edge-length':
       return (

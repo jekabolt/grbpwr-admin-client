@@ -324,6 +324,34 @@ function cornerJoins(
   return out;
 }
 
+/** Evaluate one admitted orthogonal source corner without resampling its neighbouring edges. */
+export function offsetNativeOrthogonalAllowanceCornerV1(
+  sewing: readonly PtMm[],
+  index: number,
+  widthMm: number,
+  square: boolean,
+): PtMm[] | null {
+  const point = sewing[index];
+  if (!point || !Number.isFinite(widthMm) || widthMm <= 0 || signedArea(sewing) <= 0) return null;
+  const atPoint = ({ at }: CornerInfo) => at.x === point.x && at.y === point.y;
+  const runs = cornerRuns(sewing, widthMm, MITER_LIMIT).filter(atPoint);
+  const [run] = runs;
+  if (
+    runs.length !== 1 ||
+    !run ||
+    run.first !== index ||
+    run.last !== index ||
+    run.kind !== 'mitre' ||
+    run.turnDeg !== 90
+  )
+    return null;
+  return (
+    cornerJoins(sewing, widthMm, MITER_LIMIT, false, (corner) =>
+      square && atPoint(corner) ? 'square' : null,
+    ).get(index)?.pts ?? null
+  );
+}
+
 /** The vertices a merged corner covers after its first (the offset skips them). */
 function coveredBy(corners: ReadonlyMap<number, CornerJoin>, n: number): Set<number> {
   const s = new Set<number>();

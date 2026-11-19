@@ -55,6 +55,7 @@ import {
   hasDraftNativeStraightOutlineV1,
 } from './draft-cad-edge-length-geometry-v1';
 import { sameSavedDraftRowV1 } from './draft-cad-saved-source-selection-v1';
+import { draftSavedAllowanceCornerOptionsV1 } from './draft-cad-allowance-corner-geometry-v1';
 import { hasDraftCutAllowanceJoinsV1 } from './draft-cad-allowance-offset-geometry-v1';
 import type { SavedNativeSeamRangeDraftV1 } from './cad-table-saved-seam-range-handles-v1';
 import { projectCadTablePieceFeatures } from './cad-table-piece-features-v1';
@@ -1149,10 +1150,11 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
     const piece = nativeEditPrepared.projection.pieces[pieceIndex];
     if (!piece || !matchesPiece(piece)) return null;
     const cuts = piece.contours.filter(({ role }) => role === 'cut-boundary');
-    const writerPieces = nativeEditPrepared.draftCadCompileSource.scopes
-      .filter(({ target }) => target.scopeKey === nativeEditPrepared.scopeKey)
-      .flatMap(({ writerReplay }) => writerReplay?.job.pieces ?? [])
-      .filter(({ identity }) => identity === piece.pieceId);
+    const sourceScopes = nativeEditPrepared.draftCadCompileSource.scopes.filter(
+      ({ target }) => target.scopeKey === nativeEditPrepared.scopeKey,
+    );
+    const job = sourceScopes.length === 1 ? sourceScopes[0]?.writerReplay?.job : undefined;
+    const writerPieces = job?.pieces.filter(({ identity }) => identity === piece.pieceId) ?? [];
     const writer = writerPieces.length === 1 ? writerPieces[0] : undefined;
     const writerSizes = writer?.sizes.filter(
       ({ sizeToken, sizeId }) =>
@@ -1161,24 +1163,33 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
     );
     const size = writerSizes?.length === 1 ? writerSizes[0] : undefined;
     const cut = cuts.length === 1 ? cuts[0] : undefined;
-    if (!writer || !size?.seam || !cut) return null;
-    const canOffset = cut.vertices.some(({ vertexId }, position, vertices) =>
-      hasDraftCutAllowanceJoinsV1(cut, [
-        vertexId,
-        vertices[(position + 1) % vertices.length].vertexId,
-      ]),
+    if (!job || !writer || !size?.seam || !cut) return null;
+    const canOffset =
+      !size.authoredAllowanceCorner &&
+      cut.vertices.some(({ vertexId }, position, vertices) =>
+        hasDraftCutAllowanceJoinsV1(cut, [
+          vertexId,
+          vertices[(position + 1) % vertices.length].vertexId,
+        ]),
+      );
+    const nativeStraight = hasDraftNativeStraightOutlineV1(
+      nativeEditPrepared.selection.phaseD,
+      piece.pieceId,
+      nativeEditPrepared.sizeToken,
+      cut,
     );
     const canSetLength =
+      !size.authoredAllowanceCorner &&
       writer.allowance.origin !== 'default' &&
       canResizeDraftPairedCutAllowanceV1(size) &&
-      hasDraftNativeStraightOutlineV1(
-        nativeEditPrepared.selection.phaseD,
-        piece.pieceId,
-        nativeEditPrepared.sizeToken,
-        cut,
-      ) &&
+      nativeStraight &&
       matchesSavedDraftConstantAllowanceV1(size.cut, size.seam, writer.allowance.allowanceMm);
-    return canOffset || canSetLength ? { pieceIndex, canOffset, canSetLength } : null;
+    const cornerOptions = nativeStraight
+      ? draftSavedAllowanceCornerOptionsV1(writer, job.sizes)
+      : [];
+    return canOffset || canSetLength || cornerOptions.length
+      ? { pieceIndex, canOffset, canSetLength, cornerOptions }
+      : null;
   }, [nativeEditPrepared, pickedPointPiece]);
   const sharedOutline = useMemo(() => {
     if (!nativeEditPrepared || !pickedPointPiece) return null;
@@ -1959,6 +1970,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
                 pieceIndex={activeAllowanceEdit.pieceIndex}
                 canOffset={allowanceTarget.canOffset}
                 canSetLength={allowanceTarget.canSetLength}
+                cornerOptions={allowanceTarget.cornerOptions}
                 generation={activeAllowanceEdit.generation}
                 authority={savedAuthority}
                 onClose={() => setAllowanceEdit(null)}

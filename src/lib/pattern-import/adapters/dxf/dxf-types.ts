@@ -4,6 +4,7 @@
 import type {
   Affine,
   AllowanceDecision,
+  AuthoredAllowanceCorner,
   AuthoredInternalLabel,
   AuthoredNotchStroke,
   AuthoredPointMark,
@@ -110,6 +111,10 @@ export type DxfMeta = {
   /** Manifest blocks explicitly emitted with a sewing boundary and zero allowance. */
   zeroAllowanceSeamBlocks?: ReadonlyMap<string, NonNullable<ManifestBlock['contour']>>;
   authoredInternalByBlock?: ReadonlyMap<string, readonly ManifestAuthoredInternalPath[]>;
+  authoredAllowanceCornerByBlock?: ReadonlyMap<
+    string,
+    NonNullable<ManifestBlock['authoredAllowanceCorner']>
+  >;
   authoredOutlineCornerByBlock?: ReadonlyMap<
     string,
     NonNullable<ManifestBlock['authoredOutlineCorner']>
@@ -314,6 +319,7 @@ export type DxfBlockPiece = {
   authoredInternalLabels?: ReadonlyMap<PathId, AuthoredInternalLabel>;
   authoredQuadraticByPath?: ReadonlyMap<PathId, AuthoredQuadraticControls>;
   authoredTurnAllowanceByPath?: ReadonlyMap<PathId, AuthoredTurnAllowance>;
+  authoredAllowanceCorner?: AuthoredAllowanceCorner;
   authoredOutlineCorner?: AuthoredQuadraticControls;
   texts: TextId[];
   textMarks?: AuthoredTextMark[];
@@ -404,6 +410,7 @@ export type DxfPieceCandidate = PieceCandidate & {
     /** The outer contour is L14 (mode A: the true graded line) — cut = outward offset. */
     outerIsSeam: boolean;
     zeroAllowanceSeam?: true;
+    authoredAllowanceCorner?: AuthoredAllowanceCorner;
     authoredOutlineCorner?: AuthoredQuadraticControls;
     textMarks?: AuthoredTextMark[];
     pointMarks?: AuthoredPointMark[];

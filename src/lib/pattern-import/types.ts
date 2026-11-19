@@ -1537,6 +1537,19 @@ export type FoldFeature = FeatureBase & {
 };
 export type AuthoredQuadraticControls = readonly [PtMm, PtMm, PtMm];
 
+export type AuthoredAllowanceCornerVariant = 'auto' | 'mitre' | 'square';
+export type AuthoredAllowanceCorner = {
+  variant: AuthoredAllowanceCornerVariant;
+  /** Previous vertex, corner and following vertex on the original directed sewing ring. */
+  sewing: [PtMm, PtMm, PtMm];
+  widthMm: number;
+};
+export type ManifestAuthoredAllowanceCorner = {
+  variant: AuthoredAllowanceCornerVariant;
+  sewing: [number, number, number, number, number, number];
+  width: number;
+};
+
 export type AuthoredTurnAllowanceVariant = 'single-turn-hem' | 'cut-on-facing';
 export type AuthoredTurnAllowance = {
   variant: AuthoredTurnAllowanceVariant;
@@ -1714,6 +1727,7 @@ export type PieceSizeSpec = {
   pointMarks?: AuthoredPointMark[];
   /** Exact shared rounded-corner controls in the current sheet coordinate frame. */
   authoredOutlineCorner?: AuthoredQuadraticControls;
+  authoredAllowanceCorner?: AuthoredAllowanceCorner;
   fold: FoldFeature | null;
   offset: OffsetReport | null;
   /** Wall chains the cut line came from — coverage/Hausdorff are computed against them. */
@@ -2734,6 +2748,7 @@ export type ManifestBlock = {
   authoredOutlineCorner?: AuthoredQuadraticGrid;
   /** Unequal perpendicular setbacks on one verified paired L1/L14 corner. */
   authoredFixedEndOutlineCorner?: AuthoredQuadraticGrid;
+  authoredAllowanceCorner?: ManifestAuthoredAllowanceCorner;
   authoredText?: ManifestAuthoredTextMark[];
   authoredNotches?: ManifestAuthoredNotchGroup[];
   block: string;

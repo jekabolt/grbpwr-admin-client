@@ -1,3 +1,6 @@
+import { writeDxfDetailed } from 'lib/pattern-import/write';
+import { applyDraftSavedAllowanceCornerV1 } from './draft-cad-allowance-corner-geometry-v1';
+import { draftCadCompiledArtifactV1 } from './draft-cad-geometry-compile-v1';
 import { sameDraftAllowanceRingV1 } from './draft-cad-paired-allowance-authority-v1';
 import { bboxOf } from 'lib/pattern-import/semantics/geom';
 import { transformSizeSpec } from 'lib/pattern-import/semantics/pairs';
@@ -71,6 +74,7 @@ type Review = {
     | 'saved corner'
     | 'saved outline points'
     | 'saved shared outline'
+    | 'saved allowance corner'
     | 'saved allowance offset'
     | 'saved edge length';
   current: () => boolean;
@@ -93,6 +97,7 @@ function markers(manifest: ConversionManifest) {
         b.authoredInternal ?? [],
         b.authoredOutlineCorner ?? null,
         b.authoredFixedEndOutlineCorner ?? null,
+        b.authoredAllowanceCorner ?? null,
       ])
       .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
   );
@@ -139,6 +144,7 @@ function geometry(job: WriteJob) {
         size.pointMarks ?? [],
         size.textMarks ?? [],
         size.authoredOutlineCorner ?? null,
+        size.authoredAllowanceCorner ?? null,
       ]),
     ]),
   );
@@ -212,6 +218,7 @@ export async function compileSavedDraftGeometryReviewV1(
   const savedCurve = command?.tool === 'french-curve' ? command.payload.savedCurve : undefined;
   const sharpen = command?.tool === 'sharpen-corner';
   const round = command?.tool === 'round-corner' && commands.length === 1 && sharedOutlineBlock;
+  const allowanceCorner = command?.tool === 'allowance-corner' && commands.length === 1;
   const orderedMoves =
     commands.length > 1 || sharedOutlineBlock ? draftOutlineMoveHistoryV1(commands) : null;
   requireSavedEdit(
@@ -226,6 +233,7 @@ export async function compileSavedDraftGeometryReviewV1(
   requireSavedEdit(
     command &&
       (orderedMoves ||
+        allowanceCorner ||
         round ||
         parallel ||
         (commands.length === 1 && (savedDart || savedCurve || sharpen))),
@@ -233,10 +241,12 @@ export async function compileSavedDraftGeometryReviewV1(
   );
   const { pieceId, pieceLineKey } = command.target;
   const fixedEnd = command.tool === 'round-corner' && command.payload.fixedEnd;
-  const fixedEndAuthority = fixedEnd ? opening.fixedEndAuthority : undefined;
-  if (fixedEnd)
+  const guarded = Boolean(fixedEnd || allowanceCorner);
+  const fixedEndAuthority = guarded ? opening.fixedEndAuthority : undefined;
+  if (guarded)
     requireSavedEdit(
-      round && isSavedFixedEndAuthorityV1(fixedEndAuthority, row, pieceLineKey),
+      (round || allowanceCorner) &&
+        isSavedFixedEndAuthorityV1(fixedEndAuthority, row, pieceLineKey),
       'Open a fresh guarded review for the saved corner.',
     );
   const verifyReviewSource = async () => {
@@ -252,7 +262,7 @@ export async function compileSavedDraftGeometryReviewV1(
       now.generation !== generation ||
       now.sizeToken !== sizeToken ||
       now.sharedOutlineBlock !== sharedOutlineBlock ||
-      (fixedEnd && now.fixedEndAuthority !== fixedEndAuthority) ||
+      (guarded && now.fixedEndAuthority !== fixedEndAuthority) ||
       !sameSavedDraftRowV1(now.row, row) ||
       now.card.techCardId !== row.techCardId
     )
@@ -304,6 +314,79 @@ export async function compileSavedDraftGeometryReviewV1(
     'The saved geometry selection no longer matches the Draft.',
   );
   const compileInput = { ...selection, session, compileSource };
+  if (allowanceCorner && command.tool === 'allowance-corner') {
+    requireSavedEdit(
+      fixedEndAuthority && command.payload.allRanks && command.payload.sizeToken === sizeToken,
+      'Select the exact saved corner for all five original ranks.',
+    );
+    const { readSavedNativeCutEdgesV1 } = await import('./draft-cad-parallel-spread-source-v1');
+    const [verified] = await readSavedNativeCutEdgesV1(source.value, [pieceId], true);
+    requireSavedEdit(verified, 'The original native allowance outlines changed.');
+    const replay = verified.scope.writerReplay!;
+    affectedBlockNames = verified.scope.manifest.blocks
+      .filter((block) => block.identity === pieceId)
+      .map((block) => block.block);
+    requireSavedEdit(
+      affectedBlockNames.length === 5 && current(),
+      'The original size blocks or aliases changed.',
+    );
+    const sizes = applyDraftSavedAllowanceCornerV1(
+      verified.piece,
+      replay.job.sizes,
+      command.payload.corner,
+    );
+    requireSavedEdit(sizes, 'The native corner or its coordinated grades changed.');
+    const job = structuredClone(replay.job);
+    job.pieces.find((piece) => piece.identity === pieceId)!.sizes = sizes;
+    const written = writeDxfDetailed(job, { now: () => new Date(replay.createdAt) });
+    requireSavedEdit(
+      written.plan.blocks.length === verified.scope.manifest.blocks.length &&
+        written.plan.blocks.every((block) => {
+          const size = job.pieces
+            .find((p) => p.identity === block.identity)
+            ?.sizes.find((s) => s.sizeToken === block.labelSize);
+          return (
+            size &&
+            sameDraftAllowanceRingV1(block.cut, size.cut) &&
+            (block.seam && size.seam
+              ? sameDraftAllowanceRingV1(block.seam, size.seam)
+              : block.seam === size.seam)
+          );
+        }),
+      'The DXF writer would move an untouched native edge or outline.',
+    );
+    await verifyReviewSource();
+    requireSavedEdit(current(), 'The guarded allowance corner changed before Review.');
+    const artifact = draftCadCompiledArtifactV1(
+      session,
+      row.techCardId,
+      row.scopeKey,
+      sizeToken,
+      job,
+      written,
+      [
+        {
+          commandId: command.commandId,
+          entityId: command.payload.entityId,
+          tool: command.tool,
+          output: 'allowance-corner',
+          pieceId,
+          sizeToken,
+        },
+      ],
+    );
+    artifacts.set(artifact, {
+      current,
+      kind: 'saved allowance corner',
+      verifyCurrentRow: verifyReviewSource,
+      fixedEndReplacement: fixedEndAuthority.replacement,
+      manifest: written.manifest,
+      geometry: openingGeometry(job, 'grade'),
+      cardId: row.techCardId,
+      scopeKey: row.scopeKey,
+    });
+    return { ok: true, artifact, blockers: [] };
+  }
   if (parallel) {
     const { checkSavedParallelSpreadSourceV1 } = await import(
       './draft-cad-parallel-spread-source-v1'
@@ -737,7 +820,9 @@ export function openSavedDraftGeometryFileV1(artifact: Artifact, name: string) {
   requireSavedEdit(review && review.current(), 'Compile the current saved geometry again.');
   const file = new File([artifact.dxfText], name, { type: 'image/vnd.dxf' });
   const pairedAllowance =
-    review.kind === 'saved allowance offset' || review.kind === 'saved edge length';
+    review.kind === 'saved allowance offset' ||
+    review.kind === 'saved edge length' ||
+    review.kind === 'saved allowance corner';
   const preserveHeadings =
     pairedAllowance ||
     review.kind === 'saved outline points' ||

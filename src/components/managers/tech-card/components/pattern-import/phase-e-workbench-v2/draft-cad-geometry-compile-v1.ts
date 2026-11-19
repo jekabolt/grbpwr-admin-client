@@ -124,6 +124,7 @@ export type PatternImportDxfPhaseEDraftCadCompiledFeatureV1 = Readonly<{
     | 'deleted-vertex'
     | 'sharpened-corner'
     | 'rounded-outline-corner'
+    | 'allowance-corner'
     | 'edge-length'
     | 'allowance-offset'
     | 'piece-create'

@@ -1,3 +1,4 @@
+import { mapAuthoredAllowanceCorner } from '../manifest/authored-allowance-corner';
 import { mapAuthoredTurnAllowance } from '../manifest/authored-turn-allowance';
 import { mapAuthoredQuadratic } from '../manifest/authored-internal';
 // Pairs (owner decision 9, D1'): a piece cut twice as a left and a right hand is written as TWO
@@ -69,6 +70,9 @@ export function transformSizeSpec(s: PieceSizeSpec, t: Affine): PieceSizeSpec {
   const cutLoops = transformCutLoops(t, s.cutLoops);
   return {
     ...s,
+    ...(s.authoredAllowanceCorner
+      ? { authoredAllowanceCorner: mapAuthoredAllowanceCorner(s.authoredAllowanceCorner, P) }
+      : {}),
     ...(s.authoredOutlineCorner
       ? { authoredOutlineCorner: mapAuthoredQuadratic(s.authoredOutlineCorner, P) }
       : {}),
