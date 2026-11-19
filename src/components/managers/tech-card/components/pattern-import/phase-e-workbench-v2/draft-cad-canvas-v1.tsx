@@ -1,3 +1,5 @@
+import { isAuthoredTurnAllowanceVariant } from 'lib/pattern-import/manifest/authored-turn-allowance';
+import type { AuthoredTurnAllowanceVariant } from 'lib/pattern-import/types';
 import {
   editFixedEndAuthoredOutlineCorner,
   readAuthoredOutlineCorner,
@@ -139,6 +141,7 @@ export type PatternImportDxfPhaseEDraftCadCanvasPropsV1 = Readonly<{
   savedFrenchCurveOnly?: boolean;
   moveSharedOutline?: boolean;
   savedRoundCorner?: AuthoredQuadraticGrid;
+  savedTurnAllowance?: boolean;
   savedFrenchCurve?: Readonly<{
     key: string;
     primitive: FrenchCurvePrimitive;
@@ -207,6 +210,7 @@ type BoundaryPickInput = Readonly<{
   sequence: number;
   resize?: Readonly<{ fixed: 'start' | 'end'; lengthMm: number }>;
   allowanceOffsetMm?: number;
+  turnAllowance?: AuthoredTurnAllowanceVariant;
   notchKind?: 'single' | AuthoredNotchShape;
 }>;
 
@@ -707,6 +711,7 @@ export function recordPatternImportDxfPhaseEDraftCadCanvasBoundaryPickV1(
     )?.contours.find(({ contourId }) => contourId === base.anchor.contourId);
     if (
       amount === undefined ||
+      (input.turnAllowance && amount <= 0) ||
       !selectDraftCutAllowanceOffsetV1(contour, base.anchor.boundaryVertexIds, amount)
     )
       return {
@@ -727,6 +732,7 @@ export function recordPatternImportDxfPhaseEDraftCadCanvasBoundaryPickV1(
         entityId: ids.entityId,
         edge: base.anchor,
         offsetMm: amount,
+        ...(input.turnAllowance && { turnAllowance: input.turnAllowance }),
         sizeToken: input.projection.sizeToken,
       },
     };
@@ -1930,6 +1936,7 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
   savedFrenchCurveOnly = false,
   moveSharedOutline = false,
   savedRoundCorner,
+  savedTurnAllowance,
   arrangeActive = false,
   panActive = false,
   crossScopeConnectActive = false,
@@ -1952,6 +1959,7 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
   const [pendingPoints, setPendingPoints] = useState<readonly PtMm[]>([]);
   const [pendingDartBase, setPendingDartBase] =
     useState<PatternImportDxfPhaseEDraftCadCanvasDartBaseV1 | null>(null);
+  const [turnAllowance, setTurnAllowance] = useState<AuthoredTurnAllowanceVariant>();
   const [resizeLength, setResizeLength] = useState('');
   const [resizeFixed, setResizeFixed] = useState<'start' | 'end'>('start');
   const [cornerSetback, setCornerSetback] = useState('4');
@@ -3053,6 +3061,23 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
             ) : (
               <span className='text-small'>Positive extends the cut. Negative trims it.</span>
             )}
+            {activeTool === 'allowance-offset' && savedTurnAllowance && (
+              <div role='group' aria-label='Allowance finish'>
+                <Selector
+                  label='Allowance finish'
+                  compact
+                  value={turnAllowance ?? 'offset-only'}
+                  onChange={(value: string) =>
+                    setTurnAllowance(isAuthoredTurnAllowanceVariant(value) ? value : undefined)
+                  }
+                  options={[
+                    { value: 'offset-only', label: 'Offset only' },
+                    { value: 'single-turn-hem', label: 'Single-turn hem' },
+                    { value: 'cut-on-facing', label: 'Cut-on facing' },
+                  ]}
+                />
+              </div>
+            )}
             <Button
               type='button'
               size='xs'
@@ -3067,7 +3092,10 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
                   sequence: sequence.current,
                   ...(activeTool === 'edge-length'
                     ? { resize: { fixed: resizeFixed, lengthMm: Number(resizeLength) } }
-                    : { allowanceOffsetMm: Number(resizeLength) }),
+                    : {
+                        allowanceOffsetMm: Number(resizeLength),
+                        ...(savedTurnAllowance && turnAllowance && { turnAllowance }),
+                      }),
                 });
                 setInputError(result.blocker);
                 if (result.recorded) {

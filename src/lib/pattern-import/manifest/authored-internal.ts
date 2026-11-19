@@ -1,3 +1,4 @@
+import { parseAuthoredTurnAllowance } from './authored-turn-allowance';
 import type {
   AuthoredInternalLabel,
   AuthoredQuadraticControls,
@@ -42,10 +43,18 @@ export function parseManifestAuthoredInternal(
   if (!Array.isArray(value) || value.length === 0 || value.length > internalCount) return null;
   const entries: ManifestAuthoredInternalPath[] = [];
   let previousIndex = -1;
+  let sawTurn = false;
   for (const candidate of value) {
     if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return null;
-    const { index, label, closed, vertices, quadratic } =
+    const { index, label, closed, vertices, quadratic, turnAllowance } =
       candidate as Partial<ManifestAuthoredInternalPath>;
+    const turn = turnAllowance === undefined ? null : parseAuthoredTurnAllowance(turnAllowance);
+    if (
+      turnAllowance !== undefined &&
+      (!turn || sawTurn || label !== 'draft-cad:pattern-line' || closed)
+    )
+      return null;
+    sawTurn ||= !!turn;
     if (
       typeof index !== 'number' ||
       !Number.isSafeInteger(index) ||
@@ -70,6 +79,7 @@ export function parseManifestAuthoredInternal(
       closed,
       vertices: [...vertices],
       ...(quadratic ? { quadratic: [...quadratic] } : {}),
+      ...(turn ? { turnAllowance: turn } : {}),
     });
     previousIndex = index;
   }

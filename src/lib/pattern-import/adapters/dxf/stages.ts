@@ -436,12 +436,14 @@ function candidateOf(
     if (!path || cutHoles?.has(id)) continue;
     if (role === 'internal' || role === 'hole') {
       const authoredQuadratic = p.authoredQuadraticByPath?.get(id);
+      const authoredTurnAllowance = p.authoredTurnAllowanceByPath?.get(id);
       features.push({
         kind: 'internal',
         pts: path.pts,
         closed: path.closed,
         label: role === 'hole' ? 'hole' : p.authoredInternalLabels?.get(id),
         ...(authoredQuadratic ? { authoredQuadratic } : {}),
+        ...(authoredTurnAllowance ? { authoredTurnAllowance } : {}),
         origin: 'detected',
         ranges: [range(id)],
         confidence: 1,

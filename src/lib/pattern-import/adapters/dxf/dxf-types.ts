@@ -8,6 +8,7 @@ import type {
   AuthoredNotchStroke,
   AuthoredPointMark,
   AuthoredQuadraticControls,
+  AuthoredTurnAllowance,
   AuthoredTextMark,
   BoxMm,
   Feature,
@@ -312,6 +313,7 @@ export type DxfBlockPiece = {
   roles: Record<PathId, PathRole>;
   authoredInternalLabels?: ReadonlyMap<PathId, AuthoredInternalLabel>;
   authoredQuadraticByPath?: ReadonlyMap<PathId, AuthoredQuadraticControls>;
+  authoredTurnAllowanceByPath?: ReadonlyMap<PathId, AuthoredTurnAllowance>;
   authoredOutlineCorner?: AuthoredQuadraticControls;
   texts: TextId[];
   textMarks?: AuthoredTextMark[];

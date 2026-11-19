@@ -1,3 +1,7 @@
+import {
+  captureSavedFixedEndAuthorityV1,
+  type SavedFixedEndAuthorityV1,
+} from './saved-fixed-end-outline-authority-v1';
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Button, CalloutBox } from 'ui';
 import { readPatternImportDxfPhaseECardSessionV1 } from '../phase-e-workbench-card-session-v1';
@@ -39,6 +43,11 @@ export default function CadTableSavedAllowanceEditV1({
   const { authoringAuthority, catalog, projection, selection, sizeToken, scopeKey } = prepared;
   const { row } = authoringAuthority;
   const piece = catalog.pieces[pieceIndex];
+  const savedTurn = prepared.draftCadCompileSource?.scopes
+    .find(({ target }) => target.scopeKey === scopeKey)
+    ?.writerReplay?.job.pieces.find(({ identity }) => identity === piece?.pieceId)
+    ?.sizes.find((size) => size.sizeToken === sizeToken)
+    ?.internal.find(({ authoredTurnAllowance }) => authoredTurnAllowance)?.authoredTurnAllowance;
   const initial = useMemo(
     () =>
       createPatternImportDxfPhaseEDraftCadSessionV1({
@@ -59,6 +68,7 @@ export default function CadTableSavedAllowanceEditV1({
   const [session, setSession] = useState(initial.session);
   const sessionRef = useRef(session);
   const pending = useRef(false);
+  const capture = useRef<AbortController | null>(null);
   const [preparing, setPreparing] = useState(false);
   const [error, setError] = useState('');
   const runtimeRef = useRef<ReturnType<typeof createSavedPairedAllowanceReviewRuntimeV1> | null>(
@@ -72,6 +82,7 @@ export default function CadTableSavedAllowanceEditV1({
     runtimeRef.current = runtime;
     return () => {
       runtimeRef.current = null;
+      capture.current?.abort();
       runtime.dispose();
     };
   }, [authority]);
@@ -118,10 +129,23 @@ export default function CadTableSavedAllowanceEditV1({
     setPreparing(true);
     setError('');
     try {
+      const command = captured.history[0]?.commands[0];
+      let turnAuthority: SavedFixedEndAuthorityV1 | undefined;
+      if (command?.tool === 'allowance-offset' && command.payload.turnAllowance) {
+        const controller = new AbortController();
+        capture.current = controller;
+        turnAuthority = await captureSavedFixedEndAuthorityV1(
+          row,
+          command.target.pieceLineKey,
+          authority.resolveExactCurrentCard,
+          controller.signal,
+        );
+        if (!readCurrent()) return;
+      }
       const result = await compileDraftForOrdinaryReviewV1(
         { session: captured, projection, selection, compileSource: prepared.draftCadCompileSource },
         undefined,
-        () => runtime.prepareSavedPairedAllowance(row, readCurrent),
+        () => runtime.prepareSavedPairedAllowance(row, readCurrent, turnAuthority),
       );
       if (!readCurrent()) return;
       if (!result.ok)
@@ -146,6 +170,7 @@ export default function CadTableSavedAllowanceEditV1({
         setError(err instanceof Error ? err.message : 'Could not review the saved allowance.');
     } finally {
       if (runtimeRef.current === runtime) {
+        capture.current = null;
         pending.current = false;
         setPreparing(false);
       }
@@ -184,6 +209,11 @@ export default function CadTableSavedAllowanceEditV1({
               Undo allowance offset
             </Button>
           )}
+          {savedTurn && (
+            <span className='text-small'>
+              {savedTurn.variant === 'single-turn-hem' ? 'Single-turn hem' : 'Cut-on facing'}
+            </span>
+          )}
           <Button type='button' variant='secondary' size='xs' onClick={onClose}>
             Cancel allowance
           </Button>
@@ -200,6 +230,7 @@ export default function CadTableSavedAllowanceEditV1({
         scopeKey={scopeKey}
         activePieceIndex={pieceIndex}
         activeTool='allowance-offset'
+        savedTurnAllowance={!savedTurn}
         panActive={session.cursor === 1}
         topologySession={topology}
         activeTopologyTool={null}

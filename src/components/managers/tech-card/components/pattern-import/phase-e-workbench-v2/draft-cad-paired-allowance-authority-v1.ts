@@ -1,3 +1,8 @@
+import {
+  isSavedFixedEndAuthorityV1,
+  type SavedFixedEndAuthorityV1,
+  type SavedFixedEndReplacementV1,
+} from './saved-fixed-end-outline-authority-v1';
 import { selectPatternImportDxfProductDraftPhaseDSizeV1 } from 'lib/cloth/domain/pattern-import-dxf-product-draft-phase-d-selection-v1';
 import { sha256Hex } from 'lib/pattern-import/adapters/vector/builder';
 import type { DxfPieceSpecContourBoundaryV1 } from 'lib/pattern-import/dxf-piece-spec-provenance-bridge-v1';
@@ -38,6 +43,7 @@ export type SavedDraftPairedAllowanceProofV1 = Readonly<{
   seam: readonly PtMm[];
   current: () => boolean;
   verifyCurrentRow?: () => Promise<void>;
+  fixedEndReplacement?: SavedFixedEndReplacementV1;
 }>;
 const owners = new WeakMap<
   SavedDraftPairedAllowanceAuthorityV1,
@@ -148,6 +154,7 @@ export async function prepareSavedDraftPairedAllowanceAuthorityV1(
     savedBytes: ArrayBuffer;
     readCurrent: () => SavedAddPointCurrentV1 | null;
     verifyCurrentRow?: () => Promise<void>;
+    turnAuthority?: SavedFixedEndAuthorityV1;
   }>,
 ): Promise<SavedDraftPairedAllowanceAuthorityV1> {
   const opening = input.readCurrent();
@@ -168,7 +175,19 @@ export async function prepareSavedDraftPairedAllowanceAuthorityV1(
     'record one edge length or allowance offset on the current saved size',
   );
   const { pieceId, pieceLineKey } = command.target;
-  const verifyCurrentRow = input.verifyCurrentRow;
+  const turn = command.tool === 'allowance-offset' && command.payload.turnAllowance;
+  const turnAuthority = turn ? input.turnAuthority : undefined;
+  if (turn)
+    requirePair(
+      isSavedFixedEndAuthorityV1(turnAuthority, row, pieceLineKey),
+      'an authored turn requires a guarded Assembly review',
+    );
+  const verifyCurrentRow = turnAuthority
+    ? async () => {
+        await input.verifyCurrentRow?.();
+        await turnAuthority.verify(new AbortController().signal);
+      }
+    : input.verifyCurrentRow;
   requirePair(
     command.tool === 'edge-length' || verifyCurrentRow,
     'an authoritative saved row recheck is required for the offset',
@@ -339,6 +358,7 @@ export async function prepareSavedDraftPairedAllowanceAuthorityV1(
       seam: points(size.seam),
       current,
       verifyCurrentRow,
+      ...(turnAuthority && { fixedEndReplacement: turnAuthority.replacement }),
     }),
   );
   return owner;

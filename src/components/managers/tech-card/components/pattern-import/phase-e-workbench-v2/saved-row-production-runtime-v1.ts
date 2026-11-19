@@ -105,6 +105,7 @@ export type PatternImportDxfPhaseESavedRowProductionRuntimeV1 = Readonly<{
   prepareSavedPairedAllowance?: (
     row: DxfProductSavedRowIdentityV1,
     readCurrent: () => Omit<SavedAddPointCurrentV1, 'card'> | null,
+    turnAuthority?: import('./saved-fixed-end-outline-authority-v1').SavedFixedEndAuthorityV1,
   ) => Promise<SavedDraftPairedAllowanceAuthorityV1>;
   prepareSavedJoin?: (
     row: DxfProductSavedRowIdentityV1,
@@ -420,7 +421,7 @@ function createSavedDraftSourceReaderV1(deps: SavedDraftSourceReaderDepsV1) {
   };
   const prepareSavedPairedAllowance: NonNullable<
     PatternImportDxfPhaseESavedRowProductionRuntimeV1['prepareSavedPairedAllowance']
-  > = async (row, readCurrent) => {
+  > = async (row, readCurrent, turnAuthority) => {
     const opening = readCurrent();
     const command = opening?.session.history[0]?.commands[0];
     if (
@@ -440,6 +441,7 @@ function createSavedDraftSourceReaderV1(deps: SavedDraftSourceReaderDepsV1) {
         );
         return prepareSavedDraftPairedAllowanceAuthorityV1({
           ...proof,
+          turnAuthority,
           readCurrent: () => {
             const current = readCurrent();
             return !disposed &&

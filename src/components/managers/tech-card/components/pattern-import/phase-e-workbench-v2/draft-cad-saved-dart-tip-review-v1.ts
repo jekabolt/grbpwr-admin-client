@@ -126,7 +126,15 @@ function geometry(job: WriteJob) {
         size.fold && [size.fold.a, size.fold.b],
         size.notches.map((n) => [n.at, n.seg, n.depthMm, n.authoredGroup]),
         size.drills.map((d) => [d.at, d.form, d.sizeMm]),
-        size.internal.map((p) => [p.label, p.closed, p.pts, p.authoredQuadratic]),
+        size.internal.map((p) => [
+          p.label,
+          p.closed,
+          // The manifest also pins the exact written L8 samples. The writer may add an
+          // intermediate vertex to the same directed crease when it writes the Draft endpoints.
+          p.authoredTurnAllowance?.sewing ?? p.pts,
+          p.authoredQuadratic,
+          p.authoredTurnAllowance,
+        ]),
         size.pointMarks ?? [],
         size.textMarks ?? [],
         size.authoredOutlineCorner ?? null,
@@ -713,6 +721,7 @@ function readOffsetReview(artifact: Artifact): Review | undefined {
     kind: 'saved allowance offset',
     current: proof.current,
     verifyCurrentRow: proof.verifyCurrentRow,
+    ...(proof.fixedEndReplacement && { fixedEndReplacement: proof.fixedEndReplacement }),
     manifest: artifact.manifest,
     geometry: openingGeometry(artifact.compiledJob, 'grade'),
     cardId: artifact.scope.techCardId,

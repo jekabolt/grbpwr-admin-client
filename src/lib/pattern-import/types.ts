@@ -1537,6 +1537,18 @@ export type FoldFeature = FeatureBase & {
 };
 export type AuthoredQuadraticControls = readonly [PtMm, PtMm, PtMm];
 
+export type AuthoredTurnAllowanceVariant = 'single-turn-hem' | 'cut-on-facing';
+export type AuthoredTurnAllowance = {
+  variant: AuthoredTurnAllowanceVariant;
+  cut: [PtMm, PtMm];
+  sewing: [PtMm, PtMm];
+};
+export type ManifestAuthoredTurnAllowance = {
+  variant: AuthoredTurnAllowanceVariant;
+  cut: [number, number, number, number];
+  sewing: [number, number, number, number];
+};
+
 export type InternalFeature = FeatureBase & {
   kind: 'internal';
   pts: PtMm[];
@@ -1544,6 +1556,7 @@ export type InternalFeature = FeatureBase & {
   label?: string; // "dart", "pocket placement"
   /** Exact authored start, control and end, in the same frame as pts. */
   authoredQuadratic?: AuthoredQuadraticControls;
+  authoredTurnAllowance?: AuthoredTurnAllowance;
   /** GRADE P1: not drawn in this size — placed by the operator's "in every size" at its graded place */
   graded?: { from: string[]; answered?: boolean };
 };
@@ -2695,6 +2708,8 @@ export type ManifestAuthoredInternalPath = {
   vertices: number[];
   /** Optional start, control and end on the same grid as the native sampled vertices. */
   quadratic?: AuthoredQuadraticGrid;
+  /** Explicit turn intent on the original finite L14 crease and its paired outer support. */
+  turnAllowance?: ManifestAuthoredTurnAllowance;
 };
 
 export type ManifestAuthoredTextMark = {

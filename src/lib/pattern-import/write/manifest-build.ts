@@ -95,18 +95,20 @@ export function manifestBlock(b: PlannedBlock, sigPts?: number): ManifestBlock {
     maxX = Math.max(maxX, p.x);
     maxY = Math.max(maxY, p.y);
   }
-  const authoredInternal = b.internal.flatMap(({ pts, closed, authoredLabel, quadratic }, index) =>
-    authoredLabel
-      ? [
-          {
-            index,
-            label: authoredLabel,
-            closed,
-            vertices: authoredInternalVertices(pts),
-            ...(quadratic ? { quadratic } : {}),
-          },
-        ]
-      : [],
+  const authoredInternal = b.internal.flatMap(
+    ({ pts, closed, authoredLabel, quadratic, turnAllowance }, index) =>
+      authoredLabel
+        ? [
+            {
+              index,
+              label: authoredLabel,
+              closed,
+              vertices: authoredInternalVertices(pts),
+              ...(quadratic ? { quadratic } : {}),
+              ...(turnAllowance ? { turnAllowance } : {}),
+            },
+          ]
+        : [],
   );
   const corner =
     b.size.authoredOutlineCorner && authoredQuadraticGrid(b.size.authoredOutlineCorner);

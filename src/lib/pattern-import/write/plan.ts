@@ -1,3 +1,8 @@
+import {
+  mapAuthoredTurnAllowance,
+  turnAllowanceMarker,
+  verifyTurnAllowanceGeometry,
+} from '../manifest/authored-turn-allowance';
 import { readPairedAuthoredOutlineCorner } from '../manifest/authored-outline-corner';
 // PieceSpec[] (source frame) → PlannedBlock[] (written frame): everything the emitters need,
 // with every garment decision already taken. The emitters only serialise.
@@ -36,6 +41,7 @@ import type {
   FoldFeature,
   GrainFeature,
   InternalFeature,
+  ManifestAuthoredTurnAllowance,
   ManifestProtectedLineSplit,
   NotchFeature,
   PieceSizeSpec,
@@ -120,6 +126,7 @@ export type PlannedBlock = {
     closed: boolean;
     authoredLabel?: AuthoredInternalLabel;
     quadratic?: AuthoredQuadraticGrid;
+    turnAllowance?: ManifestAuthoredTurnAllowance;
   }[];
   /** How many of `internal` are the fold line (0/1) — the manifest counts both as internal. */
   foldLines: number;
@@ -187,6 +194,9 @@ function transformSize(s: PieceSizeSpec, t: Affine): PieceSizeSpec {
     pts: mapPts(t, f.pts),
     ...(f.authoredQuadratic
       ? { authoredQuadratic: mapAuthoredQuadratic(f.authoredQuadratic, P) }
+      : {}),
+    ...(f.authoredTurnAllowance
+      ? { authoredTurnAllowance: mapAuthoredTurnAllowance(f.authoredTurnAllowance, P) }
       : {}),
   }));
   const fold: FoldFeature | null = s.fold ? { ...s.fold, a: P(s.fold.a), b: P(s.fold.b) } : null;
@@ -520,6 +530,24 @@ export function planBlocks(
           : s.notches;
       if (!seam) warnings.push(`${who}: no seam line — layer 14 omitted (the gate will block)`);
       const internal: PlannedBlock['internal'] = s.internal.map((f) => {
+        if (f.authoredTurnAllowance) {
+          const marker = turnAllowanceMarker(f.authoredTurnAllowance);
+          const pts = densifyOpen2(f.pts);
+          if (
+            f.label !== 'draft-cad:pattern-line' ||
+            f.closed ||
+            !marker ||
+            !seam ||
+            cutLoops.length ||
+            w.spec.pairOf ||
+            w.derivedFrom ||
+            !verifyTurnAllowanceGeometry(marker, cut, seam, pts, false)
+          )
+            throw new Error(
+              `${who}: the authored turn no longer matches its native crease and paired outline edges.`,
+            );
+          return { pts, closed: false, authoredLabel: f.label, turnAllowance: marker };
+        }
         if (f.authoredQuadratic) {
           const quadratic = authoredQuadraticGrid(f.authoredQuadratic);
           const pts = quadratic && sampleAuthoredQuadratic(quadratic);

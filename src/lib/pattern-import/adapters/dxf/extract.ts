@@ -284,6 +284,7 @@ class Builder {
     readonly straightEdgeCapture: StraightEdgeCapture | null = null,
     readonly productManifestPresent = false,
     readonly authoredOutlineCornerByBlock?: DxfMeta['authoredOutlineCornerByBlock'],
+    readonly authoredTurnBlocks?: ReadonlySet<string>,
   ) {
     for (const l of raw.layers) this.addLayer(l.name);
     const handleCounts = new Map<string, number>();
@@ -806,12 +807,12 @@ class Builder {
       if (e.layer === '8') nativeStraightL8Polylines.add(path);
       else if (e.layer === '1' || e.layer === '6') nativeCutAndFoldPolylines.add(path);
       if (
-        (e.layer === '1' || e.layer === '14') &&
-        em.closed &&
+        ((em.closed && (e.layer === '1' || e.layer === '14')) || (!em.closed && e.layer === '8')) &&
         ctx.group.kind === 'insert' &&
         ctx.block !== null &&
         ctx.block === ctx.group.block &&
-        this.authoredOutlineCornerByBlock?.has(ctx.block) &&
+        ((em.closed && this.authoredOutlineCornerByBlock?.has(ctx.block)) ||
+          this.authoredTurnBlocks?.has(ctx.block)) &&
         em.straightEdgeFacts.every(
           ({ sourceAffine }) =>
             sourceAffine.a === ctx.group.transform.a &&
@@ -822,10 +823,12 @@ class Builder {
             sourceAffine.f === ctx.group.transform.f,
         )
       )
-        nativeAuthoredOutlinePolylines.set(
-          path,
-          em.straightEdgeFacts.map(({ nativeStart }) => nativeStart),
-        );
+        nativeAuthoredOutlinePolylines.set(path, [
+          ...em.straightEdgeFacts.map(({ nativeStart }) => nativeStart),
+          ...(!em.closed && em.straightEdgeFacts.length
+            ? [em.straightEdgeFacts.at(-1)!.nativeEnd]
+            : []),
+        ]);
     }
     this.pathEntity.push(e.type);
     const provenance = this.capturePathProvenance(id, e, ctx, em);
@@ -1979,6 +1982,11 @@ async function readDxfInternal(
       },
     ),
   );
+  const authoredTurnBlocks = new Set(
+    conversion?.blocks
+      .filter((block) => block.authoredInternal?.some((line) => line.turnAllowance))
+      .map(({ block }) => block),
+  );
   const b = new Builder(
     file.id,
     raw,
@@ -1993,6 +2001,7 @@ async function readDxfInternal(
     straightEdgeCapture,
     productManifestPresent,
     authoredOutlineCornerByBlock,
+    authoredTurnBlocks,
   );
   b.warnings.push(...raw.warnings);
   // Unscoped parser recovery cannot establish selected-path completeness.

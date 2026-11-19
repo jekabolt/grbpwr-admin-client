@@ -933,6 +933,11 @@ export function validateManifest(x: unknown): ConversionManifest {
         : parseManifestAuthoredInternal(b.authoredInternal, b.internal as number);
     if (b.authoredInternal !== undefined && !authoredInternal)
       fail(`${p}.authoredInternal`, 'invalid native layer-8 path metadata');
+    if (authoredInternal?.some(({ turnAllowance }) => turnAllowance) && (!b.hasSeam || !b.contour))
+      fail(
+        `${p}.authoredInternal`,
+        'a saved turn allowance requires native cut and sewing contours',
+      );
     const authoredOutlineCorner =
       b.authoredOutlineCorner === undefined
         ? null

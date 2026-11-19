@@ -1,3 +1,4 @@
+import { isAuthoredTurnAllowanceVariant } from 'lib/pattern-import/manifest/authored-turn-allowance';
 import {
   parseAuthoredOutlineCorner,
   parseAuthoredFixedEndOutlineCorner,
@@ -6,7 +7,11 @@ import {
 import { normalizeAuthoredText } from 'lib/pattern-import/manifest/authored-text';
 import type { PatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import type { DxfProductPhaseDReplayCarrierV1 } from 'lib/pattern-import/dxf-product-phase-d-replay-v1';
-import type { AuthoredQuadraticGrid, PtMm } from 'lib/pattern-import/types';
+import type {
+  AuthoredQuadraticGrid,
+  AuthoredTurnAllowanceVariant,
+  PtMm,
+} from 'lib/pattern-import/types';
 
 export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_SESSION_V1 =
   'pattern-import-dxf-phase-e-draft-cad-session/1' as const;
@@ -251,6 +256,7 @@ export type PatternImportDxfPhaseEDraftCadCommandV1 =
         entityId: string;
         edge: PatternImportDxfPhaseEDraftCadBoundaryAnchorV1;
         offsetMm: number;
+        turnAllowance?: AuthoredTurnAllowanceVariant;
         sizeToken: string;
       }
     >
@@ -623,6 +629,8 @@ function validCommand(value: unknown): value is PatternImportDxfPhaseEDraftCadCo
         boundaryAnchor(payload.edge) &&
         typeof payload.offsetMm === 'number' &&
         validParallelDisplacementV1(payload.offsetMm) &&
+        (payload.turnAllowance === undefined ||
+          (isAuthoredTurnAllowanceVariant(payload.turnAllowance) && payload.offsetMm > 0)) &&
         stableId(payload.sizeToken)
       );
     case 'internal-line':

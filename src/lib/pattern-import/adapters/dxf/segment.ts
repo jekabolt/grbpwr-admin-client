@@ -1,3 +1,7 @@
+import {
+  decodeTurnAllowance,
+  verifyTurnAllowanceGeometry,
+} from '../../manifest/authored-turn-allowance';
 // DXF already carries pieces: one top-level INSERT = one piece × size. This turns the IR + the DXF
 // side channel into pre-segmented piece candidates, applying every measured CLO/AAMA rule of
 // 10-CLO-DXF-FORMAT §2 (dialect, cut-line mode, grain arrow, POINT notches, notch twins, labels,
@@ -18,6 +22,7 @@ import type {
   AllowanceDecision,
   AuthoredInternalLabel,
   AuthoredPointMark,
+  AuthoredTurnAllowance,
   AuthoredQuadraticControls,
   IRPath,
   IRText,
@@ -609,12 +614,13 @@ function blockPiece(
   const authored = group.block ? read.meta.authoredInternalByBlock?.get(group.block) : undefined;
   const authoredInternalLabels = new Map<PathId, AuthoredInternalLabel>();
   const authoredQuadraticByPath = new Map<PathId, AuthoredQuadraticControls>();
+  const authoredTurnAllowanceByPath = new Map<PathId, AuthoredTurnAllowance>();
   if (authored) {
     const { a, b, c, d, e, f } = group.transform;
     if (read.meta.units.mmPerUnit !== 1 || a !== 1 || b !== 0 || c !== 0 || d !== 1)
       throw new Error(`Typed CAD lines in ${group.block} require their original millimetre frame.`);
     const layerEight = paths.filter((path) => layerOfPath(path) === '8');
-    for (const { index, label, closed, vertices, quadratic } of authored) {
+    for (const { index, label, closed, vertices, quadratic, turnAllowance } of authored) {
       const path = layerEight[index];
       const coords = path ? authoredInternalVertices(path.pts, { x: e, y: f }) : [];
       if (
@@ -639,6 +645,26 @@ function blockPiece(
             `The saved French curve controls in ${group.block} do not reproduce the native layer-8 path.`,
           );
         authoredQuadraticByPath.set(path.id, decodeAuthoredQuadratic(quadratic, { x: e, y: f }));
+      }
+      if (turnAllowance) {
+        const c = paths.filter((path) => layerOfPath(path) === '1');
+        const s = paths.filter((path) => layerOfPath(path) === '14');
+        const cut = c.length === 1 && c[0]!.closed && nativeAuthoredOutlinePoints(c[0]!);
+        const sewing = s.length === 1 && s[0]!.closed && nativeAuthoredOutlinePoints(s[0]!);
+        const crease = !path.closed && nativeAuthoredOutlinePoints(path);
+        if (
+          !cut ||
+          !sewing ||
+          !crease ||
+          !verifyTurnAllowanceGeometry(turnAllowance, cut, sewing, crease, true)
+        )
+          throw new Error(
+            `The saved turn in ${group.block} does not reproduce its exact native crease and paired edges.`,
+          );
+        authoredTurnAllowanceByPath.set(
+          path.id,
+          decodeTurnAllowance(turnAllowance, { x: e, y: f }),
+        );
       }
       // Authored marks have a checked native role before the generic seam and drill heuristics.
       authoredInternalLabels.set(path.id, label);
@@ -1056,6 +1082,7 @@ function blockPiece(
     roles,
     ...(authoredInternalLabels.size ? { authoredInternalLabels } : {}),
     ...(authoredQuadraticByPath.size ? { authoredQuadraticByPath } : {}),
+    ...(authoredTurnAllowanceByPath.size ? { authoredTurnAllowanceByPath } : {}),
     texts: texts.map(({ id }) => id),
     ...(textMarks.length ? { textMarks } : {}),
     ...(pointMarks.length ? { pointMarks } : {}),

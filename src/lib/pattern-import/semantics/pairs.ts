@@ -1,3 +1,4 @@
+import { mapAuthoredTurnAllowance } from '../manifest/authored-turn-allowance';
 import { mapAuthoredQuadratic } from '../manifest/authored-internal';
 // Pairs (owner decision 9, D1'): a piece cut twice as a left and a right hand is written as TWO
 // blocks, `_L` and `_R`, the second the explicit mirror of the first across its grain line (the
@@ -58,6 +59,9 @@ export function transformSizeSpec(s: PieceSizeSpec, t: Affine): PieceSizeSpec {
     pts: f.pts.map(P),
     ...(f.authoredQuadratic
       ? { authoredQuadratic: mapAuthoredQuadratic(f.authoredQuadratic, P) }
+      : {}),
+    ...(f.authoredTurnAllowance
+      ? { authoredTurnAllowance: mapAuthoredTurnAllowance(f.authoredTurnAllowance, P) }
       : {}),
   }));
   const fold: FoldFeature | null = s.fold ? { ...s.fold, a: P(s.fold.a), b: P(s.fold.b) } : null;

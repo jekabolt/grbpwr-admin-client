@@ -209,7 +209,7 @@ export type PatternImportDxfPhaseEDraftCadGeometryCompileInputV1 = Readonly<{
 
 const pairedAllowanceReviews = new WeakMap<
   PatternImportDxfPhaseEDraftCadGeometryCompileArtifactV1,
-  Pick<SavedDraftPairedAllowanceProofV1, 'current' | 'verifyCurrentRow'>
+  Pick<SavedDraftPairedAllowanceProofV1, 'current' | 'verifyCurrentRow' | 'fixedEndReplacement'>
 >();
 
 export function readCompiledPairedAllowanceReviewV1(

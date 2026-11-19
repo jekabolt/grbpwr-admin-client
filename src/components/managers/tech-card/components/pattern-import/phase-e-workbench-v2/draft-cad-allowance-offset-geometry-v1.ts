@@ -1,6 +1,10 @@
+import {
+  turnAllowanceMarker,
+  verifyTurnAllowanceGeometry,
+} from 'lib/pattern-import/manifest/authored-turn-allowance';
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 import { bboxOf, signedArea } from 'lib/pattern-import/semantics/geom';
-import type { PieceSizeSpec, PtMm } from 'lib/pattern-import/types';
+import type { AuthoredTurnAllowance, PieceSizeSpec, PtMm } from 'lib/pattern-import/types';
 import { DRILL_SQUARE_MM } from 'lib/pattern-import/write/plan';
 import {
   sameDraftAllowanceRingV1,
@@ -113,7 +117,7 @@ export function selectDraftCutAllowanceOffsetV1(
     ),
   );
   return edited?.winding === original.winding
-    ? { original, edited, ring: edited.ring, axis, support }
+    ? { original, edited, ring: edited.ring, axis, support, index, next, sign }
     : null;
 }
 
@@ -239,9 +243,63 @@ export function offsetDraftCadSelectedSizeAllowanceV1(
   const holes = source.cutLoops ?? [];
   if (holes.some((loop) => signedArea(loop) >= 0))
     return { ok: false, detail: 'The cut contains an unsupported secondary outline.' };
+  let turnAllowance: AuthoredTurnAllowance | undefined;
+  if (command.payload.turnAllowance) {
+    const cut: [PtMm, PtMm] = [moved.ring[moved.index]!, moved.ring[moved.next]!];
+    const matches = sewing.ring.flatMap((point, index) => {
+      const edge: [PtMm, PtMm] = [point, sewing.ring[(index + 1) % sewing.ring.length]!];
+      const marker = turnAllowanceMarker({
+        variant: command.payload.turnAllowance!,
+        cut,
+        sewing: edge,
+      });
+      return marker && verifyTurnAllowanceGeometry(marker, moved.ring, sewing.ring, edge, true)
+        ? [edge]
+        : [];
+    });
+    if (
+      matches.length !== 1 ||
+      holes.length ||
+      source.notches.length ||
+      source.drills.length ||
+      source.internal.some(({ authoredTurnAllowance }) => authoredTurnAllowance)
+    )
+      return {
+        ok: false,
+        detail:
+          'An authored turn requires one exact parallel sewing edge and no other turn, cut hole, notch or drill.',
+      };
+    const edge = matches[0]!;
+    const axis = moved.axis;
+    const reflected = 2n * exactPoint(edge[0])![axis] - exactPoint(cut[0])![axis];
+    const kept = [...interior, ...(source.grain ? [source.grain.a, source.grain.b] : [])];
+    if (
+      kept.some((point) => {
+        const exact = exactPoint(point);
+        return !exact || BigInt(moved.sign) * (exact[axis] - reflected) >= 0n;
+      })
+    )
+      return {
+        ok: false,
+        detail:
+          'The selected turn would affect retained marks in the original or folded allowance.',
+      };
+    turnAllowance = { variant: command.payload.turnAllowance, cut, sewing: edge };
+  }
   const size = structuredClone(source);
   size.cut = moved.ring.map((point) => ({ ...point }));
   if (openRing(source.cut).length < source.cut.length) size.cut.push({ ...size.cut[0]! });
+  if (turnAllowance)
+    size.internal.push({
+      kind: 'internal',
+      label: 'draft-cad:pattern-line',
+      pts: [...turnAllowance.sewing],
+      closed: false,
+      origin: 'operator',
+      ranges: [],
+      confidence: 1,
+      authoredTurnAllowance: turnAllowance,
+    });
   size.bbox = bounds;
   size.areaMm2 =
     Math.abs(signedArea(moved.ring)) + holes.reduce((sum, hole) => sum + signedArea(hole), 0);
