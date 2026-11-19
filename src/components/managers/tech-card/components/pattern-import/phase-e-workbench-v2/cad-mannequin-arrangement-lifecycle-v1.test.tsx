@@ -13,6 +13,16 @@ import {
   PatternImportDxfPhaseECadMannequinModelPickerViewV1,
   type PatternImportDxfPhaseECadMannequinModelPickerViewPropsV1,
 } from './cad-workbench-mannequin-model-picker-v1';
+import {
+  captureMeasurementSurfaceTranslationGroupV1,
+  focusMeasurementSurfacePatternHitV1,
+} from 'components/shared/measurement-watertight-surface-v1-stage';
+import { Vector3 } from 'three';
+import {
+  activatePatternImportDxfPhaseECadTableZeroCanvasPieceV1,
+  createPatternImportDxfPhaseECadTableZeroCanvasSessionV1,
+} from './cad-table-zero-connect-canvas-v1';
+import { cadMannequinPlacementGroupKeysV1 } from './cad-mannequin-placement-group-v1';
 import type { MeasurementSurfacePatternPieceOverlayV1 } from 'components/shared/measurement-watertight-surface-v1-stage';
 import {
   createCadMannequinArrangementDocumentV1,
@@ -260,6 +270,126 @@ describe('mounted mannequin arrangement lifecycle', () => {
     await act(async () => toolbar().onPatternTool!('rotate'));
     expect(selector()).toBeNull();
     expect(save).not.toHaveBeenCalled();
+  });
+
+  it('moves the exact table multi-selection together, with one undo and one explicit arrangement save', async () => {
+    const save = vi.fn().mockResolvedValue(undefined);
+    const scene = input.patternPieceScene!;
+    const source = scene.sources[0]!;
+    const front = source.projection.pieces[0];
+    const back = { ...front, pieceId: 'back', pieceLineKey: 'back-air' };
+    const pocket = { ...front, pieceId: 'pocket', pieceLineKey: 'pocket-air' };
+    const projection = { ...source.projection, pieces: [front, back, pocket] };
+    let table = createPatternImportDxfPhaseECadTableZeroCanvasSessionV1(projection);
+    const [first, second] = table.layout.pieces.map((piece) => piece.identity.key);
+    table = activatePatternImportDxfPhaseECadTableZeroCanvasPieceV1(table, first, false);
+    table = activatePatternImportDxfPhaseECadTableZeroCanvasPieceV1(table, second, true);
+    const tableSelection = {
+      scopeKey: source.scopeKey,
+      projection,
+      selectedPieceKeys: table.layout.selectedPieceKeys,
+    };
+    const activeSource = { ...source, projection };
+    const focus = { scopeKey: 'main', pieceId: front.pieceId, pieceLineKey: front.pieceLineKey };
+    const onFocus = vi.fn();
+    input = {
+      ...input,
+      onReadMannequinArrangement: vi.fn().mockResolvedValue(stored),
+      onSaveMannequinArrangement: save,
+      patternPieceScene: {
+        ...scene,
+        sources: [activeSource],
+        selection: focus,
+        onFocus,
+        tableSelection,
+      },
+    };
+    await render();
+    const toolbar = () =>
+      visit(tree, (value) => typeof value.onPatternTool === 'function') as Parameters<
+        typeof PatternImportDxfPhaseECadMannequinViewToolbarV1
+      >[0];
+    await act(async () => toolbar().onPatternTool!('translate'));
+    const group = focusMeasurementSurfacePatternHitV1(overlay(), overlay().pieces[1])!;
+    expect(group).toBe(overlay().translationGroup);
+    const keys = overlay().pieces.map((p) => p.pieceKey);
+    expect(group.pieceKeys).toEqual(keys.slice(0, 2));
+    expect(overlay().pieces.map((p) => p.selected)).toEqual([true, false, false]);
+    const positions = new Map(
+      keys.map((key, i) => [key, { anchor: { position: new Vector3(i + 1, 2, 3) } }]),
+    );
+    const drag = () =>
+      captureMeasurementSurfaceTranslationGroupV1(overlay().translationGroup!, positions)!;
+    expect(captureMeasurementSurfaceTranslationGroupV1(group, new Map())).toBeNull();
+    const cancelled = drag();
+    cancelled.preview(new Vector3(0, 0.5, -0.125));
+    expect(positions.get(keys[1])!.anchor.position.toArray()).toEqual([2, 2.5, 2.875]);
+    cancelled.finish(false);
+    expect(positions.get(keys[0])!.anchor.position.toArray()).toEqual([1, 2, 3]);
+    expect(positions.get(keys[1])!.anchor.position.toArray()).toEqual([2, 2, 3]);
+    expect(undoButton().disabled).toBe(true);
+    await act(async () => group.onTranslateBy([9.8, 0, 0]));
+    expect(undoButton().disabled).toBe(true);
+    const move = async () =>
+      act(async () => {
+        const gesture = drag();
+        gesture.preview(new Vector3(0, 0.5, -0.125));
+        gesture.finish(true);
+      });
+    await move();
+    const expected = [
+      { offsetM: [0.4, 0.7, -0.125], rotationRad: 0.7 },
+      { offsetM: [0, 0.5, -0.125], rotationRad: 0 },
+      null,
+    ];
+    expect(overlay().pieces.map((p) => p.transform)).toEqual(expected);
+    await act(async () => undoButton().onClick());
+    expect(overlay().pieces.map((p) => p.transform)).toEqual([stored[0].transform, null, null]);
+    expect(undoButton().disabled).toBe(true);
+    expect(save).not.toHaveBeenCalled();
+    await move();
+    await clickSave();
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(
+      save.mock.calls[0][0].pieces.map((p: CadMannequinArrangementPieceV1) => p.transform),
+    ).toEqual([...expected.slice(0, 2), { offsetM: [0, 0, 0], rotationRad: 0 }]);
+    expect(onFocus).not.toHaveBeenCalled();
+    expect(focusMeasurementSurfacePatternHitV1(overlay(), overlay().pieces[2])).toBeUndefined();
+    expect(onFocus).toHaveBeenCalledWith(expect.objectContaining({ pieceId: pocket.pieceId }));
+    expect(table.layout.selectedPieceKeys).toEqual([first, second]);
+    await act(async () => toolbar().onPatternTool!('rotate'));
+    await act(async () => toolbar().onPatternTool!('translate'));
+    await act(async () => group.onTranslateBy([1, 0, 0]));
+    expect(overlay().pieces.map((p) => p.transform)).toEqual(expected);
+
+    for (const stale of [
+      { ...tableSelection, scopeKey: 'lining' },
+      { ...tableSelection, projection: { ...projection, sizeToken: 'L' } },
+      { ...tableSelection, projection: { ...projection, sourceFileId: 'old-file' } },
+      {
+        ...tableSelection,
+        projection: { ...projection, expectedCatalogCanonicalSha256: 'old-catalog' },
+      },
+      {
+        ...tableSelection,
+        projection: { ...projection, sizeSelectionCanonicalSha256: 'old-size-selection' },
+      },
+      { ...tableSelection, selectedPieceKeys: [first, 'missing'] },
+      { ...tableSelection, selectedPieceKeys: [first, second, second] },
+    ])
+      expect(cadMannequinPlacementGroupKeysV1(stale, activeSource)).toEqual([]);
+    const old = overlay().translationGroup!;
+    input = {
+      ...input,
+      patternPieceScene: {
+        ...input.patternPieceScene!,
+        tableSelection: { ...tableSelection, selectedPieceKeys: [first] },
+      },
+    };
+    await render();
+    expect(overlay().translationGroup).toBeUndefined();
+    await act(async () => old.onTranslateBy([-1, 0, 0]));
+    expect(overlay().pieces.map((p) => p.transform)).toEqual(expected);
   });
 
   it('undoes numeric and gesture commits in reverse order and saves only on explicit request', async () => {

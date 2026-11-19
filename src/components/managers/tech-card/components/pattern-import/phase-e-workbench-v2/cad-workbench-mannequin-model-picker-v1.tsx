@@ -39,6 +39,11 @@ import { Button, CheckboxCommon, Pill, Select, Text } from 'ui';
 
 import type { TechCardFormData } from '../../schema';
 import { BodyPicker, modelFacts, modelName } from '../../design/render/model-picker';
+import {
+  cadMannequinPlacementGroupKeysV1,
+  type CadMannequinTableSelectionV1,
+} from './cad-mannequin-placement-group-v1';
+import { CAD_MANNEQUIN_ARRANGEMENT_LIMITS_V1 } from './cad-mannequin-arrangement-document-v1';
 import { CadMannequinPatternOffsetControlsV1 } from './cad-mannequin-pattern-offset-controls-v1';
 import {
   buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1,
@@ -308,6 +313,7 @@ export type PatternImportDxfPhaseECadMannequinPatternPieceSceneV1 = Readonly<{
   annotationSource?: Readonly<{ identity: string; revision: string; sha256: string }>;
   sources: readonly PatternImportDxfPhaseECadMannequinDxfStagingSourceV1[];
   activeScopeKey?: string | null;
+  tableSelection?: CadMannequinTableSelectionV1;
   selection?: PatternImportDxfPhaseECadMannequinDxfStagingSelectionV1 | null;
   swatchesByScope?: Readonly<Record<string, string | null | undefined>>;
   decorations?: readonly PatternImportDxfPhaseECadMannequinPatternOverlayDecorationV1[];
@@ -580,7 +586,10 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
     setPatternTransforms(next);
   }, []);
   const placementHistory = useRef<
-    { pieceKey: string; previous: MeasurementSurfacePatternPieceTransformV1 | undefined }[]
+    (readonly {
+      pieceKey: string;
+      previous: MeasurementSurfacePatternPieceTransformV1 | undefined;
+    }[])[]
   >([]);
   const [canUndoPlacement, setCanUndoPlacement] = useState(false);
   const [arrangementSaving, setArrangementSaving] = useState(false);
@@ -744,40 +753,112 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
       if (arrangementCurrent.current.key === key) setArrangementSaving(false);
     }
   };
+  const commitPlacement = useCallback(
+    (updates: PatternTransforms) => {
+      if (!placementTurn || currentPlacementTurn.current !== placementTurn) return;
+      const current = latestTransforms.current;
+      const changes = Object.entries(updates).filter(([key, transform]) => {
+        const previous = current[key];
+        const offset = previous?.offsetM ?? ZERO_PATTERN_OFFSET_M;
+        return (
+          transform.rotationRad !== (previous?.rotationRad ?? 0) ||
+          transform.offsetM.some((value, axis) => value !== offset[axis])
+        );
+      });
+      if (!changes.length) return;
+      placementHistory.current.push(
+        changes.map(([pieceKey]) => ({ pieceKey, previous: current[pieceKey] })),
+      );
+      setCanUndoPlacement(true);
+      arrangementEdits.current += 1;
+      setArrangementMessage(null);
+      publishTransforms(Object.freeze({ ...current, ...updates }));
+    },
+    [placementTurn, publishTransforms],
+  );
   const handlePatternTransform = useCallback(
     (pieceKey: string, transform: MeasurementSurfacePatternPieceTransformV1) => {
-      if (!placementTurn || currentPlacementTurn.current !== placementTurn) return;
       const source = arrangementCurrent.current.expected;
       if (
-        !source?.projection.pieces.some(
+        source?.projection.pieces.some(
           ({ pieceId, pieceLineKey }) =>
             pieceKey === `${source.scopeKey}:${pieceId}:${pieceLineKey}`,
         )
       )
-        return;
-      const current = latestTransforms.current;
-      const previous = current[pieceKey];
-      const offset = previous?.offsetM ?? ZERO_PATTERN_OFFSET_M;
-      if (
-        transform.rotationRad === (previous?.rotationRad ?? 0) &&
-        transform.offsetM.every((value, axis) => value === offset[axis])
-      )
-        return;
-      placementHistory.current.push({ pieceKey, previous });
-      setCanUndoPlacement(true);
-      arrangementEdits.current += 1;
-      setArrangementMessage(null);
-      publishTransforms(Object.freeze({ ...current, [pieceKey]: transform }));
+        commitPlacement({ [pieceKey]: transform });
     },
-    [placementTurn, publishTransforms],
+    [commitPlacement],
   );
+  const selectionProjection = patternPieceScene?.tableSelection?.projection;
+  const selectionScope = patternPieceScene?.tableSelection?.scopeKey;
+  const selectionKeys = patternPieceScene?.tableSelection?.selectedPieceKeys;
+  const activeProjection = arrangementSource?.projection;
+  const activeScope = arrangementSource?.scopeKey;
+  const groupKeys = useMemo(
+    () =>
+      cadMannequinPlacementGroupKeysV1(
+        selectionProjection && selectionScope && selectionKeys
+          ? {
+              projection: selectionProjection,
+              scopeKey: selectionScope,
+              selectedPieceKeys: selectionKeys,
+            }
+          : undefined,
+        activeProjection && activeScope
+          ? { projection: activeProjection, scopeKey: activeScope }
+          : null,
+      ),
+    [selectionProjection, selectionScope, selectionKeys, activeProjection, activeScope],
+  );
+  const currentGroup =
+    useRef<MeasurementSurfacePatternPieceOverlayV1['translationGroup']>(undefined);
+  const translationGroup = useMemo<
+    MeasurementSurfacePatternPieceOverlayV1['translationGroup']
+  >(() => {
+    if (!placementTurn || patternTool !== 'translate' || groupKeys.length < 2) return undefined;
+    const group: NonNullable<MeasurementSurfacePatternPieceOverlayV1['translationGroup']> = {
+      pieceKeys: groupKeys,
+      onTranslateBy(deltaM) {
+        if (currentGroup.current !== group) return;
+        const updates: Record<string, MeasurementSurfacePatternPieceTransformV1> = {};
+        for (const key of groupKeys) {
+          const previous = latestTransforms.current[key];
+          const offset = previous?.offsetM ?? ZERO_PATTERN_OFFSET_M;
+          const offsetM: [number, number, number] = [
+            offset[0] + deltaM[0],
+            offset[1] + deltaM[1],
+            offset[2] + deltaM[2],
+          ];
+          if (
+            offsetM.some(
+              (value) =>
+                !Number.isFinite(value) ||
+                Math.abs(value) > CAD_MANNEQUIN_ARRANGEMENT_LIMITS_V1.maxOffsetMetres,
+            )
+          )
+            return;
+          updates[key] = { offsetM, rotationRad: previous?.rotationRad ?? 0 };
+        }
+        commitPlacement(updates);
+      },
+    };
+    return group;
+  }, [placementTurn, patternTool, groupKeys, commitPlacement]);
+  useLayoutEffect(() => {
+    currentGroup.current = translationGroup;
+    return () => {
+      currentGroup.current = undefined;
+    };
+  }, [translationGroup]);
   const undoPlacement = () => {
     if (!placementTurn || currentPlacementTurn.current !== placementTurn) return;
     const edit = placementHistory.current.pop();
     if (!edit) return;
     const next = { ...latestTransforms.current };
-    if (edit.previous) next[edit.pieceKey] = edit.previous;
-    else delete next[edit.pieceKey];
+    for (const { pieceKey, previous } of edit) {
+      if (previous) next[pieceKey] = previous;
+      else delete next[pieceKey];
+    }
     setCanUndoPlacement(placementHistory.current.length > 0);
     arrangementEdits.current += 1;
     setArrangementMessage(null);
@@ -798,6 +879,7 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
                 : patternPieceScene.guides,
             tool: placementTurn ? patternTool : 'select',
             dragPlane,
+            translationGroup,
             transformsByPieceKey: patternTransforms,
             onTransform: placementTurn ? handlePatternTransform : undefined,
           })
@@ -805,6 +887,7 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
     [
       dragPlane,
       handlePatternTransform,
+      translationGroup,
       patternPieceScene,
       patternTool,
       patternTransforms,

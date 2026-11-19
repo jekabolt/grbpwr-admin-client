@@ -1,3 +1,4 @@
+import type { CadMannequinTableSelectionV1 } from './cad-mannequin-placement-group-v1';
 import type { common_TechCard } from 'api/proto-http/admin';
 import { isGenerated } from 'lib/fusing-dxf/generated-pattern';
 import {
@@ -192,6 +193,7 @@ const EMPTY_SIZE_NAMES = new Map<number, string>();
 export type PatternImportDxfPhaseECadTableZeroOperationMannequinContextV1 = Readonly<{
   sources: readonly PatternImportDxfPhaseECadMannequinDxfStagingSourceV1[];
   activeScopeKey: string | null;
+  tableSelection?: CadMannequinTableSelectionV1;
   savedTopstitch?: CadTableSavedTopstitchOverlayV1;
   topstitchVisible: boolean;
   onTopstitchVisibilityChange: (visible: boolean) => void;
@@ -1601,6 +1603,14 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
       }
       mannequin={mannequin({
         sources: mannequinSources,
+        tableSelection:
+          prepared && layout
+            ? {
+                scopeKey: prepared.scopeKey,
+                projection: prepared.projection,
+                selectedPieceKeys: layout.selectedPieceKeys,
+              }
+            : undefined,
         activeScopeKey: currentMannequinSource?.scopeKey ?? null,
         savedTopstitch: currentTopstitch?.overlay,
         topstitchVisible,
@@ -1731,6 +1741,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
       linkedPieceRename={linkedPieceRename}
       mannequin={({
         sources,
+        tableSelection,
         activeScopeKey,
         savedTopstitch,
         topstitchVisible,
@@ -1763,6 +1774,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
               arrangementSourceKey={physicalHost?.arrangementSourceKey}
               patternPieceScene={{
                 sources,
+                tableSelection,
                 activeScopeKey,
                 savedTopstitch: topstitchVisible ? savedTopstitch : undefined,
                 topstitchVisibility: savedTopstitch

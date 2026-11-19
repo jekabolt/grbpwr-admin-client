@@ -1,3 +1,4 @@
+import type { CadMannequinTableSelectionV1 } from './cad-mannequin-placement-group-v1';
 import * as Dialog from '@radix-ui/react-dialog';
 import type {
   SavedGenericDurablePhysicalPreviewScopeV1,
@@ -100,6 +101,7 @@ export type PatternImportDxfProductExactNSeamProductionMannequinContextV2 =
   PatternImportDxfPhaseECadWorkbenchSlotContextV1 &
     Readonly<{
       sceneOverlay: PatternImportDxfPhaseECadMannequinSceneOverlayCapabilityV1;
+      tableSelection?: CadMannequinTableSelectionV1;
       previewScope: SavedGenericDurablePhysicalPreviewScopeV1 | null;
       previewSeam?: SavedGenericDurablePhysicalPreviewSeamV1;
     }>;
@@ -362,7 +364,22 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
   const mannequinSlot: PatternImportDxfPhaseECadWorkbenchSlotV1 =
     typeof mannequin === 'function'
       ? (context) =>
-          mannequin(Object.freeze({ ...context, sceneOverlay, previewScope, previewSeam }))
+          mannequin(
+            Object.freeze({
+              ...context,
+              sceneOverlay,
+              previewScope,
+              previewSeam,
+              tableSelection:
+                exactDesktop && tableSessionOwner
+                  ? {
+                      scopeKey: session.current.row.scopeKey,
+                      projection: exactDesktop.projection,
+                      selectedPieceKeys,
+                    }
+                  : undefined,
+            }),
+          )
       : mannequin;
 
   const focusSelection = (nextSelection: PatternImportDxfPhaseECadWorkbenchSelectionV1 | null) => {

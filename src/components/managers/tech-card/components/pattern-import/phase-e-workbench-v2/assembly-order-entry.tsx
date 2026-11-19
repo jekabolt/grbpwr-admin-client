@@ -2606,7 +2606,14 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
               </>
             ) : null
           }
-          mannequin={({ selection, focusSelection, sceneOverlay, previewScope, previewSeam }) => (
+          mannequin={({
+            selection,
+            focusSelection,
+            sceneOverlay,
+            previewScope,
+            previewSeam,
+            tableSelection,
+          }) => (
             <div className='flex h-full min-h-0 flex-col'>
               <div className='relative min-h-0 flex-1'>
                 <PatternImportDxfPhaseECadMannequinModelPickerV1
@@ -2618,6 +2625,7 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
                   onReadSavedMannequinModelId={physicalHost?.onReadSavedMannequinModelId}
                   arrangementSourceKey={physicalHost?.arrangementSourceKey}
                   patternPieceScene={{
+                    tableSelection,
                     annotationSource: exactNMannequinStaging?.ok
                       ? exactNMannequinStaging.staging.annotationSource
                       : matchesPatternImportDxfProductExactNDesktopGeometryV2(

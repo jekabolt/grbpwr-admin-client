@@ -104,6 +104,7 @@ export function buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1(
     guides?: MeasurementSurfacePatternPieceOverlayV1['guides'];
     tool?: PatternImportDxfPhaseECadMannequinPatternOverlayToolV1;
     dragPlane?: MeasurementSurfacePatternPieceOverlayV1['dragPlane'];
+    translationGroup?: MeasurementSurfacePatternPieceOverlayV1['translationGroup'];
     onFocus?: (selection: PatternImportDxfPhaseECadMannequinDxfStagingSelectionV1) => void;
     onTransform?: (pieceKey: string, transform: MeasurementSurfacePatternPieceTransformV1) => void;
   }>,
@@ -273,6 +274,7 @@ export function buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1(
       pieces: overlayPieces,
       tool: input.tool ?? 'select',
       ...(input.dragPlane && { dragPlane: input.dragPlane }),
+      ...(input.translationGroup && { translationGroup: input.translationGroup }),
       visibility: Object.freeze({
         pieces: true,
         edges: true,
