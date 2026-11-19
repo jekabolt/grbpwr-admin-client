@@ -17,6 +17,10 @@ import {
   selectDraftSharpCornerV1,
 } from './draft-cad-edge-length-geometry-v1';
 import { selectDraftCutAllowanceOffsetV1 } from './draft-cad-allowance-offset-geometry-v1';
+import {
+  draftOutlineMoveHistoryV1,
+  draftOutlineMovePositionsV1,
+} from './draft-cad-outline-move-history-v1';
 
 export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_PREVIEW_V1 =
   'pattern-import-dxf-phase-e-draft-cad-preview/1' as const;
@@ -304,6 +308,8 @@ export function buildPatternImportDxfPhaseEDraftCadPreviewV1(
     });
 
   const commands = activeDraftCadTransactionsV1(session).flatMap(({ commands }) => commands);
+  const outlineMoves = draftOutlineMoveHistoryV1(commands);
+  const lastOutlineMove = outlineMoves?.at(-1);
   const primitives: PatternImportDxfPhaseEDraftCadPreviewPrimitiveV1[] = [];
   const blockers: PatternImportDxfPhaseEDraftCadPreviewBlockerV1[] = [];
   let bounds: MutableBounds | null = null;
@@ -625,17 +631,26 @@ export function buildPatternImportDxfPhaseEDraftCadPreviewV1(
           ...(destination ? [destination] : []),
           contour.vertices[(index + 1) % count]!.pointMm,
         ].map(clonePoint);
+        const finalPositions =
+          command === lastOutlineMove && outlineMoves
+            ? draftOutlineMovePositionsV1(outlineMoves, contour)
+            : null;
+        const path = finalPositions
+          ? contour.vertices.map(({ vertexId, pointMm }) =>
+              clonePoint(finalPositions.get(vertexId) ?? pointMm),
+            )
+          : pointsMm;
         primitives.push(
           deepFreeze({
             ...base,
             kind: 'path' as const,
-            pointsMm,
-            closed: false,
+            pointsMm: path,
+            closed: Boolean(finalPositions),
             role: 'outline' as const,
             stroke: 'solid' as const,
           }),
         );
-        bounds = extendPoints(bounds, pointsMm);
+        if (!outlineMoves || command === lastOutlineMove) bounds = extendPoints(bounds, path);
         break;
       }
       case 'sharpen-corner': {

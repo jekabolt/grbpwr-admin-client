@@ -117,8 +117,9 @@ export function editDraftCadSelectedSizeVertexV1(
   command: VertexEdit,
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1,
   phaseD: SelectedSizePhaseD,
+  previousMoves?: ReadonlyMap<string, PtMm>,
 ): Result {
-  return editExactOutlineVertex(source, command, projection, phaseD);
+  return editExactOutlineVertex(source, command, projection, phaseD, null, previousMoves);
 }
 
 function editExactOutlineVertex(
@@ -127,6 +128,7 @@ function editExactOutlineVertex(
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1,
   phaseD: SelectedSizePhaseD,
   pairedAllowance?: SavedDraftPairedAllowanceProofV1 | null,
+  previousMoves?: ReadonlyMap<string, PtMm>,
 ): Result {
   const { sizeToken } = command.payload;
   const hasEdge = command.tool === 'edge-length' || command.tool === 'sharpen-corner';
@@ -238,10 +240,23 @@ function editExactOutlineVertex(
       detail: 'The edit requires unambiguous clockwise holes inside the original cut.',
     };
 
-  const from = contour.vertices[start]!.pointMm;
-  const to = contour.vertices[next]!.pointMm;
-  const beforeSelection =
-    contour.vertices[(start + contour.vertices.length - 1) % contour.vertices.length]!.pointMm;
+  const positions = contour.vertices.map(
+    ({ vertexId, pointMm }) => previousMoves?.get(vertexId) ?? pointMm,
+  );
+  if (
+    previousMoves &&
+    (command.tool !== 'move-point' ||
+      contour.role !== 'cut-boundary' ||
+      !seam ||
+      !sameDraftAllowanceRingV1(positions, vertices))
+  )
+    return {
+      ok: false,
+      detail: 'The current Draft vertices differ from the paired writer outline.',
+    };
+  const from = positions[start]!;
+  const to = positions[next]!;
+  const beforeSelection = positions[(start + positions.length - 1) % positions.length]!;
   const matching = vertices
     .map((point, i) =>
       samePoint(point, from) &&
@@ -273,6 +288,8 @@ function editExactOutlineVertex(
       samePoint(movedPoint, from)
     )
       return { ok: false, detail: 'Enter a different finite X and Y for the selected point.' };
+    if (previousMoves && ![movedPoint.x, movedPoint.y].every((mm) => Number(mm.toFixed(6)) === mm))
+      return { ok: false, detail: 'Enter X and Y on the DXF grid.' };
   }
   if (command.tool === 'sharpen-corner') {
     const candidate = selectDraftSharpCornerV1(contour, command.payload.edge.boundaryVertexIds);
@@ -325,26 +342,30 @@ function editExactOutlineVertex(
     return { ok: false, detail: 'Move the text anchor inside the resized outline.' };
   if (source.pointMarks?.some(({ at }) => !pointInPolygon(at, nextRing)))
     return { ok: false, detail: 'Move the construction point inside the resized outline.' };
-  if (
-    command.tool === 'delete-point' &&
-    (source.drills.some(
-      ({ at }) => !pointInPolygon(at, nextRing) || footOnSegment(at, before, after).d <= EPS,
-    ) ||
+  if (command.tool === 'delete-point' || previousMoves) {
+    const chain = movedPoint ? [before, movedPoint, after] : [before, after];
+    const crosses = (point: PtMm, next?: PtMm) =>
+      !pointInPolygon(point, nextRing) ||
+      chain.slice(0, -1).some((a, i) => {
+        const b = chain[i + 1]!;
+        return (
+          footOnSegment(point, a, b).d <= EPS || (next && segIntersect(point, next, a, b) !== null)
+        );
+      });
+    if (
+      source.drills.some(({ at }) => crosses(at)) ||
       source.internal.some(({ pts, closed }) =>
-        pts.some((point, index) => {
-          const next = pts[index + 1] ?? (closed ? pts[0] : undefined);
-          return (
-            !pointInPolygon(point, nextRing) ||
-            footOnSegment(point, before, after).d <= EPS ||
-            (next && segIntersect(point, next, before, after) !== null)
-          );
-        }),
-      ))
-  )
-    return {
-      ok: false,
-      detail: 'The joined edge would cut through a retained drill or internal line.',
-    };
+        pts.some((point, i) => crosses(point, pts[i + 1] ?? (closed ? pts[0] : undefined))),
+      )
+    )
+      return {
+        ok: false,
+        detail:
+          command.tool === 'delete-point'
+            ? 'The joined edge would cut through a retained drill or internal line.'
+            : 'The moved vertex would cut through a retained drill or internal line.',
+      };
+  }
   if (holes.some((hole) => !ringStrictlyInside(hole, nextRing)))
     return { ok: false, detail: 'The resized outline would cross or touch a retained cut hole.' };
 

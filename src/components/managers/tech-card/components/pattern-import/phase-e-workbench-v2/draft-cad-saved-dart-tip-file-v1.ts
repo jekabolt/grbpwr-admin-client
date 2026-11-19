@@ -4,14 +4,15 @@ type Scope = CardDraft['scopes'][number];
 type Verify = (draft: CardDraft, scope: Scope, isCurrent: () => boolean) => Promise<void>;
 const files = new WeakMap<File, Verify | null>();
 const scopes = new WeakMap<Scope, { file: File; text: string }>();
-type AllowanceHeading = Readonly<{ scopeKey: string; manifest: ConversionManifest }>;
-const allowanceHeadings = new WeakMap<File, AllowanceHeading>();
+type SavedPieceHeading = Readonly<{ scopeKey: string; manifest: ConversionManifest }>;
+const pieceHeadings = new WeakMap<File, SavedPieceHeading>();
 
 type SavedGeometryReviewLabel =
   | 'saved dart'
   | 'parallel opening'
   | 'saved French curve'
   | 'saved corner'
+  | 'saved outline points'
   | 'saved allowance offset';
 const labels = new WeakMap<File, SavedGeometryReviewLabel>();
 export const savedReviewLabelV1 = (file: File) => labels.get(file) ?? 'saved geometry';
@@ -19,16 +20,16 @@ export function registerSavedDartTipFileV1(
   file: File,
   verify: Verify,
   label: SavedGeometryReviewLabel = 'saved dart',
-  allowanceHeading?: AllowanceHeading,
+  pieceHeading?: SavedPieceHeading,
 ) {
   if (files.has(file)) throw new Error('This dart review File is already bound.');
   labels.set(file, label);
   files.set(file, verify);
-  if (label === 'saved allowance offset' && allowanceHeading)
-    allowanceHeadings.set(file, allowanceHeading);
+  if (pieceHeading && (label === 'saved allowance offset' || label === 'saved outline points'))
+    pieceHeadings.set(file, pieceHeading);
 }
-export const readSavedAllowanceOffsetHeadingV1 = (file: File) =>
-  files.get(file) ? allowanceHeadings.get(file) : undefined;
+export const readSavedGeometryPieceHeadingV1 = (file: File) =>
+  files.get(file) ? pieceHeadings.get(file) : undefined;
 export const isSavedDartTipReviewFileV1 = (file: File) => files.has(file);
 export function cancelSavedDartTipReviewV1(file?: File) {
   if (file && files.has(file)) files.set(file, null);

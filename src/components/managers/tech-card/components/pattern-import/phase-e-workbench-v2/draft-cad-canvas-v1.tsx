@@ -1,3 +1,7 @@
+import {
+  draftOutlineMoveHistoryV1,
+  draftOutlineMovePositionsV1,
+} from './draft-cad-outline-move-history-v1';
 import { selectDraftSharpCornerV1 } from './draft-cad-edge-length-geometry-v1';
 import {
   hasDraftCutAllowanceJoinsV1,
@@ -339,9 +343,22 @@ export function buildPatternImportDxfPhaseEDraftCadExactVertexOptionsV1(
   const outlines = cut.length
     ? cut
     : piece.contours.filter(({ role, closed }) => role === 'sewing-boundary' && closed);
+  const moves = outlineOnly
+    ? draftOutlineMoveHistoryV1(
+        session.history.slice(0, session.cursor).flatMap((tx) => tx.commands),
+      )
+    : null;
+  const first = moves?.[0];
+  const positions =
+    first?.target.pieceId === piece.pieceId &&
+    first.target.pieceLineKey === piece.pieceLineKey &&
+    first.payload.sizeToken === projection.sizeToken
+      ? moves
+      : null;
   return Object.freeze(
-    (outlineOnly ? outlines : piece.contours).flatMap((contour) =>
-      contour.vertices.map((vertex) =>
+    (outlineOnly ? outlines : piece.contours).flatMap((contour) => {
+      const current = positions && draftOutlineMovePositionsV1(positions, contour);
+      return contour.vertices.map((vertex) =>
         Object.freeze({
           key: `draft-topology-vertex:${encodeURIComponent(contour.contourId)}:${encodeURIComponent(vertex.vertexId)}`,
           anchor: Object.freeze({
@@ -350,10 +367,10 @@ export function buildPatternImportDxfPhaseEDraftCadExactVertexOptionsV1(
             contourId: contour.contourId,
             vertexId: vertex.vertexId,
           }),
-          pointMm: Object.freeze({ ...vertex.pointMm }),
+          pointMm: Object.freeze({ ...(current?.get(vertex.vertexId) ?? vertex.pointMm) }),
         }),
-      ),
-    ),
+      );
+    }),
   );
 }
 
@@ -468,12 +485,13 @@ function recordOutlinePointEdit(
   const payload = { entityId: ids.entityId, contourId, vertexId, sizeToken: projection.sizeToken };
   let command: PatternImportDxfPhaseEDraftCadCommandV1;
   if (edit.tool === 'move-point') {
-    const pointMm = { x: edit.pointMm.x + 0, y: edit.pointMm.y + 0 };
-    if (
-      !Number.isFinite(pointMm.x) ||
-      !Number.isFinite(pointMm.y) ||
-      (pointMm.x === option.pointMm.x && pointMm.y === option.pointMm.y)
-    )
+    if (!Number.isFinite(edit.pointMm.x) || !Number.isFinite(edit.pointMm.y))
+      return fail('Enter finite X and Y coordinates in millimetres.');
+    const pointMm = {
+      x: Number(dxfCoordinate(edit.pointMm.x)),
+      y: Number(dxfCoordinate(edit.pointMm.y)),
+    };
+    if (pointMm.x === option.pointMm.x && pointMm.y === option.pointMm.y)
       return fail('Enter a different finite X and Y in millimetres.');
     command = {
       commandId: ids.commandId,
@@ -1903,11 +1921,15 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
     onSessionChange(result.session);
   };
 
+  const lastOutlineMove = draftOutlineMoveHistoryV1(commands)?.at(-1);
   const primitives = preview.primitives.filter(
     (primitive) =>
-      primitive.commandId === draftPiece?.commandId ||
-      (primitive.target.pieceId === target?.pieceId &&
-        primitive.target.pieceLineKey === target?.pieceLineKey),
+      (!lastOutlineMove ||
+        primitive.tool !== 'move-point' ||
+        primitive.commandId === lastOutlineMove.commandId) &&
+      (primitive.commandId === draftPiece?.commandId ||
+        (primitive.target.pieceId === target?.pieceId &&
+          primitive.target.pieceLineKey === target?.pieceLineKey)),
   );
   const sourceMismatch = preview.blockers.some(
     (blocker) => blocker.code === 'source-projection-mismatch',

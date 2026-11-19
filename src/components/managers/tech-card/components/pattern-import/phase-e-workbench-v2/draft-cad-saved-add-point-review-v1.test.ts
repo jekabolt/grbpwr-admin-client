@@ -2228,6 +2228,7 @@ async function checkNativeOutlinePointEdit(
     | 'parallel-spread',
   fiveRanks = false,
   sourceDialect: 'r12' | 'r2000' = 'r12',
+  repeatedMoves = false,
 ) {
   const savedIntake = tool === 'dart-intake';
   const savedDartEdit = tool === 'dart-tip' || savedIntake || tool === 'fish-eye-move';
@@ -2249,6 +2250,8 @@ async function checkNativeOutlinePointEdit(
   const allowanceRuntime = allowanceOffset
     ? savedUiRuntime(f, () => authoritativeAllowanceRow)
     : null;
+  let authoritativeOutlineRow = f.current.row;
+  const outlineRuntime = repeatedMoves ? savedUiRuntime(f, () => authoritativeOutlineRow) : null;
   const reviewFiles: File[] = [];
   const unregister = registerPatternImportDxfPhaseEPatternsFieldCompiledReimportOwnerV1({
     techCardId: f.current.card.techCardId,
@@ -2460,7 +2463,97 @@ async function checkNativeOutlinePointEdit(
       ).toMatchObject({ ok: false, blockers: [{ code: 'allowance-offset-geometry-blocked' }] });
       offsetSession = edit.session;
     }
-    const shapeSession = spreadSession ?? sharpenedSession ?? offsetSession;
+    let outlineSession: typeof f.initial | null = null;
+    let movedOutline: (typeof vertices)[number]['pointMm'][] | null = null;
+    const runOutlineReview = () =>
+      outlineRuntime!.prepareSavedGeometryReview!(f.current.row, () => f.current);
+    if (repeatedMoves) {
+      const across = (a: typeof point, b: typeof next, ratio: number) => ({
+        x: Number((a.pointMm.x + (b.pointMm.x - a.pointMm.x) * ratio).toFixed(6)),
+        y: Number((a.pointMm.y + (b.pointMm.y - a.pointMm.y) * ratio).toFixed(6)),
+      });
+      const third = vertices[2]!;
+      const firstPosition = across(point, next, 0.025);
+      const nextPosition = across(next, third, 0.025);
+      const finalPosition = across(point, next, 0.035);
+      const first = recordPatternImportDxfPhaseEDraftCadMovePointV1({
+        ...input,
+        pointMm: firstPosition,
+      });
+      const adjacent = recordPatternImportDxfPhaseEDraftCadMovePointV1({
+        ...input,
+        session: first.session,
+        vertexKey: next.key,
+        pointMm: nextPosition,
+      });
+      const again = recordPatternImportDxfPhaseEDraftCadMovePointV1({
+        ...input,
+        session: adjacent.session,
+        pointMm: finalPosition,
+      });
+      expect([first.recorded, adjacent.recorded, again.recorded]).toEqual([true, true, true]);
+      expect(again.session.cursor).toBe(3);
+      const undo = undoPatternImportDxfPhaseEDraftCadSessionV1(again.session);
+      if (!undo.ok) throw Error(undo.blocker.detail);
+      const redo = redoPatternImportDxfPhaseEDraftCadSessionV1(undo.session);
+      if (!redo.ok) throw Error(redo.blocker.detail);
+      const shown = (session: typeof f.initial) =>
+        buildPatternImportDxfPhaseEDraftCadExactVertexOptionsV1(
+          session,
+          projection,
+          pieceIndex,
+          true,
+        );
+      expect(
+        shown(undo.session)
+          .slice(0, 2)
+          .map(({ key, pointMm }) => [key, pointMm]),
+      ).toEqual([
+        [point.key, firstPosition],
+        [next.key, nextPosition],
+      ]);
+      expect(
+        shown(redo.session)
+          .slice(0, 2)
+          .map(({ key, pointMm }) => [key, pointMm]),
+      ).toEqual([
+        [point.key, finalPosition],
+        [next.key, nextPosition],
+      ]);
+      movedOutline = [finalPosition, nextPosition, ...vertices.slice(2).map((v) => v.pointMm)];
+      const { buildPatternImportDxfPhaseEDraftCadPreviewV1 } = await import(
+        './draft-cad-preview-v1'
+      );
+      expect(buildPatternImportDxfPhaseEDraftCadPreviewV1(redo.session, projection)).toMatchObject({
+        previewReady: true,
+        primitives: [
+          { tool: 'move-point' },
+          { tool: 'move-point' },
+          { tool: 'move-point', closed: true, pointsMm: movedOutline },
+        ],
+      });
+      const collapse = recordPatternImportDxfPhaseEDraftCadMovePointV1({
+        ...input,
+        session: adjacent.session,
+        pointMm: nextPosition,
+      });
+      expect(collapse.recorded).toBe(true);
+      f.current.session = collapse.session;
+      expect(
+        await compileDraftForOrdinaryReviewV1(
+          { ...f.compileInput, session: collapse.session },
+          undefined,
+          undefined,
+          runOutlineReview,
+        ),
+      ).toMatchObject({ ok: false, blockers: [{ code: 'move-point-geometry-blocked' }] });
+      expect(reviewFiles).toHaveLength(0);
+      outlineSession = redo.session;
+      expect(
+        await compileDraftForOrdinaryReviewV1({ ...f.compileInput, session: outlineSession }),
+      ).toMatchObject({ ok: false, blockers: [{ code: 'move-point-geometry-blocked' }] });
+    }
+    const shapeSession = spreadSession ?? sharpenedSession ?? offsetSession ?? outlineSession;
     const edit = shapeSession
       ? { recorded: true, blocker: null, session: shapeSession }
       : savedDartEdit
@@ -2497,11 +2590,19 @@ async function checkNativeOutlinePointEdit(
       allowanceRuntime
         ? () => allowanceRuntime.prepareSavedPairedAllowance!(f.current.row, () => f.current)
         : undefined,
-      savedDartEdit || tool === 'parallel-spread' || tool === 'sharpen-corner'
-        ? () => compileSavedDartTipReviewV1(f.request, verifyRow)
-        : undefined,
+      repeatedMoves
+        ? runOutlineReview
+        : savedDartEdit || tool === 'parallel-spread' || tool === 'sharpen-corner'
+          ? () => compileSavedDartTipReviewV1(f.request, verifyRow)
+          : undefined,
     );
     if (!compiled.ok) throw Error(JSON.stringify(compiled.blockers));
+    if (repeatedMoves)
+      expect(compiled.artifact.compiledFeatures.map(({ output }) => output)).toEqual([
+        'moved-saved-vertex',
+        'moved-saved-vertex',
+        'moved-saved-vertex',
+      ]);
     if (allowanceOffset)
       expect(compiled.artifact.compiledFeatures).toMatchObject([
         { output: 'allowance-offset', sizeToken: 'M' },
@@ -2539,7 +2640,9 @@ async function checkNativeOutlinePointEdit(
       worker,
       undefined,
       undefined,
-      tool === 'sharpen-corner' || savedIntake || allowanceOffset ? sourceDialect : 'r12',
+      tool === 'sharpen-corner' || savedIntake || allowanceOffset || repeatedMoves
+        ? sourceDialect
+        : 'r12',
     );
     const scope = reviewed.scopes[0]!;
     if (tool === 'sharpen-corner' || allowanceOffset)
@@ -2550,7 +2653,8 @@ async function checkNativeOutlinePointEdit(
       savedDartEdit ||
       tool === 'parallel-spread' ||
       tool === 'sharpen-corner' ||
-      allowanceOffset
+      allowanceOffset ||
+      repeatedMoves
     ) {
       const noWrite = vi.fn();
       await expect(
@@ -2576,7 +2680,9 @@ async function checkNativeOutlinePointEdit(
             ? 'original saved corner'
             : allowanceOffset
               ? 'original saved allowance offset'
-              : 'original parallel opening',
+              : repeatedMoves
+                ? 'original saved outline points'
+                : 'original parallel opening',
       );
       const originalText = scope.dxfText;
       scope.dxfText += '\n';
@@ -2599,6 +2705,13 @@ async function checkNativeOutlinePointEdit(
         applyDirectDxfReviewedDraftV1(reviewed, [file], undefined, () => true, noWrite),
       ).rejects.toThrow('changed');
       f.current.row = before;
+      if (repeatedMoves) {
+        authoritativeOutlineRow = { ...before, revision: before.revision + 1 };
+        await expect(
+          applyDirectDxfReviewedDraftV1(reviewed, [file], undefined, () => true, noWrite, file),
+        ).rejects.toThrow('authority moved');
+        authoritativeOutlineRow = before;
+      }
       if (allowanceOffset) {
         const { sizes } = scope.writerReplay!.job.pieces.find(
           ({ identity }) => identity === targetPiece.pieceId,
@@ -2917,6 +3030,7 @@ async function checkNativeOutlinePointEdit(
       };
       const expected =
         sharpenedOutline ??
+        movedOutline ??
         (tool === 'move-point'
           ? vertices.map((vertex) => (vertex === point ? pointMm : vertex.pointMm))
           : vertices.filter((vertex) => vertex !== point).map(({ pointMm }) => pointMm));
@@ -2943,6 +3057,10 @@ async function checkNativeOutlinePointEdit(
         const original = parseDxf(f.request.savedBytes, 'mm').dxf,
           saved = parseDxf(bytes.buffer, 'mm').dxf;
         const rankIds = garmentRanks.map((token, rank) => ({ rank, token, sizeId: rank + 5 }));
+        if (repeatedMoves) {
+          expect(scope.manifest.pieces).toEqual(before.manifest.pieces);
+          expect(after.manifest.pieces).toEqual(before.manifest.pieces);
+        }
         for (const version of [before, scope, after]) {
           expect(
             version.manifest.sizes.map(({ rank, token, sizeId }) => ({ rank, token, sizeId })),
@@ -3006,6 +3124,7 @@ async function checkNativeOutlinePointEdit(
     upload.mockRestore();
     worker.dispose();
     allowanceRuntime?.dispose();
+    outlineRuntime?.dispose();
     vi.unstubAllGlobals();
     f.source.dispose();
   }
@@ -3014,6 +3133,12 @@ async function checkNativeOutlinePointEdit(
 it.each(['move-point', 'delete-point'] as const)(
   'reopens %s from both native paths after ordinary Wizard Apply',
   (tool) => checkNativeOutlinePointEdit(tool),
+);
+
+it.each(['r12', 'r2000'] as const)(
+  'replays repeated and adjacent M outline moves through protected Review, %s Apply and cold read',
+  (dialect) => checkNativeOutlinePointEdit('move-point', true, dialect, true),
+  30_000,
 );
 
 it.each(['r12', 'r2000'] as const)(

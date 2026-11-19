@@ -1,3 +1,4 @@
+import { draftOutlineMoveHistoryV1 } from './draft-cad-outline-move-history-v1';
 import { activeDraftCadTransactionsV1 } from './draft-cad-session-v1';
 import type { NativePieceCopyMode } from 'lib/pattern-import/fabrics/native-piece-copy-review';
 import type { CopyReview, SavedCopyCurrentV1 } from './draft-cad-unlinked-piece-copy-review-v1';
@@ -369,7 +370,10 @@ function createSavedDraftSourceReaderV1(deps: SavedDraftSourceReaderDepsV1) {
     PatternImportDxfPhaseESavedRowProductionRuntimeV1['prepareSavedGeometryReview']
   > = async (row, readCurrent) => {
     const opening = readCurrent();
-    const command = opening && activeDraftCadTransactionsV1(opening.session)[0]?.commands[0];
+    const commands = opening
+      ? activeDraftCadTransactionsV1(opening.session).flatMap((tx) => tx.commands)
+      : [];
+    const command = commands[0];
     if (
       !opening ||
       !sameSavedDraftRowV1(row, opening.row) ||
@@ -378,7 +382,8 @@ function createSavedDraftSourceReaderV1(deps: SavedDraftSourceReaderDepsV1) {
         (command?.tool === 'fish-eye' && command.payload.savedMove) ||
         (command?.tool === 'french-curve' && command.payload.savedCurve) ||
         command?.tool === 'cut' ||
-        command?.tool === 'sharpen-corner'
+        command?.tool === 'sharpen-corner' ||
+        (commands.length > 1 && draftOutlineMoveHistoryV1(commands))
       )
     )
       throw new Error('Select the original saved geometry.');

@@ -1,3 +1,4 @@
+import { draftOutlineMoveHistoryV1 } from './draft-cad-outline-move-history-v1';
 import { applyDraftParallelSpreadV1 } from './draft-cad-parallel-spread-v1';
 import { hasSavedDraftGeometrySourceV1 } from './draft-cad-saved-dart-tip-review-v1';
 import { sameDartVertices } from './draft-cad-saved-dart-tip-v1';
@@ -115,6 +116,7 @@ export type PatternImportDxfPhaseEDraftCadCompiledFeatureV1 = Readonly<{
     | 'moved-fish-eye'
     | 'moved-french-curve'
     | 'moved-vertex'
+    | 'moved-saved-vertex'
     | 'deleted-vertex'
     | 'sharpened-corner'
     | 'edge-length'
@@ -621,6 +623,15 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
       return blocked('unsupported-command', unsupportedDetail(command), command);
   }
 
+  const moveHistory = draftOutlineMoveHistoryV1(commands);
+  const orderedMoves = moveHistory && moveHistory.length > 1 ? moveHistory : null;
+  if (orderedMoves && !hasSavedDraftGeometrySourceV1(input))
+    return blocked(
+      'move-point-geometry-blocked',
+      'Verify the current saved cut and sewing outlines before reviewing several moves.',
+      orderedMoves[0],
+    );
+  const previousMoves = orderedMoves ? new Map<string, PtMm>() : undefined;
   const preview = buildPatternImportDxfPhaseEDraftCadPreviewV1(session, projection);
   if (!preview.previewReady)
     return blocked(
@@ -976,6 +987,16 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
           'Review one saved allowance offset without changing a derived mirror piece.',
           command,
         );
+      if (
+        orderedMoves &&
+        (writerPieces[0]!.pairOf ||
+          job.pieces.some(({ pairOf }) => pairOf === command.target.pieceId))
+      )
+        return blocked(
+          'move-point-geometry-blocked',
+          'Several outline moves require an independent saved piece.',
+          command,
+        );
       const edited =
         command.tool === 'edge-length'
           ? resizeDraftCadSelectedSizeEdgeV1(
@@ -987,7 +1008,13 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
             )
           : command.tool === 'allowance-offset'
             ? offsetDraftCadSelectedSizeAllowanceV1(size, command, projection, pairedAllowance)
-            : editDraftCadSelectedSizeVertexV1(size, command, projection, selection.phaseD);
+            : editDraftCadSelectedSizeVertexV1(
+                size,
+                command,
+                projection,
+                selection.phaseD,
+                previousMoves,
+              );
       if (!edited.ok)
         return blocked(
           edited.requiresPairedAllowance
@@ -1011,6 +1038,8 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
       }
       if (command.tool === 'sharpen-corner') sharpenedRing = edited.size.cut;
       Object.assign(size, edited.size);
+      if (command.tool === 'move-point')
+        previousMoves?.set(command.payload.vertexId, command.payload.pointMm);
       compiledFeatures.push({
         commandId: command.commandId,
         entityId: command.payload.entityId,
@@ -1021,7 +1050,9 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
           command.tool === 'edge-length' || command.tool === 'allowance-offset'
             ? command.tool
             : command.tool === 'move-point'
-              ? 'moved-vertex'
+              ? orderedMoves
+                ? 'moved-saved-vertex'
+                : 'moved-vertex'
               : command.tool === 'sharpen-corner'
                 ? 'sharpened-corner'
                 : 'deleted-vertex',
@@ -1357,6 +1388,12 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
     )
       continue;
     if (command.tool === 'edge-length' && pairedWrite?.commandId !== command.commandId) continue;
+    if (
+      orderedMoves &&
+      command.tool === 'move-point' &&
+      command.commandId !== orderedMoves.at(-1)?.commandId
+    )
+      continue;
     const matches = written.plan.blocks.filter(
       ({ identity, labelSize }) =>
         identity === command.target.pieceId && labelSize === command.payload.sizeToken,
@@ -1406,11 +1443,28 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
     const holds = (x: PtMm, y: PtMm) => Math.hypot(x.x - y.x, x.y - y.y) <= 1e-7;
     const rings = block.seam ? [block.cut, block.seam] : [block.cut];
     if (command.tool === 'move-point') {
+      const size = job.pieces
+        .find(({ identity }) => identity === command.target.pieceId)
+        ?.sizes.find(({ sizeToken }) => sizeToken === command.payload.sizeToken);
       const target = applyAffine(block.transform, command.payload.pointMm);
-      if (rings.some((ring) => !ring.some((point) => holds(point, target))))
+      const retained = orderedMoves
+        ? size &&
+          block.seam &&
+          sameDraftAllowanceRingV1(
+            block.cut,
+            size.cut.map((point) => applyAffine(block.transform, point)),
+          ) &&
+          sameDraftAllowanceRingV1(
+            block.seam,
+            size.seam!.map((point) => applyAffine(block.transform, point)),
+          )
+        : rings.every((ring) => ring.some((point) => holds(point, target)));
+      if (!retained)
         return blocked(
           'move-point-geometry-blocked',
-          'The DXF writer would omit the moved outline point.',
+          orderedMoves
+            ? 'The DXF writer would change the moved outline.'
+            : 'The DXF writer would omit the moved outline point.',
           command,
         );
       continue;

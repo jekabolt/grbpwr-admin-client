@@ -34,6 +34,7 @@ import {
   sameDartVertices,
 } from './draft-cad-saved-dart-tip-v1';
 
+import { draftOutlineMoveHistoryV1 } from './draft-cad-outline-move-history-v1';
 import { selectSavedFrenchCurveV1 } from './draft-cad-saved-french-curve-v1';
 
 const prepared = new WeakSet<CompileInput>();
@@ -48,6 +49,7 @@ type Review = {
     | 'saved dart'
     | 'saved French curve'
     | 'saved corner'
+    | 'saved outline points'
     | 'saved allowance offset';
   current: () => boolean;
   verifyCurrentRow: () => Promise<void>;
@@ -171,9 +173,12 @@ export async function compileSavedDraftGeometryReviewV1(
   const savedDart = savedTip ?? savedMove;
   const savedCurve = command?.tool === 'french-curve' ? command.payload.savedCurve : undefined;
   const sharpen = command?.tool === 'sharpen-corner';
+  const orderedMoves = commands.length > 1 ? draftOutlineMoveHistoryV1(commands) : null;
+  const contourId = sharpen ? command.payload.edge.contourId : orderedMoves?.[0]?.payload.contourId;
   requireSavedEdit(
-    command && (parallel || (commands.length === 1 && (savedDart || savedCurve || sharpen))),
-    'Record a saved corner, curve, dart or parallel opening edit.',
+    command &&
+      (orderedMoves || parallel || (commands.length === 1 && (savedDart || savedCurve || sharpen))),
+    'Record saved outline points, a corner, curve, dart or parallel opening edit.',
   );
   const { pieceId, pieceLineKey } = command.target;
   let affectedBlockNames = [pieceId + '_' + sizeToken];
@@ -206,8 +211,8 @@ export async function compileSavedDraftGeometryReviewV1(
   };
   requireSavedEdit(
     current() && session.source.phaseD.sourceSha256 === row.sha256,
-    sharpen
-      ? 'The saved bevel row, size or piece changed.'
+    contourId
+      ? 'The saved outline row, size or piece changed.'
       : savedCurve
         ? 'The saved French curve row, size or piece changed.'
         : 'The saved dart or opening row, size or piece changed.',
@@ -240,7 +245,7 @@ export async function compileSavedDraftGeometryReviewV1(
       .map((b) => b.block);
     requireSavedEdit(affectedBlockNames.length && current(), 'A graded piece alias changed.');
     await checkSavedParallelSpreadSourceV1(source.value, pieceId);
-  } else if (sharpen) {
+  } else if (contourId) {
     const scope = one(draft.scopes.filter((s) => s.target.scopeKey === row.scopeKey));
     const block = one(
       scope?.manifest.blocks.filter((b) => b.identity === pieceId && b.sizeToken === sizeToken) ??
@@ -249,7 +254,7 @@ export async function compileSavedDraftGeometryReviewV1(
     const selectedCut = one(
       selection.selection.phaseD.contours.filter(
         (c) =>
-          c.contourId === command.payload.edge.contourId &&
+          c.contourId === contourId &&
           c.pieceId === pieceId &&
           c.sizeToken === sizeToken &&
           c.role === 'cut-boundary',
@@ -261,8 +266,7 @@ export async function compileSavedDraftGeometryReviewV1(
     const group =
       block && one(read.meta.groups.filter((g) => g.kind === 'insert' && g.block === block.block));
     requireSavedEdit(
-      command.payload.sizeToken === sizeToken &&
-        selectedCut?.closed &&
+      selectedCut?.closed &&
         !selectedCut.lineage.mutations.length &&
         selectedCut.lineage.uniformPositiveScale === 1 &&
         block &&
@@ -270,7 +274,7 @@ export async function compileSavedDraftGeometryReviewV1(
         page &&
         cutId !== undefined &&
         read.meta.units.mmPerUnit === 1,
-      'Sharpening requires the exact original saved cut and sewing block.',
+      'Editing requires the exact original saved cut and sewing block.',
     );
     const { a, b, c, d } = group.transform;
     const pathById = new Map(page.paths.map((p) => [p.id, p]));
@@ -296,7 +300,7 @@ export async function compileSavedDraftGeometryReviewV1(
         cut.id !== seam.id &&
         sameDraftAllowanceRingV1(cut.pts, selectedCut.pointsMm) &&
         sameDraftAllowanceRingV1(cut.pts, seam.pts),
-      'Sharpening requires coincident original L1 and L14 polylines.',
+      'Editing requires coincident original L1 and L14 polylines.',
     );
     const edges = await projectDxfSourceNativeStraightEdgeSelectedPathsV1(nativeRead.owner, {
       schemaVersion: DXF_SOURCE_NATIVE_STRAIGHT_EDGE_SELECTED_PATHS_REQUEST_V1,
@@ -336,7 +340,7 @@ export async function compileSavedDraftGeometryReviewV1(
             })
           );
         }),
-      'Sharpening needs both original closed outlines made entirely of straight native edges.',
+      'Editing needs both original closed outlines made entirely of straight native edges.',
     );
   } else if (savedCurve && command.tool === 'french-curve') {
     const candidate = selectSavedFrenchCurveV1(compileInput, command.target);
@@ -592,9 +596,11 @@ export async function compileSavedDraftGeometryReviewV1(
           ? 'parallel opening'
           : sharpen
             ? 'saved corner'
-            : savedCurve
-              ? 'saved French curve'
-              : 'saved dart',
+            : orderedMoves
+              ? 'saved outline points'
+              : savedCurve
+                ? 'saved French curve'
+                : 'saved dart',
         verifyCurrentRow,
         manifest: result.artifact.manifest,
         geometry: (parallel ? openingGeometry : geometry)(result.artifact.compiledJob),
@@ -632,6 +638,8 @@ export function openSavedDraftGeometryFileV1(artifact: Artifact, name: string) {
   const review = artifacts.get(artifact) ?? readOffsetReview(artifact);
   requireSavedEdit(review && review.current(), 'Compile the current saved geometry again.');
   const file = new File([artifact.dxfText], name, { type: 'image/vnd.dxf' });
+  const preserveHeadings =
+    review.kind === 'saved allowance offset' || review.kind === 'saved outline points';
   registerSavedDartTipFileV1(
     file,
     async (draft, scope, isCurrent) => {
@@ -641,8 +649,7 @@ export function openSavedDraftGeometryFileV1(artifact: Artifact, name: string) {
           scope.target.scopeKey === review.scopeKey &&
           scope.manifest.gate?.passed &&
           markers(scope.manifest) === markers(review.manifest) &&
-          (review.kind !== 'saved allowance offset' ||
-            headings(scope.manifest) === headings(review.manifest)) &&
+          (!preserveHeadings || headings(scope.manifest) === headings(review.manifest)) &&
           scope.writerReplay &&
           (review.kind === 'saved allowance offset'
             ? openingGeometry(scope.writerReplay.job, 'grade')
@@ -660,9 +667,7 @@ export function openSavedDraftGeometryFileV1(artifact: Artifact, name: string) {
       );
     },
     review.kind,
-    review.kind === 'saved allowance offset'
-      ? { scopeKey: review.scopeKey, manifest: review.manifest }
-      : undefined,
+    preserveHeadings ? { scopeKey: review.scopeKey, manifest: review.manifest } : undefined,
   );
   return file;
 }

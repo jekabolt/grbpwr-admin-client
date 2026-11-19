@@ -5,7 +5,7 @@ import {
 import {
   isSavedDartTipReviewFileV1,
   bindSavedDartTipWizardScopeV1,
-  readSavedAllowanceOffsetHeadingV1,
+  readSavedGeometryPieceHeadingV1,
   savedReviewLabelV1,
   verifySavedDartTipApplyV1,
 } from './phase-e-workbench-v2/draft-cad-saved-dart-tip-file-v1';
@@ -69,13 +69,13 @@ export async function runOrdinaryDxfReviewSemanticsV1(
   run: (input: StageIO['semantics']['in']) => Promise<StageIO['semantics']['out']>,
 ) {
   const file = files.length === 1 ? files[0] : undefined;
-  const allowance = file && readSavedAllowanceOffsetHeadingV1(file);
-  const heading = allowance ?? (file && unlinkedCopyHeadings.get(file));
+  const savedGeometry = file && readSavedGeometryPieceHeadingV1(file);
+  const heading = savedGeometry ?? (file && unlinkedCopyHeadings.get(file));
   if (!heading) return run(input);
   if (heading.scopeKey !== card.scopeKey || heading.manifest.techCardId !== card.techCardId)
     throw new Error(
-      allowance
-        ? 'The reviewed allowance offset belongs to another card or material scope.'
+      savedGeometry
+        ? `The reviewed ${savedReviewLabelV1(file)} belongs to another card or material scope.`
         : 'The reviewed unlinked copy belongs to another card or material scope.',
     );
   const {
@@ -84,7 +84,7 @@ export async function runOrdinaryDxfReviewSemanticsV1(
   } = await import('./phase-e-workbench-v2/saved-dxf-reprocess-host-v1');
   const fileAllowance = buildPatternImportDxfSavedManifestAllowanceV1(heading.manifest);
   const initial = await run({ ...input, fileAllowance });
-  if (allowance && initial.blocked.length) return initial;
+  if (savedGeometry && initial.blocked.length) return initial;
   const exact = buildPatternImportDxfExactManifestPieceOverridesV1(initial, heading.manifest);
   const pieceOverrides = { ...input.pieceOverrides };
   for (const [seed, override] of Object.entries(exact)) {

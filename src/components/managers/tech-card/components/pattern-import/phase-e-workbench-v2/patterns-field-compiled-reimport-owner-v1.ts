@@ -66,7 +66,8 @@ export function registerPatternImportDxfPhaseEPatternsFieldCompiledReimportOwner
           output === 'moved-french-curve' ||
           output === 'parallel-spread' ||
           output === 'allowance-offset' ||
-          output === 'sharpened-corner',
+          output === 'sharpened-corner' ||
+          output === 'moved-saved-vertex',
       );
       const manualApply =
         savedGeometry ||

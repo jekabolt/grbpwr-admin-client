@@ -43,6 +43,7 @@ import {
   sameSavedDraftRowV1,
   selectMatchingSavedDraftV1,
 } from './draft-cad-saved-source-selection-v1';
+import { draftOutlineMoveHistoryV1 } from './draft-cad-outline-move-history-v1';
 import type { SavedDraftPairedAllowanceAuthorityV1 } from './draft-cad-paired-allowance-authority-v1';
 
 export { sameSavedDraftRowV1, selectMatchingSavedDraftV1 };
@@ -333,14 +334,15 @@ export async function compileDraftForOrdinaryReviewV1(
   prepareGeometry?: () => Promise<PatternImportDxfPhaseEDraftCadGeometryCompileResultV1>,
 ): Promise<PatternImportDxfPhaseEDraftCadGeometryCompileResultV1> {
   const commands = activeDraftCadTransactionsV1(input.session).flatMap((tx) => tx.commands);
-  const savedEdit = commands.find(
-    (command) =>
-      (command.tool === 'dart' && command.payload.savedTip) ||
-      (command.tool === 'fish-eye' && command.payload.savedMove) ||
-      (command.tool === 'french-curve' && command.payload.savedCurve) ||
-      (command.tool === 'spread' && command.payload.mode === 'parallel') ||
-      command.tool === 'sharpen-corner',
-  );
+  const savedEdit =
+    commands.find(
+      (command) =>
+        (command.tool === 'dart' && command.payload.savedTip) ||
+        (command.tool === 'fish-eye' && command.payload.savedMove) ||
+        (command.tool === 'french-curve' && command.payload.savedCurve) ||
+        (command.tool === 'spread' && command.payload.mode === 'parallel') ||
+        command.tool === 'sharpen-corner',
+    ) ?? (commands.length > 1 ? draftOutlineMoveHistoryV1(commands)?.[0] : undefined);
   if (savedEdit && prepareGeometry) {
     try {
       return await prepareGeometry();
