@@ -3,6 +3,7 @@ import { Button, CalloutBox, CheckboxCommon, EmptyCell, Pill, Select, Text } fro
 
 import {
   resolvePatternImportDxfPhaseECadOperationSwitchIndexV1,
+  resolvePatternImportDxfPhaseECadSelectedOperationV1,
   type PatternImportDxfPhaseECadOperationNavigationItemV1,
   type PatternImportDxfPhaseECadOperationNavigationV1,
 } from './cad-operation-navigation-v1';
@@ -177,8 +178,7 @@ export function PatternImportDxfPhaseECadTableDraftOperationsPanelV1({
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [handoffResult, setHandoffResult] =
     useState<PatternImportDxfPhaseECadCommandAuthoringHandoffResultV1 | null>(null);
-  const currentItem =
-    navigation?.items.find(({ index }) => index === navigation.selectedIndex) ?? null;
+  const currentItem = resolvePatternImportDxfPhaseECadSelectedOperationV1(navigation);
   const previousIndex = navigation
     ? resolvePatternImportDxfPhaseECadOperationSwitchIndexV1(navigation, 'previous')
     : null;

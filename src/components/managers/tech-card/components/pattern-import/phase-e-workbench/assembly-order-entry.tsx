@@ -86,7 +86,10 @@ import type { PatternImportDxfPhaseECadCommandAuthoringHandoffOwnerV1 } from '..
 import type { PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1 } from '../phase-e-workbench-v2/cad-table-zero-connect-authoring-handoff-v1';
 import type { PatternImportDxfPhaseECadTableCrossScopeAuthoringHandoffOwnerV1 } from '../phase-e-workbench-v2/cad-table-cross-scope-authoring-handoff-v1';
 import type { PatternImportDxfPhaseECadTablePressAuthoringOwnerV1 } from '../phase-e-workbench-v2/cad-table-press-authoring-v1';
-import type { PatternImportDxfPhaseECadOperationNavigationV1 } from '../phase-e-workbench-v2/cad-operation-navigation-v1';
+import {
+  countPatternImportDxfPhaseECadSelectedOperationWarningsV1,
+  type PatternImportDxfPhaseECadOperationNavigationV1,
+} from '../phase-e-workbench-v2/cad-operation-navigation-v1';
 import type { PatternImportDxfPhaseECadWorkbenchStitchEditorFieldV1 } from '../phase-e-workbench-v2/cad-workbench-stitch-editor-handoff-v1';
 import type { PatternImportDxfPhaseECadWorkbenchStitchEditCapabilitiesV1 } from '../phase-e-workbench-v2/cad-workbench-stitch-route-intent-v1';
 import type {
@@ -2809,6 +2812,10 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
         }
         disabled={frozen}
         selection={{ operationNumber: source.selectedOperationNumber }}
+        operationIssueCount={countPatternImportDxfPhaseECadSelectedOperationWarningsV1(
+          operationNavigation,
+          source.selectedOperationNumber,
+        )}
         defaultOperationsMode='docked'
         operationsPanel={
           <>

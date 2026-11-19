@@ -700,6 +700,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
   savedAuthority = null,
   selection = Object.freeze({ operationNumber: null }),
   operationsPanel = null,
+  operationIssueCount,
   acceptedCloth,
   savedReviewSize,
   defaultOperationsMode = 'collapsed',
@@ -717,6 +718,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
   savedAuthority?: PatternImportDxfPhaseEZeroOperationSavedCardAuthorityRuntimeV1 | null;
   selection?: PatternImportDxfPhaseECadWorkbenchSelectionV1;
   operationsPanel?: ReactNode;
+  operationIssueCount?: number;
   acceptedCloth?: CadWorkbenchPhysicalHostV1['acceptedCloth'];
   savedReviewSize?: CadWorkbenchSavedReviewSizeV1;
   defaultOperationsMode?: PatternImportDxfPhaseECadWorkbenchOperationsModeV1;
@@ -1360,6 +1362,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
             features={pieceFeatures}
             savedPieces={currentSavedPieceMetadata}
             renamePiece={renamePiece}
+            operationIssueCount={operationIssueCount}
           />
         ) : null
       }
@@ -1520,6 +1523,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
   disabled = false,
   selection,
   operationsPanel,
+  operationIssueCount,
   defaultOperationsMode,
   sourceSurface,
 }: Readonly<{
@@ -1530,6 +1534,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
   disabled?: boolean;
   selection?: PatternImportDxfPhaseECadWorkbenchSelectionV1;
   operationsPanel?: ReactNode;
+  operationIssueCount?: number;
   defaultOperationsMode?: PatternImportDxfPhaseECadWorkbenchOperationsModeV1;
   sourceSurface?: 'explicit-native-drawn-sewing';
 }>) {
@@ -1564,6 +1569,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
       savedAuthority={savedAuthority}
       selection={selection}
       operationsPanel={operationsPanel}
+      operationIssueCount={operationIssueCount}
       acceptedCloth={physicalHost?.acceptedCloth}
       savedReviewSize={physicalHost?.savedReviewSize}
       defaultOperationsMode={defaultOperationsMode}

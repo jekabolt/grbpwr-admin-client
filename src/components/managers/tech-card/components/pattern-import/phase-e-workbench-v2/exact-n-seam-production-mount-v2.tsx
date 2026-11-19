@@ -124,6 +124,7 @@ export type PatternImportDxfProductExactNSeamProductionMountPropsV2 = Readonly<{
   onActiveSeamIndexChange: (index: number) => void;
   mannequin: PatternImportDxfProductExactNSeamProductionMannequinSlotV2;
   operationsPanel: PatternImportDxfPhaseECadWorkbenchSlotV1;
+  operationIssueCount?: number;
   desktopGeometry?: PatternImportDxfProductExactNDesktopGeometryV2 | null;
   objectSidebar?: PatternImportDxfPhaseECadWorkbenchSlotV1;
   sceneOverlayInput?: PatternImportDxfProductExactNSeamProductionSceneOverlayInputV2 | null;
@@ -258,6 +259,7 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
   onActiveSeamIndexChange,
   mannequin,
   operationsPanel,
+  operationIssueCount,
   desktopGeometry = null,
   objectSidebar,
   sceneOverlayInput = null,
@@ -441,6 +443,7 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
             owner={tableSessionOwner}
             projection={exactDesktop.projection}
             features={exactDesktop.pieceFeatures}
+            operationIssueCount={operationIssueCount}
           />
         ) : null)
       }

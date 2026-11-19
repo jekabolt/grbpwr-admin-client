@@ -2,7 +2,16 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { Button } from 'ui';
-import { PATTERN_IMPORT_DXF_PHASE_E_CAD_OPERATION_NAVIGATION_V1 } from './cad-operation-navigation-v1';
+import {
+  countPatternImportDxfPhaseECadSelectedOperationWarningsV1,
+  PATTERN_IMPORT_DXF_PHASE_E_CAD_OPERATION_NAVIGATION_V1,
+} from './cad-operation-navigation-v1';
+import { CadTablePieceSelection } from './cad-table-piece-selection-panel-v1';
+import {
+  PATTERN_IMPORT_DXF_PRODUCT_PHASE_E_ASSEMBLY_PROJECTION_V1,
+  type PatternImportDxfProductPhaseEAssemblyProjectionV1,
+} from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
+import { createPatternImportDxfPhaseECadTableZeroCanvasSessionV1 } from './cad-table-zero-connect-canvas-v1';
 
 import {
   openPatternImportDxfPhaseECadOperationDetailsForEditV1,
@@ -209,6 +218,100 @@ describe('Assembly Table chrome', () => {
     expect(withCurrentOperation).toContain('Front with pocket');
     expect(withCurrentOperation.match(/data-test-operation-editor/g)).toHaveLength(1);
     expect(withCurrentOperation).not.toMatch(/no seam|data-cad-operation-draft-pane|issues/u);
+  });
+
+  it('shows only selected-operation navigation warnings in the saved table inspector', () => {
+    const operation = {
+      index: 3,
+      operationNumber: 170,
+      title: 'Finish pocket',
+      work: null,
+      typeLabel: null,
+      status: { missing: false, broken: false, problem: false, draft: false, review: false },
+      context: { inputs: [], seamKeys: [], output: null, bomRefs: [], warnings: [] },
+    };
+    const warning = 'Review operation inputs';
+    const navigation = {
+      schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_CAD_OPERATION_NAVIGATION_V1,
+      selectedIndex: operation.index,
+      items: [
+        { ...operation, index: 1, operationNumber: 160 },
+        { ...operation, context: { ...operation.context, warnings: [warning] } },
+      ],
+    };
+    const projection: PatternImportDxfProductPhaseEAssemblyProjectionV1 = {
+      schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_PHASE_E_ASSEMBLY_PROJECTION_V1,
+      expectedCatalogCanonicalSha256: '1'.repeat(64),
+      sizeSelectionCanonicalSha256: '2'.repeat(64),
+      sourceFileId: 'pattern',
+      sizeToken: 'M',
+      joinMode: 'catalog-ordinal-to-phase-d-point',
+      pieces: [],
+      geometryPlacementApplied: false,
+    };
+    const owner = {
+      session: createPatternImportDxfPhaseECadTableZeroCanvasSessionV1(projection),
+      update: () => undefined,
+    };
+    const sidebar = (operationIssueCount: number) =>
+      renderToStaticMarkup(
+        <CadTablePieceSelection
+          owner={owner}
+          projection={projection}
+          operationIssueCount={operationIssueCount}
+        />,
+      );
+    const count = countPatternImportDxfPhaseECadSelectedOperationWarningsV1;
+    expect(sidebar(count(navigation, 170))).toMatch(
+      /data-cad-object-issues-readonly=""[^>]*>1 issues/u,
+    );
+    expect(sidebar(count(navigation, 170))).not.toContain('data-cad-focus-next-issue');
+    expect(sidebar(count(navigation, 160))).not.toContain('data-cad-object-issues');
+    expect(sidebar(count({ ...navigation, selectedIndex: 1 }, 160))).not.toContain(
+      'data-cad-object-issues',
+    );
+    expect(sidebar(count(null, 170))).not.toContain('data-cad-object-issues');
+
+    const details = renderToStaticMarkup(
+      <PatternImportDxfPhaseECadTableDraftOperationsPanelV1
+        editor={null}
+        operationNumber={170}
+        navigation={navigation}
+        result={{
+          ok: false,
+          plan: null,
+          blocker: {
+            code: 'exact-connection-incomplete',
+            detail: 'Choose two exact edges.',
+            operationNumber: 170,
+            processKind: 'connect',
+          },
+        }}
+      />,
+    );
+    expect(details).toContain('2 issues');
+    expect(details).toContain(warning);
+    expect(details).toContain('Choose two exact edges.');
+  });
+
+  it('passes current ordinary navigation warnings to both saved-table mounts', () => {
+    const source = (file: string) => readFileSync(new URL(file, import.meta.url), 'utf8');
+    for (const entry of [
+      '../phase-e-workbench/assembly-order-entry.tsx',
+      './assembly-order-entry.tsx',
+    ]) {
+      expect(source(entry)).toMatch(
+        /operationIssueCount=\{countPatternImportDxfPhaseECadSelectedOperationWarningsV1\(\s*operationNavigation,\s*source\.selectedOperationNumber,\s*\)\}/u,
+      );
+    }
+    for (const mount of [
+      './cad-table-zero-operation-production-mount-v1.tsx',
+      './exact-n-seam-production-mount-v2.tsx',
+    ]) {
+      expect(source(mount)).toMatch(
+        /<CadTablePieceSelection[\s\S]*?operationIssueCount=\{operationIssueCount\}/u,
+      );
+    }
   });
 
   it('opens operation details before routing an editable stitch fact', () => {

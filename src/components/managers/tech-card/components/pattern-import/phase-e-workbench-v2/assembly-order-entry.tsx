@@ -132,7 +132,10 @@ import {
   type PatternImportDxfPhaseECadTableDraftOperationSessionBridgeResultV1,
 } from './cad-table-draft-operation-session-bridge-v1';
 import { PatternImportDxfPhaseECadTableDraftOperationsPanelV1 } from './cad-table-draft-operations-panel-v1';
-import type { PatternImportDxfPhaseECadOperationNavigationV1 } from './cad-operation-navigation-v1';
+import {
+  countPatternImportDxfPhaseECadSelectedOperationWarningsV1,
+  type PatternImportDxfPhaseECadOperationNavigationV1,
+} from './cad-operation-navigation-v1';
 import type { PatternImportDxfPhaseECadWorkbenchStitchEditorFieldV1 } from './cad-workbench-stitch-editor-handoff-v1';
 import type { PatternImportDxfPhaseECadWorkbenchStitchEditCapabilitiesV1 } from './cad-workbench-stitch-route-intent-v1';
 import type { PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1 } from './cad-table-zero-connect-authoring-handoff-v1';
@@ -2489,6 +2492,10 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
       {open && exactNSession && exactNResolution?.ok ? (
         <PatternImportDxfProductExactNSeamProductionMountV2
           session={exactNSession}
+          operationIssueCount={countPatternImportDxfPhaseECadSelectedOperationWarningsV1(
+            operationNavigation,
+            source.selectedOperationNumber,
+          )}
           activeSeamIndex={exactNActiveSeamIndex}
           onActiveSeamIndexChange={setExactNActiveSeamIndex}
           desktopGeometry={exactNDesktop}

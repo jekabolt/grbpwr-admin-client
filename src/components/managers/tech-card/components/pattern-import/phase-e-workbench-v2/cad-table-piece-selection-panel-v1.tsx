@@ -136,12 +136,14 @@ export function CadTablePieceSelection({
   features,
   savedPieces,
   renamePiece,
+  operationIssueCount,
 }: Readonly<{
   owner: CadTableZeroCanvasOwner;
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
   features?: CadTablePieceFeaturesByKey;
   savedPieces?: readonly SavedPieceName[];
   renamePiece?: RenamePiece;
+  operationIssueCount?: number;
 }>) {
   const { selectedPieceKeys } = owner.session.layout;
   const unit = usePatternImportDxfPhaseECadWorkbenchMeasurementUnitV1()?.unit ?? 'mm';
@@ -196,6 +198,7 @@ export function CadTablePieceSelection({
     <PatternImportDxfPhaseECadWorkbenchObjectSidebarV1
       pieces={rows}
       selectedPieceIds={selectedPieceKeys}
+      issueCount={operationIssueCount}
       onFocusPiece={(key, { toggle }) =>
         owner.update((current) =>
           activatePatternImportDxfPhaseECadTableZeroCanvasPieceV1(current, key, toggle),
