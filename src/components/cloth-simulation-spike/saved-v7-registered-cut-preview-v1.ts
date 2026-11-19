@@ -15,9 +15,10 @@ type Durable = Pick<
   'outer' | 'graph' | 'graphCanonicalSha256' | 'physicalInitialization'
 >;
 
-/** First full-cut Preview uses one bounded activation on the saved placement. */
+/** Admit the first cleared frame, then take one bounded 0.1 mm approach step. */
 export const SAVED_REGISTERED_CUT_ACTIVATION_V1 = [
   { requestedReductionM: 0, maximumReductionM: 0 },
+  { requestedReductionM: 0.0001, maximumReductionM: 0.00011 },
 ] as const;
 
 export async function prepareSavedV7RegisteredCutPreviewV1(
@@ -80,7 +81,7 @@ export async function prepareSavedV7RegisteredCutPreviewV1(
     parameters: {
       dtS: materialSolver.dtS,
       solverIterations: materialSolver.solverIterations,
-      frameCount: 4,
+      frameCount: 1,
       gravityMps2Y: -9.81,
       windAccelerationMps2Z: 0,
       distanceComplianceMPerN: 2e-7,

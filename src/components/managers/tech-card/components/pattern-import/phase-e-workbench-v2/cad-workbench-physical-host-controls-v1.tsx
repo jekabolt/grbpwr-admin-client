@@ -185,7 +185,11 @@ export function CadWorkbenchPhysicalHostControlsV1({
     pending: false,
     error: null,
   });
-  const [cutFrame, setCutFrame] = useState<number | null>(null);
+  const [cutFrame, setCutFrame] = useState<Readonly<{
+    number: number;
+    stitchStations: number;
+    maximumGapMm: number;
+  }> | null>(null);
   const registeredHost = useMemo<CadWorkbenchBoundedClothPreviewHostV1 | null>(() => {
     if (!host || !displayedInput || !scopeKey || !onAcceptedRegisteredCloth) return null;
     return {
@@ -200,9 +204,18 @@ export function CadWorkbenchPhysicalHostControlsV1({
         if (!result.ok) return result;
         if (!result.frame || !result.isCurrent())
           return { ok: false, detail: 'No current full-cut frame was accepted.' };
-        const { frame } = result.frame;
+        const { frame, source } = result.frame;
+        const seam = frame.activeSeams.find(
+          ({ operationOrder }) => operationOrder === source.operationOrder,
+        );
+        if (!seam?.constraintCount || !Number.isFinite(seam.maximumGapM))
+          return { ok: false, detail: 'The full-cut frame has no active stitch stations.' };
         onAcceptedRegisteredCloth(displayedFullCut(result.frame, frame.frame, result.isCurrent));
-        setCutFrame(frame.frame);
+        setCutFrame({
+          number: frame.frame,
+          stitchStations: seam.constraintCount,
+          maximumGapMm: seam.maximumGapM * 1000,
+        });
         return { ok: true, releaseDevice: true };
       },
       async stopPreview() {
@@ -496,6 +509,8 @@ export function CadWorkbenchPhysicalHostControlsV1({
             data-cad-registered-cut-placement={cutProof?.placementSha256}
             data-cad-registered-cut-body={cutProof?.bodyPositionsSha256}
             data-cad-registered-cut-triangles={cutProof?.triangles}
+            data-cad-registered-cut-active-stations={cutFrame?.stitchStations}
+            data-cad-registered-cut-gap-mm={cutFrame?.maximumGapMm}
           >
             <Button
               type='button'
@@ -548,7 +563,8 @@ export function CadWorkbenchPhysicalHostControlsV1({
             )}
             {cutFrame !== null && (
               <Text component='span' size='micro' role='status'>
-                Full cut · frame {cutFrame}
+                Full cut · frame {cutFrame.number} · {cutFrame.stitchStations} stitch stations ·{' '}
+                {cutFrame.maximumGapMm.toFixed(3)} mm maximum seam gap
               </Text>
             )}
           </div>
