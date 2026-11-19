@@ -1,5 +1,6 @@
 import { PrintDegradedNotice } from 'components/managers/print/degraded-notice';
 import { depStatus, usePrintReady, type PrintDep } from 'components/managers/print/use-print-ready';
+import { usePaperBrandDep } from 'lib/workspace/paper-brand-context';
 import { parsePrintQuery } from 'components/managers/print/scope';
 import { ROUTES } from 'constants/routes';
 import { useMemo, useState } from 'react';
@@ -50,9 +51,11 @@ export function RunPackPrint() {
   // Гейт печати обязан их ждать: без них лист печатается с пустыми таблицами, неотличимыми от
   // «настилов нет». Отказ при этом кнопку НЕ блокирует — см. правило 1 в use-print-ready.ts.
   const [docDeps, setDocDeps] = useState<PrintDep[]>([]);
+  const brandDep = usePaperBrandDep();
 
   const { ready, degraded } = usePrintReady([
     { label: 'production run', status: depStatus(isLoading, isError) },
+    brandDep,
     // Кат-лист сознательно НЕ обязателен: наряд остаётся документом партии и без него.
     { label: 'cut list', status: depStatus(cutPlanLoading, cutPlanError) },
     ...docDeps,

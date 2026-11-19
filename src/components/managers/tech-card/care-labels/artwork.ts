@@ -318,8 +318,15 @@ export function logoPath(x: number, y: number, sizeMm: number): Prim[] {
  * тот же `Art`). Нет своего — ровно `logoPath` (байт-в-байт прежняя лента). Свой рисунок вписан в
  * тот же квадрат по большей стороне и отцентрован по меньшей.
  */
-export function logoPrims(x: number, y: number, sizeMm: number, logo?: Art | null): Prim[] {
-  if (!logo) return logoPath(x, y, sizeMm);
+export function logoPrims(
+  x: number,
+  y: number,
+  sizeMm: number,
+  logo?: Art | null,
+  houseMark = true,
+): Prim[] {
+  // no own SVG: the house mark (teams OFF, the first team), otherwise the logo spot stays empty
+  if (!logo) return houseMark ? logoPath(x, y, sizeMm) : [];
   const side = Math.max(logo.vw, logo.vh);
   const k = sizeMm / side;
   return place(

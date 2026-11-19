@@ -1,7 +1,8 @@
 import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { LabelShapeIcon } from 'components/managers/tech-card/components/label-shape-icon';
 import { PatternQR } from 'components/managers/tech-card/patterns/pattern-qr';
-import { DataTable, GrbpwrMark, HeaderNote, SectionHeader } from 'ui';
+import { PaperMark, usePaperBrand } from 'lib/workspace/paper-brand-context';
+import { DataTable, HeaderNote, SectionHeader } from 'ui';
 import {
   deriveLabels,
   type LabelsDeriveOptions,
@@ -226,9 +227,10 @@ export function LabelsPage({
   orderSizes,
 }: LabelsPageProps) {
   const { t } = useT();
+  const paper = usePaperBrand();
   const model = useMemo(
-    () => deriveLabels(techCard, { sampleSizeName, sizeNames, orderSizes }, undefined, t),
-    [techCard, sampleSizeName, sizeNames, orderSizes, t],
+    () => deriveLabels(techCard, { sampleSizeName, sizeNames, orderSizes, paper }, undefined, t),
+    [techCard, sampleSizeName, sizeNames, orderSizes, paper, t],
   );
   const [tight, setTight] = useState(0);
   const sheets = useMemo(
@@ -249,7 +251,7 @@ export function LabelsPage({
                 className='h-full w-full object-contain'
               />
             ) : (
-              <GrbpwrMark className='h-full w-full text-textColor' />
+              <PaperMark brand={paper} className='h-full w-full text-textColor' />
             )}
           </div>
           <div className='flex min-w-0 flex-1 flex-col gap-1 text-control uppercase leading-tight'>

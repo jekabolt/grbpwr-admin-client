@@ -64,7 +64,11 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
           >
             <Link to='/'>{title}</Link>
           </Button>
-          {workspace?.readOnly && <Pill tone='warn'>read only</Pill>}
+          {workspace?.readOnly && (
+            <Pill tone='warn' lowercase>
+              read only
+            </Pill>
+          )}
         </div>
 
         <div className='flex shrink-0 grow basis-0 items-center justify-end gap-1'>
@@ -85,7 +89,12 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
             <span className='hidden text-labelColor lg:inline'>{PALETTE_KEY_HINT}</span>
           </Button>
           <div className='hidden lg:block'>
-            <NavDropdownMenu groups={[ADMIN_GROUP]} align='end' onOpenChange={setIsNavOpen} />
+            <NavDropdownMenu
+              groups={[ADMIN_GROUP]}
+              align='end'
+              flatSingle={team}
+              onOpenChange={setIsNavOpen}
+            />
           </div>
           {/* «Мой профиль» стоит рядом с «logout», а не в выпадающем «admin», и это не
               вкусовщина: пункты «admin» гейтятся правами и у фотографа группа исчезает целиком,
@@ -103,10 +112,10 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
                 asChild
                 className={cn(
                   'px-2 underline-offset-2 transition-colors hover:underline hover:opacity-70',
-                  pathname === ROUTES.people && 'underline',
+                  pathname === ROUTES.workspace && 'underline',
                 )}
               >
-                <Link to={ROUTES.people}>people</Link>
+                <Link to={ROUTES.workspace}>workspace</Link>
               </Button>
             </div>
           )}

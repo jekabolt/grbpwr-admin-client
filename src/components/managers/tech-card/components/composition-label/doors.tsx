@@ -28,11 +28,14 @@ import type { QrPreset } from '../../care-labels/use-care-label-prefs';
 export function LogoEditor({
   url,
   custom,
+  houseMark = true,
   disabled,
   onPick,
 }: {
   url: string;
   custom: boolean;
+  /** No own SVG: the house mark (teams OFF, the first team) or nothing. */
+  houseMark?: boolean;
   disabled?: boolean;
   onPick: (media: common_MediaFull) => void;
 }) {
@@ -41,12 +44,12 @@ export function LogoEditor({
       <span className='flex size-16 items-center justify-center border border-borderColor bg-bgColor p-2'>
         {custom && url ? (
           <img src={url} alt='composition label logo' className='max-h-full max-w-full' />
-        ) : (
+        ) : houseMark ? (
           <GrbpwrMark className='size-full text-textColor' />
-        )}
+        ) : null}
       </span>
       <div className='flex flex-col gap-2'>
-        <Text className='uppercase'>{custom ? 'your SVG' : 'the GRBPWR mark'}</Text>
+        <Text className='uppercase'>{custom ? 'your SVG' : houseMark ? 'the GRBPWR mark' : 'none'}</Text>
         {disabled ? null : (
           <MediaSelector
             label='composition label logo'

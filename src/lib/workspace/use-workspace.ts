@@ -14,6 +14,8 @@ export function toWorkspace(res: GetCurrentAccountResponse | undefined): Workspa
     role: w.role ?? '',
     features: w.features ?? [],
     readOnly: !!w.readOnly,
+    brand: w.brand ?? null,
+    logoUrl: w.logoUrl ?? '',
   };
 }
 
@@ -25,6 +27,8 @@ export interface UseWorkspace {
   features: string[];
   readOnly: boolean;
   gate: WorkspaceGate;
+  /** GetCurrentAccount failed (nothing cached). */
+  failed: boolean;
   refetch: () => void;
 }
 
@@ -50,6 +54,7 @@ export function useWorkspace(): UseWorkspace {
     features: workspace?.features ?? [],
     readOnly: workspace?.readOnly ?? false,
     gate: workspaceGate(currentHost().kind, workspace, loaded),
+    failed: q.isError && !q.data,
     refetch: () => {
       void q.refetch();
     },

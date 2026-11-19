@@ -6,6 +6,7 @@
 //   stub.fail = '1'        every console / people write is refused (optimistic revert)
 //   stub.soleOwner = '1'   the signed-in person is the team's only owner
 //   stub.noTeams = '1'     the console has no teams
+//   stub.noRequests = '1'  no sign-up waits for approval
 //   stub.member = '1'      the signed-in person is a plain member (no people actions)
 //   stub.ownerOnly = '1'   people writes are refused `owner_only` (demoted a moment ago)
 //   stub.unauth = '1'      EnterTeam answers 401 (console session revoked)
@@ -109,6 +110,21 @@ function team(
   };
 }
 
+const gone = (slug: string, name: string, people: number, wipeInDays: number): StubTeam => ({
+  ...team(
+    slug,
+    name,
+    60 + wipeInDays,
+    '0',
+    Array.from({ length: people }, (_, i) => [`p${i}`, `p${i}@${slug}.com`, 'owner', 60 * 24 * 40]),
+  ),
+  status: 'deleted',
+  deletedFrom: 'active',
+  purgeAt: new Date(Date.now() + wipeInDays * DAY).toISOString(),
+});
+
+// 4 live teams (the first team with its locked cells, one paused, one long name), 2 waiting
+// sign-ups, 10 deleted teams with different wipe dates, one never-listed pending sign-up.
 let teams: StubTeam[] = [
   team(
     'grbpwr',
@@ -122,63 +138,39 @@ let teams: StubTeam[] = [
       ['mika', 'mika@grbpwr.com', 'member', 60 * 26],
       ['lena', 'lena@grbpwr.com', 'member', 60 * 24 * 4],
     ],
-    { features: ALL.filter((k) => k !== 'support') },
+    { features: ALL.filter((k) => !['hero', 'promo', 'support', 'local_accounts'].includes(k)) },
   ),
   team(
     'ostra',
     'ostra',
-    2,
-    '12.40',
+    20,
+    '21.40',
     [
-      ['mira', 'mira@ostra.studio', 'owner', 0],
-      ['tomas', 'tomas@ostra.studio', 'owner', 120],
-      ['ana', 'ana@ostra.studio', 'member', 60 * 30],
+      ['anna kowal', 'anna@ostra.studio', 'owner', 40],
+      ['teo marin', 'teo@ostra.studio', 'member', 120],
+      ['lena fischer', 'lena@ostra.studio', 'member', 60 * 24 * 7],
     ],
-    { features: [...DEFAULTS, 'products', 'orders'] },
+    { features: [...DEFAULTS, 'products', 'settings'] },
   ),
   team(
-    'atelier-nord',
-    'atelier nord',
-    9,
+    'mono',
+    'mono',
+    13,
     '0',
-    [
-      ['ilse', 'ilse@ateliernord.com', 'owner', 60 * 24 * 6],
-      ['oskar', 'oskar@ateliernord.com', 'member', 60 * 24 * 8],
-    ],
-    { status: 'read_only' },
+    [['nika petrova', 'nika@mono.works', 'owner', 60 * 24 * 17]],
+    { status: 'read_only', features: [...DEFAULTS.filter((k) => k !== 'materials'), 'accounting'] },
   ),
-  team('vela', 'vela', 0, '0', [['noor', 'noor@vela.design', 'owner', 3]], {
-    status: 'provisioning',
-  }),
   team(
-    'kiln-and-cloth',
-    'kiln and cloth',
-    5,
-    '7.85',
+    'studio-hale-atelier-for-considered-garments',
+    'studio hale atelier for considered garments and small runs',
+    1,
+    '6.80',
     [
-      ['felix', 'felix@kilnandcloth.com', 'owner', 15],
-      ['ruth', 'ruth@kilnandcloth.com', 'member', 60 * 5],
-      ['sami', 'sami@kilnandcloth.com', 'member', 60 * 24 * 3],
-      ['ada', 'ada@kilnandcloth.com', 'member', 60 * 24 * 12],
+      ['mira hale', 'mira@studiohale.com', 'owner', 5],
+      ['sam ortiz', 'sam@studiohale.com', 'member', 60 * 26],
     ],
-    { schemaOk: false, features: [...DEFAULTS, 'analytics'] },
   ),
-  team('pale-hours', 'pale hours', 14, '0.52', [
-    ['emil', 'emil@palehours.co', 'owner', 60 * 2],
-    ['juno', 'juno@palehours.co', 'member', 60 * 24 * 2],
-  ]),
-  team(
-    'halden-rook',
-    'halden & rook',
-    31,
-    '43.10',
-    [
-      ['kai', 'kai@haldenrook.com', 'owner', 40],
-      ['lotte', 'lotte@haldenrook.com', 'member', 60 * 9],
-    ],
-    { features: DEFAULTS.filter((k) => k !== 'fittings') },
-  ),
-  team('atelier-brisk', 'atelier brisk', 0, '0', [['ines', 'ines@atelierbrisk.com', 'owner', 0]], {
+  team('vela', 'vela', 0, '0', [['maria vela', 'maria@velastudio.com', 'owner', 0]], {
     status: 'review',
     features: [],
   }),
@@ -186,6 +178,21 @@ let teams: StubTeam[] = [
     status: 'review',
     features: [],
   }),
+  gone('kiln-works', 'kiln works', 2, 30),
+  gone('paper-moon', 'paper moon', 1, 25),
+  gone('nord-form-atelier', 'nord form atelier', 3, 21),
+  gone('linea', 'linea', 1, 13),
+  gone('atelier-vey', 'atelier vey', 2, 8),
+  gone('pale-hours', 'pale hours', 2, 6),
+  gone(
+    'halden-rook-tailoring-house',
+    'halden & rook tailoring house and pattern archive',
+    4,
+    4,
+  ),
+  gone('kiln-and-cloth', 'kiln and cloth', 4, 3),
+  gone('atelier-brisk', 'atelier brisk', 1, 2),
+  gone('draft-studio', 'draft studio', 1, 1),
   team('draft-x', 'draft x', 0, '0', [], { status: 'pending', features: [] }),
 ];
 
@@ -297,7 +304,9 @@ export function consoleStubAnswer(method: string, body: string | null, path = ''
       // deleted teams whose data is not wiped yet come after every other team
       return {
         teams: [
-          ...teams.filter((t) => t.status !== 'deleted'),
+          ...teams.filter(
+            (t) => t.status !== 'deleted' && !(flag('stub.noRequests') && t.status === 'review'),
+          ),
           ...teams.filter((t) => t.status === 'deleted'),
         ].map(pub),
         aiSpendMonthTotalUsd: total(),

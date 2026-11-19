@@ -12,6 +12,8 @@ interface NavDropdownMenuProps {
   align?: 'start' | 'end';
   onOpenChange?: (open: boolean) => void;
   className?: string;
+  // A group left with one item is drawn as that item's word, not a menu of one (team hosts).
+  flatSingle?: boolean;
 }
 
 export function NavDropdownMenu({
@@ -19,6 +21,7 @@ export function NavDropdownMenu({
   align = 'start',
   onOpenChange,
   className,
+  flatSingle = false,
 }: NavDropdownMenuProps) {
   const { canSee } = usePermissions();
   const { pathname } = useLocation();
@@ -45,6 +48,26 @@ export function NavDropdownMenu({
       <NavigationMenu.List className={cn('flex items-center', align === 'end' && 'justify-end')}>
         {visibleGroups.map((group) => {
           const groupActive = group.items.some((item) => isActiveRoute(pathname, item.route));
+          if (flatSingle && group.items.length === 1) {
+            const item = group.items[0];
+            return (
+              <NavigationMenu.Item key={group.label}>
+                <NavigationMenu.Link asChild active={groupActive}>
+                  <Link
+                    to={item.route}
+                    aria-current={groupActive ? 'page' : undefined}
+                    className={cn(
+                      'block px-2 py-1 text-textBaseSize whitespace-nowrap underline-offset-2 transition-opacity hover:underline hover:opacity-70',
+                      'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
+                      groupActive && 'underline',
+                    )}
+                  >
+                    {item.label}
+                  </Link>
+                </NavigationMenu.Link>
+              </NavigationMenu.Item>
+            );
+          }
           return (
             <NavigationMenu.Item key={group.label} className='relative'>
               <NavigationMenu.Trigger

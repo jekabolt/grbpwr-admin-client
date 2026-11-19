@@ -49,7 +49,7 @@ import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { ReactNode, useEffect, useMemo } from 'react';
 import { PatternQR } from 'components/managers/tech-card/patterns/pattern-qr';
-import { GrbpwrMark } from 'ui';
+import { PaperMark, usePaperBrand } from 'lib/workspace/paper-brand-context';
 import { decimalToInput } from 'utils/decimal';
 import { viewerOrigin } from 'utils/viewer-origin';
 import { cmToM } from './lay-card';
@@ -123,6 +123,7 @@ export function RunPackDocument({
    */
   printQuery?: PrintQuery;
 }) {
+  const paper = usePaperBrand();
   const ins = run.run;
   const runId = wireInt(run.id);
   const techCardId = wireInt(ins?.techCardId);
@@ -508,10 +509,14 @@ export function RunPackDocument({
       <header className='mb-5 border-b-2 border-black pb-3'>
         <div className='flex items-start justify-between gap-4'>
           <div className='flex items-start gap-3'>
-            <GrbpwrMark className='mt-0.5 h-10 w-10 shrink-0 text-black' />
+            <PaperMark brand={paper} className='mt-0.5 h-10 w-10 shrink-0 text-black' />
             <div>
               <div className='text-micro uppercase tracking-[0.2em] text-labelColor'>
-                {tc?.brand || 'GRBPWR'} · production run pack
+                {(tc?.brand || paper.name) ? (
+                  <>{tc?.brand || paper.name} · production run pack</>
+                ) : (
+                  'production run pack'
+                )}
               </div>
               <div className='text-2xl font-bold uppercase leading-tight'>PR-{runId || '—'}</div>
               <div className='text-sm'>

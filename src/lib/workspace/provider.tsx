@@ -9,6 +9,7 @@ import { type ReactNode, useEffect, useRef } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { onWorkspaceSignal } from './events';
 import { featureForPath, featureOn } from './features';
+import { PaperBrandProvider } from './paper-brand-context';
 import { useWorkspace } from './use-workspace';
 
 const NAV_ITEMS = [...NAV_GROUPS, ADMIN_GROUP].flatMap((g) => g.items);
@@ -50,7 +51,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  return <>{children}</>;
+  return <PaperBrandProvider>{children}</PaperBrandProvider>;
 }
 
 /** Sends a path whose feature is off to the first allowed screen. */
