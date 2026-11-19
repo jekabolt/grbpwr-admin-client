@@ -269,3 +269,58 @@ export function measureDeformedClothSurfaceTapeV1(
     ? route.geodesicLengthM
     : null;
 }
+
+/** Recover indexed topology from the displayed cut's compiler-owned corner identities. */
+export function measureProjectedDeformedClothSurfaceTapeV1(
+  input: Readonly<{
+    positionsM: Float32Array;
+    pieceRange: Pick<ClothMeshPieceRange, 'pieceId' | 'triangleOffset' | 'triangleCount'>;
+    cornerRepresentative: (corner: number) => number;
+    start: DeformedClothSurfaceTapeHitV1;
+    end: DeformedClothSurfaceTapeHitV1;
+  }>,
+): number | null {
+  const { positionsM, pieceRange, start, end, cornerRepresentative } = input;
+  const { pieceId, triangleOffset, triangleCount } = pieceRange;
+  if (
+    positionsM.length % 9 !== 0 ||
+    !contains(triangleOffset, triangleCount, positionsM.length / 9) ||
+    [start, end].some(
+      ({ triangleIndex }) =>
+        triangleIndex < triangleOffset || triangleIndex >= triangleOffset + triangleCount,
+    )
+  )
+    return null;
+
+  const firstCorner = triangleOffset * 3;
+  const triangles = new Uint32Array(triangleCount * 3);
+  const indexedPositions = new Float32Array(triangles.length * 3);
+  let vertexCount = 0;
+  for (let index = 0; index < triangles.length; index += 1) {
+    const corner = firstCorner + index;
+    const owned = cornerRepresentative(corner) - firstCorner;
+    if (!Number.isSafeInteger(owned) || owned < 0 || owned > index) return null;
+    if (owned === index) {
+      indexedPositions.set(positionsM.subarray(corner * 3, corner * 3 + 3), vertexCount * 3);
+      triangles[index] = vertexCount;
+      vertexCount += 1;
+      continue;
+    }
+    const vertex = triangles[owned];
+    if (
+      cornerRepresentative(firstCorner + owned) !== firstCorner + owned ||
+      positionsM[corner * 3] !== indexedPositions[vertex * 3] ||
+      positionsM[corner * 3 + 1] !== indexedPositions[vertex * 3 + 1] ||
+      positionsM[corner * 3 + 2] !== indexedPositions[vertex * 3 + 2]
+    )
+      return null;
+    triangles[index] = vertex;
+  }
+  return measureDeformedClothSurfaceTapeV1({
+    positionsM: indexedPositions.subarray(0, vertexCount * 3),
+    triangles,
+    pieceRange: { pieceId, triangleOffset: 0, triangleCount, vertexOffset: 0, vertexCount },
+    start: { ...start, triangleIndex: start.triangleIndex - triangleOffset },
+    end: { ...end, triangleIndex: end.triangleIndex - triangleOffset },
+  });
+}

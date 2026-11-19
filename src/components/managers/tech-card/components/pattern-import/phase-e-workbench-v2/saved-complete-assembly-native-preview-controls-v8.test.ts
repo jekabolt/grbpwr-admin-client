@@ -112,6 +112,7 @@ function mountTestRoot() {
 
 function frame(number: number, isCurrent: () => boolean) {
   const read = vi.fn<(signal: AbortSignal) => Promise<SourceCutPrincipalStrainV1 | null>>();
+  const measureSurfaceTape = vi.fn<SavedWholeAssemblyPreviewProgressV1['measureSurfaceTape']>();
   const progress: SavedWholeAssemblyPreviewProgressV1 = {
     cloth: {
       positionsM: Float32Array.of(number, 0, 0, number, 1, 0, number, 0, 1),
@@ -120,6 +121,7 @@ function frame(number: number, isCurrent: () => boolean) {
       isCurrent,
     },
     readPrincipalStrain: read,
+    measureSurfaceTape,
     action: 'activate',
     activeSeams: [],
     contact: {
@@ -140,10 +142,13 @@ function frame(number: number, isCurrent: () => boolean) {
     totalStages: 2,
     frameWork: {},
   };
-  return { progress, read };
+  return { progress, read, measureSurfaceTape };
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.clearAllMocks();
+  vi.unstubAllGlobals();
+});
 
 it('toggles the current ordinary whole frame, ignores late readings and keeps the focused control', async () => {
   const page = mountTestRoot();
@@ -241,6 +246,79 @@ it('toggles the current ordinary whole frame, ignores late readings and keeps th
     expect(rendered).toBeUndefined();
     expect(button()).toBeUndefined();
     expect(legend()).toBeUndefined();
+  } finally {
+    await act(async () => page.root.unmount());
+  }
+});
+
+it('measures two points on the displayed accepted frame and cancels on mannequin change', async () => {
+  const page = mountTestRoot();
+  type Props = ComponentProps<typeof SavedCompleteAssemblyNativePreviewControlsV8>;
+  let bodyCurrent = true;
+  const body = { isCurrent: () => bodyCurrent } as NonNullable<Props['body']>;
+  const review = { wholeAssembly: { load: async () => ({}) } } as unknown as Props['review'];
+  const frameOne = frame(1, body.isCurrent);
+  let invalidate!: () => void;
+  let rendered: MeasurementSurfaceAcceptedClothV1 | undefined;
+  const onAcceptedCloth: Props['onAcceptedCloth'] = (cloth) => {
+    rendered = cloth;
+  };
+  mocks.invalidate.mockImplementation((_body, callback: () => void) => {
+    invalidate = callback;
+  });
+  mocks.run.mockImplementation(async ({ onAccepted }) => {
+    onAccepted(frameOne.progress);
+    return frameOne.progress;
+  });
+  mocks.start.mockImplementation((host: CadWorkbenchBoundedClothPreviewHostV1) =>
+    host.runBounded({} as Parameters<typeof host.runBounded>[0], new AbortController().signal),
+  );
+  const first = { triangleIndex: 0, barycentric: [0.5, 0.25, 0.25] as const };
+  const second = { triangleIndex: 0, barycentric: [0.25, 0.5, 0.25] as const };
+  const late = Promise.withResolvers<number>();
+  frameOne.measureSurfaceTape.mockResolvedValueOnce(0.5154).mockReturnValueOnce(late.promise);
+
+  try {
+    await act(async () =>
+      page.root.render(
+        createElement(SavedCompleteAssemblyNativePreviewControlsV8, {
+          review,
+          body,
+          disabled: false,
+          onAcceptedCloth,
+        }),
+      ),
+    );
+    expect(page.element('data-whole-assembly-tape-toggle')).toBeUndefined();
+    await act(async () => page.click('Preview full layout'));
+    await act(async () => page.click('Surface tape'));
+    const pick = rendered?.onMeasurePoint;
+    expect(pick).toBeDefined();
+    expect(rendered?.positionsM).toBe(frameOne.progress.cloth.positionsM);
+    await act(async () => pick?.(first));
+    expect(page.text()).toContain('Pick a second point on the same piece.');
+    await act(async () => pick?.(second));
+    expect(frameOne.measureSurfaceTape).toHaveBeenCalledWith(
+      first,
+      second,
+      expect.any(AbortSignal),
+    );
+    expect(page.text()).toContain('Surface distance · 515.4 mm');
+
+    await act(async () => {
+      pick?.(first);
+      pick?.(second);
+    });
+    expect(page.text()).toContain('Measuring surface path…');
+    await act(async () => {
+      bodyCurrent = false;
+      invalidate();
+    });
+    expect(frameOne.measureSurfaceTape.mock.calls[1][2].aborted).toBe(true);
+    await act(async () => late.resolve(1.23));
+    expect(rendered).toBeUndefined();
+    expect(page.element('data-whole-assembly-tape')).toBeUndefined();
+    expect(mocks.start).toHaveBeenCalledTimes(1);
   } finally {
     await act(async () => page.root.unmount());
   }

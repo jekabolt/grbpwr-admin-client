@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   measureDeformedClothSurfaceTapeV1,
+  measureProjectedDeformedClothSurfaceTapeV1,
   type DeformedClothSurfaceTapeHitV1,
 } from './deformed-cloth-surface-tape-v1';
 
@@ -37,6 +38,41 @@ function foldedStrip() {
 }
 
 describe('deformed cloth surface tape', () => {
+  it('uses exact cut-corner identities to rejoin the displayed folded surface', () => {
+    const indexed = foldedStrip();
+    const before = 3;
+    const positionsM = Float32Array.from([
+      ...new Array<number>(before * 3).fill(0),
+      ...Array.from(indexed.triangles).flatMap((vertex) =>
+        Array.from(indexed.positionsM.subarray(vertex * 3, vertex * 3 + 3)),
+      ),
+    ]);
+    const representatives = [0, 1, 2, 0, 2, 5, 1, 7, 8, 1, 8, 2];
+    const firstFace = before / 3;
+    const source = {
+      positionsM,
+      pieceRange: { ...indexed.pieceRange, triangleOffset: firstFace },
+      start: { ...indexed.start, triangleIndex: indexed.start.triangleIndex + firstFace },
+      end: { ...indexed.end, triangleIndex: indexed.end.triangleIndex + firstFace },
+      cornerRepresentative: (corner: number) => before + representatives[corner - before],
+    };
+    expect(measureProjectedDeformedClothSurfaceTapeV1(source)).toBeCloseTo(
+      Math.hypot(0.8, 0.2),
+      10,
+    );
+    expect(
+      measureProjectedDeformedClothSurfaceTapeV1({ ...source, cornerRepresentative: (i) => i }),
+    ).toBeNull();
+    expect(
+      measureProjectedDeformedClothSurfaceTapeV1({ ...source, start: indexed.start }),
+    ).toBeNull();
+    const shiftedPositions = positionsM.slice();
+    shiftedPositions[(before + 3) * 3] = 0.01;
+    expect(
+      measureProjectedDeformedClothSurfaceTapeV1({ ...source, positionsM: shiftedPositions }),
+    ).toBeNull();
+  });
+
   it('unfolds a folded strip between exact interior anchors, in either direction', () => {
     const input = foldedStrip();
     const positions = input.positionsM.slice();

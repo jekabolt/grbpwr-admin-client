@@ -7,7 +7,10 @@ import type {
   continueStagedSourceCutFramesV1,
   runStagedSourceCutFramesV1,
 } from 'components/cloth-simulation-spike/run-staged-source-cut-frames-v1';
-import type { MeasurementSurfaceAcceptedClothV1 } from 'components/shared/measurement-watertight-surface-v1-stage';
+import type {
+  MeasurementSurfaceAcceptedClothPointV1,
+  MeasurementSurfaceAcceptedClothV1,
+} from 'components/shared/measurement-watertight-surface-v1-stage';
 import type { SourceCutPrincipalStrainV1 } from 'lib/cloth/runtime/cpu/source-cut-principal-strain-v1';
 import { inspectOwnedActiveXpbdDeviceLeaseV1 } from 'lib/cloth/runtime/webgpu/xpbd-device-session';
 import type { SavedCompleteAssemblyNativeStitchAnchorsV1 } from './saved-complete-assembly-native-stitch-anchors-v1';
@@ -82,6 +85,11 @@ export type SavedWholeAssemblyPreviewProgressV1 = Readonly<{
   totalStages: number;
   frameWork: FrameWork;
   readPrincipalStrain: (signal: AbortSignal) => Promise<SourceCutPrincipalStrainV1 | null>;
+  measureSurfaceTape: (
+    start: MeasurementSurfaceAcceptedClothPointV1,
+    end: MeasurementSurfaceAcceptedClothPointV1,
+    signal: AbortSignal,
+  ) => Promise<number | null>;
   paused?: SavedWholeAssemblyResumeV1;
   stopped?: Readonly<{ operationNumber: number; detail: string }>;
 }>;
@@ -421,6 +429,34 @@ export async function runSavedWholeAssemblyStagedPreviewV1(
     let strain: SourceCutPrincipalStrainV1 | undefined;
     last = Object.freeze({
       cloth: Object.freeze({ positionsM, frameNumber: frame.frame, ranges, isCurrent }),
+      async measureSurfaceTape(
+        start: MeasurementSurfaceAcceptedClothPointV1,
+        end: MeasurementSurfaceAcceptedClothPointV1,
+        active: AbortSignal,
+      ) {
+        active.throwIfAborted();
+        if (!isCurrent()) return null;
+        const range = surface.drawRanges.find(({ triangleOffset, triangleCount }) =>
+          [start, end].every(
+            ({ triangleIndex }) =>
+              triangleIndex >= triangleOffset && triangleIndex < triangleOffset + triangleCount,
+          ),
+        );
+        if (!range) return null;
+        const { measureProjectedDeformedClothSurfaceTapeV1 } = await import(
+          'components/cloth-simulation-spike/deformed-cloth-surface-tape-v1'
+        );
+        active.throwIfAborted();
+        if (!isCurrent()) return null;
+        const length = measureProjectedDeformedClothSurfaceTapeV1({
+          positionsM,
+          pieceRange: range,
+          cornerRepresentative: surface.cornerRepresentative,
+          start,
+          end,
+        });
+        return isCurrent() ? length : null;
+      },
       async readPrincipalStrain(active: AbortSignal) {
         active.throwIfAborted();
         if (!isCurrent()) return null;

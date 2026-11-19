@@ -13,17 +13,24 @@ import {
   type ModelDisplayedTriangleBodyOwnedInputV1,
 } from 'components/cloth-simulation-spike/model-displayed-triangle-body-input-v1';
 import { MEASUREMENT_SURFACE_PRINCIPAL_STRAIN_SCALE_V1 as principalStrainScale } from 'components/shared/measurement-surface-principal-strain-scale-v1';
-import type { MeasurementSurfaceAcceptedClothV1 } from 'components/shared/measurement-watertight-surface-v1-stage';
+import type {
+  MeasurementSurfaceAcceptedClothPointV1,
+  MeasurementSurfaceAcceptedClothV1,
+} from 'components/shared/measurement-watertight-surface-v1-stage';
 import type { SourceCutPrincipalStrainV1 } from 'lib/cloth/runtime/cpu/source-cut-principal-strain-v1';
 import { Button, Input, Text } from 'ui';
 import { CAD_WORKBENCH_SEAM_SIDE_COLORS } from './cad-workbench-seam-colors-v1';
-import { useCadWorkbenchRetainMannequinPreviewV1 } from './cad-workbench-split-shell-v1';
+import {
+  useCadWorkbenchRetainMannequinPreviewV1,
+  usePatternImportDxfPhaseECadWorkbenchMeasurementUnitV1,
+} from './cad-workbench-split-shell-v1';
 import {
   createCadWorkbenchPreviewLifecycleV1,
   type CadWorkbenchBoundedClothPreviewHostV1,
   type CadWorkbenchPreviewStatusV1,
 } from './cad-workbench-preview-lifecycle-v1';
 import { canonicalizePatternImportDxfPhaseESavedAssemblyValueV1 as canonical } from './saved-assembly-topology-hash-v1';
+import { formatPatternImportDxfPhaseEMeasurementValueV1 } from './measurement-units-v1';
 import type { SavedCrossMaterialReviewForPreviewV8 } from './saved-complete-assembly-native-review-action-v8';
 import { matchesSavedNeutralPlacementBodyV1 as matchesSavedBody } from './saved-cross-material-placement-model-binding-v1';
 import type {
@@ -66,6 +73,13 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
     cloth: MeasurementSurfaceAcceptedClothV1;
     value: SourceCutPrincipalStrainV1 | null;
   }> | null>(null);
+  const [tape, setTape] = useState<Readonly<{
+    cloth: MeasurementSurfaceAcceptedClothV1;
+    first?: MeasurementSurfaceAcceptedClothPointV1;
+    second?: MeasurementSurfaceAcceptedClothPointV1;
+    lengthM?: number | null;
+  }> | null>(null);
+  const unit = usePatternImportDxfPhaseECadWorkbenchMeasurementUnitV1()?.unit ?? 'mm';
   const [pausing, setPausing] = useState(false);
   const [lifecycle] = useState(() => createCadWorkbenchPreviewLifecycleV1());
   const [status, setStatus] = useState<CadWorkbenchPreviewStatusV1>({
@@ -267,6 +281,7 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
         activeWholeCloth.current = null;
         setShowStrain(false);
         setStrainReading(null);
+        setTape(null);
         pauseRequested.current = false;
         setPausing(false);
         onAcceptedCloth(undefined);
@@ -285,6 +300,7 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
       activeWholeCloth.current = null;
       setShowStrain(false);
       setStrainReading(null);
+      setTape(null);
       onAcceptedCloth(undefined);
       setAcceptedFrame(null);
       setWholeProgress(null);
@@ -301,24 +317,66 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
 
   const wholeCloth = wholeProgress?.cloth;
   const readPrincipalStrain = wholeProgress?.readPrincipalStrain;
+  const measureSurfaceTape = wholeProgress?.measureSurfaceTape;
+  const canMeasureTape = !disabled && !status.pending && wholeCloth?.isCurrent() === true;
+  const activeTape = canMeasureTape && tape?.cloth === wholeCloth ? tape : null;
+  const tapeEnabled = activeTape !== null;
+  const pickTapePoint = useMemo(() => {
+    if (!tapeEnabled || !wholeCloth) return undefined;
+    return (point: MeasurementSurfaceAcceptedClothPointV1) => {
+      if (activeWholeCloth.current !== wholeCloth || !wholeCloth.isCurrent()) return;
+      setTape((current) => {
+        if (current?.cloth !== wholeCloth) return current;
+        return current.first && !current.second
+          ? { ...current, second: point }
+          : { cloth: wholeCloth, first: point };
+      });
+    };
+  }, [tapeEnabled, wholeCloth]);
+  useEffect(() => {
+    if (
+      !measureSurfaceTape ||
+      !activeTape?.first ||
+      !activeTape.second ||
+      activeTape.lengthM !== undefined
+    )
+      return;
+    const controller = new AbortController();
+    const publish = (lengthM: number | null) => {
+      if (
+        !controller.signal.aborted &&
+        activeWholeCloth.current === activeTape.cloth &&
+        activeTape.cloth.isCurrent()
+      )
+        setTape((current) => (current === activeTape ? { ...current, lengthM } : current));
+    };
+    void measureSurfaceTape(activeTape.first, activeTape.second, controller.signal).then(
+      publish,
+      () => publish(null),
+    );
+    return () => controller.abort();
+  }, [activeTape, measureSurfaceTape]);
   const currentStrainReading =
     showStrain && strainReading?.cloth === wholeCloth ? strainReading : null;
   const displayedStrain = currentStrainReading?.value;
   useLayoutEffect(() => {
     if (!wholeCloth?.isCurrent() || activeWholeCloth.current !== wholeCloth) return;
     onAcceptedCloth(
-      displayedStrain
+      displayedStrain || pickTapePoint
         ? Object.freeze({
             ...wholeCloth,
-            principalStrain: Object.freeze({
-              frameNumber: wholeCloth.frameNumber,
-              positionsM: wholeCloth.positionsM,
-              valuesInDrawOrder: displayedStrain.valuesInDrawOrder,
+            onMeasurePoint: pickTapePoint,
+            ...(displayedStrain && {
+              principalStrain: Object.freeze({
+                frameNumber: wholeCloth.frameNumber,
+                positionsM: wholeCloth.positionsM,
+                valuesInDrawOrder: displayedStrain.valuesInDrawOrder,
+              }),
             }),
           })
         : wholeCloth,
     );
-  }, [displayedStrain, onAcceptedCloth, wholeCloth]);
+  }, [displayedStrain, onAcceptedCloth, pickTapePoint, wholeCloth]);
 
   useEffect(() => {
     if (!showStrain || !readPrincipalStrain || !wholeCloth?.isCurrent()) return;
@@ -351,6 +409,7 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
     )
       return;
     if (resumeSuspended && (kind !== 'whole' || !pausedCheckpoint.current)) return;
+    setTape(null);
     previewKind.current = kind;
     pauseRequested.current = false;
     resumeRequested.current = resumeSuspended;
@@ -533,6 +592,18 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
             Principal strain
           </Button>
         )}
+        {canMeasureTape && wholeCloth && (
+          <Button
+            type='button'
+            variant={tapeEnabled ? 'main' : 'secondary'}
+            size='xs'
+            aria-pressed={tapeEnabled}
+            data-whole-assembly-tape-toggle=''
+            onClick={() => setTape(tapeEnabled ? null : { cloth: wholeCloth })}
+          >
+            Surface tape
+          </Button>
+        )}
         {(wholeProgress || (status.pending && previewKind.current === 'whole')) && (
           <Button
             type='button'
@@ -629,6 +700,19 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
       {!status.pending && wholeProgress?.paused && (
         <Text component='p' size='micro' role='status'>
           Paused after accepted frame {wholeProgress.paused.lastAcceptedFrame}.
+        </Text>
+      )}
+      {activeTape && (
+        <Text component='p' size='micro' role='status' data-whole-assembly-tape=''>
+          {typeof activeTape.lengthM === 'number'
+            ? `Surface distance · ${formatPatternImportDxfPhaseEMeasurementValueV1(activeTape.lengthM * 1000, unit).formatted}`
+            : activeTape.lengthM === null
+              ? 'No verified surface path between these points.'
+              : activeTape.second
+                ? 'Measuring surface path…'
+                : activeTape.first
+                  ? 'Pick a second point on the same piece.'
+                  : 'Pick a first point on the garment.'}
         </Text>
       )}
       {wholeProgress?.cloth.isCurrent() && (

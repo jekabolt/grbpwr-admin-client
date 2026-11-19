@@ -38,6 +38,7 @@ import {
   measurementSurfacePatternPieceTransformReceiptV1,
   measurementSurfaceRestoreCameraV10,
   pickMeasurementSurfaceAcceptedClothPieceV1,
+  pickMeasurementSurfaceAcceptedClothPointV1,
   updateMeasurementSurfaceAcceptedClothStrainV1,
   measurementSurfaceRotationGizmoMatrixV6,
   measurementSurfaceRotationGizmoSignatureV6,
@@ -317,6 +318,12 @@ it('uses the existing visible accepted cloth triangle ranges and rejects occlude
   expect(pickMeasurementSurfaceAcceptedClothPieceV1(ray(-1), cloth, null, accepted)).toBe(first);
   expect(pickMeasurementSurfaceAcceptedClothPieceV1(ray(1), cloth, body, accepted)).toBe(second);
   expect(pickMeasurementSurfaceAcceptedClothPieceV1(ray(-1), cloth, body, accepted)).toBeNull();
+  const point = pickMeasurementSurfaceAcceptedClothPointV1(ray(1), cloth, body, accepted);
+  expect(point?.triangleIndex).toBe(1);
+  expect(point?.barycentric[0]).toBeCloseTo(0.25, 12);
+  expect(point?.barycentric[1]).toBeCloseTo(0.25, 12);
+  expect(point?.barycentric[2]).toBeCloseTo(0.5, 12);
+  expect(pickMeasurementSurfaceAcceptedClothPointV1(ray(-1), cloth, body, accepted)).toBeNull();
   expect(
     pickMeasurementSurfaceAcceptedClothPieceV1(ray(1), cloth, body, {
       ...accepted,
@@ -325,6 +332,7 @@ it('uses the existing visible accepted cloth triangle ranges and rejects occlude
   ).toBeNull();
   current = false;
   expect(pickMeasurementSurfaceAcceptedClothPieceV1(ray(1), cloth, body, accepted)).toBeNull();
+  expect(pickMeasurementSurfaceAcceptedClothPointV1(ray(1), cloth, body, accepted)).toBeNull();
   clothGeometry.dispose();
   cloth.material.forEach((material) => material.dispose());
   bodyGeometry.dispose();

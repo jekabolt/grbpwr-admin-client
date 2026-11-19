@@ -165,6 +165,11 @@ export type MeasurementSurfaceAcceptedClothPieceV1 = Readonly<{
   sourceInstancePath: readonly string[];
 }>;
 
+export type MeasurementSurfaceAcceptedClothPointV1 = Readonly<{
+  triangleIndex: number;
+  barycentric: readonly [number, number, number];
+}>;
+
 /** An accepted frame in the displayed body's world-metre geometry. */
 export type MeasurementSurfaceAcceptedClothV1 = Readonly<{
   positionsM: Float32Array;
@@ -177,6 +182,7 @@ export type MeasurementSurfaceAcceptedClothV1 = Readonly<{
   }>[];
   isCurrent: () => boolean;
   onSelectPiece?: (piece: MeasurementSurfaceAcceptedClothPieceV1) => void;
+  onMeasurePoint?: (hit: MeasurementSurfaceAcceptedClothPointV1) => void;
   principalStrain?: Readonly<{
     frameNumber: number;
     positionsM: Float32Array;
@@ -248,6 +254,17 @@ export function updateMeasurementSurfaceAcceptedClothStrainV1(
   return show;
 }
 
+function intersectAcceptedCloth(
+  raycaster: THREE.Raycaster,
+  clothMesh: THREE.Mesh,
+  bodyMesh: THREE.Mesh | null,
+  cloth: MeasurementSurfaceAcceptedClothV1,
+) {
+  if (!cloth.isCurrent()) return null;
+  const hit = raycaster.intersectObjects(bodyMesh ? [bodyMesh, clothMesh] : [clothMesh], false)[0];
+  return hit?.object === clothMesh && hit.faceIndex != null && cloth.isCurrent() ? hit : null;
+}
+
 /** Resolve the frontmost accepted triangle's exact source occurrence. */
 export function pickMeasurementSurfaceAcceptedClothPieceV1(
   raycaster: THREE.Raycaster,
@@ -255,16 +272,40 @@ export function pickMeasurementSurfaceAcceptedClothPieceV1(
   bodyMesh: THREE.Mesh | null,
   cloth: MeasurementSurfaceAcceptedClothV1,
 ): MeasurementSurfaceAcceptedClothPieceV1 | null {
-  if (!cloth.isCurrent()) return null;
-  const hit = raycaster.intersectObjects(bodyMesh ? [bodyMesh, clothMesh] : [clothMesh], false)[0];
-  const triangle = hit?.faceIndex;
-  if (hit?.object !== clothMesh || triangle == null || !cloth.isCurrent()) return null;
+  const triangle = intersectAcceptedCloth(raycaster, clothMesh, bodyMesh, cloth)?.faceIndex;
+  if (triangle == null) return null;
   return (
     cloth.ranges.find(
       ({ triangleOffset, triangleCount }) =>
         triangle >= triangleOffset && triangle < triangleOffset + triangleCount,
     )?.sourcePiece ?? null
   );
+}
+
+/** Pick on the same rendered triangle and camera used for ordinary garment selection. */
+export function pickMeasurementSurfaceAcceptedClothPointV1(
+  raycaster: THREE.Raycaster,
+  clothMesh: THREE.Mesh,
+  bodyMesh: THREE.Mesh | null,
+  cloth: MeasurementSurfaceAcceptedClothV1,
+): MeasurementSurfaceAcceptedClothPointV1 | null {
+  const hit = intersectAcceptedCloth(raycaster, clothMesh, bodyMesh, cloth);
+  const triangleIndex = hit?.faceIndex;
+  if (triangleIndex == null || !hit?.face || triangleIndex * 9 + 8 >= cloth.positionsM.length)
+    return null;
+  const offset = triangleIndex * 9;
+  const weights = THREE.Triangle.getBarycoord(
+    clothMesh.worldToLocal(hit.point.clone()),
+    new THREE.Vector3().fromArray(cloth.positionsM, offset),
+    new THREE.Vector3().fromArray(cloth.positionsM, offset + 3),
+    new THREE.Vector3().fromArray(cloth.positionsM, offset + 6),
+    new THREE.Vector3(),
+  );
+  if (!weights || !weights.toArray().every((value) => value >= -1e-9 && value <= 1 + 1e-9))
+    return null;
+  const [a, b, c] = weights.toArray().map((value) => THREE.MathUtils.clamp(value, 0, 1));
+  const sum = a + b + c;
+  return Object.freeze({ triangleIndex, barycentric: [a / sum, b / sum, c / sum] as const });
 }
 
 export const MEASUREMENT_SURFACE_PATTERN_PIECE_PROJECTED_HIT_RECEIPT_V1 =
@@ -2279,7 +2320,8 @@ export function MeasurementWatertightSurfaceV1Stage({
       ].join(',');
       const topstitch = overlay?.pieces.find((piece) => piece.topstitch)?.topstitch;
       const line =
-        topstitch && patternPieceLayer?.getObjectByName(`pattern-piece-topstitch:${topstitch.lineKey}`);
+        topstitch &&
+        patternPieceLayer?.getObjectByName(`pattern-piece-topstitch:${topstitch.lineKey}`);
       if (line instanceof THREE.Line) {
         const positions = line.geometry.getAttribute('position');
         const start = new THREE.Vector3(positions.getX(0), positions.getY(0), positions.getZ(0));
@@ -3297,7 +3339,7 @@ export function MeasurementWatertightSurfaceV1Stage({
         if (
           event.isPrimary &&
           interactive &&
-          mountedCloth?.onSelectPiece &&
+          (mountedCloth?.onSelectPiece || mountedCloth?.onMeasurePoint) &&
           mountedCloth === acceptedClothRef.current &&
           mountedCloth.isCurrent()
         ) {
@@ -3439,7 +3481,8 @@ export function MeasurementWatertightSurfaceV1Stage({
             !acceptedClothMesh ||
             !mountedCloth ||
             mountedCloth !== acceptedClothRef.current ||
-            !sameAcceptedClothFrame(captured.frame, mountedCloth)
+            !sameAcceptedClothFrame(captured.frame, mountedCloth) ||
+            captured.frame.onMeasurePoint !== mountedCloth.onMeasurePoint
           )
             return;
           const point = normalizedTransformPointer(event, event.button);
@@ -3447,6 +3490,16 @@ export function MeasurementWatertightSurfaceV1Stage({
           camera.updateMatrixWorld();
           const raycaster = new THREE.Raycaster();
           raycaster.setFromCamera(new THREE.Vector2(point.x, point.y), camera);
+          if (mountedCloth.onMeasurePoint) {
+            const hit = pickMeasurementSurfaceAcceptedClothPointV1(
+              raycaster,
+              acceptedClothMesh,
+              surface,
+              mountedCloth,
+            );
+            if (hit) mountedCloth.onMeasurePoint(hit);
+            return;
+          }
           const piece = pickMeasurementSurfaceAcceptedClothPieceV1(
             raycaster,
             acceptedClothMesh,
