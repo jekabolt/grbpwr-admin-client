@@ -9,6 +9,7 @@ import { projectPatternImportDxfProductPhaseEAssemblyV1 } from 'lib/pattern-impo
 
 import {
   PatternImportDxfPhaseECadMannequinModelPickerV1,
+  PatternImportDxfPhaseECadMannequinViewToolbarV1,
   PatternImportDxfPhaseECadMannequinModelPickerViewV1,
   type PatternImportDxfPhaseECadMannequinModelPickerViewPropsV1,
 } from './cad-workbench-mannequin-model-picker-v1';
@@ -227,6 +228,40 @@ describe('mounted mannequin arrangement lifecycle', () => {
     });
     expect(overlay().pieces[0].transform).toEqual(moved);
   });
+  it('routes the Move plane selector through the current overlay without staging or saving an edit', async () => {
+    const save = vi.fn();
+    input = {
+      ...input,
+      onReadMannequinArrangement: vi.fn().mockResolvedValue(stored),
+      onSaveMannequinArrangement: save,
+    };
+    await render();
+    const toolbar = () =>
+      visit(tree, (value) => typeof value.onPatternTool === 'function') as Parameters<
+        typeof PatternImportDxfPhaseECadMannequinViewToolbarV1
+      >[0];
+    const selector = () =>
+      visit(
+        PatternImportDxfPhaseECadMannequinViewToolbarV1(toolbar()),
+        (value) => value.name === 'cad-placement-drag-plane',
+      );
+    expect(selector()).toBeNull();
+    await act(async () => toolbar().onPatternTool!('translate'));
+    const original = overlay();
+    expect(original.dragPlane).toBe('view');
+    for (const plane of ['xy', 'xz', 'yz', 'view']) {
+      await act(async () => (selector()!.onValueChange as (value: string) => void)(plane));
+      expect(overlay().dragPlane).toBe(plane);
+      expect(overlay().revision).toBe(original.revision);
+      expect(overlay().onTransformPiece).toBe(original.onTransformPiece);
+      expect(overlay().pieces[0].transform).toEqual(stored[0].transform);
+      expect(undoButton().disabled).toBe(true);
+    }
+    await act(async () => toolbar().onPatternTool!('rotate'));
+    expect(selector()).toBeNull();
+    expect(save).not.toHaveBeenCalled();
+  });
+
   it('undoes numeric and gesture commits in reverse order and saves only on explicit request', async () => {
     const save = vi.fn().mockResolvedValue(undefined);
     const scene = input.patternPieceScene!;

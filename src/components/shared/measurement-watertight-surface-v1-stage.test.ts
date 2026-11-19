@@ -8,6 +8,7 @@ import {
   MeshBasicMaterial,
   MeshStandardMaterial,
   PerspectiveCamera,
+  Ray,
   Raycaster,
   TorusGeometry,
   Vector2,
@@ -19,6 +20,9 @@ import {
   MEASUREMENT_SURFACE_JOINT_MARKER_HIT_DIAMETER_CSS_PX_V1,
   MEASUREMENT_SURFACE_PATTERN_PIECE_PROJECTED_HIT_RECEIPT_V1,
   measurementSurfaceCommittedPatternGestureV1,
+  measurementSurfaceMovePatternOnPlaneV1,
+  measurementSurfacePatternDragIntersectionV1,
+  measurementSurfacePatternDragPlaneV1,
   measurementSurfaceExpandRotationPickerV9,
   measurementSurfaceJointEditorEffectiveEditModeV1,
   measurementSurfaceJointGroupsSignatureV1,
@@ -45,6 +49,71 @@ import {
   type MeasurementSurfacePatternPieceOverlayV1,
   type MeasurementSurfaceAcceptedClothV1,
 } from './measurement-watertight-surface-v1-stage';
+
+describe('staged piece translation using the selected world plane', () => {
+  const start = new Vector3(0.12, -0.53, 0.74);
+  const camera = new PerspectiveCamera(32, 1, 0.001, 100);
+  camera.position.set(2, 3, 5);
+  camera.lookAt(start);
+  camera.updateMatrixWorld();
+  const rayTo = (point: Vector3) =>
+    new Ray(camera.position.clone(), point.clone().sub(camera.position).normalize());
+
+  it.each([
+    ['xy', 2, new Vector3(0.12, -0.25, 0)],
+    ['xz', 1, new Vector3(-0.12, 0, 0.25)],
+    ['yz', 0, new Vector3(0, 0.12, -0.25)],
+  ] as const)(
+    'moves only in %s and retains the last valid point through a grazing ray',
+    (mode, locked, delta) => {
+      const plane = measurementSurfacePatternDragPlaneV1(mode, camera, start);
+      const startPoint = measurementSurfacePatternDragIntersectionV1(rayTo(start), plane, camera)!;
+      const gesture = { plane, startPoint, startPosition: start.clone() };
+      const position = start.clone();
+      const destination = start.clone().add(delta);
+      measurementSurfaceMovePatternOnPlaneV1(rayTo(destination), camera, gesture, position);
+      expect(position.distanceTo(destination)).toBeLessThan(1e-12);
+      expect(position.getComponent(locked)).toBe(start.getComponent(locked));
+      const lastValid = position.clone();
+      const grazing = new Ray(
+        camera.position.clone(),
+        delta.clone().normalize().addScaledVector(plane.normal, -0.001).normalize(),
+      );
+      expect(measurementSurfacePatternDragIntersectionV1(grazing, plane, camera)).toBeNull();
+      measurementSurfaceMovePatternOnPlaneV1(grazing, camera, gesture, position);
+      expect(position.equals(lastValid)).toBe(true);
+      measurementSurfaceMovePatternOnPlaneV1(rayTo(start), camera, gesture, position);
+      expect(position.equals(start)).toBe(true);
+    },
+  );
+  it('uses the current camera for the view plane and declines ambiguous or behind hits', () => {
+    const view = measurementSurfacePatternDragPlaneV1('view', camera, start);
+    expect(view.normal.distanceTo(camera.getWorldDirection(new Vector3()))).toBeLessThan(1e-12);
+    expect(view.distanceToPoint(start)).toBeCloseTo(0);
+    const xy = measurementSurfacePatternDragPlaneV1('xy', camera, start);
+    const hit = (origin: Vector3, direction: Vector3) =>
+      measurementSurfacePatternDragIntersectionV1(new Ray(origin, direction), xy, camera);
+    expect(hit(start.clone(), new Vector3(1, 0, 0))).toBeNull();
+    expect(hit(start.clone(), new Vector3(0, 0, -1))).toBeNull();
+    expect(hit(camera.position.clone(), new Vector3(0, 0, 1))).toBeNull();
+  });
+
+  it('clips oblique pointer rays by camera depth', () => {
+    const camera = new PerspectiveCamera(90, 1, 1, 10);
+    camera.updateMatrixWorld();
+    const hit = (point: Vector3) =>
+      measurementSurfacePatternDragIntersectionV1(
+        new Ray(camera.position.clone(), point.clone().normalize()),
+        measurementSurfacePatternDragPlaneV1('xy', camera, point),
+        camera,
+      );
+    const visible = new Vector3(9, 0, -9.5);
+    expect(visible.length()).toBeGreaterThan(camera.far);
+    expect(hit(visible)?.distanceTo(visible)).toBeLessThan(1e-12);
+    expect(hit(new Vector3(0.79, 0, -0.8))).toBeNull();
+    expect(hit(new Vector3(9, 0, -10.1))).toBeNull();
+  });
+});
 
 it('ignores a stationary placement and preserves untouched local components at a nonzero origin', () => {
   const basePosition = new Vector3(1.1, 2.3, -3.2);

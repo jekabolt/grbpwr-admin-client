@@ -103,6 +103,7 @@ export function buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1(
     savedTopstitch?: CadTableSavedTopstitchOverlayV1;
     guides?: MeasurementSurfacePatternPieceOverlayV1['guides'];
     tool?: PatternImportDxfPhaseECadMannequinPatternOverlayToolV1;
+    dragPlane?: MeasurementSurfacePatternPieceOverlayV1['dragPlane'];
     onFocus?: (selection: PatternImportDxfPhaseECadMannequinDxfStagingSelectionV1) => void;
     onTransform?: (pieceKey: string, transform: MeasurementSurfacePatternPieceTransformV1) => void;
   }>,
@@ -271,6 +272,7 @@ export function buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1(
       revision,
       pieces: overlayPieces,
       tool: input.tool ?? 'select',
+      ...(input.dragPlane && { dragPlane: input.dragPlane }),
       visibility: Object.freeze({
         pieces: true,
         edges: true,

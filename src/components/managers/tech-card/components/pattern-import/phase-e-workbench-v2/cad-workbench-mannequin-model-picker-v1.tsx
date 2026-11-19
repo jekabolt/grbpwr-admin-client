@@ -16,6 +16,7 @@ import type { ModelOpenReferencePreviewInputV1 } from 'components/managers/model
 import { modelFormRevisionKeyV1 } from 'components/managers/model/components/schema';
 import { useAllModels } from 'components/managers/models/components/useModelQuery';
 import type {
+  MeasurementSurfacePatternDragPlaneV1,
   MeasurementSurfacePatternPieceOverlayV1,
   MeasurementSurfacePatternPieceV1,
   MeasurementSurfacePatternPieceTransformV1,
@@ -34,7 +35,7 @@ import {
 } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Link } from 'react-router-dom';
-import { Button, CheckboxCommon, Pill, Text } from 'ui';
+import { Button, CheckboxCommon, Pill, Select, Text } from 'ui';
 
 import type { TechCardFormData } from '../../schema';
 import { BodyPicker, modelFacts, modelName } from '../../design/render/model-picker';
@@ -54,6 +55,7 @@ import type { CadWorkbenchPhysicalHostV1 } from './cad-workbench-physical-host-v
 
 export const PATTERN_IMPORT_DXF_PHASE_E_CAD_MANNEQUIN_MODEL_PICKER_V1 =
   'pattern-import-dxf-phase-e-cad-mannequin-model-picker/1' as const;
+const DRAG_PLANES = ['view', 'xy', 'xz', 'yz'] as const;
 const ZERO_PATTERN_OFFSET_M = [0, 0, 0] as const;
 type PatternTransforms = Readonly<Record<string, MeasurementSurfacePatternPieceTransformV1>>;
 
@@ -93,6 +95,8 @@ export function PatternImportDxfPhaseECadMannequinViewToolbarV1({
   onViewPreset,
   patternTool,
   onPatternTool,
+  dragPlane,
+  onDragPlaneChange,
   patternTransformDisabled = false,
   poseEditing,
   poseEditingDisabled = false,
@@ -103,6 +107,8 @@ export function PatternImportDxfPhaseECadMannequinViewToolbarV1({
   onViewPreset: (preset: MeasurementSurfaceViewPreset) => void;
   patternTool?: PatternImportDxfPhaseECadMannequinPatternOverlayToolV1;
   onPatternTool?: (tool: PatternImportDxfPhaseECadMannequinPatternOverlayToolV1) => void;
+  dragPlane?: MeasurementSurfacePatternDragPlaneV1;
+  onDragPlaneChange?: (plane: MeasurementSurfacePatternDragPlaneV1) => void;
   patternTransformDisabled?: boolean;
   poseEditing: boolean;
   poseEditingDisabled?: boolean;
@@ -147,6 +153,23 @@ export function PatternImportDxfPhaseECadMannequinViewToolbarV1({
             </Button>
           ))}
         </>
+      ) : null}
+      {patternTool === 'translate' && dragPlane && onDragPlaneChange ? (
+        <Select
+          name='cad-placement-drag-plane'
+          size='sm'
+          placeholder='Move plane'
+          value={dragPlane}
+          items={DRAG_PLANES.map((value) => ({
+            value,
+            label: value === 'view' ? 'View plane' : `${value.toUpperCase()} plane`,
+          }))}
+          onValueChange={(value) => {
+            const plane = DRAG_PLANES.find((option) => option === value);
+            if (plane) onDragPlaneChange(plane);
+          }}
+          readOnly={patternTransformDisabled}
+        />
       ) : null}
       {topstitchVisibility ? (
         <Button
@@ -547,6 +570,7 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
   const [viewPreset, setViewPreset] = useState<MeasurementSurfaceViewPreset>('front');
   const [patternTool, setPatternTool] =
     useState<PatternImportDxfPhaseECadMannequinPatternOverlayToolV1>('select');
+  const [dragPlane, setDragPlane] = useState<MeasurementSurfacePatternDragPlaneV1>('view');
   const [poseEditing, setPoseEditing] = useState(false);
   const [patternTransforms, setPatternTransforms] = useState<PatternTransforms>({});
   // Pointer, numeric and undo commands can arrive before React publishes the next overlay.
@@ -773,11 +797,19 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
                 ? patternPieceScene.sceneOverlay.bridge.guides
                 : patternPieceScene.guides,
             tool: placementTurn ? patternTool : 'select',
+            dragPlane,
             transformsByPieceKey: patternTransforms,
             onTransform: placementTurn ? handlePatternTransform : undefined,
           })
         : null,
-    [handlePatternTransform, patternPieceScene, patternTool, patternTransforms, placementTurn],
+    [
+      dragPlane,
+      handlePatternTransform,
+      patternPieceScene,
+      patternTool,
+      patternTransforms,
+      placementTurn,
+    ],
   );
   const offsetPiece =
     patternTool === 'translate' &&
@@ -902,6 +934,8 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
           onViewPreset={setViewPreset}
           patternTool={patternOverlayResult?.ok ? patternOverlayResult.overlay.tool : undefined}
           onPatternTool={patternOverlayResult?.ok ? setPatternTool : undefined}
+          dragPlane={dragPlane}
+          onDragPlaneChange={setDragPlane}
           patternTransformDisabled={!placementTurn}
           poseEditing={poseEditing}
           poseEditingDisabled={!poseBinding || Boolean(poseError)}

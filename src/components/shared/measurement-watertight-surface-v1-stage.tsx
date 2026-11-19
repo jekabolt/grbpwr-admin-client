@@ -116,11 +116,14 @@ export interface MeasurementSurfacePatternPieceGuideV1 {
   readonly thread: Readonly<{ bomLineKey: string; colorCss: string }> | null;
 }
 
+export type MeasurementSurfacePatternDragPlaneV1 = 'view' | 'xy' | 'xz' | 'yz';
+
 export interface MeasurementSurfacePatternPieceOverlayV1 {
   /** Exact contour revision. Selection/tool changes intentionally do not mint geometry. */
   readonly revision: string;
   readonly pieces: readonly MeasurementSurfacePatternPieceV1[];
   readonly tool: 'select' | 'translate' | 'rotate';
+  readonly dragPlane?: MeasurementSurfacePatternDragPlaneV1;
   readonly visibility: Readonly<{
     pieces: boolean;
     edges: boolean;
@@ -481,6 +484,57 @@ interface MeasurementSurfacePatternPieceSceneBindingV1 {
   readonly basePosition: THREE.Vector3;
   readonly meshes: readonly THREE.Mesh[];
   readonly vertexLocalPositions: ReadonlyMap<string, THREE.Vector3>;
+}
+
+export function measurementSurfacePatternDragPlaneV1(
+  mode: MeasurementSurfacePatternDragPlaneV1,
+  camera: THREE.Camera,
+  anchor: THREE.Vector3,
+): THREE.Plane {
+  const normal = new THREE.Vector3();
+  switch (mode) {
+    case 'view':
+      camera.getWorldDirection(normal);
+      break;
+    case 'xy':
+      normal.z = 1;
+      break;
+    case 'xz':
+      normal.y = 1;
+      break;
+    case 'yz':
+      normal.x = 1;
+      break;
+  }
+  return new THREE.Plane().setFromNormalAndCoplanarPoint(normal, anchor);
+}
+
+export function measurementSurfacePatternDragIntersectionV1(
+  ray: THREE.Ray,
+  plane: THREE.Plane,
+  camera: Pick<THREE.PerspectiveCamera, 'near' | 'far' | 'matrixWorldInverse'>,
+): THREE.Vector3 | null {
+  const alignment = plane.normal.dot(ray.direction);
+  // At grazing incidence tiny pointer motion would throw the piece across the scene.
+  if (Math.abs(alignment) < Math.sin(Math.PI / 180)) return null;
+  const distance = -plane.distanceToPoint(ray.origin) / alignment;
+  if (!Number.isFinite(distance) || distance <= 0) return null;
+  const point = ray.at(distance, new THREE.Vector3());
+  const depth = -point.clone().applyMatrix4(camera.matrixWorldInverse).z;
+  return depth >= camera.near && depth <= camera.far ? point : null;
+}
+
+export function measurementSurfaceMovePatternOnPlaneV1(
+  ray: THREE.Ray,
+  camera: Pick<THREE.PerspectiveCamera, 'near' | 'far' | 'matrixWorldInverse'>,
+  gesture: { plane: THREE.Plane; startPoint: THREE.Vector3; startPosition: THREE.Vector3 },
+  position: THREE.Vector3,
+): void {
+  const point = measurementSurfacePatternDragIntersectionV1(ray, gesture.plane, camera);
+  if (point)
+    position
+      .copy(gesture.startPosition)
+      .add(point.sub(gesture.startPoint).projectOnPlane(gesture.plane.normal));
 }
 
 export function measurementSurfaceCommittedPatternGestureV1(gesture: {
@@ -1908,6 +1962,7 @@ export function MeasurementWatertightSurfaceV1Stage({
       onTransform: NonNullable<MeasurementSurfacePatternPieceOverlayV1['onTransformPiece']>;
       binding: MeasurementSurfacePatternPieceSceneBindingV1;
       tool: 'translate' | 'rotate';
+      dragPlane: MeasurementSurfacePatternDragPlaneV1;
       plane: THREE.Plane;
       startPoint: THREE.Vector3;
       startPosition: THREE.Vector3;
@@ -2129,6 +2184,8 @@ export function MeasurementWatertightSurfaceV1Stage({
     function isPatternPieceGestureCurrent(gesture: NonNullable<typeof patternPieceGesture>) {
       return (
         gesture.overlayKey === patternPieceOverlayRenderKeyRef.current &&
+        (gesture.tool !== 'translate' ||
+          gesture.dragPlane === (patternPieceOverlayRef.current?.dragPlane ?? 'view')) &&
         gesture.onTransform === patternPieceOverlayRef.current?.onTransformPiece
       );
     }
@@ -3108,23 +3165,29 @@ export function MeasurementWatertightSurfaceV1Stage({
           scheduleRender();
           return;
         }
-        const planeNormal = camera.getWorldDirection(new THREE.Vector3()).normalize();
-        const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(
-          planeNormal,
+        const dragPlane = tool === 'translate' ? overlay?.dragPlane ?? 'view' : 'view';
+        const plane = measurementSurfacePatternDragPlaneV1(
+          dragPlane,
+          camera,
           binding.anchor.position,
         );
         const pointer = normalizedTransformPointer(event, event.button);
         if (!pointer) return;
         const raycaster = new THREE.Raycaster();
         raycaster.setFromCamera(new THREE.Vector2(pointer.x, pointer.y), camera);
-        const startPoint = new THREE.Vector3();
-        if (!raycaster.ray.intersectPlane(plane, startPoint)) return;
+        const startPoint = measurementSurfacePatternDragIntersectionV1(
+          raycaster.ray,
+          plane,
+          camera,
+        );
+        if (!startPoint) return;
         patternPieceGesture = Object.freeze({
           pointerId: event.pointerId,
           overlayKey: mountedPatternPieceKey,
           onTransform,
           binding,
           tool,
+          dragPlane,
           plane,
           startPoint,
           startPosition: binding.anchor.position.clone(),
@@ -3153,12 +3216,12 @@ export function MeasurementWatertightSurfaceV1Stage({
           if (!pointer) return;
           const raycaster = new THREE.Raycaster();
           raycaster.setFromCamera(new THREE.Vector2(pointer.x, pointer.y), camera);
-          const point = new THREE.Vector3();
-          if (raycaster.ray.intersectPlane(gesture.plane, point)) {
-            gesture.binding.anchor.position
-              .copy(gesture.startPosition)
-              .add(point.sub(gesture.startPoint));
-          }
+          measurementSurfaceMovePatternOnPlaneV1(
+            raycaster.ray,
+            camera,
+            gesture,
+            gesture.binding.anchor.position,
+          );
         } else {
           const angle = pointerAngleAroundPatternPiece(event, gesture.binding);
           gesture.binding.content.rotation.z = gesture.startRotation + (angle - gesture.startAngle);
@@ -3646,7 +3709,11 @@ export function MeasurementWatertightSurfaceV1Stage({
 
   useEffect(() => {
     runtimeRef.current?.syncPatternPieceOverlay(patternPieceOverlayRenderKey);
-  }, [patternPieceOverlayRenderKey, patternPieceOverlay?.onTransformPiece]);
+  }, [
+    patternPieceOverlayRenderKey,
+    patternPieceOverlay?.onTransformPiece,
+    patternPieceOverlay?.dragPlane,
+  ]);
 
   useEffect(() => {
     contextReleaseGenerationRef.current += 1;
