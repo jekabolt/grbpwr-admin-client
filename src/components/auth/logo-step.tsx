@@ -29,7 +29,7 @@ export function TeamMark({
         'flex flex-none items-center justify-center overflow-hidden border border-borderColor bg-bgColor',
         size === 'tile' && 'aspect-square w-full p-[22%]',
         size === 'side' && 'size-11 p-1',
-        size === 'plate' && 'mb-2 size-12 p-1 sm:size-24 sm:p-2',
+        size === 'plate' && 'size-24 p-3 lg:size-40 lg:p-5',
       )}
     >
       {src && <img src={src} alt='' className='block size-full object-contain' />}

@@ -215,23 +215,37 @@ export function RootSide({ mode }: { mode: 'signup' | 'login' }) {
   );
 }
 
-/** Team (or console) side: its logo square when it has one, its name as the wordmark, `lekalo`. */
+/**
+ * Team (or console) side: its name as the wordmark, `lekalo` under it. `brand` — the team's log-in
+ * page: the logo square (`mark`, when the team has one), the name and `lekalo` as one group centred
+ * in the plate (in the middle of the stretched plate at lg).
+ */
 export function TeamSide({
   name,
   sub = 'lekalo',
   mark,
+  brand,
 }: {
   name: string;
   sub?: string;
   mark?: ReactNode;
+  brand?: boolean;
 }) {
-  return (
-    <Section className={SIDE}>
-      {mark}
+  const words = (
+    <>
       <Wordmark>{name}</Wordmark>
       <Text size='micro' variant='label' tracking='label' component='span' className='block'>
         {sub}
       </Text>
+    </>
+  );
+  if (!brand) return <Section className={SIDE}>{words}</Section>;
+  return (
+    <Section className={cn(SIDE, 'lg:flex lg:flex-col')}>
+      <div className='flex min-w-0 flex-col items-center gap-3 text-center lg:my-auto'>
+        {mark}
+        {words}
+      </div>
     </Section>
   );
 }

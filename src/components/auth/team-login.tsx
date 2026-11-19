@@ -57,7 +57,11 @@ export function TeamLogin({
         isConsole ? (
           <TeamSide name='lekalo' sub='console' />
         ) : (
-          <TeamSide name={currentHost().slug} mark={logo && <TeamMark src={logo} size='plate' />} />
+          <TeamSide
+            name={currentHost().slug}
+            brand
+            mark={logo && <TeamMark src={logo} size='plate' />}
+          />
         )
       }
     >
