@@ -435,6 +435,17 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
     );
     if (nextIndex >= 0) onActiveSeamIndexChange(nextIndex);
   };
+  const focusActiveSeamSide = (sideIndex: 0 | 1) => {
+    const { pieceId, pieceLineKey } = activeSeamChoice.sides[sideIndex];
+    focusSelection({
+      operationNumber: operation.sourceOperationNumber,
+      scopeKey: session.current.row.scopeKey,
+      pieceId,
+      pieceLineKey,
+      seamId: activeSeam.seamId,
+      seamSideIndex: sideIndex,
+    });
+  };
 
   return (
     <PatternImportDxfPhaseECadWorkbenchSplitShellV1
@@ -447,6 +458,14 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
             projection={exactDesktop.projection}
             features={exactDesktop.pieceFeatures}
             operationIssueCount={operationIssueCount}
+            seams={[
+              {
+                seamId: activeSeam.seamId,
+                label: `Operation ${operation.sourceOperationNumber}`,
+                active: true,
+              },
+            ]}
+            onFocusSeam={() => focusActiveSeamSide(0)}
           />
         ) : null)
       }
@@ -505,17 +524,7 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
                   },
                 }),
               sides: activeSeamChoice.sides,
-              onFocusSide: (sideIndex) => {
-                const { pieceId, pieceLineKey } = activeSeamChoice.sides[sideIndex];
-                focusSelection({
-                  operationNumber: operation.sourceOperationNumber,
-                  scopeKey: session.current.row.scopeKey,
-                  pieceId,
-                  pieceLineKey,
-                  seamId: activeSeam.seamId,
-                  seamSideIndex: sideIndex,
-                });
-              },
+              onFocusSide: focusActiveSeamSide,
             }}
             disabled
           />

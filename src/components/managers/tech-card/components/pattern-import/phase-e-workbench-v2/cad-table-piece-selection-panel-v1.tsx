@@ -7,7 +7,10 @@ import { normalizeTechCardPieceRename } from 'utils/pattern';
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 import { areaOf, perimeter } from 'lib/pattern-import/semantics/geom';
 
-import { PatternImportDxfPhaseECadWorkbenchObjectSidebarV1 } from './cad-workbench-object-sidebar-v1';
+import {
+  PatternImportDxfPhaseECadWorkbenchObjectSidebarV1,
+  type PatternImportDxfPhaseECadWorkbenchObjectSidebarPropsV1,
+} from './cad-workbench-object-sidebar-v1';
 import { usePatternImportDxfPhaseECadWorkbenchMeasurementUnitV1 } from './cad-workbench-split-shell-v1';
 import {
   formatPatternImportDxfPhaseEMeasurementAreaV1,
@@ -144,6 +147,8 @@ export function CadTablePieceSelection({
   savedPieces,
   renamePiece,
   operationIssueCount,
+  seams,
+  onFocusSeam,
 }: Readonly<{
   owner: CadTableZeroCanvasOwner;
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
@@ -151,7 +156,8 @@ export function CadTablePieceSelection({
   savedPieces?: readonly SavedPieceMetadata[];
   renamePiece?: RenamePiece;
   operationIssueCount?: number;
-}>) {
+}> &
+  Pick<PatternImportDxfPhaseECadWorkbenchObjectSidebarPropsV1, 'seams' | 'onFocusSeam'>) {
   const { selectedPieceKeys } = owner.session.layout;
   const unit = usePatternImportDxfPhaseECadWorkbenchMeasurementUnitV1()?.unit ?? 'mm';
   const savedMetadata = new Map<string, SavedPieceMetadata | null>();
@@ -237,6 +243,8 @@ export function CadTablePieceSelection({
   return (
     <PatternImportDxfPhaseECadWorkbenchObjectSidebarV1
       pieces={rows}
+      seams={seams}
+      onFocusSeam={onFocusSeam}
       selectedPieceIds={selectedPieceKeys}
       issueCount={operationIssueCount}
       onFocusPiece={(key, { toggle }) =>
