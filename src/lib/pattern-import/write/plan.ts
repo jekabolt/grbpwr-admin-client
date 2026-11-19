@@ -400,8 +400,9 @@ export function planBlocks(
   input: PieceSpec[],
   scope: DraftScopeTarget,
   warnings: string[] = [],
-  keepOriginalGrainAnchor = false,
+  options: { keepOriginalGrainAnchor?: true; preserveNativeLayout?: true } = {},
 ): Plan {
+  const { keepOriginalGrainAnchor, preserveNativeLayout } = options;
   // 1. scope membership
   const inScope: PieceSpec[] = [];
   for (const p of input) {
@@ -451,6 +452,13 @@ export function planBlocks(
   let rowH = 0;
   for (const w of written) {
     if (!w.sizes.length) continue;
+    if (preserveNativeLayout) {
+      if (w.derivedFrom) {
+        throw new Error('A derived mirror needs its own layout before keeping native coordinates.');
+      }
+      offsets[w.spec.identity] = { dx: 0, dy: 0 };
+      continue;
+    }
     let box = bboxOf(w.sizes[0].cut);
     for (const s of w.sizes) box = unionBox(box, cutBox(s)); // srcT already applied in derived sizes
     const W = box.maxX - box.minX;

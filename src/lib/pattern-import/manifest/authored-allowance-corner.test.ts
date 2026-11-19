@@ -4,7 +4,7 @@ import { readDxf } from '../adapters/dxf/extract';
 import { segmentDxf } from '../adapters/dxf/segment';
 import { areaOf, bboxOf } from '../semantics/geom';
 import { writeDxfDetailed } from '../write';
-import { embedManifest } from './index';
+import { embedManifest, readManifest } from './index';
 import {
   authoredAllowanceCornerMarker,
   decodeAuthoredAllowanceCorner,
@@ -199,7 +199,7 @@ it.each([
         sheet: { pages: 1, method: 'single', maxResidualMm: 0 },
       },
     };
-    const { dxfText, manifest } = writeDxfDetailed(job);
+    const { dxfText, manifest, plan } = writeDxfDetailed(job);
     const marker = manifest.blocks[0]?.authoredAllowanceCorner;
     expect(marker?.variant).toBe(variant);
     const read = (text: string) =>
@@ -215,6 +215,18 @@ it.each([
     expect(native.pieces.map(({ authoredAllowanceCorner }) => authoredAllowanceCorner)).toEqual([
       decodeAuthoredAllowanceCorner(marker!),
     ]);
+    if (variant === 'foldback-after') {
+      expect(plan.offsets.PCK?.dy).toBe(22);
+      const fixed = writeDxfDetailed({ ...job, preserveNativeLayout: true });
+      const [block] = fixed.plan.blocks;
+      expect(fixed.plan.offsets.PCK).toEqual({ dx: 0, dy: 0 });
+      expect(block?.cut).toEqual(updated);
+      expect(block?.seam).toEqual(sewingLine);
+      expect(readManifest(fixed.dxfText)?.preserveNativeLayout).toBe(true);
+      expect(segmentDxf(await read(fixed.dxfText)).pieces[0]?.authoredAllowanceCorner).toEqual(
+        corner,
+      );
+    }
     const shifted = structuredClone(manifest);
     shifted.blocks[0]!.authoredAllowanceCorner!.variant = 'mitre';
     const mismatched = await read(embedManifest(dxfText, shifted));

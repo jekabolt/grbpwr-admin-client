@@ -672,6 +672,8 @@ export function validateManifest(x: unknown): ConversionManifest {
     if ((x.layers as Record<string, unknown>)[k] !== v) fail(`layers.${k}`, `must be "${v}"`);
   }
   if (x.cutLayerIsFinal !== true) fail('cutLayerIsFinal', 'must be true');
+  if (x.preserveNativeLayout !== undefined && x.preserveNativeLayout !== true)
+    fail('preserveNativeLayout', 'must be true when present');
   if (!isNum(x.allowanceMm) || x.allowanceMm < 0) fail('allowanceMm', 'not a non-negative number');
 
   if (!Array.isArray(x.sizes)) fail('sizes', 'not an array');
@@ -1099,6 +1101,7 @@ export function validateManifest(x: unknown): ConversionManifest {
     units: 'mm',
     layers: { ...LAYERS },
     cutLayerIsFinal: true,
+    ...(x.preserveNativeLayout ? { preserveNativeLayout: true as const } : {}),
     allowanceMm: x.allowanceMm,
     sizes,
     pieces,

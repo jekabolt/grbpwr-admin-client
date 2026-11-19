@@ -3036,6 +3036,8 @@ export type ConversionManifest = {
   layers: LayerMap;
   /** Layer 1 is the FINAL cutting line: the card must NOT add allowance again. */
   cutLayerIsFinal: true;
+  /** Draw in the existing native coordinate frame when reopening this card and material. */
+  preserveNativeLayout?: true;
   /** File-level allowance, mm, informational (per piece in `pieces`). */
   allowanceMm: Mm;
   sizes: ManifestSize[];
@@ -3132,6 +3134,8 @@ export type WriteJob = {
   generator: string;
   /** Which CLO dialect to emit (K2 decides the default; both must read back through our parser). */
   dialect: 'r12' | 'r2000';
+  /** An exact native edit keeps the recorded block coordinates. */
+  preserveNativeLayout?: true;
   /** A10: the autopilot's assumptions, carried into the manifest as they are. */
   autopilot?: AutopilotRecord;
   /** PASSPORT Ф1: the document's digest, carried into the manifest as it is. */

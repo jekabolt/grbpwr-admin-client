@@ -267,6 +267,7 @@ export function buildManifest(
     units: 'mm',
     layers: { ...LAYERS },
     cutLayerIsFinal: true,
+    ...(job.preserveNativeLayout ? { preserveNativeLayout: true as const } : {}),
     allowanceMm: fileAllowance(specs),
     sizes: job.sizes.map((s) => ({ ...s })),
     pieces: specs.map(manifestPiece),

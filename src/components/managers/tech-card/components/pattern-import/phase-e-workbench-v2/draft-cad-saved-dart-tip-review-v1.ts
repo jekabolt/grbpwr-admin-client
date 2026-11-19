@@ -353,21 +353,28 @@ export async function compileSavedDraftGeometryReviewV1(
     requireSavedEdit(sizes, 'The native corner or its coordinated grades changed.');
     const job = structuredClone(replay.job);
     job.pieces.find((piece) => piece.identity === pieceId)!.sizes = sizes;
-    const written = writeDxfDetailed(job, { now: () => new Date(replay.createdAt) });
-    requireSavedEdit(
+    const nativeCoordinatesMatch = (written: ReturnType<typeof writeDxfDetailed>) =>
       written.plan.blocks.length === verified.scope.manifest.blocks.length &&
-        written.plan.blocks.every((block) => {
-          const size = job.pieces
-            .find((p) => p.identity === block.identity)
-            ?.sizes.find((s) => s.sizeToken === block.labelSize);
-          return (
-            size &&
-            sameDraftAllowanceRingV1(block.cut, size.cut) &&
-            (block.seam && size.seam
-              ? sameDraftAllowanceRingV1(block.seam, size.seam)
-              : block.seam === size.seam)
-          );
-        }),
+      written.plan.blocks.every((block) => {
+        const size = job.pieces
+          .find((p) => p.identity === block.identity)
+          ?.sizes.find((s) => s.sizeToken === block.labelSize);
+        return (
+          size &&
+          sameDraftAllowanceRingV1(block.cut, size.cut) &&
+          (block.seam && size.seam
+            ? sameDraftAllowanceRingV1(block.seam, size.seam)
+            : block.seam === size.seam)
+        );
+      });
+    const writerOptions = { now: () => new Date(replay.createdAt) };
+    let written = writeDxfDetailed(job, writerOptions);
+    if (!job.preserveNativeLayout && !nativeCoordinatesMatch(written)) {
+      job.preserveNativeLayout = true;
+      written = writeDxfDetailed(job, writerOptions);
+    }
+    requireSavedEdit(
+      nativeCoordinatesMatch(written),
       'The DXF writer would move an untouched native edge or outline.',
     );
     await verifyReviewSource();

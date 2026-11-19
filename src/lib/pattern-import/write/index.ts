@@ -67,7 +67,10 @@ export function writeDxfDetailed(job: WriteJob, opts: WriteOptions = {}): WriteD
     throw new Error('Historical fusing grain is supported only for bare R12 interlining replay.');
   return emitPlannedDxf(
     job,
-    planBlocks(job.pieces, job.scope, [], opts.legacyFusingGrainAnchor),
+    planBlocks(job.pieces, job.scope, [], {
+      keepOriginalGrainAnchor: opts.legacyFusingGrainAnchor,
+      preserveNativeLayout: job.preserveNativeLayout,
+    }),
     opts,
   );
 }
@@ -80,7 +83,9 @@ export async function writeDxfWithAuthoredLineSplit(
 ): Promise<WriteDetail> {
   const job = structuredClone(sourceJob);
   const args = structuredClone(input);
-  const plan = planBlocks(job.pieces, job.scope);
+  const plan = planBlocks(job.pieces, job.scope, [], {
+    preserveNativeLayout: job.preserveNativeLayout,
+  });
   const { preserveAuthoredLineSplit } = await import('./protected-line-split');
   await preserveAuthoredLineSplit(job, plan, args);
   return emitPlannedDxf(job, plan, { now: opts.now });
@@ -94,7 +99,9 @@ export async function writeDxfWithRetainedLineSplit(
 ): Promise<WriteDetail> {
   const job = structuredClone(sourceJob),
     retained = structuredClone(occurrence);
-  const plan = planBlocks(job.pieces, job.scope);
+  const plan = planBlocks(job.pieces, job.scope, [], {
+    preserveNativeLayout: job.preserveNativeLayout,
+  });
   const { retainReviewedLineSplit } = await import('./retained-line-split');
   await retainReviewedLineSplit(job, plan, retained);
   return emitPlannedDxf(job, plan, opts);

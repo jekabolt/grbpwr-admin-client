@@ -12,7 +12,7 @@ import { readManifestBytes } from '../manifest';
 import { sha256Hex as hashNativeOutput } from '../adapters/vector/builder';
 import { readProtectedLineSplit } from '../write/read-protected-line-split';
 import { identifyReviewedAddPoint } from './reviewed-add-point';
-import type { ReviewedAddPointOpen, ReviewedAddPointAtWrite } from '../types';
+import type { ConversionManifest, ReviewedAddPointOpen, ReviewedAddPointAtWrite } from '../types';
 import type {
   AllowanceDecision,
   BackgroundKind,
@@ -628,6 +628,7 @@ export class Session {
 
   private readonly reviewedAddPoint?: ReviewedAddPointOpen;
   private readonly protectedInput: boolean;
+  private readonly nativeLayout?: Pick<ConversionManifest, 'techCardId' | 'scope'>;
   constructor(id: number, input: SessionOpenFile[], reviewedAddPoint?: ReviewedAddPointOpen) {
     let files = input;
     this.id = id;
@@ -713,14 +714,20 @@ export class Session {
     // Several DXF files = one file per size: merged into one drawing by the read stage (R4: the
     // set is guarded, decoded and merged there — cancellable, after its size checks), read as one
     // DXF after.
+    let nativeLayout: typeof this.nativeLayout;
     this.protectedInput = files.some((f, index) => {
       if (routes[index]?.route !== 'dxf') return false;
       try {
-        return !!readManifestBytes(f.bytes)?.blocks.some((b) => b.protectedLineSplit);
+        const manifest = readManifestBytes(f.bytes);
+        if (files === input && files.length === 1 && manifest?.preserveNativeLayout) {
+          nativeLayout = { techCardId: manifest.techCardId, scope: manifest.scope };
+        }
+        return !!manifest?.blocks.some((b) => b.protectedLineSplit);
       } catch (error) {
         return error instanceof Error && error.message.includes('.protectedLineSplit');
       }
     });
+    this.nativeLayout = nativeLayout;
     this.isDxfSet = routes[0].route === 'dxf' && files.length > 1;
     this.files = files.map((f, i) => ({
       id: String(i),
@@ -3016,6 +3023,12 @@ export class Session {
       ctx.checkCancel();
       const scope = sp.target;
       ctx.progress(k++, plan.scopes.length, scope.label);
+      const retained = this.nativeLayout;
+      const preserveNativeLayout =
+        input.storage !== 'rul' &&
+        retained?.techCardId === input.techCardId &&
+        retained.scope.bomLineKey === scope.bomLineKey &&
+        retained.scope.fabricPurpose === scope.fabricPurpose;
       const writerJob: WriteJob = {
         techCardId: input.techCardId,
         scope,
@@ -3024,6 +3037,7 @@ export class Session {
         source: sourceFor(sp.specs),
         generator: input.generator,
         dialect: input.dialect,
+        ...(preserveNativeLayout ? { preserveNativeLayout: true as const } : {}),
         ...(input.autopilot ? { autopilot: input.autopilot } : {}),
         ...(this.passportBound ? { passport: passportDigest(this.passportBound) } : {}),
         ...(input.replay ? { replay: input.replay } : {}),
