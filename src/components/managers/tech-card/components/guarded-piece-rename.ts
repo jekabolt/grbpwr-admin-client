@@ -1,4 +1,5 @@
 import { createContext, useContext } from 'react';
+import { abortableAdminService } from 'api/api';
 import type { common_TechCard, GuardedZeroOperationPieceRename } from 'api/proto-http/admin';
 import { bindingScopes } from './bom-purpose';
 import { rollGoodsScopes } from './piece-block-refs';
@@ -7,11 +8,18 @@ import { savedWorkbenchBindingScopeKeyV1 } from './pattern-import/phase-e-workbe
 import { assertExactZeroOperationSavedPatternRowV1 } from './pattern-import/phase-e-workbench-v2/zero-operation-saved-card-authority-v1';
 import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 
+export type GuardedSavedPieceRenameAttachment = Readonly<{
+  expectedServerAssemblyRevision: string;
+  expectedCompleteSourceSha256: string;
+  expectedCurrentSidecarSha256: string;
+}>;
+
 export type GuardedSavedPieceRename = Readonly<{
   row: DxfProductSavedRowIdentityV1;
   pieceLineKey: string;
   expectedName: string;
   nextName: string;
+  attachment?: GuardedSavedPieceRenameAttachment;
 }>;
 
 export const GuardedPieceRenameContext = createContext<
@@ -27,14 +35,17 @@ function readRenameBinding(
   row: DxfProductSavedRowIdentityV1,
   lineKey: string,
   name: string,
+  attachment?: GuardedSavedPieceRenameAttachment,
 ) {
   assertExactZeroOperationSavedPatternRowV1(card, row);
   const body = card.techCard!;
-  if (body.operations?.length || card.seams?.length || card.pieceFolds?.length)
+  if (!attachment && (body.operations?.length || card.seams?.length || card.pieceFolds?.length))
     throw new Error('This card now contains assembly work.');
   const pieces = (body.pieces ?? []).filter((piece) => piece.lineKey?.toUpperCase() === lineKey);
   if (pieces.length !== 1 || pieces[0].lineKey !== lineKey || pieces[0].name !== name)
     throw new Error('The selected piece changed. Reopen its inspector.');
+  if (attachment && pieces[0].calloutNumber)
+    throw new Error('Edit this piece with its linked callout in the tech card.');
   const bindings = bindingScopes(rollGoodsScopes(body.bomItems ?? []), body.patterns ?? []);
   const aliases = (body.pieceDxfAliases?.items ?? [])
     .map((alias) => [
@@ -48,11 +59,33 @@ function readRenameBinding(
   return aliases;
 }
 
+export async function verifyGuardedSavedPieceRenameAttachment(
+  row: DxfProductSavedRowIdentityV1,
+  attachment: GuardedSavedPieceRenameAttachment,
+): Promise<void> {
+  const { readCompleteSavedAssemblySourceV1 } = await import(
+    './pattern-import/phase-e-workbench-v2/saved-assembly-complete-source-rpc-v1'
+  );
+  const signal = new AbortController().signal;
+  const current = await readCompleteSavedAssemblySourceV1(
+    abortableAdminService(signal),
+    row,
+    {
+      expectedServerAssemblyRevision: attachment.expectedServerAssemblyRevision,
+      expectedCompleteSourceSha256: attachment.expectedCompleteSourceSha256,
+    },
+    signal,
+  );
+  if (current.priorCarrier?.sidecarSha256 !== attachment.expectedCurrentSidecarSha256)
+    throw new Error('The saved 3D placement changed. Reopen its review before renaming.');
+}
+
 export async function writeGuardedSavedPieceRename(
   intent: GuardedSavedPieceRename,
   ports: Readonly<{
     read: () => Promise<common_TechCard>;
     update: (rename: GuardedZeroOperationPieceRename) => Promise<number | undefined>;
+    verifyAttachment?: typeof verifyGuardedSavedPieceRenameAttachment;
   }>,
 ): Promise<common_TechCard> {
   const nextName = normalizeTechCardPieceRename(intent.nextName);
@@ -63,7 +96,18 @@ export async function writeGuardedSavedPieceRename(
   )
     throw new Error('Enter a changed name for this saved piece.');
   const before = await ports.read();
-  const aliases = readRenameBinding(before, intent.row, intent.pieceLineKey, intent.expectedName);
+  const { attachment } = intent;
+  const aliases = readRenameBinding(
+    before,
+    intent.row,
+    intent.pieceLineKey,
+    intent.expectedName,
+    attachment,
+  );
+  if (attachment) {
+    if (!ports.verifyAttachment) throw new Error('The current saved placement is unavailable.');
+    await ports.verifyAttachment(intent.row, attachment);
+  }
   const lock = await ports.update({
     pieceLineKey: intent.pieceLineKey,
     expectedName: intent.expectedName,
@@ -72,15 +116,17 @@ export async function writeGuardedSavedPieceRename(
     patternLineKey: intent.row.patternLineKey,
     expectedSavedRowRevision: intent.row.revision,
     expectedDxfSha256: intent.row.sha256,
+    ...attachment,
   });
   if (lock !== intent.row.cardLockVersion + 1)
     throw new Error('The rename response could not be verified. Reload the card.');
   const after = await ports.read();
   const currentAliases = readRenameBinding(
     after,
-    { ...intent.row, cardLockVersion: lock, revision: intent.row.revision + 1 },
+    { ...intent.row, cardLockVersion: lock, revision: intent.row.revision + (attachment ? 0 : 1) },
     intent.pieceLineKey,
     nextName,
+    attachment,
   );
   if (JSON.stringify(aliases) !== JSON.stringify(currentAliases))
     throw new Error('The saved pattern links changed. Reload the card.');

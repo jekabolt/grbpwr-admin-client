@@ -73,7 +73,7 @@ import {
   type PatternImportDxfPhaseECadTableZeroOperationSavedPreparationResultV1,
 } from './cad-table-zero-operation-saved-preparation-v1';
 import { isPatternImportDxfPhaseEZeroConnectPreparedAuthorityV1 } from './cad-table-zero-connect-phase-e-authority-v1';
-import { useGuardedPieceRename } from '../../guarded-piece-rename';
+import { useGuardedPieceRename, type GuardedSavedPieceRename } from '../../guarded-piece-rename';
 import { buildPatternImportDxfPhaseESavedCardContextV1 } from './saved-card-production-projection-v1';
 import {
   hasMatchingFreshPatternChoiceV1,
@@ -706,6 +706,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
   defaultOperationsMode = 'collapsed',
   sourceSurface,
   pointClosureTarget,
+  linkedPieceRename,
 }: Readonly<{
   techCardId?: number;
   cardSession: PatternImportDxfPhaseECardSessionV1 | null;
@@ -725,6 +726,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
   defaultOperationsMode?: PatternImportDxfPhaseECadWorkbenchOperationsModeV1;
   sourceSurface?: 'explicit-native-drawn-sewing';
   pointClosureTarget?: SavedPointClosureOperationTargetV1;
+  linkedPieceRename?: Required<Pick<GuardedSavedPieceRename, 'row' | 'attachment'>>;
 }>) {
   const savePieceRename = useGuardedPieceRename();
   const generation = cardSession?.importGeneration ?? 0;
@@ -1206,25 +1208,40 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
     currentPreparation?.status === 'settled' ? currentPreparation.authoringPrepared : null;
   const rebindExpectation =
     currentPreparation?.status === 'settled' ? currentPreparation.rebindExpectation : null;
-  const renameAuthority = authoringPrepared?.authoringAuthority;
+  const renameAuthority =
+    authoringPrepared?.authoringAuthority ??
+    (linkedPieceRename && resolvedSource === 'saved' && prepared && 'authoringAuthority' in prepared
+      ? prepared.authoringAuthority
+      : undefined);
   const currentSavedPieceMetadata =
     isPatternImportDxfPhaseEZeroConnectPreparedAuthorityV1(renameAuthority) &&
     renameAuthority.row.cardLockVersion === resolvedSavedCard?.lockVersion
       ? resolvedSavedCard?.techCard?.pieces
       : undefined;
-  const renamePiece =
-    !disabled &&
+  const attachedRename =
+    linkedPieceRename &&
+    isPatternImportDxfPhaseEZeroConnectPreparedAuthorityV1(renameAuthority) &&
+    Object.entries(linkedPieceRename.row).every(
+      ([key, value]) => renameAuthority.row[key as keyof typeof renameAuthority.row] === value,
+    )
+      ? linkedPieceRename.attachment
+      : undefined;
+  const emptyRename =
     selection.operationNumber == null &&
-    savePieceRename &&
-    renameAuthority &&
     resolvedSavedCard?.techCard &&
     !resolvedSavedCard.techCard.operations?.length &&
     !resolvedSavedCard.seams?.length &&
-    !resolvedSavedCard.pieceFolds?.length &&
+    !resolvedSavedCard.pieceFolds?.length;
+  const renamePiece =
+    !disabled &&
+    (emptyRename || attachedRename) &&
+    savePieceRename &&
+    renameAuthority &&
     currentSavedPieceMetadata
       ? {
           row: renameAuthority.row,
           save: savePieceRename,
+          attachment: attachedRename,
         }
       : undefined;
   const authoringAuthorityRefresh = useMemo(
@@ -1656,6 +1673,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
   defaultOperationsMode,
   sourceSurface,
   pointClosureTarget,
+  linkedPieceRename,
 }: Readonly<{
   techCardId?: number;
   physicalHost?: CadWorkbenchPhysicalHostV1;
@@ -1668,6 +1686,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
   defaultOperationsMode?: PatternImportDxfPhaseECadWorkbenchOperationsModeV1;
   sourceSurface?: 'explicit-native-drawn-sewing';
   pointClosureTarget?: SavedPointClosureOperationTargetV1;
+  linkedPieceRename?: Required<Pick<GuardedSavedPieceRename, 'row' | 'attachment'>>;
 }>) {
   const subscribe = useCallback(
     (listener: () => void) => subscribePatternImportDxfPhaseECardSessionV1(techCardId, listener),
@@ -1706,6 +1725,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
       defaultOperationsMode={defaultOperationsMode}
       sourceSurface={sourceSurface}
       pointClosureTarget={pointClosureTarget}
+      linkedPieceRename={linkedPieceRename}
       mannequin={({
         sources,
         activeScopeKey,

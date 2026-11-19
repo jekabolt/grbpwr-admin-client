@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useId, useRef, useState } from 'react';
 import { abortableAdminService } from 'api/api';
+import type { GuardedSavedPieceRename } from '../../guarded-piece-rename';
 import type { common_TechCard, TechCardPatternSemanticSidecar } from 'api/proto-http/admin';
 import { rollGoodsScopes } from 'components/managers/tech-card/components/piece-block-refs';
 import { useDictionary } from 'lib/providers/dictionary-provider';
@@ -47,6 +48,7 @@ export type SavedCrossMaterialReviewForPreviewV8 = Readonly<{
   sha256: string;
   placementRebuild?: true;
   patternSize: CadWorkbenchSavedReviewSizeV1;
+  linkedPieceRename?: Required<Pick<GuardedSavedPieceRename, 'row' | 'attachment'>>;
   load: (signal: AbortSignal) => ReturnType<typeof readSavedCompleteAssemblyNativePhysicalSourceV8>;
   verify: (signal: AbortSignal, expectedAuthoredFoldSourceSha256?: string) => Promise<void>;
   wholeAssembly?: Readonly<{
@@ -319,6 +321,16 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
               sizeId: restored.document.selection.sizeId,
               sizeToken: restored.document.selection.sizeToken,
             }),
+            linkedPieceRename: whole
+              ? {
+                  row: exact.row,
+                  attachment: {
+                    expectedServerAssemblyRevision: current.serverAssemblyRevision,
+                    expectedCompleteSourceSha256: current.sourceSha256,
+                    expectedCurrentSidecarSha256: carrierSha256,
+                  },
+                }
+              : undefined,
             load,
             wholeAssembly: prepareWholeAssemblyPreview && {
               prepare: prepareWholeAssemblyPreview,

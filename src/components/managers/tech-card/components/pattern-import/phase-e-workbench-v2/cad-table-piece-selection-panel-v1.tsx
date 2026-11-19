@@ -56,12 +56,13 @@ export function handleCadTablePieceSelectionKey(
 type SavedPieceMetadata = Readonly<
   Pick<
     common_TechCardPiece,
-    'lineKey' | 'name' | 'piecesPerGarment' | 'grainline' | 'cutSymmetry' | 'note'
+    'lineKey' | 'name' | 'piecesPerGarment' | 'grainline' | 'cutSymmetry' | 'note' | 'calloutNumber'
   >
 >;
 
 type RenamePiece = Readonly<{
   row: GuardedSavedPieceRename['row'];
+  attachment?: GuardedSavedPieceRename['attachment'];
   save: (intent: GuardedSavedPieceRename) => Promise<void>;
 }>;
 
@@ -260,13 +261,17 @@ export function CadTablePieceSelection({
             data-cad-selected-piece-inspector={active.objectKey}
           >
             <p className='font-bold'>{active.label}</p>
-            {renamePiece && renameLineKey && active.savedName ? (
+            {renamePiece &&
+            renameLineKey &&
+            active.savedName &&
+            (!renamePiece.attachment || !active.metadata?.calloutNumber) ? (
               <SavedPieceNameEditor
                 key={`${renamePiece.row.cardLockVersion}:${renamePiece.row.revision}:${renameLineKey}`}
                 intent={{
                   row: renamePiece.row,
                   pieceLineKey: renameLineKey,
                   expectedName: active.savedName,
+                  attachment: renamePiece.attachment,
                 }}
                 save={renamePiece.save}
               />

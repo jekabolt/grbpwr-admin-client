@@ -275,3 +275,44 @@ it('fails verification when a fresh readback has a rebound alias and never retri
   ).rejects.toThrow(/pattern links changed/);
   expect(updateAndRebind).toHaveBeenCalledTimes(1);
 });
+
+it('requires the current attachment before renaming and keeps its saved DXF revision', async () => {
+  const { persisted, intent, read } = await setup();
+  const attachment = {
+    expectedServerAssemblyRevision: 'asm:v1:fixture:7',
+    expectedCompleteSourceSha256: 'a'.repeat(64),
+    expectedCurrentSidecarSha256: 'b'.repeat(64),
+  };
+  const readLinked = async () => {
+    const card = await read();
+    return {
+      ...card,
+      techCard: { ...card.techCard!, operations: [{ operationNumber: 10 } as never] },
+    };
+  };
+  const update = vi.fn(async (rename: GuardedZeroOperationPieceRename) => {
+    expect(rename).toMatchObject({ ...attachment, expectedSavedRowRevision: intent.row.revision });
+    persisted.techCard.pieces[0].name = rename.nextName!;
+    return ++persisted.lockVersion;
+  });
+  const verifyAttachment = vi.fn<() => Promise<void>>();
+  verifyAttachment.mockRejectedValueOnce(new Error('The saved placement changed.'));
+  await expect(
+    writeGuardedSavedPieceRename(
+      { ...intent, attachment },
+      { read: readLinked, update, verifyAttachment },
+    ),
+  ).rejects.toThrow(/saved placement changed/);
+  expect(update).not.toHaveBeenCalled();
+
+  verifyAttachment.mockResolvedValueOnce(undefined);
+  const after = await writeGuardedSavedPieceRename(
+    { ...intent, attachment },
+    { read: readLinked, update, verifyAttachment },
+  );
+  expect(verifyAttachment).toHaveBeenLastCalledWith(intent.row, attachment);
+  expect(update).toHaveBeenCalledOnce();
+  expect(after.lockVersion).toBe(intent.row.cardLockVersion + 1);
+  expect(after.techCard?.patterns?.[0].savedRowRevision).toBe(intent.row.revision);
+  expect(after.techCard?.pieces?.[0].name).toBe(NAME);
+});

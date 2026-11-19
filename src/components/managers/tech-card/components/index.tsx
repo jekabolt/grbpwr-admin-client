@@ -78,6 +78,7 @@ import { IssuesField } from './issues-field';
 import { AssemblyField } from './assembly-field';
 import {
   GuardedPieceRenameContext,
+  verifyGuardedSavedPieceRenameAttachment,
   writeGuardedSavedPieceRename,
   type GuardedSavedPieceRename,
 } from './guarded-piece-rename';
@@ -3333,6 +3334,7 @@ export function TechCardForm({
       (read, checkWrite) =>
         writeGuardedSavedPieceRename(intent, {
           read,
+          verifyAttachment: verifyGuardedSavedPieceRenameAttachment,
           update: async (guardedPieceRename) => {
             checkWrite();
             try {

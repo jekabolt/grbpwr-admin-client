@@ -2832,6 +2832,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
         )}
         defaultOperationsMode='docked'
         pointClosureTarget={pointClosureTarget}
+        linkedPieceRename={activeCrossMaterialReview?.linkedPieceRename}
         operationsPanel={
           <>
             {savedCrossMaterialActions}
