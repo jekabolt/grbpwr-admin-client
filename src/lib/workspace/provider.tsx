@@ -54,6 +54,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   return <PaperBrandProvider>{children}</PaperBrandProvider>;
 }
 
+/** Sends every screen to `/welcome` while the team's first entry is not done (P0 §4). */
+export function EntryGuard({ children }: { children: ReactNode }) {
+  const { pathname } = useLocation();
+  const { workspace } = useWorkspace();
+  if (!workspace?.entryNeeded || pathname === ROUTES.welcome) return <>{children}</>;
+  return <Navigate to={ROUTES.welcome} replace />;
+}
+
 /** Sends a path whose feature is off to the first allowed screen. */
 export function FeatureGuard({ children }: { children: ReactNode }) {
   const { pathname } = useLocation();

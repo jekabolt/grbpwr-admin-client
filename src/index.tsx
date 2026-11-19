@@ -19,7 +19,7 @@ import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom
 import { TooltipProvider } from 'ui';
 import { Layout } from 'components/shell/layout';
 import { currentHost } from 'lib/host';
-import { FeatureGuard, WorkspaceProvider } from 'lib/workspace/provider';
+import { EntryGuard, FeatureGuard, WorkspaceProvider } from 'lib/workspace/provider';
 import './global.css';
 
 // A deploy replaces every hashed chunk, so a tab that was already open asks for a file that is no
@@ -327,6 +327,7 @@ const WorkspacePage = lazyRoute(() => import('components/workspace/workspace-pag
 const Handoff = lazyRoute(() =>
   import('components/auth/handoff').then((m) => ({ default: m.Handoff })),
 );
+const Welcome = lazyRoute(() => import('components/welcome/welcome-page'));
 const Join = lazyRoute(() => import('components/auth/join').then((m) => ({ default: m.Join })));
 
 // Configure QueryClient with best practices
@@ -400,9 +401,11 @@ const ProtectedLayout = () => (
       <WorkspaceProvider>
         <Layout>
           <Suspense fallback={<LoadingFallback />}>
-            <FeatureGuard>
-              <Outlet />
-            </FeatureGuard>
+            <EntryGuard>
+              <FeatureGuard>
+                <Outlet />
+              </FeatureGuard>
+            </EntryGuard>
           </Suspense>
         </Layout>
       </WorkspaceProvider>
@@ -417,9 +420,11 @@ const ProtectedBare = () => (
     <DictionaryProvider>
       <WorkspaceProvider>
         <Suspense fallback={<LoadingFallback />}>
-          <FeatureGuard>
-            <Outlet />
-          </FeatureGuard>
+          <EntryGuard>
+            <FeatureGuard>
+              <Outlet />
+            </FeatureGuard>
+          </EntryGuard>
         </Suspense>
       </WorkspaceProvider>
     </DictionaryProvider>
@@ -593,6 +598,7 @@ const app = (
                     engine (Safari especially) renders the document in normal flow, with
                     no app chrome to isolate via fragile print CSS. */}
                 <Route path='/' element={<ProtectedBare />}>
+                  <Route path={ROUTES.welcome} element={<Welcome />} />
                   <Route path={ROUTES.techCardPrint} element={<TechCardPrint />} />
                   <Route path={ROUTES.techCardMarkerViewer} element={<TechCardMarkerViewer />} />
                   {/* Схема сборки на одном листе (420 / 841 мм): лист сам объявляет @page,

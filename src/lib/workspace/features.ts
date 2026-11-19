@@ -39,6 +39,8 @@ export interface WorkspaceInfo {
   /** The team's paper brand; absent = teams OFF (a backend before teams). */
   brand?: TeamBrand | null;
   logoUrl?: string;
+  /** First entry not done yet: the person goes to `/welcome` before anything else. */
+  entryNeeded?: boolean;
 }
 
 /** Is this feature on? No workspace (a backend before teams) means everything is on, as today. */

@@ -53,6 +53,7 @@ let signedUp: { email: string; team: Record<string, unknown> } | null = null;
  * localStorage knobs: stub.teams=empty (first time), stub.signin=google|none (default: both),
  * stub.rootToken=0 (the code answers as the old server: no token; 111111 → awaiting, else the
  * team host). Brand: a website starting with `refuse` → the server's `bad_website`.
+ * stub.entry=1 → the first entry (`/welcome`); username `taken` → `username_taken`.
  */
 function knob(key: string): string {
   try {
@@ -78,6 +79,17 @@ function refuseBrand(body: string | null): void {
 function logoUrlOf(logo: string | undefined): string {
   return logo ? `data:${logo.startsWith('/9j/') ? 'image/jpeg' : 'image/png'};base64,${logo}` : '';
 }
+
+// first entry (stub.entry=1): `/welcome` until FinishTeamEntry; the profile lives for the page load
+let entryDone = false;
+const myProfile = {
+  firstName: 'mira',
+  lastName: '',
+  publicUsername: '',
+  email: 'mira@ostra.studio',
+  avatarUrl: '',
+  passwordSet: true,
+};
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 let slowOnce = true;
@@ -205,9 +217,33 @@ export async function stubAnswer(method: string, body: string | null): Promise<u
       const ws = stubWorkspace(DEFAULT_FEATURES);
       return {
         account: { username: ws.you, isSuper: true, permissions: [] },
-        workspace: { ...ws.workspace, slug: h.slug, readOnly: readOnly || ws.workspace.readOnly },
+        workspace: {
+          ...ws.workspace,
+          slug: h.slug,
+          readOnly: readOnly || ws.workspace.readOnly,
+          entryNeeded: knob('stub.entry') === '1' && !entryDone,
+        },
       };
     }
+    case 'GetMyProfile':
+      return { profile: { ...myProfile } };
+    case 'UpdateMyProfile': {
+      const u = req.publicUsername ?? '';
+      if (u === 'taken') refuse(409, 'username_taken');
+      if (u && !/^[a-z0-9][a-z0-9._-]{1,29}$/.test(u)) refuse(400, 'bad_username');
+      Object.assign(myProfile, {
+        firstName: req.firstName ?? '',
+        lastName: req.lastName ?? '',
+        publicUsername: u,
+      });
+      return { profile: { ...myProfile } };
+    }
+    case 'SetMyAvatar':
+      myProfile.avatarUrl = logoUrlOf(req.avatar);
+      return { avatarUrl: myProfile.avatarUrl };
+    case 'FinishTeamEntry':
+      entryDone = true;
+      return {};
     default: {
       // workspace calls (brand, people, access), then console calls (lane C2)
       const { workspaceStubAnswer } = await import('components/workspace/dev-stub');
