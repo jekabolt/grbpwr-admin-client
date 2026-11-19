@@ -1,3 +1,4 @@
+import { readPairedAuthoredOutlineCorner } from '../manifest/authored-outline-corner';
 // PieceSpec[] (source frame) → PlannedBlock[] (written frame): everything the emitters need,
 // with every garment decision already taken. The emitters only serialise.
 //
@@ -192,6 +193,9 @@ function transformSize(s: PieceSizeSpec, t: Affine): PieceSizeSpec {
   const cut = mapPts(t, s.cut);
   return {
     ...s,
+    ...(s.authoredOutlineCorner
+      ? { authoredOutlineCorner: mapAuthoredQuadratic(s.authoredOutlineCorner, P) }
+      : {}),
     cut,
     cutLoops: transformCutLoops(t, s.cutLoops),
     seam: s.seam ? mapPts(t, s.seam) : null,
@@ -460,6 +464,30 @@ export function planBlocks(
         preserveWinding(loop, stripSpikes(simplify(loop, true, WRITE_SIMPLIFY_MM)).ring),
       );
       const seam = seamS ? ccw(seamS.ring) : null;
+      const corner = s.authoredOutlineCorner;
+      let authoredOutlineCorner;
+      if (corner) {
+        const ordered = authoredQuadraticGrid(corner);
+        const reverse = authoredQuadraticGrid([corner[2], corner[1], corner[0]]);
+        const grid =
+          seam &&
+          [ordered, reverse].find(
+            (value) => value && readPairedAuthoredOutlineCorner(cut, seam, value),
+          );
+        if (
+          !w.spec.ungraded ||
+          w.sizes.length !== 1 ||
+          w.spec.allowance.allowanceMm !== 0 ||
+          cutLoops.length ||
+          w.spec.pairOf ||
+          w.derivedFrom ||
+          !grid
+        )
+          throw new Error(
+            `${who}: rounded corner no longer matches the exact shared cut and sewing outlines.`,
+          );
+        authoredOutlineCorner = decodeAuthoredQuadratic(grid);
+      }
       // …and never silently dropped (Codex, r5a): what semantics did not already turn into a notch
       // and still goes in and out of the cut line ≥ notchMinMm is written as a notch there, warned
       const slits: NotchFeature[] = cutS.excursions
@@ -534,6 +562,7 @@ export function planBlocks(
       const srcT = w.srcT.get(s0.rank) ?? IDENTITY;
       const size: PieceSizeSpec = {
         ...s,
+        ...(authoredOutlineCorner ? { authoredOutlineCorner } : {}),
         cut,
         cutLoops,
         seam,

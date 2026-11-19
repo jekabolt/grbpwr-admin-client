@@ -1,3 +1,4 @@
+import { authoredQuadraticGrid } from 'lib/pattern-import/manifest/authored-internal';
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Button, CalloutBox } from 'ui';
 import { readPatternImportDxfPhaseECardSessionV1 } from '../phase-e-workbench-card-session-v1';
@@ -61,7 +62,16 @@ export default function CadTableSavedSharedOutlineEditV1({
     [catalog],
   );
   const [session, setSession] = useState(initial.session);
-  const [tool, setTool] = useState<'move-point' | 'round-corner'>('move-point');
+  const savedRoundCorner = useMemo(() => {
+    const authored = prepared.draftCadCompileSource.scopes
+      .find(({ target }) => target.scopeKey === scopeKey)
+      ?.writerReplay?.job.pieces.find(({ identity }) => identity === piece?.pieceId)
+      ?.sizes[0]?.authoredOutlineCorner;
+    return authored ? authoredQuadraticGrid(authored) ?? undefined : undefined;
+  }, [prepared, scopeKey, piece]);
+  const [tool, setTool] = useState<'move-point' | 'round-corner'>(
+    savedRoundCorner ? 'round-corner' : 'move-point',
+  );
   const sessionRef = useRef(session);
   const runtimeRef = useRef<ReturnType<typeof createSavedGeometryReviewRuntimeV1> | null>(null);
   const pending = useRef(false);
@@ -152,7 +162,7 @@ export default function CadTableSavedSharedOutlineEditV1({
               type='button'
               size='xs'
               variant='secondary'
-              disabled={session.history.length > 0 || preparing}
+              disabled={Boolean(savedRoundCorner) || session.history.length > 0 || preparing}
               onClick={() => setTool(tool === 'move-point' ? 'round-corner' : 'move-point')}
             >
               {tool === 'move-point' ? 'Round corner' : 'Move points'}
@@ -207,6 +217,7 @@ export default function CadTableSavedSharedOutlineEditV1({
           activePieceIndex={pieceIndex}
           activeTool={tool}
           moveSharedOutline
+          savedRoundCorner={savedRoundCorner}
           panActive={preparing || (tool === 'round-corner' && session.cursor > 0)}
           topologySession={topology}
           activeTopologyTool={null}

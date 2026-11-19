@@ -1,3 +1,4 @@
+import { readAuthoredOutlineCorner } from 'lib/pattern-import/manifest/authored-outline-corner';
 import {
   draftOutlineMoveHistoryV1,
   draftOutlineMovePositionsV1,
@@ -26,7 +27,12 @@ import {
   AUTHORED_TEXT_HEIGHT_MM,
   normalizeAuthoredText,
 } from 'lib/pattern-import/manifest/authored-text';
-import type { AuthoredNotchShape, BoxMm, PtMm } from 'lib/pattern-import/types';
+import type {
+  AuthoredNotchShape,
+  AuthoredQuadraticGrid,
+  BoxMm,
+  PtMm,
+} from 'lib/pattern-import/types';
 import { num as dxfCoordinate } from 'lib/pattern-import/write/format';
 import { Button, Input, Selector } from 'ui';
 
@@ -127,6 +133,7 @@ export type PatternImportDxfPhaseEDraftCadCanvasPropsV1 = Readonly<{
   }>[];
   savedFrenchCurveOnly?: boolean;
   moveSharedOutline?: boolean;
+  savedRoundCorner?: AuthoredQuadraticGrid;
   savedFrenchCurve?: Readonly<{
     key: string;
     primitive: FrenchCurvePrimitive;
@@ -464,16 +471,21 @@ export function recordPatternImportDxfPhaseEDraftCadDeletePointV1(
 }
 
 export function recordPatternImportDxfPhaseEDraftCadRoundCornerV1(
-  input: OutlinePointEditInput & Readonly<{ setbackMm: number }>,
+  input: OutlinePointEditInput &
+    Readonly<{ setbackMm: number; savedCorner?: AuthoredQuadraticGrid }>,
 ): PatternImportDxfPhaseEDraftCadCanvasPointResultV1 {
-  return recordOutlinePointEdit(input, { tool: 'round-corner', setbackMm: input.setbackMm });
+  return recordOutlinePointEdit(input, {
+    tool: 'round-corner',
+    setbackMm: input.setbackMm,
+    savedCorner: input.savedCorner,
+  });
 }
 function recordOutlinePointEdit(
   input: OutlinePointEditInput,
   edit:
     | Readonly<{ tool: 'move-point'; pointMm: PtMm }>
     | Readonly<{ tool: 'delete-point' }>
-    | Readonly<{ tool: 'round-corner'; setbackMm: number }>,
+    | Readonly<{ tool: 'round-corner'; setbackMm: number; savedCorner?: AuthoredQuadraticGrid }>,
 ): PatternImportDxfPhaseEDraftCadCanvasPointResultV1 {
   const { session, projection, activePieceIndex, sequence } = input;
   const fail = (blocker: string) => ({
@@ -516,22 +528,27 @@ function recordOutlinePointEdit(
     const contour = activeProjectedPiece(session, projection, activePieceIndex)?.contours.find(
       (candidate) => candidate.contourId === contourId,
     );
+    const points = contour?.vertices.map(({ pointMm }) => pointMm);
     const index = contour?.vertices.findIndex((vertex) => vertex.vertexId === vertexId) ?? -1;
+    const prior = edit.savedCorner && points && readAuthoredOutlineCorner(points, edit.savedCorner);
     if (
       !contour?.closed ||
       contour.role !== 'cut-boundary' ||
-      !roundDraftRectangularCornerV1(
-        contour.vertices.map(({ pointMm }) => pointMm),
-        index,
-        edit.setbackMm,
-      )
+      !points ||
+      (edit.savedCorner &&
+        (!prior || prior.start !== index || prior.setbackMm === edit.setbackMm)) ||
+      !roundDraftRectangularCornerV1(prior ? prior.rectangle : points, index, edit.setbackMm)
     )
       return fail('Choose a right-angle corner and keep a straight rail on each side.');
     command = {
       commandId: ids.commandId,
       tool: 'round-corner',
       target,
-      payload: { ...payload, setbackMm: edit.setbackMm },
+      payload: {
+        ...payload,
+        setbackMm: edit.setbackMm,
+        ...(edit.savedCorner ? { savedCorner: edit.savedCorner } : {}),
+      },
     };
   } else {
     command = { commandId: ids.commandId, tool: 'delete-point', target, payload };
@@ -1880,6 +1897,7 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
   savedFrenchCurve,
   savedFrenchCurveOnly = false,
   moveSharedOutline = false,
+  savedRoundCorner,
   arrangeActive = false,
   panActive = false,
   crossScopeConnectActive = false,
@@ -2001,16 +2019,28 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
     !activeTopologyTool &&
     (activeTool === 'move-point' || activeTool === 'delete-point' || activeTool === 'round-corner');
   const movePointActive = outlineEditActive && activeTool === 'move-point';
-  const exactVertexOptions = useMemo(
-    () =>
-      buildPatternImportDxfPhaseEDraftCadExactVertexOptionsV1(
-        session,
-        projection,
-        activePieceIndex,
-        outlineEditActive,
-      ),
-    [activePieceIndex, outlineEditActive, projection, session],
-  );
+  const exactVertexOptions = useMemo(() => {
+    const options = buildPatternImportDxfPhaseEDraftCadExactVertexOptionsV1(
+      session,
+      projection,
+      activePieceIndex,
+      outlineEditActive,
+    );
+    if (activeTool !== 'round-corner' || !savedRoundCorner) return options;
+    const contour = activeProjectedPiece(session, projection, activePieceIndex)?.contours.find(
+      ({ role }) => role === 'cut-boundary',
+    );
+    if (!contour) return [];
+    const corner = readAuthoredOutlineCorner(
+      contour.vertices.map(({ pointMm }) => pointMm),
+      savedRoundCorner,
+    );
+    if (!corner) return [];
+    const firstSample = contour.vertices[corner.start]?.vertexId;
+    return options.filter(
+      ({ anchor }) => anchor.contourId === contour.contourId && anchor.vertexId === firstSample,
+    );
+  }, [activePieceIndex, activeTool, outlineEditActive, projection, savedRoundCorner, session]);
   const canUseActiveTool = activeDraftPieceId
     ? Boolean(draftPiece) && !activeTopologyTool && permitsDraftCadLocalPieceEditV1(activeTool)
     : crossScopeConnectActive ||
@@ -2033,9 +2063,11 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
 
   const activeToolInstruction = savedFrenchCurveOnly
     ? 'Move a start, control or end point.'
-    : activeTool === 'move-point' && moveSharedOutline
-      ? 'Drag an outline point or click it to enter X and Y in millimetres.'
-      : toolInstruction(activeTool, projection.sizeToken);
+    : activeTool === 'round-corner' && savedRoundCorner
+      ? 'Select the saved corner handle to change its linked setback.'
+      : activeTool === 'move-point' && moveSharedOutline
+        ? 'Drag an outline point or click it to enter X and Y in millimetres.'
+        : toolInstruction(activeTool, projection.sizeToken);
   const unavailable = sourceMismatch
     ? 'The exact projection does not match this Draft session source.'
     : !projectedPiece || !target
@@ -2102,6 +2134,14 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
     }
   };
   const chooseOutlinePoint = (option: PatternImportDxfPhaseEDraftCadExactVertexOptionV1 | null) => {
+    if (option && activeTool === 'round-corner' && savedRoundCorner)
+      setCornerSetback(
+        String(
+          Math.abs(
+            savedRoundCorner[0] - savedRoundCorner[2] + savedRoundCorner[1] - savedRoundCorner[3],
+          ) / 1e6,
+        ),
+      );
     setOutlinePointInput(
       option ? { key: option.key, x: String(option.pointMm.x), y: String(option.pointMm.y) } : null,
     );
@@ -2115,6 +2155,7 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
         ? recordPatternImportDxfPhaseEDraftCadRoundCornerV1({
             ...input,
             setbackMm: Number(cornerSetback),
+            savedCorner: savedRoundCorner,
           })
         : recordPatternImportDxfPhaseEDraftCadDeletePointV1(input);
     setInputError(result.blocker);

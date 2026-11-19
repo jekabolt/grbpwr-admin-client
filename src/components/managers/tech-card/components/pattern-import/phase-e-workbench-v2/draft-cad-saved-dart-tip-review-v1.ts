@@ -77,7 +77,14 @@ const artifacts = new WeakMap<Artifact, Review>();
 function markers(manifest: ConversionManifest) {
   return JSON.stringify(
     manifest.blocks
-      .map((b) => [b.block, b.identity, b.sizeToken, b.sizeId, b.authoredInternal ?? []])
+      .map((b) => [
+        b.block,
+        b.identity,
+        b.sizeToken,
+        b.sizeId,
+        b.authoredInternal ?? [],
+        b.authoredOutlineCorner ?? null,
+      ])
       .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
   );
 }
@@ -114,6 +121,7 @@ function geometry(job: WriteJob) {
         size.internal.map((p) => [p.label, p.closed, p.pts, p.authoredQuadratic]),
         size.pointMarks ?? [],
         size.textMarks ?? [],
+        size.authoredOutlineCorner ?? null,
       ]),
     ]),
   );

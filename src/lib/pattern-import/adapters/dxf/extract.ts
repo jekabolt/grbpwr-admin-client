@@ -243,6 +243,9 @@ const MAX_STRAIGHT_EDGE_COORDINATE_ABS_MM = 1_000_000_000;
 // The ordinary decoder owns these path objects. Only all-straight, unresampled source intervals qualify.
 const nativeCutAndFoldPolylines = new WeakSet<IRPath>();
 const nativeStraightL8Polylines = new WeakSet<IRPath>();
+const nativeAuthoredOutlinePolylines = new WeakMap<IRPath, readonly PtMm[]>();
+export const nativeAuthoredOutlinePoints = (path: IRPath) =>
+  nativeAuthoredOutlinePolylines.get(path);
 export const isNativeStraightL8Polyline = (path: IRPath) => nativeStraightL8Polylines.has(path);
 export const isNativeCutOrFoldPolyline = (path: IRPath) => nativeCutAndFoldPolylines.has(path);
 
@@ -280,6 +283,7 @@ class Builder {
     readonly provenanceCapture: ProvenanceCapture | null = null,
     readonly straightEdgeCapture: StraightEdgeCapture | null = null,
     readonly productManifestPresent = false,
+    readonly authoredOutlineCornerByBlock?: DxfMeta['authoredOutlineCornerByBlock'],
   ) {
     for (const l of raw.layers) this.addLayer(l.name);
     const handleCounts = new Map<string, number>();
@@ -788,18 +792,40 @@ class Builder {
     });
     if (
       this.productManifestPresent &&
-      (e.layer === '1' || e.layer === '6' || e.layer === '8') &&
+      (e.layer === '1' || e.layer === '6' || e.layer === '8' || e.layer === '14') &&
       (e.type === 'POLYLINE' || e.type === 'LWPOLYLINE') &&
       em.straightEdgeFacts?.length === (em.closed ? em.pts.length : em.pts.length - 1) &&
       em.straightEdgeFacts.every(
-        (f, i) =>
+        (f, i): f is Extract<NativeStraightEdgeFact, { kind: 'line' }> =>
           f.kind === 'line' &&
           f.startPointIndex === i &&
           f.endPointIndex === (i + 1) % em.pts.length,
       )
     ) {
-      if (e.layer === '8') nativeStraightL8Polylines.add(this.paths[id]!);
-      else nativeCutAndFoldPolylines.add(this.paths[id]!);
+      const path = this.paths[id]!;
+      if (e.layer === '8') nativeStraightL8Polylines.add(path);
+      else if (e.layer === '1' || e.layer === '6') nativeCutAndFoldPolylines.add(path);
+      if (
+        (e.layer === '1' || e.layer === '14') &&
+        em.closed &&
+        ctx.group.kind === 'insert' &&
+        ctx.block !== null &&
+        ctx.block === ctx.group.block &&
+        this.authoredOutlineCornerByBlock?.has(ctx.block) &&
+        em.straightEdgeFacts.every(
+          ({ sourceAffine }) =>
+            sourceAffine.a === ctx.group.transform.a &&
+            sourceAffine.b === ctx.group.transform.b &&
+            sourceAffine.c === ctx.group.transform.c &&
+            sourceAffine.d === ctx.group.transform.d &&
+            sourceAffine.e === ctx.group.transform.e &&
+            sourceAffine.f === ctx.group.transform.f,
+        )
+      )
+        nativeAuthoredOutlinePolylines.set(
+          path,
+          em.straightEdgeFacts.map(({ nativeStart }) => nativeStart),
+        );
     }
     this.pathEntity.push(e.type);
     const provenance = this.capturePathProvenance(id, e, ctx, em);
@@ -1935,6 +1961,21 @@ async function readDxfInternal(
   const version = raw.header['$ACADVER']?.[0]?.value.trim() ?? null;
   progress?.(1, 3, 'expand');
 
+  const productManifestPresent =
+    manifest && dec.binary === null && !file.generatedFusing && !dec.generatedFusing;
+  let conversion: ReturnType<typeof readManifestBytes> = null;
+  if (productManifestPresent) {
+    try {
+      conversion = readManifestBytes(file.bytes);
+    } catch {
+      // The native read follows the ordinary foreign-file rules if the manifest is invalid.
+    }
+  }
+  const authoredOutlineCornerByBlock = new Map(
+    (conversion?.blocks ?? []).flatMap(({ block, authoredOutlineCorner }) =>
+      authoredOutlineCorner ? [[block, authoredOutlineCorner]] : [],
+    ),
+  );
   const b = new Builder(
     file.id,
     raw,
@@ -1947,7 +1988,8 @@ async function readDxfInternal(
     },
     provenanceCapture,
     straightEdgeCapture,
-    manifest && dec.binary === null && !file.generatedFusing && !dec.generatedFusing,
+    productManifestPresent,
+    authoredOutlineCornerByBlock,
   );
   b.warnings.push(...raw.warnings);
   // Unscoped parser recovery cannot establish selected-path completeness.
@@ -2058,48 +2100,41 @@ async function readDxfInternal(
   let authoredInternalByBlock: DxfMeta['authoredInternalByBlock'];
   let authoredTextByBlock: DxfMeta['authoredTextByBlock'];
   let authoredNotchesByBlock: DxfMeta['authoredNotchesByBlock'];
-  if (manifest && dec.binary === null && !file.generatedFusing && !dec.generatedFusing) {
-    try {
-      const conversion = readManifestBytes(file.bytes);
-      const halfIdentities = new Set(
-        conversion?.pieces
-          .filter((p) => p.halfFold && !p.unfoldedFold && !p.pairOf && p.piecesPerGarment === 1)
-          .map((p) => p.identity),
+  if (conversion) {
+    const halfIdentities = new Set(
+      conversion.pieces
+        .filter((p) => p.halfFold && !p.unfoldedFold && !p.pairOf && p.piecesPerGarment === 1)
+        .map((p) => p.identity),
+    );
+    if (halfIdentities.size)
+      halfFoldBlocks = new Set(
+        conversion.blocks
+          .filter((b) => halfIdentities.has(b.identity) && b.contour)
+          .map((b) => b.block),
       );
-      if (halfIdentities.size)
-        halfFoldBlocks = new Set(
-          conversion?.blocks
-            .filter((b) => halfIdentities.has(b.identity) && b.contour)
-            .map((b) => b.block),
-        );
-      const zeroAllowancePieces = new Set(
-        conversion?.pieces
-          .filter((piece) => piece.allowanceMm === 0)
-          .map((piece) => piece.identity),
-      );
-      zeroAllowanceSeamBlocks = new Map(
-        (conversion?.blocks ?? []).flatMap(({ block, contour, hasSeam, identity }) =>
-          hasSeam && contour && zeroAllowancePieces.has(identity) ? [[block, contour]] : [],
-        ),
-      );
-      authoredInternalByBlock = new Map(
-        (conversion?.blocks ?? []).flatMap(({ block, authoredInternal }) =>
-          authoredInternal?.length ? [[block, authoredInternal]] : [],
-        ),
-      );
-      authoredTextByBlock = new Map(
-        (conversion?.blocks ?? []).flatMap(({ block, authoredText }) =>
-          authoredText?.length ? [[block, authoredText]] : [],
-        ),
-      );
-      authoredNotchesByBlock = new Map(
-        (conversion?.blocks ?? []).flatMap(({ block, authoredNotches }) =>
-          authoredNotches?.length ? [[block, authoredNotches]] : [],
-        ),
-      );
-    } catch {
-      // The native read follows the ordinary foreign-file rules if the manifest is invalid.
-    }
+    const zeroAllowancePieces = new Set(
+      conversion.pieces.filter((piece) => piece.allowanceMm === 0).map((piece) => piece.identity),
+    );
+    zeroAllowanceSeamBlocks = new Map(
+      conversion.blocks.flatMap(({ block, contour, hasSeam, identity }) =>
+        hasSeam && contour && zeroAllowancePieces.has(identity) ? [[block, contour]] : [],
+      ),
+    );
+    authoredInternalByBlock = new Map(
+      conversion.blocks.flatMap(({ block, authoredInternal }) =>
+        authoredInternal?.length ? [[block, authoredInternal]] : [],
+      ),
+    );
+    authoredTextByBlock = new Map(
+      conversion.blocks.flatMap(({ block, authoredText }) =>
+        authoredText?.length ? [[block, authoredText]] : [],
+      ),
+    );
+    authoredNotchesByBlock = new Map(
+      conversion.blocks.flatMap(({ block, authoredNotches }) =>
+        authoredNotches?.length ? [[block, authoredNotches]] : [],
+      ),
+    );
   }
   const meta: DxfMeta = {
     version,
@@ -2113,6 +2148,7 @@ async function readDxfInternal(
     ...(halfFoldBlocks?.size ? { halfFoldBlocks } : {}),
     ...(zeroAllowanceSeamBlocks?.size ? { zeroAllowanceSeamBlocks } : {}),
     ...(authoredInternalByBlock?.size ? { authoredInternalByBlock } : {}),
+    ...(authoredOutlineCornerByBlock?.size ? { authoredOutlineCornerByBlock } : {}),
     ...(authoredTextByBlock?.size ? { authoredTextByBlock } : {}),
     ...(authoredNotchesByBlock?.size ? { authoredNotchesByBlock } : {}),
     generatedFusing: dec.generatedFusing || file.generatedFusing === true,

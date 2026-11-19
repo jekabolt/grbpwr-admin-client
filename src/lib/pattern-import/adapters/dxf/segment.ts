@@ -10,7 +10,8 @@ import {
 } from '../../manifest/authored-internal';
 import { AUTHORED_NOTCH_STROKES } from '../../manifest/authored-notches';
 import { AUTHORED_TEXT_LAYER } from '../../manifest/authored-text';
-import { isNativeStraightL8Polyline } from './extract';
+import { isNativeStraightL8Polyline, nativeAuthoredOutlinePoints } from './extract';
+import { readNativePairedAuthoredOutlineCorner } from '../../manifest/authored-outline-corner';
 import { readAuthoredTextMarks } from './authored-text';
 import { contourSigProblem } from '../../manifest/contour-sig';
 import type {
@@ -762,6 +763,31 @@ function blockPiece(
       ) &&
       !contourSigProblem(signature, cut.pts),
   );
+  const rounded = group.block && read.meta.authoredOutlineCornerByBlock?.get(group.block);
+  let authoredOutlineCorner;
+  if (rounded) {
+    const { a, b, c, d, e, f } = group.transform;
+    const cutPath = cut && pathById.get(cut.paths[0]!);
+    const seamPath = authoredSeam && pathById.get(authoredSeam.paths[0]!);
+    const nativeCut = cutPath && nativeAuthoredOutlinePoints(cutPath);
+    const nativeSeam = seamPath && nativeAuthoredOutlinePoints(seamPath);
+    if (
+      read.meta.units.mmPerUnit !== 1 ||
+      a !== 1 ||
+      b !== 0 ||
+      c !== 0 ||
+      d !== 1 ||
+      !explicitZeroAllowanceSeam ||
+      cutLayerPaths.length !== 1 ||
+      !nativeCut ||
+      !nativeSeam ||
+      !readNativePairedAuthoredOutlineCorner(nativeCut, nativeSeam, rounded)
+    )
+      throw new Error(
+        `The saved rounded corner in ${group.block} does not reproduce both native outlines.`,
+      );
+    authoredOutlineCorner = decodeAuthoredQuadratic(rounded, { x: e, y: f });
+  }
   let cutEqualsSeam = false;
   if (
     !explicitZeroAllowanceSeam &&
@@ -1020,6 +1046,7 @@ function blockPiece(
     seam,
     seamSource,
     ...(explicitZeroAllowanceSeam ? { zeroAllowanceSeam: true as const } : {}),
+    ...(authoredOutlineCorner ? { authoredOutlineCorner } : {}),
     cutEqualsSeam,
     seamToCutMm,
     grain,

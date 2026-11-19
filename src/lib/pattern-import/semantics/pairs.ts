@@ -65,6 +65,9 @@ export function transformSizeSpec(s: PieceSizeSpec, t: Affine): PieceSizeSpec {
   const cutLoops = transformCutLoops(t, s.cutLoops);
   return {
     ...s,
+    ...(s.authoredOutlineCorner
+      ? { authoredOutlineCorner: mapAuthoredQuadratic(s.authoredOutlineCorner, P) }
+      : {}),
     cut,
     ...(cutLoops && { cutLoops }),
     seam: s.seam ? ccw(s.seam.map(P)) : null,

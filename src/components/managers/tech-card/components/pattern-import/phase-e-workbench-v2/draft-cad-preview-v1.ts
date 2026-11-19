@@ -16,7 +16,10 @@ import {
   resizeDraftStraightEdgeV1,
   selectDraftSharpCornerV1,
 } from './draft-cad-edge-length-geometry-v1';
-import { roundDraftRectangularCornerV1 } from './draft-cad-round-corner-v1';
+import {
+  readAuthoredOutlineCorner,
+  roundDraftRectangularCornerV1,
+} from 'lib/pattern-import/manifest/authored-outline-corner';
 import { selectDraftCutAllowanceOffsetV1 } from './draft-cad-allowance-offset-geometry-v1';
 import {
   draftOutlineMoveHistoryV1,
@@ -655,19 +658,22 @@ export function buildPatternImportDxfPhaseEDraftCadPreviewV1(
         break;
       }
       case 'round-corner': {
-        const { contourId, vertexId, setbackMm, sizeToken } = command.payload;
+        const { contourId, vertexId, setbackMm, sizeToken, savedCorner } = command.payload;
         const piece = projection.pieces.find(
           ({ pieceId, pieceLineKey }) =>
             pieceId === command.target.pieceId && pieceLineKey === command.target.pieceLineKey,
         );
         const contour = piece?.contours.find((item) => item.contourId === contourId);
+        const points = contour?.vertices.map(({ pointMm }) => pointMm);
+        const index = contour?.vertices.findIndex(({ vertexId: id }) => id === vertexId) ?? -1;
+        const prior = savedCorner && points && readAuthoredOutlineCorner(points, savedCorner);
         const rounded =
-          contour?.closed && contour.role === 'cut-boundary' && projection.sizeToken === sizeToken
-            ? roundDraftRectangularCornerV1(
-                contour.vertices.map(({ pointMm }) => pointMm),
-                contour.vertices.findIndex(({ vertexId: id }) => id === vertexId),
-                setbackMm,
-              )
+          contour?.closed &&
+          contour.role === 'cut-boundary' &&
+          projection.sizeToken === sizeToken &&
+          points &&
+          (!savedCorner || (prior && prior.start === index))
+            ? roundDraftRectangularCornerV1(prior ? prior.rectangle : points, index, setbackMm)
             : null;
         if (!rounded) {
           blockers.push(

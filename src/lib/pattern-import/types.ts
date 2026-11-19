@@ -1699,6 +1699,8 @@ export type PieceSizeSpec = {
   internal: InternalFeature[];
   textMarks?: AuthoredTextMark[];
   pointMarks?: AuthoredPointMark[];
+  /** Exact shared rounded-corner controls in the current sheet coordinate frame. */
+  authoredOutlineCorner?: AuthoredQuadraticControls;
   fold: FoldFeature | null;
   offset: OffsetReport | null;
   /** Wall chains the cut line came from — coverage/Hausdorff are computed against them. */
@@ -2713,6 +2715,8 @@ export type ManifestAuthoredNotchGroup = {
 export type ManifestBlock = {
   protectedLineSplit?: ManifestProtectedLineSplit;
   authoredInternal?: ManifestAuthoredInternalPath[];
+  /** One exact quadratic corner on the same closed L1/L14 outline, in block grid units. */
+  authoredOutlineCorner?: AuthoredQuadraticGrid;
   authoredText?: ManifestAuthoredTextMark[];
   authoredNotches?: ManifestAuthoredNotchGroup[];
   block: string;

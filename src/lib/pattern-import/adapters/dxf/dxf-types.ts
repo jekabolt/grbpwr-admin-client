@@ -109,6 +109,10 @@ export type DxfMeta = {
   /** Manifest blocks explicitly emitted with a sewing boundary and zero allowance. */
   zeroAllowanceSeamBlocks?: ReadonlyMap<string, NonNullable<ManifestBlock['contour']>>;
   authoredInternalByBlock?: ReadonlyMap<string, readonly ManifestAuthoredInternalPath[]>;
+  authoredOutlineCornerByBlock?: ReadonlyMap<
+    string,
+    NonNullable<ManifestBlock['authoredOutlineCorner']>
+  >;
   authoredTextByBlock?: ReadonlyMap<string, readonly ManifestAuthoredTextMark[]>;
   authoredNotchesByBlock?: ReadonlyMap<string, readonly ManifestAuthoredNotchGroup[]>;
   /** Proven by the generator's DXF marker or the system-owned card-row flag. */
@@ -308,6 +312,7 @@ export type DxfBlockPiece = {
   roles: Record<PathId, PathRole>;
   authoredInternalLabels?: ReadonlyMap<PathId, AuthoredInternalLabel>;
   authoredQuadraticByPath?: ReadonlyMap<PathId, AuthoredQuadraticControls>;
+  authoredOutlineCorner?: AuthoredQuadraticControls;
   texts: TextId[];
   textMarks?: AuthoredTextMark[];
   pointMarks?: AuthoredPointMark[];
@@ -397,6 +402,7 @@ export type DxfPieceCandidate = PieceCandidate & {
     /** The outer contour is L14 (mode A: the true graded line) — cut = outward offset. */
     outerIsSeam: boolean;
     zeroAllowanceSeam?: true;
+    authoredOutlineCorner?: AuthoredQuadraticControls;
     textMarks?: AuthoredTextMark[];
     pointMarks?: AuthoredPointMark[];
     /** The block's `seamPair` allowance, mm (the uniform same-look loop inside the outline). */

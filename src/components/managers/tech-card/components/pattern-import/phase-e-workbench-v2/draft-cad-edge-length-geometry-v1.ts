@@ -15,7 +15,14 @@ import {
   sameDraftAllowanceRingV1,
   type SavedDraftPairedAllowanceProofV1,
 } from './draft-cad-paired-allowance-authority-v1';
-import { roundDraftRectangularCornerV1 } from './draft-cad-round-corner-v1';
+import {
+  readPairedAuthoredOutlineCorner,
+  roundDraftRectangularCornerV1,
+} from 'lib/pattern-import/manifest/authored-outline-corner';
+import {
+  authoredQuadraticGrid,
+  decodeAuthoredQuadratic,
+} from 'lib/pattern-import/manifest/authored-internal';
 import { DRILL_SQUARE_MM } from 'lib/pattern-import/write/plan';
 import type { PatternImportDxfPhaseEDraftCadCommandV1 } from './draft-cad-session-v1';
 
@@ -181,6 +188,11 @@ function editExactOutlineVertex(
       ok: false,
       detail: 'This outline requires its retained topology or allowance editor.',
     };
+  if (source.authoredOutlineCorner && command.tool !== 'round-corner')
+    return {
+      ok: false,
+      detail: 'Edit the saved rounded corner with its original setback control.',
+    };
   const vertices = ring(primary);
   const seam = source.seam ? ring(source.seam) : null;
   const cut = ring(source.cut);
@@ -310,16 +322,39 @@ function editExactOutlineVertex(
       return { ok: false, detail: 'Rebind the notch on this bevel corner before sharpening.' };
     sharpCorner = candidate.corner;
   }
+  const cornerGrid =
+    source.authoredOutlineCorner && authoredQuadraticGrid(source.authoredOutlineCorner);
+  const savedCorner = command.tool === 'round-corner' ? command.payload.savedCorner : undefined;
+  const originalCorner =
+    cornerGrid &&
+    seam &&
+    savedCorner &&
+    cornerGrid.every((coordinate, i) => coordinate === savedCorner[i]) &&
+    readPairedAuthoredOutlineCorner(vertices, seam, savedCorner);
+  if (
+    command.tool === 'round-corner' &&
+    (source.authoredOutlineCorner || savedCorner) &&
+    (!originalCorner ||
+      originalCorner.start !== index ||
+      source.notches.length ||
+      originalCorner.setbackMm === command.payload.setbackMm)
+  )
+    return { ok: false, detail: 'The selected saved corner or its setback changed.' };
   const rounding =
     command.tool === 'round-corner' &&
-    roundDraftRectangularCornerV1(vertices, index, command.payload.setbackMm);
+    roundDraftRectangularCornerV1(
+      originalCorner ? originalCorner.rectangle : vertices,
+      index,
+      command.payload.setbackMm,
+    );
   if (command.tool === 'round-corner' && (!rounding || contour.role !== 'cut-boundary'))
     return { ok: false, detail: 'Choose one right-angle corner on an exact saved rectangle.' };
   if (!movedPoint && vertices.length <= 3)
     return { ok: false, detail: 'Keep at least three vertices in a closed outline.' };
   const oldPoint = vertices[moving]!;
   const before = vertices[(moving + vertices.length - 1) % vertices.length]!;
-  const after = vertices[(moving + 1) % vertices.length]!;
+  const after =
+    vertices[(moving + (originalCorner ? originalCorner.sampleCount : 1)) % vertices.length]!;
   if (
     source.fold ||
     source.notches.some(
@@ -437,6 +472,8 @@ function editExactOutlineVertex(
     return updated;
   };
   size.cut = copyLoop(source.cut, nextRing);
+  if (rounding && rounding.controls)
+    size.authoredOutlineCorner = decodeAuthoredQuadratic(rounding.controls);
   if (source.seam) size.seam = copyLoop(source.seam, nextSeam);
   size.bbox = bboxOf(nextRing);
   size.areaMm2 = Math.abs(area) + holes.reduce((total, hole) => total + signedArea(hole), 0);

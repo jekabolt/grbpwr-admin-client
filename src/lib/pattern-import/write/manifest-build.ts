@@ -1,7 +1,7 @@
 // The ConversionManifest of one scope file (08-CONTRACT §3), built from the plan — never from
 // the text, so the gate can compare the two.
 
-import { authoredInternalVertices } from '../manifest/authored-internal';
+import { authoredInternalVertices, authoredQuadraticGrid } from '../manifest/authored-internal';
 import { AUTHORED_NOTCH_STROKES } from '../manifest/authored-notches';
 import type {
   ReplayRecord,
@@ -107,6 +107,8 @@ export function manifestBlock(b: PlannedBlock, sigPts?: number): ManifestBlock {
         ]
       : [],
   );
+  const authoredOutlineCorner =
+    b.size.authoredOutlineCorner && authoredQuadraticGrid(b.size.authoredOutlineCorner);
   const authoredText = b.size.textMarks?.map(({ text, at }) => {
     const [x, y] = authoredInternalVertices([at]);
     return { anchor: [x!, y!] as [number, number], text };
@@ -116,6 +118,7 @@ export function manifestBlock(b: PlannedBlock, sigPts?: number): ManifestBlock {
     block: b.name,
     ...(b.protectedLineSplit ? { protectedLineSplit: b.protectedLineSplit } : {}),
     ...(authoredInternal.length ? { authoredInternal } : {}),
+    ...(authoredOutlineCorner ? { authoredOutlineCorner } : {}),
     ...(authoredText?.length ? { authoredText } : {}),
     ...(authoredNotches.length ? { authoredNotches } : {}),
     identity: b.identity,

@@ -1,8 +1,11 @@
-import { validDraftCornerSetbackV1 } from './draft-cad-round-corner-v1';
+import {
+  parseAuthoredOutlineCorner,
+  validDraftCornerSetbackV1,
+} from 'lib/pattern-import/manifest/authored-outline-corner';
 import { normalizeAuthoredText } from 'lib/pattern-import/manifest/authored-text';
 import type { PatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import type { DxfProductPhaseDReplayCarrierV1 } from 'lib/pattern-import/dxf-product-phase-d-replay-v1';
-import type { PtMm } from 'lib/pattern-import/types';
+import type { AuthoredQuadraticGrid, PtMm } from 'lib/pattern-import/types';
 
 export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_SESSION_V1 =
   'pattern-import-dxf-phase-e-draft-cad-session/1' as const;
@@ -227,6 +230,7 @@ export type PatternImportDxfPhaseEDraftCadCommandV1 =
         vertexId: string;
         sizeToken: string;
         setbackMm: number;
+        savedCorner?: AuthoredQuadraticGrid;
       }
     >
   | Command<
@@ -597,7 +601,9 @@ function validCommand(value: unknown): value is PatternImportDxfPhaseEDraftCadCo
         stableId(payload.vertexId) &&
         stableId(payload.sizeToken) &&
         typeof payload.setbackMm === 'number' &&
-        validDraftCornerSetbackV1(payload.setbackMm)
+        validDraftCornerSetbackV1(payload.setbackMm) &&
+        (payload.savedCorner === undefined ||
+          parseAuthoredOutlineCorner(payload.savedCorner) !== null)
       );
     case 'edge-length':
       return (
