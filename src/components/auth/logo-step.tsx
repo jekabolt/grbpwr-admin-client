@@ -1,58 +1,97 @@
+import { type BrandDraft, type BrandKey, BRAND_FIELDS } from 'lib/workspace/brand-fields';
 import { cn } from 'lib/utility';
-import { Button, Text } from 'ui';
+import { useEffect, useRef, useState } from 'react';
+import { AddDoor } from 'ui';
 
 import { type PickedLogo, readLogo } from './logo';
-import { SheetFoot, SheetForm, SheetLink, SheetSubmit } from './sheet';
+import { teamLogoUrl } from './oauth';
+import { SheetFoot, SheetForm, SheetInput, SheetLink, SheetRow, SheetSubmit } from './sheet';
 
-// Step two of `sign up` and `new team` (mockup `signup-step2`, `signup-logo`, `new-team-step2`,
-// `new-team-logo`): a square pick target, the picture previews inside it; `skip` sends without one.
-// The square is built here from tokens: no primitive draws a picture slot of this shape.
+// Step two of `sign up` and `new team` (fix mockup `logo · one button`): the square is the add
+// door, the chosen picture previews in it; beside it (under it on the phone) the team's brand
+// fields as in the workspace `brand` block. One button sends it all, with or without either.
 
-/** A team's logo in a row: 20 px square, hairline border; `nil` keeps the slot empty. */
-export function TeamMark({ src, size = 'row' }: { src?: string; size?: 'row' | 'side' }) {
-  const box = size === 'side' ? 'size-11 p-1' : 'size-5 p-0.5';
-  if (!src) return <span aria-hidden='true' className={cn('inline-flex flex-none', box)} />;
+/**
+ * A team's square: hairline border, the logo fitted inside, empty when there is none (never a
+ * hole). `side` — 44px under a sheet's wordmark; `tile` — the full width of a team tile.
+ */
+export function TeamMark({
+  src,
+  size = 'side',
+}: {
+  src?: string;
+  size?: 'side' | 'tile' | 'plate';
+}) {
   return (
     <span
+      aria-hidden={src ? undefined : 'true'}
       className={cn(
-        'inline-flex flex-none items-center justify-center overflow-hidden border border-borderColor bg-bgColor',
-        box,
+        'flex flex-none items-center justify-center overflow-hidden border border-borderColor bg-bgColor',
+        size === 'tile' && 'aspect-square w-full p-[22%]',
+        size === 'side' && 'size-11 p-1',
+        size === 'plate' && 'mb-2 size-12 p-1 sm:size-24 sm:p-2',
       )}
     >
-      <img src={src} alt='' className='block size-full object-contain' />
+      {src && <img src={src} alt='' className='block size-full object-contain' />}
     </span>
   );
 }
 
+/**
+ * A team's public logo before sign-in (the same address the invite uses): the URL once the picture
+ * has loaded, `undefined` while it loads, when the team has none, or when it fails.
+ */
+export function useTeamLogo(slug: string): string | undefined {
+  const [loaded, setLoaded] = useState<string>();
+  useEffect(() => {
+    const src = slug ? teamLogoUrl(slug) : '';
+    if (!src) return;
+    const img = new Image();
+    img.onload = () => setLoaded(src);
+    img.src = src;
+    return () => {
+      img.onload = null;
+    };
+  }, [slug]);
+  return loaded;
+}
+
+const SQUARE = 'size-28 max-sm:size-30';
+
 export function LogoStep({
   title,
-  team,
-  primary,
   logo,
   onLogo,
   bad,
   onBad,
+  brand,
+  onBrand,
+  invalid,
   busy,
   note,
   onBack,
   onSend,
 }: {
   title: string;
-  team: string;
-  primary: string;
   logo: PickedLogo | null;
   onLogo: (logo: PickedLogo | null) => void;
   /** The picture was refused (here or by the server's `bad_logo`): the square turns red. */
   bad: boolean;
   onBad: (bad: boolean) => void;
-  busy: 'create' | 'skip' | null;
+  brand: BrandDraft;
+  onBrand: (key: BrandKey, value: string) => void;
+  /** Fields refused here or by the server. */
+  invalid: readonly BrandKey[];
+  busy: boolean;
   note: string;
   onBack: () => void;
-  onSend: (withLogo: boolean) => void;
+  onSend: () => void;
 }) {
-  const pick = async (file: File | undefined) => {
-    if (!file) return;
-    const read = await readLogo(file);
+  const file = useRef<HTMLInputElement>(null);
+
+  const pick = async (f: File | undefined) => {
+    if (!f) return;
+    const read = await readLogo(f);
     if (!read) {
       onBad(true);
       return;
@@ -61,57 +100,86 @@ export function LogoStep({
     onLogo(read);
   };
 
+  const input = (
+    <input
+      ref={file}
+      type='file'
+      accept='image/png,image/jpeg'
+      aria-label='logo'
+      aria-invalid={bad || undefined}
+      tabIndex={logo ? 0 : -1}
+      className='pointer-events-none absolute size-px opacity-0'
+      onChange={(e) => {
+        void pick(e.target.files?.[0]);
+        e.target.value = '';
+      }}
+    />
+  );
+
+  const drop = {
+    onDragOver: (e: React.DragEvent) => e.preventDefault(),
+    onDrop: (e: React.DragEvent) => {
+      e.preventDefault();
+      void pick(e.dataTransfer.files?.[0]);
+    },
+  };
+
   return (
-    <SheetForm
-      title={title}
-      note={note || team}
-      noteTone={note ? 'warn' : 'mut'}
-      onSubmit={() => logo && !busy && onSend(true)}
-    >
-      <div className='flex items-end gap-3 pb-2 pt-3.5'>
-        <label
-          className={cn(
-            'relative flex size-28 flex-none cursor-pointer items-center justify-center border bg-bgColor p-2 transition-colors duration-150 ease-out hover:border-textColor has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-textColor max-sm:size-30',
-            bad ? 'border-error' : 'border-borderColor',
-          )}
-        >
-          <input
-            type='file'
-            accept='image/png,image/jpeg'
-            aria-label='logo'
-            aria-invalid={bad || undefined}
-            className='pointer-events-none absolute size-px opacity-0'
-            onChange={(e) => {
-              void pick(e.target.files?.[0]);
-              e.target.value = '';
-            }}
-          />
+    <SheetForm title={title} note={note} onSubmit={() => !busy && onSend()}>
+      <div className='grid grid-cols-1 items-start gap-3.5 pb-2 pt-3.5 sm:grid-cols-[7rem_minmax(0,1fr)] sm:gap-5'>
+        <div className='relative flex flex-col items-start gap-2'>
           {logo ? (
-            <img src={logo.preview} alt='logo' className='block size-full object-contain' />
+            <>
+              <label
+                {...drop}
+                className={cn(
+                  'relative flex flex-none cursor-pointer items-center justify-center border bg-bgColor p-2 hover:border-textColor has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-textColor',
+                  SQUARE,
+                  bad ? 'border-error' : 'border-borderColor',
+                )}
+              >
+                {input}
+                <img src={logo.preview} alt='logo' className='block size-full object-contain' />
+              </label>
+              <SheetLink onClick={() => onLogo(null)}>remove</SheetLink>
+            </>
           ) : (
-            <Text size='micro' variant='label' tracking='label' component='span'>
-              logo
-            </Text>
+            <>
+              {input}
+              <AddDoor
+                {...drop}
+                shape='tile'
+                lowercase
+                aria-invalid={bad || undefined}
+                className={cn(SQUARE, bad && 'border-error')}
+                onClick={() => file.current?.click()}
+              >
+                logo
+              </AddDoor>
+            </>
           )}
-        </label>
-        {logo && <SheetLink onClick={() => onLogo(null)}>remove</SheetLink>}
+        </div>
+        <div className='flex min-w-0 flex-col [&>*:first-child]:pt-0'>
+          {BRAND_FIELDS.map((f) => (
+            <SheetRow key={f.key} label={f.label}>
+              <SheetInput
+                name={`brand-${f.key}`}
+                type={f.type}
+                value={brand[f.key]}
+                maxLength={f.max}
+                autoComplete={f.autoComplete}
+                aria-label={f.label}
+                invalid={invalid.includes(f.key)}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  onBrand(f.key, e.target.value)
+                }
+              />
+            </SheetRow>
+          ))}
+        </div>
       </div>
       <SheetFoot left={<SheetLink onClick={onBack}>back</SheetLink>}>
-        <span className='flex flex-row-reverse flex-wrap items-center gap-2 max-sm:w-full max-sm:flex-col'>
-          <SheetSubmit disabled={!logo || busy === 'skip'} loading={busy === 'create'}>
-            {primary}
-          </SheetSubmit>
-          <Button
-            variant='secondary'
-            size='lg'
-            disabled={busy === 'create'}
-            loading={busy === 'skip'}
-            className='w-full py-2 sm:w-auto sm:min-w-[9.375rem]'
-            onClick={() => onSend(false)}
-          >
-            skip
-          </Button>
-        </span>
+        <SheetSubmit loading={busy}>create team</SheetSubmit>
       </SheetFoot>
     </SheetForm>
   );

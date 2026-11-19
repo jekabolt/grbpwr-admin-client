@@ -3,10 +3,9 @@ import { authService } from 'api/api';
 import { writeAuthToken } from 'api/auth-headers';
 import type { ListMyTeamsResponse, TeamRef } from 'api/proto-http/auth';
 import { goToUrl, teamUrl } from 'lib/host';
-import { cn } from 'lib/utility';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, Loader, Text } from 'ui';
+import { AddDoor, Loader, Text, Tile, Tiles } from 'ui';
 
 import { AddressField, useSlugCheck } from './address';
 import { clearHash, errMessage, errStatus } from './api-error';
@@ -14,6 +13,7 @@ import { isBadLogo, type PickedLogo } from './logo';
 import { LogoStep, TeamMark } from './logo-step';
 import { oauthErrorWord, parseOAuthFragment } from './oauth';
 import {
+  AccountSide,
   AgreeRow,
   AuthSheet,
   RootSide,
@@ -23,13 +23,14 @@ import {
   SheetLink,
   SheetRow,
   SheetSubmit,
-  TeamSide,
 } from './sheet';
 import { createError } from './signup';
 import { slugify } from './slug';
+import { useBrandDraft } from './use-brand-draft';
 
-// The signed-in root (mockup `teams`, `teams-first`, `new-team*`): the person's own teams, each
-// opened through the hand-off; `new team`; `log out`. The root token stays (30 days, spec O §5).
+// The signed-in root (fix mockup `teams · tiles`, `no team yet · list`, `new team · fixed`): the
+// person's teams as tiles, each opened through the hand-off; the `new team` door; `log out` in
+// the side. The root token stays (30 days, spec O §5).
 
 export const MY_TEAMS_KEY = ['auth', 'my-teams'] as const;
 
@@ -62,68 +63,49 @@ function useMyTeams(session: RootSession) {
   return q;
 }
 
-function AccountSide({ email }: { email: string }) {
-  return <TeamSide name='lekalo' sub={email} />;
+function useLogOut(session: RootSession) {
+  const queryClient = useQueryClient();
+  return async () => {
+    await authService.SignOut({}).catch(() => undefined);
+    queryClient.removeQueries({ queryKey: MY_TEAMS_KEY });
+    session.out('/');
+  };
 }
 
-/** One team: its mark, name, and role — or `awaiting approval`, not openable. */
-function TeamRow({
-  team,
-  reserve,
-  busy,
-  onOpen,
-}: {
-  team: TeamRef;
-  reserve: boolean;
-  busy: boolean;
-  onOpen: () => void;
-}) {
-  const name = (
-    <span className='flex min-w-0 items-center gap-2.5'>
-      {(reserve || team.logoUrl) && <TeamMark src={team.logoUrl} />}
-      <span
-        className={cn(
-          'min-w-0 break-words',
-          team.awaitingApproval
-            ? 'text-labelColor'
-            : 'underline-offset-2 group-hover:underline group-disabled:no-underline',
-        )}
-      >
-        {team.name || team.slug}
-      </span>
-    </span>
-  );
-  const row =
-    'flex min-h-10 w-full items-center justify-between gap-3 border-t border-hairline py-2.5 text-left first:border-t-0 max-sm:min-h-11 max-sm:py-3';
-  const tag = (word: string) => (
-    <Text size='micro' variant='label' tracking='label' component='span' className='flex-none'>
-      {word}
-    </Text>
-  );
+/** One team: its square, name, and role — or `awaiting approval`, greyed and not openable. */
+function TeamTile({ team, busy, onOpen }: { team: TeamRef; busy: boolean; onOpen: () => void }) {
+  const name = team.name || team.slug || '';
+  const media = <TeamMark src={team.logoUrl || undefined} size='tile' />;
   if (team.awaitingApproval)
     return (
-      <div className={row} aria-disabled='true'>
-        {name}
-        {tag('awaiting approval')}
-      </div>
+      <Tile
+        lowercase
+        media={media}
+        name={<Text variant='label'>{name}</Text>}
+        sub='awaiting approval'
+        title={name}
+      />
     );
   return (
-    <Button className={cn(row, 'group')} disabled={busy} onClick={onOpen}>
-      {name}
-      {tag(team.role || '')}
-    </Button>
+    <Tile
+      lowercase
+      media={media}
+      name={name}
+      sub={team.role || undefined}
+      title={name}
+      onClick={busy ? undefined : onOpen}
+    />
   );
 }
 
 export function MyTeams({ session }: { session: RootSession }) {
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const ended = useRootErrors(session);
+  const logOut = useLogOut(session);
   const { data, isPending } = useMyTeams(session);
   const [opening, setOpening] = useState('');
   const [note, setNote] = useState('');
   const teams = data?.teams ?? [];
-  const reserve = teams.some((t) => !!t.logoUrl);
 
   const open = async (slug: string) => {
     if (opening) return;
@@ -140,44 +122,32 @@ export function MyTeams({ session }: { session: RootSession }) {
     }
   };
 
-  const logOut = async () => {
-    await authService.SignOut({}).catch(() => undefined);
-    queryClient.removeQueries({ queryKey: MY_TEAMS_KEY });
-    session.out('/');
-  };
-
   return (
-    <AuthSheet side={<AccountSide email={data?.email ?? ''} />}>
+    <AuthSheet side={<AccountSide email={data?.email ?? ''} onLogOut={() => void logOut()} />}>
       <SheetForm title='teams' note={note}>
         {isPending ? (
           <div className='flex justify-center py-6'>
             <Loader />
           </div>
+        ) : teams.length === 0 ? (
+          <SheetFoot>
+            <SheetSubmit onClick={() => navigate('/new')}>new team</SheetSubmit>
+          </SheetFoot>
         ) : (
-          <div className='flex flex-col'>
+          <Tiles min={100} className='auto-rows-fr'>
             {teams.map((t) => (
-              <TeamRow
+              <TeamTile
                 key={t.slug}
                 team={t}
-                reserve={reserve}
                 busy={!!opening}
                 onOpen={() => void open(t.slug ?? '')}
               />
             ))}
-            <Button
-              className='group flex min-h-10 w-full items-center gap-2.5 border-t border-hairline py-2.5 text-left first:border-t-0 max-sm:min-h-11 max-sm:py-3'
-              onClick={() => navigate('/new')}
-            >
-              {reserve && <TeamMark />}
-              <span className='text-labelColor underline underline-offset-2 group-hover:text-textColor'>
-                new team
-              </span>
-            </Button>
-          </div>
+            <AddDoor shape='tile' lowercase className='h-full' onClick={() => navigate('/new')}>
+              new team
+            </AddDoor>
+          </Tiles>
         )}
-        <SheetFoot left={<SheetLink onClick={() => void logOut()}>log out</SheetLink>}>
-          <span />
-        </SheetFoot>
       </SheetForm>
     </AuthSheet>
   );
@@ -190,11 +160,15 @@ interface NewDraft {
   agreed: boolean;
 }
 
-/** `new team`: name + address (+ terms while the server needs them) → the logo step → CreateTeam. */
+/**
+ * `new team`: name + address (+ terms while the server needs them) → the logo step with the brand
+ * fields → one CreateTeam.
+ */
 export function NewTeam({ session }: { session: RootSession }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const ended = useRootErrors(session);
+  const logOut = useLogOut(session);
   const { data } = useMyTeams(session);
   const [step, setStep] = useState<'form' | 'logo'>('form');
   const [draft, setDraft] = useState<NewDraft>({
@@ -205,26 +179,32 @@ export function NewTeam({ session }: { session: RootSession }) {
   });
   const [logo, setLogo] = useState<PickedLogo | null>(null);
   const [bad, setBad] = useState(false);
-  const [busy, setBusy] = useState<'create' | 'skip' | null>(null);
+  const brand = useBrandDraft();
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const termsNeeded = !!data?.termsNeeded;
+  const first = !!data && (data.teams ?? []).length === 0;
   const slug = draft.edited ? draft.address : slugify(draft.team);
   const check = useSlugCheck(slug, draft.team.trim());
   const set = (patch: Partial<NewDraft>) => setDraft((d) => ({ ...d, ...patch }));
   const ready =
     check.status === 'free' && !!draft.team.trim() && (!termsNeeded || draft.agreed) && !!data;
 
-  const send = async (withLogo: boolean) => {
+  const send = async () => {
     if (busy) return;
-    setBusy(withLogo ? 'create' : 'skip');
     setError('');
+    if (!brand.check()) {
+      setError('check fields');
+      return;
+    }
+    setBusy(true);
     try {
       const r = await authService.CreateTeam({
         teamName: draft.team.trim(),
         teamSlug: slug,
         termsAccepted: termsNeeded ? draft.agreed : undefined,
-        logo: withLogo ? logo?.base64 : undefined,
-        brand: undefined,
+        logo: logo?.base64,
+        brand: brand.payload(),
       });
       const team = r.team;
       if (team) {
@@ -241,45 +221,53 @@ export function NewTeam({ session }: { session: RootSession }) {
       void queryClient.invalidateQueries({ queryKey: MY_TEAMS_KEY });
       navigate('/', { replace: true });
     } catch (e) {
-      setBusy(null);
+      setBusy(false);
       if (ended(e)) return;
-      if (isBadLogo(errMessage(e))) setBad(true);
-      else setError(createError(e));
+      const msg = errMessage(e);
+      if (isBadLogo(msg)) setBad(true);
+      else setError(brand.refused(msg) ? 'check fields' : createError(e));
     }
   };
 
-  const side = <AccountSide email={data?.email ?? ''} />;
-
   if (step === 'logo')
     return (
-      <AuthSheet side={side}>
+      <AuthSheet
+        side={
+          <AccountSide
+            email={data?.email ?? ''}
+            onLogOut={first ? () => void logOut() : undefined}
+          />
+        }
+      >
         <LogoStep
           title='new team'
-          team={draft.team.trim().toLowerCase()}
-          primary='create'
           logo={logo}
           onLogo={setLogo}
           bad={bad}
           onBad={setBad}
+          brand={brand.brand}
+          onBrand={brand.set}
+          invalid={brand.invalid}
           busy={busy}
           note={error}
           onBack={() => {
             setError('');
             setStep('form');
           }}
-          onSend={(withLogo) => void send(withLogo)}
+          onSend={() => void send()}
         />
       </AuthSheet>
     );
 
   return (
-    <AuthSheet side={side}>
+    <AuthSheet side={<AccountSide email={data?.email ?? ''} />}>
       <SheetForm
         title='new team'
         note={error}
         onSubmit={() => {
           if (!ready) return;
           setError('');
+          brand.prefill(draft.team.trim());
           setStep('logo');
         }}
       >
@@ -297,8 +285,15 @@ export function NewTeam({ session }: { session: RootSession }) {
         <SheetRow label='address'>
           <AddressField check={check} onChange={(v) => set({ address: v, edited: true })} />
         </SheetRow>
-        {termsNeeded && <AgreeRow checked={draft.agreed} onChange={(v) => set({ agreed: v })} />}
-        <SheetFoot left={<SheetLink onClick={() => navigate('/')}>cancel</SheetLink>}>
+        <SheetFoot
+          left={
+            termsNeeded ? (
+              <AgreeRow checked={draft.agreed} onChange={(v) => set({ agreed: v })} />
+            ) : (
+              <SheetLink onClick={() => navigate('/')}>cancel</SheetLink>
+            )
+          }
+        >
           <SheetSubmit disabled={!ready}>continue</SheetSubmit>
         </SheetFoot>
       </SheetForm>

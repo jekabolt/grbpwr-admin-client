@@ -41,7 +41,10 @@ export default function RootApp() {
   return (
     <>
       <Routes>
-        <Route path='/' element={signedIn ? <MyTeams session={session} /> : <SignUp />} />
+        <Route
+          path='/'
+          element={signedIn ? <MyTeams session={session} /> : <SignUp onSignedIn={onSignedIn} />}
+        />
         <Route
           path='/login'
           element={signedIn ? <Navigate to='/' replace /> : <RootLogin onSignedIn={onSignedIn} />}
@@ -51,7 +54,7 @@ export default function RootApp() {
           element={signedIn ? <NewTeam session={session} /> : <Navigate to='/login' replace />}
         />
         <Route path='/auth/oauth' element={<OAuthReturn onSignedIn={onSignedIn} />} />
-        <Route path='/confirm' element={<ConfirmLink />} />
+        <Route path='/confirm' element={<ConfirmLink onSignedIn={onSignedIn} />} />
         <Route path='/reset' element={<ResetPassword />} />
         <Route path='/terms' element={<LegalPage doc='terms' />} />
         <Route path='/privacy' element={<LegalPage doc='privacy' />} />

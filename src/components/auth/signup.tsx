@@ -1,6 +1,6 @@
 import { authService } from 'api/api';
-import type { VerifyEmailResponse } from 'api/proto-http/auth';
-import { goToUrl, teamUrl } from 'lib/host';
+import { writeAuthToken } from 'api/auth-headers';
+import { goToUrl } from 'lib/host';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
@@ -18,6 +18,7 @@ import { isBadLogo, type PickedLogo } from './logo';
 import { LogoStep } from './logo-step';
 import { ProviderButtons } from './providers';
 import {
+  AccountSide,
   AgreeRow,
   AuthSheet,
   AwaitingApproval,
@@ -31,17 +32,25 @@ import {
   SheetValue,
 } from './sheet';
 import { slugify } from './slug';
+import { useBrandDraft } from './use-brand-draft';
+import { afterVerify } from './verify';
 
-/** After a confirmed sign-up the team host greets with `email confirmed`. */
-export function signupHandoffUrl(slug: string, code: string): string {
-  return teamUrl(slug, `/auth#code=${encodeURIComponent(code)}&from=signup`);
-}
-
-/** A confirmed sign-up either waits for the operator (the slug to show) or leaves for its team. */
-function afterVerify(r: VerifyEmailResponse, fallbackSlug: string): string | null {
-  if (r.awaitingApproval) return r.teamSlug || fallbackSlug;
-  goToUrl(signupHandoffUrl(r.teamSlug ?? '', r.handoffCode ?? ''));
-  return null;
+/**
+ * A confirmed email: signed in → `teams`; an old server → the waiting address (returned) or the
+ * team host.
+ */
+function useAfterVerify(onSignedIn: () => void) {
+  return (r: Parameters<typeof afterVerify>[0], fallbackSlug: string): string | null => {
+    const next = afterVerify(r, fallbackSlug);
+    if (next.kind === 'signed-in') {
+      writeAuthToken(next.token);
+      onSignedIn();
+      return null;
+    }
+    if (next.kind === 'awaiting') return next.slug;
+    goToUrl(next.url);
+    return null;
+  };
 }
 
 /** Step one's values; `back` from the logo step finds them as they were. */
@@ -72,19 +81,24 @@ export function createError(e: unknown): string {
       : 'try again';
 }
 
-export function SignUp() {
+export function SignUp({ onSignedIn }: { onSignedIn: () => void }) {
   const [step, setStep] = useState<'form' | 'logo' | 'code'>('form');
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const [slug, setSlug] = useState('');
   const [logo, setLogo] = useState<PickedLogo | null>(null);
   const [bad, setBad] = useState(false);
-  const [busy, setBusy] = useState<'create' | 'skip' | null>(null);
+  const brand = useBrandDraft();
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
-  const send = async (withLogo: boolean) => {
+  const send = async () => {
     if (busy) return;
-    setBusy(withLogo ? 'create' : 'skip');
     setError('');
+    if (!brand.check()) {
+      setError('check fields');
+      return;
+    }
+    setBusy(true);
     try {
       await authService.SignUp({
         email: draft.email.trim(),
@@ -92,16 +106,17 @@ export function SignUp() {
         teamName: draft.team.trim(),
         teamSlug: slug,
         termsAccepted: true,
-        logo: withLogo ? logo?.base64 : undefined,
-        brand: undefined,
+        logo: logo?.base64,
+        brand: brand.payload(),
       });
       rememberEmail(draft.email.trim());
       setStep('code');
     } catch (e) {
-      if (isBadLogo(errMessage(e))) setBad(true);
-      else setError(createError(e));
+      const msg = errMessage(e);
+      if (isBadLogo(msg)) setBad(true);
+      else setError(brand.refused(msg) ? 'check fields' : createError(e));
     } finally {
-      setBusy(null);
+      setBusy(false);
     }
   };
 
@@ -110,6 +125,7 @@ export function SignUp() {
       <ConfirmCode
         email={draft.email}
         slug={slug}
+        onSignedIn={onSignedIn}
         onChangeEmail={() => {
           setError('');
           setStep('form');
@@ -121,19 +137,20 @@ export function SignUp() {
       <AuthSheet side={<RootSide mode='signup' />}>
         <LogoStep
           title='sign up'
-          team={draft.team.trim().toLowerCase()}
-          primary='create team'
           logo={logo}
           onLogo={setLogo}
           bad={bad}
           onBad={setBad}
+          brand={brand.brand}
+          onBrand={brand.set}
+          invalid={brand.invalid}
           busy={busy}
           note={error}
           onBack={() => {
             setError('');
             setStep('form');
           }}
-          onSend={(withLogo) => void send(withLogo)}
+          onSend={() => void send()}
         />
       </AuthSheet>
     );
@@ -145,6 +162,7 @@ export function SignUp() {
       onNext={(s) => {
         setSlug(s);
         setError('');
+        brand.prefill(draft.team.trim());
         setStep('logo');
       }}
     />
@@ -177,7 +195,7 @@ function SignUpForm({
     <AuthSheet side={<RootSide mode='signup' />}>
       <SheetForm title='sign up' note={note} onSubmit={() => ready && onNext(slug)}>
         <ProviderButtons fields={() => ({ target: 'signin' })} />
-        <SheetRow label='team'>
+        <SheetRow label='team name'>
           <SheetInput
             name='team'
             value={team}
@@ -209,8 +227,7 @@ function SignUpForm({
             autoComplete='new-password'
           />
         </SheetRow>
-        <AgreeRow checked={agreed} onChange={(v) => set({ agreed: v })} />
-        <SheetFoot>
+        <SheetFoot left={<AgreeRow checked={agreed} onChange={(v) => set({ agreed: v })} />}>
           <SheetSubmit disabled={!ready}>continue</SheetSubmit>
         </SheetFoot>
       </SheetForm>
@@ -221,12 +238,15 @@ function SignUpForm({
 function ConfirmCode({
   email,
   slug = '',
+  onSignedIn,
   onChangeEmail,
 }: {
   email: string;
   slug?: string;
+  onSignedIn: () => void;
   onChangeEmail: () => void;
 }) {
+  const next = useAfterVerify(onSignedIn);
   const [awaiting, setAwaiting] = useState<string | null>(null);
   const [wrong, setWrong] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -237,7 +257,7 @@ function ConfirmCode({
     setBusy(true);
     try {
       const r = await authService.VerifyEmail({ token: '', email: email.trim(), code });
-      setAwaiting(afterVerify(r, slug));
+      setAwaiting(next(r, slug));
     } catch {
       setWrong(true);
       setRound((n) => n + 1);
@@ -246,9 +266,9 @@ function ConfirmCode({
     }
   };
 
-  if (awaiting !== null) return <AwaitingApproval slug={awaiting} />;
+  if (awaiting !== null) return <AwaitingApproval slug={awaiting} email={email} />;
   return (
-    <AuthSheet side={<RootSide mode='signup' />}>
+    <AuthSheet side={<AccountSide email={email.trim()} />}>
       <SheetForm title='confirm email' note={wrong ? 'wrong code' : undefined}>
         <SheetRow label='sent to'>
           <SheetValue onChange={onChangeEmail}>{email}</SheetValue>
@@ -273,8 +293,9 @@ function ConfirmCode({
 }
 
 /** `/confirm#token=…`: the link in the letter. Good → the team host; bad → `link expired`. */
-export function ConfirmLink() {
+export function ConfirmLink({ onSignedIn }: { onSignedIn: () => void }) {
   const navigate = useNavigate();
+  const next = useAfterVerify(onSignedIn);
   const [token] = useState(() => hashParam('token'));
   const [state, setState] = useState<'checking' | 'expired' | 'code'>(
     token ? 'checking' : 'expired',
@@ -289,16 +310,22 @@ export function ConfirmLink() {
     let live = true;
     authService
       .VerifyEmail({ token, email: '', code: '' })
-      .then((r) => live && setAwaiting(afterVerify(r, '')))
+      .then((r) => live && setAwaiting(next(r, '')))
       .catch(() => live && setState('expired'));
     return () => {
       live = false;
     };
-  }, [token]);
+  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (awaiting !== null) return <AwaitingApproval slug={awaiting} />;
+  if (awaiting !== null) return <AwaitingApproval slug={awaiting} email={rememberedEmail()} />;
   if (state === 'code')
-    return <ConfirmCode email={email} onChangeEmail={() => navigate('/', { replace: true })} />;
+    return (
+      <ConfirmCode
+        email={email}
+        onSignedIn={onSignedIn}
+        onChangeEmail={() => navigate('/', { replace: true })}
+      />
+    );
 
   const known = rememberedEmail();
   const resend = async () => {

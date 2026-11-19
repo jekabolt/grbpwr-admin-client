@@ -1,11 +1,10 @@
 import { authService } from 'api/api';
 import { currentHost, goToUrl, teamUrl } from 'lib/host';
 import { useEffect, useState } from 'react';
-import { Loader, Section, Text } from 'ui';
+import { Loader, Section } from 'ui';
 
 import { clearHash, hashParam, isRefusal } from './api-error';
-import { TeamMark } from './logo-step';
-import { teamLogoUrl } from './oauth';
+import { TeamMark, useTeamLogo } from './logo-step';
 import { ProviderButtons, signInOptions } from './providers';
 import {
   AgreeRow,
@@ -17,35 +16,20 @@ import {
   SheetRow,
   SheetSubmit,
   SheetValue,
+  SIDE,
   Wordmark,
 } from './sheet';
 
 /**
- * The join sheet's side: the team name, and under it the team's logo as a square (spec O §15) —
- * the word `lekalo` while it loads, when the team has none, or when it fails. Nothing is reserved.
+ * The join sheet's side: the team name, and under it the team's square (spec O §15) — its logo, or
+ * the empty square while it loads, when the team has none, or when it fails.
  */
 function JoinSide({ name }: { name: string }) {
-  const [src] = useState(() => teamLogoUrl(currentHost().slug));
-  const [loaded, setLoaded] = useState(false);
+  const logo = useTeamLogo(currentHost().slug);
   return (
-    <Section className='self-start'>
+    <Section className={SIDE}>
       <Wordmark>{name}</Wordmark>
-      {src && (
-        <img
-          src={src}
-          alt=''
-          hidden
-          onLoad={() => setLoaded(true)}
-          onError={() => setLoaded(false)}
-        />
-      )}
-      {loaded ? (
-        <TeamMark src={src} size='side' />
-      ) : (
-        <Text size='micro' variant='label' tracking='label' component='span' className='block'>
-          lekalo
-        </Text>
-      )}
+      <TeamMark src={logo} size='side' />
     </Section>
   );
 }
@@ -61,6 +45,8 @@ export function Join() {
   );
   const [name, setName] = useState('');
   const [agreed, setAgreed] = useState(false);
+  // a provider pressed before consent: the consent line turns red, the page stays
+  const [need, setNeed] = useState(false);
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState('');
@@ -125,6 +111,12 @@ export function Join() {
               <SheetValue>{invite.email}</SheetValue>
             </SheetRow>
             <ProviderButtons
+              gate={() => {
+                if (agreed) return true;
+                setNeed(true);
+                document.getElementById('agree')?.focus();
+                return false;
+              }}
               fields={() => ({
                 target: 'invite',
                 invite_token: token,
@@ -153,8 +145,18 @@ export function Join() {
                 autoFocus={invite.accountExists}
               />
             </SheetRow>
-            <AgreeRow checked={agreed} onChange={setAgreed} />
-            <SheetFoot>
+            <SheetFoot
+              left={
+                <AgreeRow
+                  checked={agreed}
+                  need={need}
+                  onChange={(v) => {
+                    setAgreed(v);
+                    setNeed(false);
+                  }}
+                />
+              }
+            >
               <SheetSubmit
                 disabled={password.length < (invite.accountExists ? 1 : 8) || !agreed}
                 loading={busy}
