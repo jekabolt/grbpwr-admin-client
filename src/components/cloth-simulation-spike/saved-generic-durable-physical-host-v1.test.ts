@@ -2466,7 +2466,7 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
     expect((await f.body.projectCurrentBody()).status).toBe('projected');
   }, 120000);
 
-  it('mounts explicit physical placement and reloads the exact observed target and rigid transforms through V7', async () => {
+  async function verifyFirstPlacement(mode: 'manual rotation' | 'flat orientation') {
     const f = await fixture();
     const prior = {
       ...f.storage.v6,
@@ -2560,8 +2560,15 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
       );
     };
     const firstPivot = pieces[0]!.contours[0]!.vertices[0]!.positionM;
-    const firstWorldX = positionAtPivot(pieces[0]!.pieceId, firstPivot)[0]!;
+    const [firstWorldX, firstWorldY] = positionAtPivot(pieces[0]!.pieceId, firstPivot);
+    const isFlat = mode === 'flat orientation';
     for (const [index, piece] of pieces.entries()) {
+      const flatControl = () =>
+        visitMountedTree(
+          view.output(),
+          (item) => item['aria-label'] === `Flat orientation for ${piece.pieceId}`,
+        );
+      expect(flatControl()?.disabled).toBe(true);
       const contour = piece.contours[0]!;
       await enter(`placement-contour-${piece.pieceId}`, 'onValueChange', contour.contourId);
       await enter(
@@ -2570,15 +2577,29 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
         contour.vertices[0]!.vertexId,
       );
       const [x, y, z] = positionAtPivot(piece.pieceId, contour.vertices[0]!.positionM);
+      const tx = String(isFlat ? x! + 1 : z! + 1);
+      const ty = String(isFlat ? z! + 1 : y);
+      const tz = index === 0 ? '-0' : String(isFlat ? firstWorldY! - y! : firstWorldX! - x!);
       for (const [axis, value] of [
-        ['rx', '0'],
-        ['ry', '90'],
-        ['rz', '0'],
-        ['x', String(z! + 1)],
-        ['y', String(y)],
-        ['z', index === 0 ? '-0' : String(firstWorldX - x!)],
+        ['rx', isFlat ? '21' : '0'],
+        ['ry', isFlat ? '16' : '90'],
+        ['rz', isFlat ? '-32' : '0'],
+        ['x', tx],
+        ['y', ty],
+        ['z', tz],
       ])
         await enter(`placement-${axis}-${piece.pieceId}`, 'onChange', value!);
+      if (isFlat) {
+        expect(flatControl()?.disabled).toBe(false);
+        await act(async () => (flatControl()?.onClick as () => void)());
+        expect(field(`placement-contour-${piece.pieceId}`)?.value).toBe(contour.contourId);
+        expect(field(`placement-vertex-${piece.pieceId}`)?.value).toBe(
+          contour.vertices[0]!.vertexId,
+        );
+        expect(field(`placement-x-${piece.pieceId}`)?.value).toBe(tx);
+        expect(field(`placement-y-${piece.pieceId}`)?.value).toBe(ty);
+        expect(field(`placement-z-${piece.pieceId}`)?.value).toBe(tz);
+      }
     }
     const submit = visitMountedTree(view.output(), (item) => item.children === 'Save placement')
       ?.onClick as (() => void) | undefined;
@@ -2589,7 +2610,10 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
     expect(save).toHaveBeenCalledTimes(1);
     const placements = save.mock.calls[0]![0];
     expect(placements[0]?.translationM[2]).toBe(0);
-    expect(placements[1]?.rotationRowMajor).toEqual([0, 0, 1, 0, 1, 0, -1, 0, 0]);
+    const expectedRotation = isFlat ? [1, 0, 0, 0, 0, 1, 0, -1, 0] : [0, 0, 1, 0, 1, 0, -1, 0, 0];
+    expect(placements).toHaveLength(pieces.length);
+    for (const { rotationRowMajor } of placements)
+      expect(rotationRowMajor).toEqual(expectedRotation);
     const request = { placements, expectedGeneration: generation };
     expect(
       await bindSavedFullAssemblyGenericFirstAuthoringV1(actor.pre, {
@@ -2671,7 +2695,19 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
       'sourceOriginM',
       'translationM',
     ]);
-  }, 120000);
+  }
+
+  it(
+    'mounts explicit physical placement and reloads the exact observed target and rigid transforms through V7',
+    () => verifyFirstPlacement('manual rotation'),
+    120000,
+  );
+
+  it(
+    'saves a mounted face-up flat orientation with the exact pivot and entered world position',
+    () => verifyFirstPlacement('flat orientation'),
+    120000,
+  );
 
   it('renders adapter and retained-frame device failure, then restores and cleans up the same saved arrangement', async () => {
     const f = await fixture(true);

@@ -447,7 +447,10 @@ function PlacementAuthoring({ state, disabled }: { state: HostState; disabled: b
         };
         const contour = piece.contours.find(({ contourId }) => contourId === draft.contourId);
         const update = (change: Partial<PlacementDraft>) =>
-          setDrafts((current) => ({ ...current, [piece.pieceId]: { ...draft, ...change } }));
+          setDrafts((current) => ({
+            ...current,
+            [piece.pieceId]: { ...(current[piece.pieceId] ?? draft), ...change },
+          }));
         return (
           <div key={piece.pieceId} className='space-y-2 border-t border-hairline pt-2'>
             <Text component='p' size='micro'>
@@ -499,7 +502,19 @@ function PlacementAuthoring({ state, disabled }: { state: HostState; disabled: b
                 onChange={(rz) => update({ rz })}
                 disabled={busy}
               />
-              <div />
+              <Button
+                type='button'
+                size='xs'
+                variant='secondary'
+                className='self-end justify-self-start'
+                aria-label={`Flat orientation for ${piece.pieceId}`}
+                disabled={
+                  busy || !contour?.vertices.some(({ vertexId }) => vertexId === draft.vertexId)
+                }
+                onClick={() => update({ rx: '-90', ry: '0', rz: '0' })}
+              >
+                Flat orientation
+              </Button>
               <NumberField
                 name={`placement-x-${piece.pieceId}`}
                 label='Translate X m'
