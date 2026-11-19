@@ -68,6 +68,9 @@ describe('physical host production receivers', () => {
 
     expect(elements(mount.tree, 'CadWorkbenchPhysicalHostControlsV1')).toHaveLength(1);
     expect(controls.text).toContain("'Preview'");
+    expect(controls.text).toContain("'Back to flat patterns'");
+    expect(controls.text).toContain('onClick={returnToFlat}');
+    expect(controls.text).toContain('const stopped = lifecycle.cancel(host)');
     expect(controls.text).toContain('Retry');
     expect(controls.text).toContain('Place pieces on mannequin.');
     expect(controls.text).toContain('CadWorkbenchFirstPhysicalAuthoringV1');
@@ -81,6 +84,8 @@ describe('physical host production receivers', () => {
 
   it('keeps the last complete-layout frame visible when contact diagnostics are long', () => {
     const controls = source('./saved-complete-assembly-native-preview-controls-v8.tsx');
+    expect(controls.text).toContain('Back to flat patterns');
+    expect(controls.text).toContain('if (!placementSave.current) onReturnToFlat()');
     const [details, ...otherDetails] = elements(controls.tree, 'details');
 
     expect(otherDetails).toHaveLength(0);

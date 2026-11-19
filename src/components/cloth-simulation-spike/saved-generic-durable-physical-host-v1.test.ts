@@ -1910,10 +1910,41 @@ describe('durable facade refusal before any stored V7 authority exists', () => {
 });
 
 describe('fixed durable generic host, real encoded V7 and genuine fresh receipts', () => {
-  it.each(['save', 'conflict', 'lost-after-write', 'rotate', 'rotate-conflict'] as const)(
+  it.each([
+    'save',
+    'conflict',
+    'lost-after-write',
+    'rotate',
+    'rotate-conflict',
+    'rotate-x',
+    'flip-face',
+  ] as const)(
     'recovers exact mounted placement values and V7 bytes for %s',
     async (outcome) => {
-      const rotates = outcome === 'rotate' || outcome === 'rotate-conflict';
+      const assemblyTurn = {
+        rotate: {
+          label: 'Rotate assembly +90° about world Y',
+          change: { kind: 'quarter-turn-world-y' },
+          rotation: [0, 1, 0, 0, 0, -1, -1, 0, 0],
+        },
+        'rotate-x': {
+          label: 'Rotate assembly +90° about world X',
+          change: { kind: 'rotate-assembly-world', axis: 'X', degrees: 90 },
+          rotation: [1, 0, 0, 0, -1, 0, 0, 0, -1],
+        },
+        'flip-face': {
+          label: 'Flip assembly front to back',
+          change: { kind: 'rotate-assembly-world', axis: 'Y', degrees: 180 },
+          rotation: [-1, 0, 0, 0, 0, -1, 0, -1, 0],
+        },
+      } as const;
+      const turn =
+        outcome === 'rotate-conflict'
+          ? assemblyTurn.rotate
+          : outcome === 'rotate' || outcome === 'rotate-x' || outcome === 'flip-face'
+            ? assemblyTurn[outcome]
+            : null;
+      const rotates = turn !== null;
       const conflicts = outcome === 'conflict' || outcome === 'rotate-conflict';
       const losesReply = outcome === 'lost-after-write';
       // A common +90° X frame preserves seam positions and does not commute with +90° Y.
@@ -2013,14 +2044,15 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
         ...piece,
         translationM: [translationM[0] + 0.125, translationM[1], translationM[2]] as const,
       }));
-      const goal: Parameters<State['saveSavedPlacementEdit']>[1] = rotates
-        ? { kind: 'quarter-turn-world-y' }
-        : { kind: 'translate', pieces: requestedTranslations };
+      const goal: Parameters<State['saveSavedPlacementEdit']>[1] = turn?.change ?? {
+        kind: 'translate',
+        pieces: requestedTranslations,
+      };
       const displayedTranslations = rotates ? edit.pieces : requestedTranslations;
       const rotateAssembly = () =>
         visitMountedTree(
           view.output(),
-          (props) => props.children === 'Rotate assembly +90° about world Y',
+          (props) => props.children === (turn?.label ?? assemblyTurn.rotate.label),
         );
       if (rotates) {
         await render(state, true);
@@ -2142,13 +2174,21 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
       const saved = physicalReader.projectSavedFullAssemblyPhysicalSnapshotV1(cold.reader)!;
       expect(saved.physicalInitialization).toEqual({
         ...old,
-        placements: old.placements.map((piece, index) => ({
-          ...piece,
-          rotationRowMajor: rotates ? [0, 1, 0, 0, 0, -1, -1, 0, 0] : piece.rotationRowMajor,
-          translationM: rotates
-            ? [1, 0.5, 0 - (piece.translationM[0] - 1)]
-            : requestedTranslations[index]!.translationM,
-        })),
+        placements: old.placements.map((piece, index) => {
+          const [x, y, z] = piece.translationM;
+          const translations = {
+            'Rotate assembly +90° about world Y': [1 + z, y, 0 - (x - 1)],
+            'Rotate assembly +90° about world X': [x, 0.5 - z, y - 0.5],
+            'Flip assembly front to back': [1 - (x - 1), y, -z || 0],
+          };
+          return {
+            ...piece,
+            rotationRowMajor: turn?.rotation ?? piece.rotationRowMajor,
+            translationM: turn
+              ? translations[turn.label]
+              : requestedTranslations[index]!.translationM,
+          };
+        }),
       });
       expect(put).toHaveBeenCalledTimes(conflicts ? 2 : 1);
       if (rotates) {

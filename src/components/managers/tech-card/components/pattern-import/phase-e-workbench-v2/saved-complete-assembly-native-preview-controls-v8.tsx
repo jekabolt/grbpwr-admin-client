@@ -44,11 +44,13 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
   body,
   disabled,
   onAcceptedCloth,
+  onReturnToFlat,
 }: {
   review: SavedCrossMaterialReviewForPreviewV8;
   body: ModelDisplayedTriangleBodyOwnedInputV1 | null;
   disabled: boolean;
   onAcceptedCloth: (frame: MeasurementSurfaceAcceptedClothV1 | undefined) => void;
+  onReturnToFlat?: () => void;
 }) {
   const id = useId();
   const computeCanvas = useRef<HTMLCanvasElement>(null);
@@ -540,6 +542,19 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
             onClick={resetWholePreview}
           >
             Reset preview
+          </Button>
+        )}
+        {onReturnToFlat && (
+          <Button
+            type='button'
+            variant='secondary'
+            size='xs'
+            disabled={placementStatus.pending}
+            onClick={() => {
+              if (!placementSave.current) onReturnToFlat();
+            }}
+          >
+            Back to flat patterns
           </Button>
         )}
         {review.wholeAssembly?.save && (

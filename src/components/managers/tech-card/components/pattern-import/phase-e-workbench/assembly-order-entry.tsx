@@ -2433,6 +2433,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
               body={displayedBodyInput}
               disabled={frozen || !tableSizeMatches}
               onAcceptedCloth={setAcceptedCloth}
+              onReturnToFlat={() => setCrossMaterialReview(null)}
             />
           </Suspense>
         </>

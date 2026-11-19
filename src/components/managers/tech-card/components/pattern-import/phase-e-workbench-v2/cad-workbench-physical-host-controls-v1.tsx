@@ -170,6 +170,7 @@ export function CadWorkbenchPhysicalHostControlsV1({
   const [previewStatus, setPreviewStatus] = useState<
     (CadWorkbenchPreviewStatusV1 & Readonly<{ host: HostState['host'] }>) | null
   >(null);
+  const [returningHost, setReturningHost] = useState<HostState['host']>(null);
   const localStatus = previewStatus?.host === host ? previewStatus : null;
   const pending = localStatus?.pending ?? false;
   const localError = localStatus?.error;
@@ -319,6 +320,20 @@ export function CadWorkbenchPhysicalHostControlsV1({
     scopeKey: string;
     points: readonly DxfGarmentObservedPreviewSurfacePointV1[];
   } | null>(null);
+  const returningToFlat = host !== null && returningHost === host;
+  const returnToFlat = () => {
+    if (!host || returningToFlat) return;
+    const stopped = lifecycle.cancel(host);
+    if (!stopped) return;
+    setReturningHost(host);
+    setMeasurement(null);
+    void stopped.then(() => {
+      setPreviewStatus((current) =>
+        current?.host === host ? { host, pending: false, error: null } : current,
+      );
+      setReturningHost((current) => (current === host ? null : current));
+    });
+  };
   const canMeasure = Boolean(host && receipt && scopeKey && !disabled && !pending);
   const activeMeasurement =
     canMeasure &&
@@ -464,7 +479,7 @@ export function CadWorkbenchPhysicalHostControlsV1({
             type='button'
             size='xs'
             variant='main'
-            disabled={disabled || pending || editingPlacement || registeredBusy}
+            disabled={disabled || pending || editingPlacement || registeredBusy || returningToFlat}
             onClick={preview}
           >
             {pending ? 'Preparing…' : previewReady ? 'Refresh preview' : 'Preview'}
@@ -490,6 +505,17 @@ export function CadWorkbenchPhysicalHostControlsV1({
             }}
           >
             Retry
+          </Button>
+        ) : null}
+        {host && (pending || previewReady || returningToFlat) ? (
+          <Button
+            type='button'
+            size='xs'
+            variant='secondary'
+            disabled={returningToFlat}
+            onClick={returnToFlat}
+          >
+            {returningToFlat ? 'Returning…' : 'Back to flat patterns'}
           </Button>
         ) : null}
         {ready && registeredHost && host?.hasRegisteredCut() && !restoreRequired && (

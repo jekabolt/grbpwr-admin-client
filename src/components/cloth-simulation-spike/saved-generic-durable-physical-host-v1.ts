@@ -126,6 +126,7 @@ export type SavedV7WorldRotationAxisV1 = 'X' | 'Y' | 'Z';
 export type SavedV7PlacementChangeV1 =
   | Readonly<{ kind: 'translate'; pieces: readonly SavedV7PieceTranslationV1[] }>
   | Readonly<{ kind: 'quarter-turn-world-y' }>
+  | Readonly<{ kind: 'rotate-assembly-world'; axis: 'X' | 'Y'; degrees: 90 | 180 }>
   | Readonly<{
       kind: 'rotate-piece-world';
       pieceId: string;
@@ -184,15 +185,26 @@ function placementAfterEdit(
   edit: SavedV7PlacementEditV1,
   change: SavedV7PlacementChangeV1,
 ): readonly DxfGarmentExplicitPiecePlacementV1[] {
-  if (change.kind === 'quarter-turn-world-y') {
+  if (change.kind === 'quarter-turn-world-y' || change.kind === 'rotate-assembly-world') {
     const pivot = placements[0]?.translationM;
     if (!pivot) throw new Error('The saved assembly has no placement pivot.');
+    const { axis, degrees } =
+      change.kind === 'quarter-turn-world-y'
+        ? { axis: 'Y' as const, degrees: 90 as const }
+        : change;
+    if ((axis !== 'X' && axis !== 'Y') || (degrees !== 90 && degrees !== 180))
+      throw new Error('Select a supported turn about the current assembly pivot.');
+    const [a, b] = axis === 'X' ? ([1, 2] as const) : ([2, 0] as const);
     return placements.map((piece) => {
-      const [x, y, z] = piece.translationM;
+      const translationM: [number, number, number] = [...piece.translationM];
+      const da = translationM[a] - pivot[a];
+      const db = translationM[b] - pivot[b];
+      translationM[a] = pivot[a] - (degrees === 90 ? db : da);
+      translationM[b] = degrees === 90 ? pivot[b] + da : pivot[b] - db;
       return {
         ...piece,
-        rotationRowMajor: rotatePlacementWorld(piece.rotationRowMajor, 'Y', 90),
-        translationM: [pivot[0] + (z - pivot[2]), y, pivot[2] - (x - pivot[0])],
+        rotationRowMajor: rotatePlacementWorld(piece.rotationRowMajor, axis, degrees),
+        translationM,
       };
     });
   }

@@ -610,6 +610,18 @@ export function CadWorkbenchFirstPhysicalAuthoringV1({
   );
 }
 
+const SAVED_ASSEMBLY_TURNS = [
+  { label: 'Rotate assembly +90° about world Y', change: { kind: 'quarter-turn-world-y' } },
+  {
+    label: 'Rotate assembly +90° about world X',
+    change: { kind: 'rotate-assembly-world', axis: 'X', degrees: 90 },
+  },
+  {
+    label: 'Flip assembly front to back',
+    change: { kind: 'rotate-assembly-world', axis: 'Y', degrees: 180 },
+  },
+] as const satisfies readonly { label: string; change: SavedV7PlacementChangeV1 }[];
+
 function SavedPlacementFields({
   draft,
   state,
@@ -624,7 +636,10 @@ function SavedPlacementFields({
   const [values, setValues] = useState(() =>
     draft.pieces.map(({ translationM }) => translationM.map(String)),
   );
-  const [rotate, setRotate] = useState(false);
+  const [assemblyTurn, setAssemblyTurn] = useState<(typeof SAVED_ASSEMBLY_TURNS)[number] | null>(
+    null,
+  );
+  const rotate = assemblyTurn !== null;
   const [pieceId, setPieceId] = useState('');
   const [axis, setAxis] = useState<SavedV7WorldRotationAxisV1 | ''>('');
   const [angle, setAngle] = useState('');
@@ -637,7 +652,7 @@ function SavedPlacementFields({
   const degrees = finite(angle);
   const hasAngle = angle.trim() !== '';
   let change: SavedV7PlacementChangeV1 | null = null;
-  if (rotate) change = { kind: 'quarter-turn-world-y' };
+  if (assemblyTurn) change = assemblyTurn.change;
   else if (!translationChanged && piece && axis && degrees !== null && degrees % 360 !== 0)
     change = {
       kind: 'rotate-piece-world',
@@ -664,19 +679,24 @@ function SavedPlacementFields({
         World translation in metres.
       </Text>
       <div className='space-y-2'>
-        <Button
-          type='button'
-          size='xs'
-          variant={rotate ? 'main' : 'secondary'}
-          aria-pressed={rotate}
-          disabled={busy || readOnly || translationChanged || hasAngle}
-          onClick={() => {
-            if (busy || readOnly || translationChanged || hasAngle) return;
-            setRotate((selected) => !selected);
-          }}
-        >
-          Rotate assembly +90° about world Y
-        </Button>
+        <div className='flex flex-wrap gap-2'>
+          {SAVED_ASSEMBLY_TURNS.map((turn) => (
+            <Button
+              key={turn.label}
+              type='button'
+              size='xs'
+              variant={assemblyTurn === turn ? 'main' : 'secondary'}
+              aria-pressed={assemblyTurn === turn}
+              disabled={busy || readOnly || translationChanged || hasAngle}
+              onClick={() => {
+                if (busy || readOnly || translationChanged || hasAngle) return;
+                setAssemblyTurn((selected) => (selected === turn ? null : turn));
+              }}
+            >
+              {turn.label}
+            </Button>
+          ))}
+        </div>
         <Text component='p' size='micro' variant='label'>
           Rotation pivot: {draft.pieces[0]?.pieceId}
         </Text>
