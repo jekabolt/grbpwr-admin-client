@@ -87,7 +87,9 @@ export function captureSavedSurfaceDirection(
   const { id, lockVersion, techCard: body } = card;
   if (
     !id ||
-    !lockVersion ||
+    typeof lockVersion !== 'number' ||
+    !Number.isSafeInteger(lockVersion) ||
+    lockVersion < 0 ||
     !body ||
     !Number.isSafeInteger(operationNumber) ||
     operationNumber <= 0 ||

@@ -294,6 +294,12 @@ it.each(['lock', 'selection', 'cancel', 'server-clock'] as const)(
   },
 );
 
+it('captures both signed rows on a freshly imported card with lock version zero', () => {
+  const captured = captureSavedSurfaceDirection({ ...card, lockVersion: 0 }, 570, seam);
+  expect(captured.rows.map((row) => row.cardLockVersion)).toEqual([0, 0]);
+  expect(() => captureSavedSurfaceDirection({ ...card, lockVersion: -1 }, 570, seam)).toThrow();
+});
+
 it('keeps ambiguous and differently placed rows out of the saved direction editor', () => {
   expect(isPlacedSurfaceDirectionSeam({ ...seam, stale: true })).toBe(false);
   expect(isPlacedSurfaceDirectionSeam({ ...seam, sideB: [...seam.sideB, seam.sideB[0]!] })).toBe(
