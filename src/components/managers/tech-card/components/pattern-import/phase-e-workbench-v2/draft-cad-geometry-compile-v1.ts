@@ -291,7 +291,7 @@ function activeCommands(
 }
 
 function supported(command: PatternImportDxfPhaseEDraftCadCommandV1): boolean {
-  if (!PRODUCTIVE_TOOLS.has(command.tool)) return false;
+  if (command.tool !== 'round-corner' && !PRODUCTIVE_TOOLS.has(command.tool)) return false;
   if (command.tool === 'pen') return command.payload.closed && Boolean(command.payload.newPiece);
   if (command.tool === 'rectangle') return Boolean(command.payload.newPiece);
   if (command.tool === 'circle' || command.tool === 'ellipse')

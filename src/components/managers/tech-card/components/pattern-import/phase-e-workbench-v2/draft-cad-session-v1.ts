@@ -60,7 +60,6 @@ export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_PRODUCTIVE_TOOLS_V1 = Object.f
   'move-point',
   'delete-point',
   'sharpen-corner',
-  'round-corner',
   'edge-length',
   'allowance-offset',
   'dart',
