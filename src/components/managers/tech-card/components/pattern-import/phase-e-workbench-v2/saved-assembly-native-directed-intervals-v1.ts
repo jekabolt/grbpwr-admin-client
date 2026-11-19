@@ -12,6 +12,7 @@ import {
 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 import { aliasKey } from 'lib/pattern-import/fabrics/draft';
 import { anchorOfRunId } from 'lib/seams/anchor';
+import type { EdgeAnchor, StoredSeam } from 'lib/seams/types';
 import { anchorFromWire, anchorToWire } from 'lib/seams/wire';
 import {
   buildPatternImportDxfPhaseEExactAnchorEdgeV1,
@@ -56,6 +57,8 @@ type DirectedSide = Readonly<{
   canonicalAnchorWire: string;
   /** Present on a bounded side of a subrange receipt. An omitted side is the full native edge. */
   nativeSubrange?: NativeSubrange;
+  /** Present on both sides of a subrange receipt, including the currently untrimmed side. */
+  nativeParentLengthMm?: number;
 }>;
 
 type DirectedIntervalReceipt<Schema extends ReceiptSchema> = Readonly<{
@@ -116,6 +119,80 @@ export function isVerifiedSavedAssemblyNativeDirectedSubrangeReceiptV1(
   if (typeof receipt !== 'object' || receipt === null) return false;
   const issued = verifiedReceipts.get(receipt);
   return issued?.schema === subrangeSchemaVersion && !issued.generation.aborted;
+}
+
+function matchesWireFraction(value: number, numerator: number) {
+  const expected = numerator / rangeDenominator;
+  // MySQL and its JSON encoders can round a decimal to the adjacent floating-point value.
+  return Math.abs(value - expected) <= Number.EPSILON * Math.abs(expected);
+}
+
+type ForwardRanges = readonly [readonly [number, number], readonly [number, number]];
+
+/** Edits one stored native seam pair without changing its directed parent edges. */
+export function reviseSavedAssemblyNativeDirectedSubrangeV1(
+  receipt: SavedAssemblyNativeDirectedSubrangeReceiptV1,
+  current: StoredSeam,
+  ranges: ForwardRanges,
+): { ok: true; seam: StoredSeam } | { ok: false; why: string } {
+  const moved = {
+    ok: false,
+    why: 'The saved seam changed. Reopen the current pattern and try again.',
+  } as const;
+  if (!isVerifiedSavedAssemblyNativeDirectedSubrangeReceiptV1(receipt)) return moved;
+  const bound = receipt.orderedSeams[0];
+  const [a] = current.sideA;
+  const [b] = current.sideB;
+  if (
+    !bound ||
+    bound.seamKey !== current.seamKey ||
+    bound.seamDirection !== current.direction ||
+    receipt.sizeToken !== current.anchoredSize ||
+    current.kind !== 'partial' ||
+    current.status !== 'confirmed' ||
+    current.source !== 'manual' ||
+    current.stale ||
+    current.sideA.length !== 1 ||
+    current.sideB.length !== 1 ||
+    !a ||
+    !b ||
+    canonicalize(anchorToWire(a)) !== bound.sides[0].canonicalAnchorWire ||
+    canonicalize(anchorToWire(b)) !== bound.sides[1].canonicalAnchorWire
+  )
+    return moved;
+  if (
+    ranges.some(
+      ([start, end]) =>
+        !Number.isInteger(start) ||
+        !Number.isInteger(end) ||
+        start < 0 ||
+        end > rangeDenominator ||
+        start >= end,
+    )
+  )
+    return {
+      ok: false,
+      why: 'Enter a start and end from 0 to 100%, with the start before the end.',
+    };
+  const update = (
+    anchor: EdgeAnchor,
+    [start, end]: ForwardRanges[number],
+    direction: DirectedSide['direction'],
+  ): EdgeAnchor => {
+    const [from, to] =
+      direction === 'forward' ? [start, end] : [rangeDenominator - end, rangeDenominator - start];
+    return matchesWireFraction(anchor.range[0], from) && matchesWireFraction(anchor.range[1], to)
+      ? anchor
+      : { ...anchor, range: [from / rangeDenominator, to / rangeDenominator] };
+  };
+  const editedA = update(a, ranges[0], bound.sides[0].direction);
+  const editedB = update(b, ranges[1], bound.sides[1].direction);
+  if (editedA === a && editedB === b)
+    return { ok: false, why: 'Change either range before saving.' };
+  const kind = ranges.every(([start, end]) => start === 0 && end === rangeDenominator)
+    ? 'edge'
+    : 'partial';
+  return { ok: true, seam: { ...current, kind, sideA: [editedA], sideB: [editedB] } };
 }
 
 function sameRow(a: DxfProductSavedRowIdentityV1, b: DxfProductSavedRowIdentityV1) {
@@ -195,8 +272,8 @@ function resolveSide(
     (!fullEdge &&
       (!partialAliases ||
         !(start >= 0 && start < end && end <= 1) ||
-        start !== startNumerator / rangeDenominator ||
-        end !== endNumerator / rangeDenominator)) ||
+        !matchesWireFraction(start, startNumerator) ||
+        !matchesWireFraction(end, endNumerator))) ||
     persisted.samples.length !== 5 ||
     !(persisted.lenMm > 0) ||
     !(persisted.perimShare > 0) ||
@@ -256,6 +333,7 @@ function resolveSide(
     direction,
     canonicalAnchorWire,
     ...(nativeSubrange && { nativeSubrange }),
+    ...(partialAliases && { nativeParentLengthMm: lengthMm }),
   });
   return { ok: true as const, side: value };
 }

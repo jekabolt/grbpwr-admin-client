@@ -1766,27 +1766,53 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
     ],
   );
   const n1Target = exactSavedLinkedN1Target.target;
+  const pendingPartial = selectedSeamKeys.length === 1 && pending[selectedSeamKeys[0]!];
+  const subrangeTarget = useMemo(
+    () =>
+      pendingPartial
+        ? resolvePatternImportDxfPhaseEZeroConnectExistingLinkedN1TargetV1({
+            techCardId,
+            selectedIndex,
+            liveOperations: operations,
+            savedCard: savedCard.data,
+            currentRows: [...server, ...poses],
+            seamWriterCardId: seamWriterCardId ?? undefined,
+            seamWriterLockVersion,
+          }).target
+        : n1Target,
+    [
+      n1Target,
+      operations,
+      pendingPartial,
+      poses,
+      savedCard.data,
+      seamWriterCardId,
+      seamWriterLockVersion,
+      selectedIndex,
+      server,
+      techCardId,
+    ],
+  );
   const savedPartial =
-    n1Target?.originalSeamKind === 'partial' && n1Target.orderedRowKeys.length === 1
-      ? server.find(({ seamKey }) => seamKey === n1Target.seamKey)
+    subrangeTarget?.originalSeamKind === 'partial' && subrangeTarget.orderedRowKeys.length === 1
+      ? server.find(({ seamKey }) => seamKey === subrangeTarget.seamKey)
       : undefined;
   const partialAnchors = savedPartial ? [...savedPartial.sideA, ...savedPartial.sideB] : [];
   const savedSeamSubrangeTarget =
-    n1Target &&
+    subrangeTarget &&
     savedPartial?.status === 'confirmed' &&
     savedPartial.source === 'manual' &&
     savedPartial.direction !== 'unknown' &&
     !savedPartial.stale &&
-    !pending[savedPartial.seamKey] &&
     savedPartial.anchoredSize &&
     savedPartial.sideA.length === 1 &&
     savedPartial.sideB.length === 1 &&
     partialAnchors.every(({ edgeHint, piece }) => edgeHint?.startsWith(`${piece}#dxf:`)) &&
     partialAnchors.some(({ range: [from, to] }) => from !== 0 || to !== 1)
       ? {
-          operationNumber: n1Target.operationNumber,
+          operationNumber: subrangeTarget.operationNumber,
           seamKey: savedPartial.seamKey,
-          cardLockVersion: n1Target.capturedCardLockVersion,
+          cardLockVersion: subrangeTarget.capturedCardLockVersion,
           sizeToken: savedPartial.anchoredSize,
         }
       : undefined;

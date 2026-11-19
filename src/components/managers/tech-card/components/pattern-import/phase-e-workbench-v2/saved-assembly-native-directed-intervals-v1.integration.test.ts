@@ -103,6 +103,7 @@ import {
   isVerifiedSavedAssemblyNativeDirectedSubrangeReceiptV1,
   resolveSavedAssemblyNativeDirectedIntervalsV1,
   resolveSavedAssemblyNativeDirectedSubrangesV1,
+  reviseSavedAssemblyNativeDirectedSubrangeV1,
 } from './saved-assembly-native-directed-intervals-v1';
 import {
   canonicalizePatternImportDxfPhaseESavedAssemblyValueV1 as canonicalize,
@@ -655,6 +656,7 @@ it('refuses casting a real saved native partial seam into whole-edge semantic ch
   expect(isVerifiedSavedAssemblyNativeDirectedIntervalReceiptV1(ranges.receipt)).toBe(false);
   const [left, right] = ranges.receipt.orderedSeams[0]!.sides;
   expect(left.nativeSubrange).toBeUndefined();
+  expect(left.nativeParentLengthMm).toBe(a.piece.edges[0]!.lenMm);
   expect(right).toMatchObject({
     direction: 'reverse',
     boundaryVertexIds: b.boundaryVertexIds,
@@ -665,6 +667,71 @@ it('refuses casting a real saved native partial seam into whole-edge semantic ch
     },
   });
   expect(JSON.parse(right.canonicalAnchorWire)).toEqual(wire.sideB!.parts![0]);
+
+  const unchanged = reviseSavedAssemblyNativeDirectedSubrangeV1(ranges.receipt, partial, [
+    [0, 10_000],
+    [3_200, 8_250],
+  ]);
+  expect(unchanged).toEqual({ ok: false, why: 'Change either range before saving.' });
+  const edited = reviseSavedAssemblyNativeDirectedSubrangeV1(ranges.receipt, partial, [
+    [0, 9_000],
+    [3_500, 7_200],
+  ]);
+  if (!edited.ok) throw new Error(edited.why);
+  const editedWire = toWire(edited.seam);
+  const expectedWire = structuredClone(wire);
+  Object.assign(expectedWire.sideA!.parts![0]!, { rangeFrom: 0, rangeTo: 0.9 });
+  Object.assign(expectedWire.sideB!.parts![0]!, { rangeFrom: 0.28, rangeTo: 0.65 });
+  expect(editedWire).toEqual(expectedWire);
+  const fresh = await resolveSavedAssemblyNativeDirectedSubrangesV1(
+    { ...partialRead, source: await savedSource(seed, [editedWire]) },
+    signal,
+  );
+  if (!fresh.ok) throw new Error(JSON.stringify(fresh.blocker));
+  expect(
+    fresh.receipt.orderedSeams[0]!.sides.map((side) => side.nativeSubrange?.forwardNumerators),
+  ).toEqual([
+    [0, 9_000],
+    [3_500, 7_200],
+  ]);
+  expect(
+    reviseSavedAssemblyNativeDirectedSubrangeV1(ranges.receipt, edited.seam, [
+      [0, 9_100],
+      [3_500, 7_200],
+    ]),
+  ).toMatchObject({ ok: false });
+  expect(
+    reviseSavedAssemblyNativeDirectedSubrangeV1(structuredClone(ranges.receipt), partial, [
+      [0, 9_100],
+      [3_500, 7_200],
+    ]),
+  ).toMatchObject({ ok: false });
+  expect(
+    reviseSavedAssemblyNativeDirectedSubrangeV1(ranges.receipt, partial, [
+      [0, 9_000.5],
+      [4_500, 3_000],
+    ]),
+  ).toMatchObject({ ok: false });
+  const whole = reviseSavedAssemblyNativeDirectedSubrangeV1(ranges.receipt, partial, [
+    [0, 10_000],
+    [0, 10_000],
+  ]);
+  if (!whole.ok) throw new Error(whole.why);
+  expect(toWire(whole.seam)).toMatchObject({
+    seamKey: wire.seamKey,
+    kind: 'TECH_CARD_SEAM_KIND_EDGE',
+    sideB: { parts: [{ rangeFrom: 0, rangeTo: 0 }] },
+  });
+  const adjacent = structuredClone(wire);
+  adjacent.sideB!.parts![0]!.rangeFrom = 0.17500000000000002;
+  const adjacentRead = await resolveSavedAssemblyNativeDirectedSubrangesV1(
+    { ...partialRead, source: await savedSource(seed, [adjacent]) },
+    signal,
+  );
+  if (!adjacentRead.ok) throw new Error(JSON.stringify(adjacentRead.blocker));
+  expect(adjacentRead.receipt.orderedSeams[0]!.sides[1].nativeSubrange?.forwardNumerators).toEqual([
+    3_200, 8_250,
+  ]);
 
   const offGrid = structuredClone(wire);
   offGrid.sideB!.parts![0]!.rangeFrom = 0.17501;
@@ -1191,6 +1258,7 @@ it('shows a verified saved PARTIAL span through the ordinary N1 operations route
       target,
       replay: authored.replay,
       catalogCanonicalSha256: authored.catalog.canonicalSha256,
+      disabled: true,
     };
     function Inspector(props: typeof read) {
       output = CadTableSavedSeamSubrangePanelV1(props);

@@ -1958,6 +1958,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
                   target={savedSeamSubrangeTarget}
                   replay={verifiedSubrangeReplay}
                   catalogCanonicalSha256={prepared.catalog.canonicalSha256}
+                  disabled={disabled}
                 />
               </Suspense>
             ) : prepared ? (
