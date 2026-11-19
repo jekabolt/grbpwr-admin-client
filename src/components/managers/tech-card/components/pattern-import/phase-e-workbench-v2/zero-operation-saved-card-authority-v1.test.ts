@@ -496,6 +496,45 @@ describe('zero-operation saved card authority', () => {
     host.dispose();
   });
 
+  it('reads a team DXF through the authenticated backend proxy without forwarding it', async () => {
+    const exactRow = Object.freeze({ ...row, sizeBytes: 3 });
+    const download = new URL('/api/files/proxy', 'https://api.beta.example/');
+    download.searchParams.set('url', 'https://files.example/teams/a/pattern.dxf');
+    const fetcher = vi.fn<typeof globalThis.fetch>();
+    fetcher.mockResolvedValueOnce(new Response(new Uint8Array([1, 2, 3])));
+    fetcher.mockRejectedValueOnce(new TypeError('Private proxy unavailable.'));
+    const host = createPatternImportDxfPhaseESavedDxfReprocessHostV1({
+      serverUrl: download.origin,
+      mediaProxyUrl: 'https://media.example/media-proxy',
+      readAuthToken: () => 'team-token',
+      fetch: fetcher,
+      readAuthoritativeRow: async () => ({
+        row: exactRow,
+        downloadUrl: download.pathname + download.search,
+      }),
+      resolveCard: async () => {
+        throw new Error('Card projection is not used by the byte-read test.');
+      },
+    });
+
+    await expect(
+      host.readAuthoritativeRow(exactRow, new AbortController().signal, () => undefined),
+    ).resolves.toMatchObject({ row: exactRow, bytes: new Uint8Array([1, 2, 3]) });
+    await expect(
+      host.readAuthoritativeRow(exactRow, new AbortController().signal, () => undefined),
+    ).rejects.toThrow('Private proxy unavailable.');
+
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    for (const [url, request] of fetcher.mock.calls) {
+      expect(url).toBe(download.toString());
+      expect(request).toMatchObject({ method: 'GET', redirect: 'error' });
+      expect(new Headers(request?.headers).get('Grpc-Metadata-Authorization')).toBe(
+        'Bearer team-token',
+      );
+    }
+    host.dispose();
+  });
+
   it('retries one transient capability network failure before downloading saved DXF bytes', async () => {
     const exactRow = Object.freeze({ ...row, sizeBytes: 3 });
     const capabilityUrl = 'https://api.beta.example/api/p/token/download?mode=json';

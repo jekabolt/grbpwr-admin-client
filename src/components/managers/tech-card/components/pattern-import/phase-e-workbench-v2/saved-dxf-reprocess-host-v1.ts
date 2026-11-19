@@ -200,34 +200,28 @@ function readBrowserAuthToken(): string | null {
   return readStoredAuthToken();
 }
 
+function savedBackendDownloadUrl(resolvedUrl: string, serverUrl: string): URL | null {
+  try {
+    const download = new URL(resolvedUrl);
+    return download.origin === new URL(serverUrl).origin ? download : null;
+  } catch {
+    return null;
+  }
+}
+
 function backendDownloadAuthHeaders(
   resolvedUrl: string,
   serverUrl: string,
   readAuthToken: () => string | null,
 ): Readonly<Record<string, string>> | undefined {
-  let downloadOrigin: string;
-  let backendOrigin: string;
-  try {
-    downloadOrigin = new URL(resolvedUrl).origin;
-    backendOrigin = new URL(serverUrl).origin;
-  } catch {
-    return undefined;
-  }
-  if (downloadOrigin !== backendOrigin) return undefined;
+  if (!savedBackendDownloadUrl(resolvedUrl, serverUrl)) return undefined;
   const token = readAuthToken()?.trim();
   return token ? { 'Grpc-Metadata-Authorization': `Bearer ${token}`, ...teamHeaders() } : undefined;
 }
 
 function backendPatternCapabilityJsonUrl(resolvedUrl: string, serverUrl: string): string | null {
-  let download: URL;
-  let backend: URL;
-  try {
-    download = new URL(resolvedUrl);
-    backend = new URL(serverUrl);
-  } catch {
-    return null;
-  }
-  if (download.origin !== backend.origin || !download.pathname.startsWith('/api/p/')) return null;
+  const download = savedBackendDownloadUrl(resolvedUrl, serverUrl);
+  if (!download?.pathname.startsWith('/api/p/')) return null;
   download.searchParams.set('mode', 'json');
   return download.toString();
 }
@@ -998,18 +992,19 @@ export function createPatternImportDxfPhaseESavedDxfReprocessHostV1(
       const headers = byteTarget.usedCapabilityHop
         ? undefined
         : backendDownloadAuthHeaders(byteTarget.url, transportServerUrl, readAuthToken);
-      const response = await fetchSavedDxfBytes(
-        fetcher,
-        byteTarget.url,
-        {
-          method: 'GET',
-          credentials: byteTarget.usedCapabilityHop ? 'omit' : 'same-origin',
-          ...(headers ? { headers } : {}),
-          signal,
-        },
-        mediaProxyUrl,
+      const request: NonNullable<Parameters<typeof fetcher>[1]> = {
+        method: 'GET',
+        credentials: byteTarget.usedCapabilityHop ? 'omit' : 'same-origin',
+        ...(headers ? { headers } : {}),
         signal,
-      );
+      };
+      const privateFileProxy =
+        !byteTarget.usedCapabilityHop &&
+        savedBackendDownloadUrl(byteTarget.url, transportServerUrl)?.pathname ===
+          '/api/files/proxy';
+      const response = privateFileProxy
+        ? await fetcher(byteTarget.url, { ...request, redirect: 'error' })
+        : await fetchSavedDxfBytes(fetcher, byteTarget.url, request, mediaProxyUrl, signal);
       if (!response.ok) throw new Error(`Saved DXF download failed with HTTP ${response.status}.`);
       const declaredLength = response.headers.get('content-length');
       if (
