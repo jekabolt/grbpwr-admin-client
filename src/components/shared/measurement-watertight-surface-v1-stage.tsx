@@ -483,6 +483,31 @@ interface MeasurementSurfacePatternPieceSceneBindingV1 {
   readonly vertexLocalPositions: ReadonlyMap<string, THREE.Vector3>;
 }
 
+export function measurementSurfaceCommittedPatternGestureV1(gesture: {
+  startPosition: THREE.Vector3;
+  startRotation: number;
+  binding: {
+    basePosition: THREE.Vector3;
+    anchor: Pick<THREE.Group, 'position'>;
+    content: Pick<THREE.Group, 'rotation'>;
+    piece: Pick<MeasurementSurfacePatternPieceV1, 'transform'>;
+  };
+}): MeasurementSurfacePatternPieceTransformV1 | null {
+  const { anchor, basePosition, content, piece } = gesture.binding;
+  const rotationRad = content.rotation.z;
+  if (anchor.position.equals(gesture.startPosition) && rotationRad === gesture.startRotation)
+    return null;
+  // World position includes the staging origin. Reuse unchanged local components exactly.
+  const previous = piece.transform?.offsetM ?? [0, 0, 0];
+  const offsetM: [number, number, number] = [...previous];
+  for (const index of [0, 1, 2] as const) {
+    const position = anchor.position.getComponent(index);
+    if (position !== gesture.startPosition.getComponent(index))
+      offsetM[index] = position - basePosition.getComponent(index);
+  }
+  return Object.freeze({ offsetM: Object.freeze(offsetM), rotationRad });
+}
+
 interface MeasurementSurfacePatternPieceSceneGuideBindingV1 {
   readonly line: THREE.Line;
   readonly fromBinding: MeasurementSurfacePatternPieceSceneBindingV1;
@@ -2122,16 +2147,8 @@ export function MeasurementWatertightSurfaceV1Stage({
         contextCanvas.releasePointerCapture(gesture.pointerId);
       }
       if (controls) controls.enabled = interactive;
-      if (commit) {
-        const offset = gesture.binding.anchor.position.clone().sub(gesture.binding.basePosition);
-        gesture.onTransform(
-          gesture.binding.piece.pieceKey,
-          Object.freeze({
-            offsetM: Object.freeze(offset.toArray() as [number, number, number]),
-            rotationRad: gesture.binding.content.rotation.z,
-          }),
-        );
-      }
+      const transform = commit ? measurementSurfaceCommittedPatternGestureV1(gesture) : null;
+      if (transform) gesture.onTransform(gesture.binding.piece.pieceKey, transform);
       if (contextCanvas) {
         contextCanvas.dataset.patternPieceGesture = 'idle';
         contextCanvas.style.cursor = '';
@@ -3144,7 +3161,7 @@ export function MeasurementWatertightSurfaceV1Stage({
           }
         } else {
           const angle = pointerAngleAroundPatternPiece(event, gesture.binding);
-          gesture.binding.content.rotation.z = gesture.startRotation + angle - gesture.startAngle;
+          gesture.binding.content.rotation.z = gesture.startRotation + (angle - gesture.startAngle);
         }
         event.preventDefault();
         event.stopImmediatePropagation();

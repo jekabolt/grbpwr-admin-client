@@ -196,6 +196,11 @@ describe('mounted mannequin arrangement lifecycle', () => {
       (button!.onClick as () => void)();
     });
   }
+  function undoButton() {
+    const button = visit(tree, (value) => value.children === 'Undo placement');
+    expect(button).not.toBeNull();
+    return button as { disabled: boolean; onClick: () => void };
+  }
   beforeEach(() => {
     input = props();
     root = createRoot(container() as never);
@@ -222,6 +227,97 @@ describe('mounted mannequin arrangement lifecycle', () => {
     });
     expect(overlay().pieces[0].transform).toEqual(moved);
   });
+  it('undoes numeric and gesture commits in reverse order and saves only on explicit request', async () => {
+    const save = vi.fn().mockResolvedValue(undefined);
+    const scene = input.patternPieceScene!;
+    const source = scene.sources[0]!;
+    const front = source.projection.pieces[0]!;
+    const back = { ...front, pieceId: 'back', pieceLineKey: 'piece-back' };
+    const backKey = 'main:back:piece-back';
+    input = {
+      ...input,
+      onReadMannequinArrangement: vi.fn().mockResolvedValue(stored),
+      onSaveMannequinArrangement: save,
+      patternPieceScene: {
+        ...scene,
+        sources: [{ ...source, projection: { ...source.projection, pieces: [front, back] } }],
+        selection: { scopeKey: 'main', pieceId: front.pieceId, pieceLineKey: front.pieceLineKey },
+      },
+    };
+    await render();
+    expect(undoButton().disabled).toBe(true);
+    const toolbar = visit(tree, (value) => typeof value.onPatternTool === 'function')!;
+    await act(async () => (toolbar.onPatternTool as (tool: 'translate') => void)('translate'));
+    const offset = visit(tree, (value) => typeof value.onApply === 'function' && !!value.offsetM)!;
+    await act(async () => (offset.onApply as (axis: number, value: number) => void)(2, 0.75));
+    const numeric = { offsetM: [0.4, 0.2, 0.75], rotationRad: 0.7 };
+    expect(overlay().pieces[0].transform).toEqual(numeric);
+
+    const backRotation = { offsetM: [0, 0, 0] as const, rotationRad: -0.2 };
+    await act(async () => {
+      const edit = overlay().onTransformPiece!;
+      edit(backKey, backRotation);
+      edit(backKey, { ...backRotation });
+      edit('another-scope:back:piece-back', backRotation);
+    });
+    expect(overlay().pieces[1].transform).toEqual(backRotation);
+    await act(async () => undoButton().onClick());
+    expect(overlay().pieces[1].transform).toBeNull();
+    expect(overlay().pieces[0].transform).toEqual(numeric);
+    expect(undoButton().disabled).toBe(false);
+    await act(async () => undoButton().onClick());
+    expect(overlay().pieces[0].transform).toEqual(stored[0].transform);
+    expect(undoButton().disabled).toBe(true);
+    expect(save).not.toHaveBeenCalled();
+    await clickSave();
+    expect(
+      save.mock.calls[0][0].pieces.map((piece: CadMannequinArrangementPieceV1) => piece.transform),
+    ).toEqual([stored[0].transform, { offsetM: [0, 0, 0], rotationRad: 0 }]);
+    expect(save).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps an empty undo and a zero-offset commit inert during hydration', async () => {
+    const read = deferred<readonly CadMannequinArrangementPieceV1[]>();
+    const save = vi.fn();
+    input = {
+      ...input,
+      onReadMannequinArrangement: () => read.promise,
+      onSaveMannequinArrangement: save,
+    };
+    await render();
+    await act(async () => {
+      undoButton().onClick();
+      overlay().onTransformPiece!(pieceKey, { offsetM: [0, 0, 0], rotationRad: 0 });
+      read.resolve(stored);
+    });
+    expect(overlay().pieces[0].transform).toEqual(stored[0].transform);
+    expect(undoButton().disabled).toBe(true);
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('keeps undo local while an explicit save finishes and protects it from late hydration', async () => {
+    const read = deferred<readonly CadMannequinArrangementPieceV1[]>();
+    const write = deferred<void>();
+    const save = vi.fn(() => write.promise);
+    input = {
+      ...input,
+      onReadMannequinArrangement: () => read.promise,
+      onSaveMannequinArrangement: save,
+    };
+    await render();
+    await act(async () => overlay().onTransformPiece!(pieceKey, stored[0].transform));
+    await clickSave();
+    await act(async () => {
+      undoButton().onClick();
+      read.resolve(stored);
+      write.resolve();
+    });
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(overlay().pieces[0].transform).toBeNull();
+    expect(strings(tree)).toContain('Current changes are not saved.');
+    expect(undoButton().disabled).toBe(true);
+  });
+
   it.each(['disabled', 'pose-edit', 'row', 'model'] as const)(
     'revokes a staged rotation turn on %s without changing the native contour or saved angle',
     async (change) => {
@@ -293,6 +389,49 @@ describe('mounted mannequin arrangement lifecycle', () => {
       expect(input.patternPieceScene!.sources[0]!.projection.pieces[0]!.contours).toEqual(contours);
     },
   );
+  it.each(['row', 'model', 'pose', 'pose-edit', 'disabled'] as const)(
+    'drops undo history across a %s turn, including callbacks retained from before the change',
+    async (change) => {
+      const save = vi.fn().mockResolvedValue(undefined);
+      input = {
+        ...input,
+        onReadMannequinArrangement: vi.fn().mockResolvedValue(stored),
+        onSaveMannequinArrangement: save,
+      };
+      const initial = input;
+      await render();
+      await act(async () =>
+        overlay().onTransformPiece!(pieceKey, { offsetM: [1, 0, 0], rotationRad: 1 }),
+      );
+      const staleUndo = undoButton().onClick;
+      expect(undoButton().disabled).toBe(false);
+      const setPoseEditing = () =>
+        visit(tree, (value) => typeof value.onPoseEditingChange === 'function')!
+          .onPoseEditingChange as (editing: boolean) => void;
+      if (change === 'row') input = { ...input, arrangementSourceKey: 'another-row' };
+      if (change === 'model') input = { ...input, models: [model(43, 'Another')], modelId: 43 };
+      if (change === 'pose')
+        input = { ...input, poseBinding: { ...input.poseBinding!, canonicalKey: 'pose-b' } };
+      if (change === 'disabled') input = { ...input, disabled: true };
+      if (change === 'pose-edit') await act(async () => setPoseEditing()(true));
+      await render();
+      expect(undoButton().disabled).toBe(true);
+      input = initial;
+      if (change === 'pose-edit') await act(async () => setPoseEditing()(false));
+      await render();
+      expect(undoButton().disabled).toBe(true);
+      const before = overlay().pieces[0].transform;
+      const latest = { offsetM: [0, 0, 0] as const, rotationRad: 2 };
+      await act(async () => overlay().onTransformPiece!(pieceKey, latest));
+      await act(async () => staleUndo());
+      expect(overlay().pieces[0].transform).toEqual(latest);
+      await act(async () => undoButton().onClick());
+      expect(overlay().pieces[0].transform).toEqual(before);
+      expect(undoButton().disabled).toBe(true);
+      expect(save).not.toHaveBeenCalled();
+    },
+  );
+
   it('saves and reloads the real projected native piece rotation through the arrangement codec', async () => {
     const { draft, row } = await createPatternImportDxfProductSavedRuntimeSeedV1Fixture();
     const selection = await selectPatternImportDxfProductDraftPhaseDSizeV1(draft, 'main', 'M');

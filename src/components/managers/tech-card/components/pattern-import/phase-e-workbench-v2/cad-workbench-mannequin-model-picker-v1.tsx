@@ -55,6 +55,7 @@ import type { CadWorkbenchPhysicalHostV1 } from './cad-workbench-physical-host-v
 export const PATTERN_IMPORT_DXF_PHASE_E_CAD_MANNEQUIN_MODEL_PICKER_V1 =
   'pattern-import-dxf-phase-e-cad-mannequin-model-picker/1' as const;
 const ZERO_PATTERN_OFFSET_M = [0, 0, 0] as const;
+type PatternTransforms = Readonly<Record<string, MeasurementSurfacePatternPieceTransformV1>>;
 
 export const PATTERN_IMPORT_DXF_PHASE_E_CAD_MANNEQUIN_MODEL_PICKER_CLAIMS_V1 = Object.freeze({
   techCardBaseModelFieldReused: true,
@@ -547,9 +548,17 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
   const [patternTool, setPatternTool] =
     useState<PatternImportDxfPhaseECadMannequinPatternOverlayToolV1>('select');
   const [poseEditing, setPoseEditing] = useState(false);
-  const [patternTransforms, setPatternTransforms] = useState<
-    Readonly<Record<string, MeasurementSurfacePatternPieceTransformV1>>
-  >({});
+  const [patternTransforms, setPatternTransforms] = useState<PatternTransforms>({});
+  // Pointer, numeric and undo commands can arrive before React publishes the next overlay.
+  const latestTransforms = useRef(patternTransforms);
+  const publishTransforms = useCallback((next: PatternTransforms) => {
+    latestTransforms.current = next;
+    setPatternTransforms(next);
+  }, []);
+  const placementHistory = useRef<
+    { pieceKey: string; previous: MeasurementSurfacePatternPieceTransformV1 | undefined }[]
+  >([]);
+  const [canUndoPlacement, setCanUndoPlacement] = useState(false);
   const [arrangementSaving, setArrangementSaving] = useState(false);
   const [arrangementMessage, setArrangementMessage] = useState<string | null>(null);
   const arrangementSource =
@@ -595,6 +604,8 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
   const currentPlacementTurn = useRef<typeof placementTurn>(null);
   useLayoutEffect(() => {
     currentPlacementTurn.current = placementTurn;
+    placementHistory.current = [];
+    setCanUndoPlacement(false);
     return () => {
       currentPlacementTurn.current = null;
     };
@@ -616,7 +627,7 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
     const controller = new AbortController();
     const current = arrangementCurrent.current;
     const edits = arrangementEdits.current;
-    setPatternTransforms({});
+    publishTransforms({});
     setArrangementMessage(null);
     setArrangementSaving(false);
     if (current.expected && current.read) {
@@ -629,7 +640,7 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
             arrangementEdits.current === edits &&
             pieces
           ) {
-            setPatternTransforms(
+            publishTransforms(
               Object.fromEntries(pieces.map(({ pieceKey, transform }) => [pieceKey, transform])),
             );
           }
@@ -645,13 +656,15 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
       controller.abort();
       arrangementSaveController.current?.abort();
     };
-  }, [arrangementKey]);
+  }, [arrangementKey, publishTransforms]);
   const saveArrangement = async () => {
     const source = arrangementSource;
     const key = arrangementKey;
     const editGeneration = arrangementEdits.current;
     if (
       !source ||
+      arrangementCurrent.current.key !== key ||
+      currentPlacementTurn.current !== placementTurn ||
       !selected?.id ||
       !selectedRevision ||
       !poseBinding ||
@@ -675,7 +688,7 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
           },
           pieces: source.projection.pieces.map(({ pieceId, pieceLineKey }) => {
             const pieceKey = `${source.scopeKey}:${pieceId}:${pieceLineKey}`;
-            const transform = patternTransforms[pieceKey];
+            const transform = latestTransforms.current[pieceKey];
             return {
               pieceKey,
               scopeKey: source.scopeKey,
@@ -710,11 +723,42 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
   const handlePatternTransform = useCallback(
     (pieceKey: string, transform: MeasurementSurfacePatternPieceTransformV1) => {
       if (!placementTurn || currentPlacementTurn.current !== placementTurn) return;
+      const source = arrangementCurrent.current.expected;
+      if (
+        !source?.projection.pieces.some(
+          ({ pieceId, pieceLineKey }) =>
+            pieceKey === `${source.scopeKey}:${pieceId}:${pieceLineKey}`,
+        )
+      )
+        return;
+      const current = latestTransforms.current;
+      const previous = current[pieceKey];
+      const offset = previous?.offsetM ?? ZERO_PATTERN_OFFSET_M;
+      if (
+        transform.rotationRad === (previous?.rotationRad ?? 0) &&
+        transform.offsetM.every((value, axis) => value === offset[axis])
+      )
+        return;
+      placementHistory.current.push({ pieceKey, previous });
+      setCanUndoPlacement(true);
       arrangementEdits.current += 1;
-      setPatternTransforms((current) => Object.freeze({ ...current, [pieceKey]: transform }));
+      setArrangementMessage(null);
+      publishTransforms(Object.freeze({ ...current, [pieceKey]: transform }));
     },
-    [placementTurn],
+    [placementTurn, publishTransforms],
   );
+  const undoPlacement = () => {
+    if (!placementTurn || currentPlacementTurn.current !== placementTurn) return;
+    const edit = placementHistory.current.pop();
+    if (!edit) return;
+    const next = { ...latestTransforms.current };
+    if (edit.previous) next[edit.pieceKey] = edit.previous;
+    else delete next[edit.pieceKey];
+    setCanUndoPlacement(placementHistory.current.length > 0);
+    arrangementEdits.current += 1;
+    setArrangementMessage(null);
+    publishTransforms(Object.freeze(next));
+  };
   const patternOverlayResult = useMemo(
     () =>
       patternPieceScene
@@ -876,19 +920,29 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
           offsetM={offsetPiece.transform?.offsetM ?? ZERO_PATTERN_OFFSET_M}
           onApply={(axis, valueM) => {
             if (arrangementCurrent.current.key !== arrangementKey) return;
+            const previous = latestTransforms.current[offsetPiece.pieceKey];
             const offsetM: [number, number, number] = [
-              ...(offsetPiece.transform?.offsetM ?? ZERO_PATTERN_OFFSET_M),
+              ...(previous?.offsetM ?? ZERO_PATTERN_OFFSET_M),
             ];
             offsetM[axis] = valueM;
             handlePatternTransform(offsetPiece.pieceKey, {
               offsetM,
-              rotationRad: offsetPiece.transform?.rotationRad ?? 0,
+              rotationRad: previous?.rotationRad ?? 0,
             });
           }}
         />
       ) : null}
       {onSaveMannequinArrangement && selected && patternPieceScene ? (
         <div className='flex shrink-0 items-center gap-2 px-2 py-1'>
+          <Button
+            type='button'
+            size='xs'
+            variant='secondary'
+            disabled={!placementTurn || !canUndoPlacement}
+            onClick={undoPlacement}
+          >
+            Undo placement
+          </Button>
           <Button
             type='button'
             size='xs'

@@ -18,6 +18,7 @@ import {
   MEASUREMENT_SURFACE_JOINT_MARKER_COARSE_HIT_DIAMETER_CSS_PX_V9,
   MEASUREMENT_SURFACE_JOINT_MARKER_HIT_DIAMETER_CSS_PX_V1,
   MEASUREMENT_SURFACE_PATTERN_PIECE_PROJECTED_HIT_RECEIPT_V1,
+  measurementSurfaceCommittedPatternGestureV1,
   measurementSurfaceExpandRotationPickerV9,
   measurementSurfaceJointEditorEffectiveEditModeV1,
   measurementSurfaceJointGroupsSignatureV1,
@@ -44,6 +45,29 @@ import {
   type MeasurementSurfacePatternPieceOverlayV1,
   type MeasurementSurfaceAcceptedClothV1,
 } from './measurement-watertight-surface-v1-stage';
+
+it('ignores a stationary placement and preserves untouched local components at a nonzero origin', () => {
+  const basePosition = new Vector3(1.1, 2.3, -3.2);
+  const previous = { offsetM: [0.2, 0.17, -0.23] as const, rotationRad: 0.9 };
+  const anchor = new Group();
+  anchor.position.copy(basePosition).add(new Vector3(...previous.offsetM));
+  const content = new Group();
+  content.rotation.z = previous.rotationRad;
+  const gesture = {
+    startPosition: anchor.position.clone(),
+    startRotation: previous.rotationRad,
+    binding: { basePosition, anchor, content, piece: { transform: previous } },
+  };
+  expect(anchor.position.x - basePosition.x).not.toBe(previous.offsetM[0]);
+  expect(measurementSurfaceCommittedPatternGestureV1(gesture)).toBeNull();
+  content.rotation.z = 1.1;
+  expect(measurementSurfaceCommittedPatternGestureV1(gesture)).toEqual({
+    ...previous,
+    rotationRad: 1.1,
+  });
+  anchor.position.y = basePosition.y + 0.5;
+  expect(measurementSurfaceCommittedPatternGestureV1(gesture)?.offsetM).toEqual([0.2, 0.5, -0.23]);
+});
 
 it('applies accepted-frame signed color without replacing positions, triangle groups or materials', () => {
   const geometry = new BufferGeometry();
