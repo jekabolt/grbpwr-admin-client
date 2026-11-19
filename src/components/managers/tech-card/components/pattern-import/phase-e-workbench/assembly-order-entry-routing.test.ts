@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   isPatternImportDxfPhaseEExactSavedEmptyOperationV1,
+  isPatternImportDxfPhaseEExactSavedStaleOperationV1,
   resolvePatternImportDxfPhaseEWorkbenchRequestedV1,
   routePatternImportDxfPhaseEAssemblyOrderEntryV2,
   shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1,
@@ -139,6 +140,53 @@ describe('saved Assembly Order workbench routing', () => {
       ).toBe(fallback);
     },
   );
+
+  it('opens browse-only saved Draft for uniquely owned confirmed stale seams', () => {
+    const stale = { status: 'TECH_CARD_SEAM_STATUS_CONFIRMED', stale: true };
+    const liveSeamKeys = ['seam-a', 'seam-b'];
+    const savedSeams = liveSeamKeys.map((seamKey) => ({ seamKey, ...stale }));
+    const input = {
+      liveOperationNumber: 10,
+      liveSeamKeys,
+      savedOperations: [{ operationNumber: 10, seamKeys: liveSeamKeys }],
+      savedSeams,
+    };
+    expect(isPatternImportDxfPhaseEExactSavedStaleOperationV1(input)).toBe(true);
+    expect(
+      isPatternImportDxfPhaseEExactSavedStaleOperationV1({
+        ...input,
+        liveSeamKeys: ['seam-b', 'seam-a'],
+      }),
+    ).toBe(false);
+    expect(
+      isPatternImportDxfPhaseEExactSavedStaleOperationV1({
+        ...input,
+        savedSeams: [savedSeams[0]!, { ...savedSeams[1]!, stale: false }],
+      }),
+    ).toBe(false);
+    expect(
+      isPatternImportDxfPhaseEExactSavedStaleOperationV1({
+        ...input,
+        savedSeams: [...savedSeams, savedSeams[0]!],
+      }),
+    ).toBe(false);
+    const fallback = {
+      workbenchOpen: true,
+      exactNSessionAvailable: false,
+      savedProjectionBlockerCode: 'saved-seam-not-exact',
+      selectedSeamKeys: liveSeamKeys,
+      savedOrderedSeamKeys: null,
+      exactSavedEmptyOperation: false,
+      exactSavedStaleOperation: true,
+    };
+    expect(shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1(fallback)).toBe(true);
+    expect(
+      shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
+        ...fallback,
+        exactNSessionAvailable: true,
+      }),
+    ).toBe(false);
+  });
 
   it('does not replace an exact-N owner or a genuine saved projection failure', () => {
     expect(

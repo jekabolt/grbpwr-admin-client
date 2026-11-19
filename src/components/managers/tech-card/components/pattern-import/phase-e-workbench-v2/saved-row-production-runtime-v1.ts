@@ -1,3 +1,4 @@
+import { activeDraftCadTransactionsV1 } from './draft-cad-session-v1';
 import type { NativePieceCopyMode } from 'lib/pattern-import/fabrics/native-piece-copy-review';
 import type { CopyReview, SavedCopyCurrentV1 } from './draft-cad-unlinked-piece-copy-review-v1';
 import { DXF_PRODUCT_SAVED_REPROCESS_REQUEST_V1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
@@ -364,10 +365,55 @@ function createSavedDraftSourceReaderV1(deps: SavedDraftSourceReaderDepsV1) {
       );
     };
 
+  const prepareSavedGeometryReview: NonNullable<
+    PatternImportDxfPhaseESavedRowProductionRuntimeV1['prepareSavedGeometryReview']
+  > = async (row, readCurrent) => {
+    const opening = readCurrent();
+    const command = opening && activeDraftCadTransactionsV1(opening.session)[0]?.commands[0];
+    if (
+      !opening ||
+      !sameSavedDraftRowV1(row, opening.row) ||
+      !(
+        (command?.tool === 'dart' && command.payload.savedTip) ||
+        (command?.tool === 'fish-eye' && command.payload.savedMove) ||
+        (command?.tool === 'french-curve' && command.payload.savedCurve) ||
+        command?.tool === 'cut'
+      )
+    )
+      throw new Error('Select the original saved geometry.');
+    return withSavedDraftSource(
+      row,
+      command.target.pieceId,
+      async (proof, card, readCurrentRow) => {
+        const { compileSavedDraftGeometryReviewV1 } = await import(
+          './draft-cad-saved-dart-tip-review-v1'
+        );
+        return compileSavedDraftGeometryReviewV1(
+          {
+            ...proof,
+            readCurrent: () => {
+              const current = readCurrent();
+              return !disposed &&
+                current?.session === opening.session &&
+                current.generation === opening.generation &&
+                current.sizeToken === opening.sizeToken &&
+                sameSavedDraftRowV1(row, current.row)
+                ? { ...current, card }
+                : null;
+            },
+          },
+          async () => {
+            await readCurrentRow();
+          },
+        );
+      },
+    );
+  };
   return {
     createSavedReprocessHost,
     withSavedDraftSource,
     prepareSavedRankedPointReview,
+    prepareSavedGeometryReview,
     dispose() {
       if (disposed) return;
       disposed = true;
@@ -383,6 +429,12 @@ export function createSavedRankedPointReviewRuntimeV1(
 ): SavedRankedPointReviewRuntimeV1 {
   const { prepareSavedRankedPointReview, dispose } = createSavedDraftSourceReaderV1(deps);
   return Object.freeze({ prepareSavedRankedPointReview, dispose });
+}
+
+/** Runs the same signed-row geometry Review without a selected Assembly operation. */
+export function createSavedGeometryReviewRuntimeV1(deps: SavedDraftSourceReaderDepsV1) {
+  const { prepareSavedGeometryReview, dispose } = createSavedDraftSourceReaderV1(deps);
+  return Object.freeze({ prepareSavedGeometryReview, dispose });
 }
 
 /** Injectable composition used by the production factory and focused tests. */
@@ -404,6 +456,7 @@ export function createPatternImportDxfPhaseESavedRowRuntimeV1(
     createSavedReprocessHost,
     withSavedDraftSource,
     prepareSavedRankedPointReview,
+    prepareSavedGeometryReview,
     dispose: disposeDraftSource,
   } = createSavedDraftSourceReaderV1({
     resolveCard,
@@ -413,41 +466,6 @@ export function createPatternImportDxfPhaseESavedRowRuntimeV1(
   });
   let disposed = false;
 
-  const prepareSavedGeometryReview: NonNullable<
-    PatternImportDxfPhaseESavedRowProductionRuntimeV1['prepareSavedGeometryReview']
-  > = async (row, readCurrent) => {
-    const opening = readCurrent(),
-      command = opening?.session.history[0]?.commands[0];
-    if (
-      !(
-        (command?.tool === 'dart' && command.payload.savedTip) ||
-        (command?.tool === 'fish-eye' && command.payload.savedMove) ||
-        command?.tool === 'cut'
-      )
-    )
-      throw new Error('Select the original saved geometry.');
-    return withSavedDraftSource(
-      row,
-      command.target.pieceId,
-      async (proof, card, readCurrentRow) => {
-        const { compileSavedDraftGeometryReviewV1 } = await import(
-          './draft-cad-saved-dart-tip-review-v1'
-        );
-        return compileSavedDraftGeometryReviewV1(
-          {
-            ...proof,
-            readCurrent: () => {
-              const current = readCurrent();
-              return !disposed && current ? { ...current, card } : null;
-            },
-          },
-          async () => {
-            await readCurrentRow();
-          },
-        );
-      },
-    );
-  };
   const preparationOwner = createPatternImportDxfPhaseESavedRowPreparationOwnerV1({
     createSavedReprocessHost,
     readAuthoritativeAssembly: deps.snapshot.authorityAdapter.readAuthoritativeAssembly,

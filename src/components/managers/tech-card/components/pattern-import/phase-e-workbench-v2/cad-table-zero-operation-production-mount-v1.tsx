@@ -1,3 +1,4 @@
+import { selectSavedFrenchCurveTableEditV1 } from './draft-cad-saved-french-curve-v1';
 import type { CadMannequinTableSelectionV1 } from './cad-mannequin-placement-group-v1';
 import type { common_TechCard } from 'api/proto-http/admin';
 import { isGenerated } from 'lib/fusing-dxf/generated-pattern';
@@ -111,6 +112,7 @@ import {
 
 const SavedGeneratedFusingView = lazy(() => import('./saved-generated-fusing-view'));
 const SavedRankedPointEdit = lazy(() => import('./cad-table-saved-ranked-point-edit-v1'));
+const SavedFrenchCurveEdit = lazy(() => import('./cad-table-saved-french-curve-edit-v1'));
 const SavedPointClosurePanel = lazy(() => import('./cad-table-saved-point-closure-panel-v1'));
 
 export const PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_OPERATION_PRODUCTION_MOUNT_V1 =
@@ -713,6 +715,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
   savedReviewSize,
   defaultOperationsMode = 'collapsed',
   sourceSurface,
+  savedDraftSourceOnly = false,
   pointClosureTarget,
   linkedPieceRename,
 }: Readonly<{
@@ -733,6 +736,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
   savedReviewSize?: CadWorkbenchSavedReviewSizeV1;
   defaultOperationsMode?: PatternImportDxfPhaseECadWorkbenchOperationsModeV1;
   sourceSurface?: 'explicit-native-drawn-sewing';
+  savedDraftSourceOnly?: boolean;
   pointClosureTarget?: SavedPointClosureOperationTargetV1;
   linkedPieceRename?: Required<Pick<GuardedSavedPieceRename, 'row' | 'attachment'>>;
 }>) {
@@ -841,7 +845,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
     selection.operationNumber,
   );
   const choices =
-    sourceSurface || currentReviewSize || pointClosureTarget
+    sourceSurface || currentReviewSize || pointClosureTarget || savedDraftSourceOnly
       ? explicitSavedChoices
       : sourceRoute.choices;
   const [chosenScopeKey, setChosenScopeKey] = useState('');
@@ -904,6 +908,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
   const tableSizeMatchesReview = !disabled && (!savedReviewSize || matchesReview);
   const sizeToken = selectedSize?.sizeToken ?? '';
   const useFreshSession =
+    !savedDraftSourceOnly &&
     !pointClosureTarget &&
     !currentReviewSize &&
     hasMatchingFreshPatternChoiceV1(
@@ -1094,6 +1099,45 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
     layout?.selectedPieceKeys.length === 1
       ? layout.pieces.find(({ identity }) => identity.key === layout.selectedPieceKeys[0])?.identity
       : undefined;
+  const frenchPrepared =
+    !disabled &&
+    !sourceSurface &&
+    !generatedFusing &&
+    savedAuthority &&
+    resolvedSource === 'saved' &&
+    prepared &&
+    'authoringAuthority' in prepared &&
+    !('foreignSavedDxf' in prepared && prepared.foreignSavedDxf) &&
+    isPatternImportDxfPhaseEZeroConnectPreparedAuthorityV1(prepared.authoringAuthority) &&
+    prepared.scopeKey === scopeKey &&
+    prepared.sizeToken === sizeToken &&
+    selectedSize &&
+    prepared.authoringAuthority.selectedRank.sizeId === selectedSize.sizeId
+      ? prepared
+      : null;
+  const frenchRow = frenchPrepared?.authoringAuthority?.row;
+  const frenchCurve = useMemo(
+    () =>
+      frenchPrepared && frenchRow && pickedPointPiece
+        ? selectSavedFrenchCurveTableEditV1(frenchPrepared, frenchRow, pickedPointPiece)
+        : null,
+    [frenchPrepared, frenchRow, pickedPointPiece],
+  );
+  const [frenchEdit, setFrenchEdit] = useState<Readonly<{
+    candidate: NonNullable<typeof frenchCurve>;
+    generation: number;
+    operationNumber: typeof selection.operationNumber;
+  }> | null>(null);
+  const activeFrenchEdit =
+    frenchEdit &&
+    frenchEdit.candidate === frenchCurve &&
+    frenchEdit.generation === generation &&
+    frenchEdit.operationNumber === selection.operationNumber
+      ? frenchEdit
+      : null;
+  useEffect(() => {
+    if (frenchEdit && !activeFrenchEdit) setFrenchEdit(null);
+  }, [activeFrenchEdit, frenchEdit]);
   const pointPieceIndex =
     pickedPointPiece && pointPrepared
       ? pointPrepared.catalog.pieces.findIndex(
@@ -1615,7 +1659,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
                 <span className='text-micro text-labelColor'>opening exact saved geometry…</span>
               )}
               {pressControl}
-              {pointPrepared && !activePointEdit && (
+              {pointPrepared && !activePointEdit && !activeFrenchEdit && (
                 <Button
                   type='button'
                   variant='secondary'
@@ -1631,6 +1675,22 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
                   }
                 >
                   Draft point
+                </Button>
+              )}
+              {frenchCurve && !activePointEdit && !activeFrenchEdit && (
+                <Button
+                  type='button'
+                  variant='secondary'
+                  size='xs'
+                  onClick={() =>
+                    setFrenchEdit({
+                      candidate: frenchCurve,
+                      generation,
+                      operationNumber: selection.operationNumber,
+                    })
+                  }
+                >
+                  Edit French curve
                 </Button>
               )}
             </div>
@@ -1689,7 +1749,23 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
               />
             </Suspense>
           )}
-          {!activePointEdit && prepared && tableSessionOwner && (
+          {activeFrenchEdit && savedAuthority && (
+            <Suspense
+              fallback={
+                <Text component='p' size='micro' role='status'>
+                  Opening French curve editor…
+                </Text>
+              }
+            >
+              <SavedFrenchCurveEdit
+                candidate={activeFrenchEdit.candidate}
+                generation={activeFrenchEdit.generation}
+                authority={savedAuthority}
+                onClose={() => setFrenchEdit(null)}
+              />
+            </Suspense>
+          )}
+          {!activePointEdit && !activeFrenchEdit && prepared && tableSessionOwner && (
             <PatternImportDxfPhaseECadTableZeroConnectCanvasV1
               catalog={prepared.catalog}
               projection={prepared.projection}
@@ -1791,6 +1867,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
   operationIssueCount,
   defaultOperationsMode,
   sourceSurface,
+  savedDraftSourceOnly,
   pointClosureTarget,
   linkedPieceRename,
 }: Readonly<{
@@ -1804,6 +1881,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
   operationIssueCount?: number;
   defaultOperationsMode?: PatternImportDxfPhaseECadWorkbenchOperationsModeV1;
   sourceSurface?: 'explicit-native-drawn-sewing';
+  savedDraftSourceOnly?: boolean;
   pointClosureTarget?: SavedPointClosureOperationTargetV1;
   linkedPieceRename?: Required<Pick<GuardedSavedPieceRename, 'row' | 'attachment'>>;
 }>) {
@@ -1843,6 +1921,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
       savedReviewSize={physicalHost?.savedReviewSize}
       defaultOperationsMode={defaultOperationsMode}
       sourceSurface={sourceSurface}
+      savedDraftSourceOnly={savedDraftSourceOnly}
       pointClosureTarget={pointClosureTarget}
       linkedPieceRename={linkedPieceRename}
       mannequin={({

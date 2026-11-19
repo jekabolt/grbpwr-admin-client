@@ -22,7 +22,10 @@ export function canMoveSavedDartTipV1(previous: PtMm, next: PtMm) {
   );
 }
 
-function selectSavedDartPiece(input: CompileInput, target: PatternImportDxfPhaseEDraftCadTargetV1) {
+export function selectSavedDraftInternalPathPieceV1(
+  input: CompileInput,
+  target: PatternImportDxfPhaseEDraftCadTargetV1,
+) {
   const { scopeKey, sizeToken } = input.selection.selection;
   const scope = one(input.compileSource.scopes.filter((s) => s.target.scopeKey === scopeKey));
   const piece = one(
@@ -42,7 +45,7 @@ export function selectSavedDartTipV1(
   input: CompileInput,
   target: PatternImportDxfPhaseEDraftCadTargetV1,
 ) {
-  const selected = selectSavedDartPiece(input, target);
+  const selected = selectSavedDraftInternalPathPieceV1(input, target);
   if (!selected) return null;
   const { scopeKey, sizeToken, size, projected } = selected;
   const dart = one(size.internal.filter((p) => p.label === 'draft-cad:dart'));
@@ -149,7 +152,7 @@ export function selectSavedFishEyeMoveV1(
   input: CompileInput,
   target: PatternImportDxfPhaseEDraftCadTargetV1,
 ) {
-  const selected = selectSavedDartPiece(input, target);
+  const selected = selectSavedDraftInternalPathPieceV1(input, target);
   if (!selected) return null;
   const { scopeKey, sizeToken, size } = selected;
   const dart = one(size.internal.filter((feature) => feature.label === 'draft-cad:fish-eye'));

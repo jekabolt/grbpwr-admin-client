@@ -1535,11 +1535,15 @@ export type FoldFeature = FeatureBase & {
   b: PtMm;
   label?: string; // "СГИБ", "Stoffbruch", "fold"
 };
+export type AuthoredQuadraticControls = readonly [PtMm, PtMm, PtMm];
+
 export type InternalFeature = FeatureBase & {
   kind: 'internal';
   pts: PtMm[];
   closed: boolean;
   label?: string; // "dart", "pocket placement"
+  /** Exact authored start, control and end, in the same frame as pts. */
+  authoredQuadratic?: AuthoredQuadraticControls;
   /** GRADE P1: not drawn in this size — placed by the operator's "in every size" at its graded place */
   graded?: { from: string[]; answered?: boolean };
 };
@@ -2678,6 +2682,8 @@ export type AuthoredInternalLabel =
   | 'draft-cad:fish-eye'
   | 'draft-cad:cross';
 
+export type AuthoredQuadraticGrid = [number, number, number, number, number, number];
+
 export type ManifestAuthoredInternalPath = {
   /** Zero-based order among the block's native layer-8 paths. */
   index: number;
@@ -2685,6 +2691,8 @@ export type ManifestAuthoredInternalPath = {
   closed: boolean;
   /** Alternating coordinates on the writer's 0.000001 mm grid, in block coordinates. */
   vertices: number[];
+  /** Optional start, control and end on the same grid as the native sampled vertices. */
+  quadratic?: AuthoredQuadraticGrid;
 };
 
 export type ManifestAuthoredTextMark = {

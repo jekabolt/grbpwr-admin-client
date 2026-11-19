@@ -3,15 +3,21 @@
 // 10-CLO-DXF-FORMAT §2 (dialect, cut-line mode, grain arrow, POINT notches, notch twins, labels,
 // sizes, pairs, ungraded layer 1).
 
-import { authoredInternalVertices } from '../../manifest/authored-internal';
+import {
+  authoredInternalVertices,
+  decodeAuthoredQuadratic,
+  sampleAuthoredQuadratic,
+} from '../../manifest/authored-internal';
 import { AUTHORED_NOTCH_STROKES } from '../../manifest/authored-notches';
 import { AUTHORED_TEXT_LAYER } from '../../manifest/authored-text';
+import { isNativeStraightL8Polyline } from './extract';
 import { readAuthoredTextMarks } from './authored-text';
 import { contourSigProblem } from '../../manifest/contour-sig';
 import type {
   AllowanceDecision,
   AuthoredInternalLabel,
   AuthoredPointMark,
+  AuthoredQuadraticControls,
   IRPath,
   IRText,
   PathId,
@@ -601,12 +607,13 @@ function blockPiece(
   const by = (k: LayerKind) => paths.filter((p) => kindOf(p) === k);
   const authored = group.block ? read.meta.authoredInternalByBlock?.get(group.block) : undefined;
   const authoredInternalLabels = new Map<PathId, AuthoredInternalLabel>();
+  const authoredQuadraticByPath = new Map<PathId, AuthoredQuadraticControls>();
   if (authored) {
     const { a, b, c, d, e, f } = group.transform;
     if (read.meta.units.mmPerUnit !== 1 || a !== 1 || b !== 0 || c !== 0 || d !== 1)
       throw new Error(`Typed CAD lines in ${group.block} require their original millimetre frame.`);
     const layerEight = paths.filter((path) => layerOfPath(path) === '8');
-    for (const { index, label, closed, vertices } of authored) {
+    for (const { index, label, closed, vertices, quadratic } of authored) {
       const path = layerEight[index];
       const coords = path ? authoredInternalVertices(path.pts, { x: e, y: f }) : [];
       if (
@@ -618,6 +625,20 @@ function blockPiece(
         coords.some((value, i) => value !== vertices[i])
       )
         throw new Error(`The saved layer-8 path for ${label} in ${group.block} changed.`);
+      if (quadratic) {
+        const sampled = sampleAuthoredQuadratic(quadratic);
+        const sampledCoords = sampled && authoredInternalVertices(sampled);
+        if (
+          !isNativeStraightL8Polyline(path) ||
+          !sampledCoords ||
+          sampledCoords.length !== vertices.length ||
+          sampledCoords.some((value, i) => value !== vertices[i])
+        )
+          throw new Error(
+            `The saved French curve controls in ${group.block} do not reproduce the native layer-8 path.`,
+          );
+        authoredQuadraticByPath.set(path.id, decodeAuthoredQuadratic(quadratic, { x: e, y: f }));
+      }
       // Authored marks have a checked native role before the generic seam and drill heuristics.
       authoredInternalLabels.set(path.id, label);
       roles[path.id] = 'internal';
@@ -1007,6 +1028,7 @@ function blockPiece(
     drills,
     roles,
     ...(authoredInternalLabels.size ? { authoredInternalLabels } : {}),
+    ...(authoredQuadraticByPath.size ? { authoredQuadraticByPath } : {}),
     texts: texts.map(({ id }) => id),
     ...(textMarks.length ? { textMarks } : {}),
     ...(pointMarks.length ? { pointMarks } : {}),

@@ -5,7 +5,10 @@ import {
   DXF_SOURCE_NATIVE_STRAIGHT_EDGE_SELECTED_PATHS_REQUEST_V1,
   projectDxfSourceNativeStraightEdgeSelectedPathsV1,
 } from 'lib/pattern-import/dxf-source-native-straight-edge-authority-v1';
-import { authoredInternalVertices } from 'lib/pattern-import/manifest/authored-internal';
+import {
+  authoredInternalVertices,
+  decodeAuthoredQuadratic,
+} from 'lib/pattern-import/manifest/authored-internal';
 import type { ConversionManifest, WriteJob } from 'lib/pattern-import/types';
 import { createPatternImportDxfPhaseEDraftCadCompileSourceV1 } from './draft-cad-compile-source-v1';
 import {
@@ -17,7 +20,7 @@ import {
   sameSavedDraftRowV1,
   selectMatchingSavedDraftV1,
 } from './draft-cad-saved-source-selection-v1';
-import { isRecordedDraftCadSessionV1 } from './draft-cad-session-v1';
+import { activeDraftCadTransactionsV1, isRecordedDraftCadSessionV1 } from './draft-cad-session-v1';
 import { registerSavedDartTipFileV1 } from './draft-cad-saved-dart-tip-file-v1';
 import {
   canMoveSavedDartTipV1,
@@ -27,6 +30,8 @@ import {
   sameDartVertices,
 } from './draft-cad-saved-dart-tip-v1';
 
+import { selectSavedFrenchCurveV1 } from './draft-cad-saved-french-curve-v1';
+
 const prepared = new WeakSet<CompileInput>();
 export const hasSavedDraftGeometrySourceV1 = (input: CompileInput) => prepared.has(input);
 function requireSavedEdit(ok: unknown, detail: string): asserts ok {
@@ -34,7 +39,7 @@ function requireSavedEdit(ok: unknown, detail: string): asserts ok {
 }
 const one = <T>(items: readonly T[]) => (items.length === 1 ? items[0] : undefined);
 type Review = {
-  parallel: boolean;
+  kind: 'parallel opening' | 'saved dart' | 'saved French curve';
   current: () => boolean;
   verifyCurrentRow: () => Promise<void>;
   manifest: ConversionManifest;
@@ -70,7 +75,7 @@ function geometry(job: WriteJob) {
         size.fold && [size.fold.a, size.fold.b],
         size.notches.map((n) => [n.at, n.seg, n.depthMm, n.authoredGroup]),
         size.drills.map((d) => [d.at, d.form, d.sizeMm]),
-        size.internal.map((p) => [p.label, p.closed, p.pts]),
+        size.internal.map((p) => [p.label, p.closed, p.pts, p.authoredQuadratic]),
         size.pointMarks ?? [],
         size.textMarks ?? [],
       ]),
@@ -127,7 +132,7 @@ export async function compileSavedDraftGeometryReviewV1(
   );
   const { session, generation, sizeToken } = opening,
     row = structuredClone(opening.row);
-  const commands = session.history.slice(0, session.cursor).flatMap((tx) => tx.commands);
+  const commands = activeDraftCadTransactionsV1(session).flatMap((tx) => tx.commands);
   const command = commands[0],
     last = commands[1];
   const parallel =
@@ -141,9 +146,10 @@ export async function compileSavedDraftGeometryReviewV1(
   const savedTip = command?.tool === 'dart' ? command.payload.savedTip : undefined;
   const savedMove = command?.tool === 'fish-eye' ? command.payload.savedMove : undefined;
   const savedDart = savedTip ?? savedMove;
+  const savedCurve = command?.tool === 'french-curve' ? command.payload.savedCurve : undefined;
   requireSavedEdit(
-    command && (parallel || (commands.length === 1 && savedDart)),
-    'Record the saved dart edit or a Cut and parallel opening.',
+    command && (parallel || (commands.length === 1 && (savedDart || savedCurve))),
+    'Record a saved curve, dart or parallel opening edit.',
   );
   const { pieceId, pieceLineKey } = command.target;
   let affectedBlockNames = [pieceId + '_' + sizeToken];
@@ -176,7 +182,9 @@ export async function compileSavedDraftGeometryReviewV1(
   };
   requireSavedEdit(
     current() && session.source.phaseD.sourceSha256 === row.sha256,
-    'The saved dart or opening row, size or piece changed.',
+    savedCurve
+      ? 'The saved French curve row, size or piece changed.'
+      : 'The saved dart or opening row, size or piece changed.',
   );
   const source = consumeDxfProductSavedNativeCompilerSourceV1(sourceOwner, sourceRequest);
   requireSavedEdit(
@@ -206,6 +214,72 @@ export async function compileSavedDraftGeometryReviewV1(
       .map((b) => b.block);
     requireSavedEdit(affectedBlockNames.length && current(), 'A graded piece alias changed.');
     await checkSavedParallelSpreadSourceV1(source.value, pieceId);
+  } else if (savedCurve && command.tool === 'french-curve') {
+    const candidate = selectSavedFrenchCurveV1(compileInput, command.target);
+    const sourcePathId = savedCurve.sourcePathId;
+    requireSavedEdit(
+      candidate &&
+        savedCurve.pieceId === pieceId &&
+        savedCurve.pieceLineKey === pieceLineKey &&
+        savedCurve.sourceSha256 === row.sha256 &&
+        savedCurve.scopeKey === row.scopeKey &&
+        savedCurve.sizeToken === sizeToken &&
+        savedCurve.sizeId === candidate.savedCurve.sizeId &&
+        savedCurve.rank === candidate.savedCurve.rank &&
+        savedCurve.index === candidate.savedCurve.index &&
+        sourcePathId === candidate.savedCurve.sourcePathId &&
+        sameDartVertices(candidate.controlPointsMm, savedCurve.original) &&
+        !sameDartVertices(candidate.controlPointsMm, command.payload.controlPointsMm),
+      'The saved French curve or its selected source changed.',
+    );
+    const scope = one(draft.scopes.filter((s) => s.target.scopeKey === row.scopeKey));
+    const block = one(
+      scope?.manifest.blocks.filter(
+        (b) =>
+          b.identity === pieceId && b.sizeToken === sizeToken && b.sizeId === savedCurve.sizeId,
+      ) ?? [],
+    );
+    const { read } = nativeRead;
+    const group =
+      block &&
+      one(
+        read.meta.groups.filter(
+          (g) => g.kind === 'insert' && g.block === block.block && g.paths.includes(sourcePathId),
+        ),
+      );
+    const marker =
+      block &&
+      one(
+        read.meta.authoredInternalByBlock
+          ?.get(block.block)
+          ?.filter((m) => m.label === 'draft-cad:french-curve') ?? [],
+      );
+    const page = read.doc.pages[0];
+    requireSavedEdit(
+      block && group && page && marker?.quadratic && !marker.closed,
+      'The original analytical French curve is unavailable in the signed DXF.',
+    );
+    const paths = new Map(page.paths.map((path) => [path.id, path]));
+    const native = group.paths
+      .map((id) => paths.get(id))
+      .filter((path) => path && page.styles[path.style]?.layer === '8')[marker.index];
+    const { a, b, c, d, e, f } = group.transform;
+    requireSavedEdit(
+      current() &&
+        a === 1 &&
+        b === 0 &&
+        c === 0 &&
+        d === 1 &&
+        native?.id === sourcePathId &&
+        native.src.block === block.block &&
+        !native.closed &&
+        sameDartVertices(native.pts, candidate.pointsMm) &&
+        sameDartVertices(
+          decodeAuthoredQuadratic(marker.quadratic, { x: e, y: f }),
+          candidate.controlPointsMm,
+        ),
+      'The native French curve no longer matches its signed layer-8 path and controls.',
+    );
   } else {
     requireSavedEdit(
       savedDart &&
@@ -363,19 +437,22 @@ export async function compileSavedDraftGeometryReviewV1(
   );
   requireSavedEdit(current(), 'The saved geometry changed before compiling.');
   prepared.add(compileInput);
-  const result = compilePatternImportDxfPhaseEDraftCadGeometryV1(compileInput);
-  prepared.delete(compileInput);
-  if (result.ok)
-    artifacts.set(result.artifact, {
-      current,
-      parallel,
-      verifyCurrentRow,
-      manifest: result.artifact.manifest,
-      geometry: (parallel ? openingGeometry : geometry)(result.artifact.compiledJob),
-      cardId: row.techCardId,
-      scopeKey: row.scopeKey,
-    });
-  return result;
+  try {
+    const result = compilePatternImportDxfPhaseEDraftCadGeometryV1(compileInput);
+    if (result.ok)
+      artifacts.set(result.artifact, {
+        current,
+        kind: parallel ? 'parallel opening' : savedCurve ? 'saved French curve' : 'saved dart',
+        verifyCurrentRow,
+        manifest: result.artifact.manifest,
+        geometry: (parallel ? openingGeometry : geometry)(result.artifact.compiledJob),
+        cardId: row.techCardId,
+        scopeKey: row.scopeKey,
+      });
+    return result;
+  } finally {
+    prepared.delete(compileInput);
+  }
 }
 
 export const compileSavedDartTipReviewV1 = compileSavedDraftGeometryReviewV1;
@@ -393,11 +470,12 @@ export function openSavedDraftGeometryFileV1(artifact: Artifact, name: string) {
           scope.manifest.gate?.passed &&
           markers(scope.manifest) === markers(review.manifest) &&
           scope.writerReplay &&
-          (review.parallel ? openingGeometry : geometry)(scope.writerReplay.job) ===
-            review.geometry,
-        review.parallel
-          ? 'The reviewed parallel opening or another size changed.'
-          : 'The reviewed native dart paths or size blocks changed.',
+          (review.kind === 'parallel opening' ? openingGeometry : geometry)(
+            scope.writerReplay.job,
+          ) === review.geometry,
+        review.kind === 'saved dart'
+          ? 'The reviewed native dart paths or size blocks changed.'
+          : `The reviewed ${review.kind} or another size changed.`,
       );
       await review.verifyCurrentRow();
       requireSavedEdit(
@@ -405,7 +483,7 @@ export function openSavedDraftGeometryFileV1(artifact: Artifact, name: string) {
         'The saved geometry row changed before Apply.',
       );
     },
-    review.parallel ? 'parallel opening' : 'saved dart',
+    review.kind,
   );
   return file;
 }

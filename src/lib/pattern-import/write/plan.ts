@@ -19,9 +19,16 @@
 //   • every open 2-point L8 line (internal or fold) gets a midpoint: the card's parser takes any
 //     2-point open chain ≥ 1 cm as a grain candidate (pieces.ts), and a fold line won that way (K1 d).
 
-import { isAuthoredInternalLabel } from '../manifest/authored-internal';
+import {
+  authoredQuadraticGrid,
+  decodeAuthoredQuadratic,
+  isAuthoredInternalLabel,
+  mapAuthoredQuadratic,
+  sampleAuthoredQuadratic,
+} from '../manifest/authored-internal';
 import type {
   AuthoredInternalLabel,
+  AuthoredQuadraticGrid,
   Affine,
   DraftScopeTarget,
   DrillFeature,
@@ -107,7 +114,12 @@ export type PlannedBlock = {
   cutLoops: PtMm[][];
   seam: PtMm[] | null;
   /** L8 lines: internal features, then the fold line. Open 2-pt lines already densified. */
-  internal: { pts: PtMm[]; closed: boolean; authoredLabel?: AuthoredInternalLabel }[];
+  internal: {
+    pts: PtMm[];
+    closed: boolean;
+    authoredLabel?: AuthoredInternalLabel;
+    quadratic?: AuthoredQuadraticGrid;
+  }[];
   /** How many of `internal` are the fold line (0/1) — the manifest counts both as internal. */
   foldLines: number;
   /**
@@ -169,7 +181,13 @@ function transformSize(s: PieceSizeSpec, t: Affine): PieceSizeSpec {
     seg: [P(n.seg[0]), P(n.seg[1])],
   }));
   const drills: DrillFeature[] = s.drills.map((d) => ({ ...d, at: P(d.at) }));
-  const internal: InternalFeature[] = s.internal.map((f) => ({ ...f, pts: mapPts(t, f.pts) }));
+  const internal: InternalFeature[] = s.internal.map((f) => ({
+    ...f,
+    pts: mapPts(t, f.pts),
+    ...(f.authoredQuadratic
+      ? { authoredQuadratic: mapAuthoredQuadratic(f.authoredQuadratic, P) }
+      : {}),
+  }));
   const fold: FoldFeature | null = s.fold ? { ...s.fold, a: P(s.fold.a), b: P(s.fold.b) } : null;
   const cut = mapPts(t, s.cut);
   return {
@@ -473,16 +491,27 @@ export function planBlocks(
           ? [...s.notches, ...slits]
           : s.notches;
       if (!seam) warnings.push(`${who}: no seam line — layer 14 omitted (the gate will block)`);
-      const internal = s.internal.map((f) => ({
-        pts:
-          f.label === 'draft-cad:dart' || f.label === 'draft-cad:fish-eye'
-            ? f.pts
-            : f.closed
-              ? simplify(f.pts, true, WRITE_SIMPLIFY_MM)
-              : densifyOpen2(simplify(f.pts, false, WRITE_SIMPLIFY_MM)),
-        closed: f.closed,
-        ...(isAuthoredInternalLabel(f.label) ? { authoredLabel: f.label } : {}),
-      }));
+      const internal: PlannedBlock['internal'] = s.internal.map((f) => {
+        if (f.authoredQuadratic) {
+          const quadratic = authoredQuadraticGrid(f.authoredQuadratic);
+          const pts = quadratic && sampleAuthoredQuadratic(quadratic);
+          if (f.label !== 'draft-cad:french-curve' || f.closed || !quadratic || !pts)
+            throw new Error(
+              `${who}: exact French curve cannot be represented as an open native path.`,
+            );
+          return { pts, closed: false, authoredLabel: f.label, quadratic };
+        }
+        return {
+          pts:
+            f.label === 'draft-cad:dart' || f.label === 'draft-cad:fish-eye'
+              ? f.pts
+              : f.closed
+                ? simplify(f.pts, true, WRITE_SIMPLIFY_MM)
+                : densifyOpen2(simplify(f.pts, false, WRITE_SIMPLIFY_MM)),
+          closed: f.closed,
+          ...(isAuthoredInternalLabel(f.label) ? { authoredLabel: f.label } : {}),
+        };
+      });
       let foldLines = 0;
       if (s.fold) {
         // L13: a half on fold (owner decision 19.10 a) is meant so — its fold line IS the mirror line
@@ -509,6 +538,16 @@ export function planBlocks(
         cutLoops,
         seam,
         notches: sNotches,
+        internal: s.internal.map((feature, index) => {
+          const line = internal[index]!;
+          return line.quadratic
+            ? {
+                ...feature,
+                pts: line.pts,
+                authoredQuadratic: decodeAuthoredQuadratic(line.quadratic),
+              }
+            : feature;
+        }),
         bbox: cutBox({ ...s, cut, cutLoops }),
         areaMm2: cutArea(cut, cutLoops),
       };

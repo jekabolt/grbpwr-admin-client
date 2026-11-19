@@ -242,6 +242,8 @@ const MAX_STRAIGHT_EDGE_COORDINATE_ABS_MM = 1_000_000_000;
 
 // The ordinary decoder owns these path objects. Only all-straight, unresampled source intervals qualify.
 const nativeCutAndFoldPolylines = new WeakSet<IRPath>();
+const nativeStraightL8Polylines = new WeakSet<IRPath>();
+export const isNativeStraightL8Polyline = (path: IRPath) => nativeStraightL8Polylines.has(path);
 export const isNativeCutOrFoldPolyline = (path: IRPath) => nativeCutAndFoldPolylines.has(path);
 
 class Builder {
@@ -786,7 +788,7 @@ class Builder {
     });
     if (
       this.productManifestPresent &&
-      (e.layer === '1' || e.layer === '6') &&
+      (e.layer === '1' || e.layer === '6' || e.layer === '8') &&
       (e.type === 'POLYLINE' || e.type === 'LWPOLYLINE') &&
       em.straightEdgeFacts?.length === (em.closed ? em.pts.length : em.pts.length - 1) &&
       em.straightEdgeFacts.every(
@@ -796,7 +798,8 @@ class Builder {
           f.endPointIndex === (i + 1) % em.pts.length,
       )
     ) {
-      nativeCutAndFoldPolylines.add(this.paths[id]!);
+      if (e.layer === '8') nativeStraightL8Polylines.add(this.paths[id]!);
+      else nativeCutAndFoldPolylines.add(this.paths[id]!);
     }
     this.pathEntity.push(e.type);
     const provenance = this.capturePathProvenance(id, e, ctx, em);

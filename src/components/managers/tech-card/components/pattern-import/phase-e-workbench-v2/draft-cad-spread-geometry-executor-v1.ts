@@ -1,3 +1,4 @@
+import { mapAuthoredQuadratic } from 'lib/pattern-import/manifest/authored-internal';
 import type { PieceSizeSpec, PieceSpec, PtMm, WriteJob } from 'lib/pattern-import/types';
 
 import { executePatternImportDxfPhaseEDraftCadCutGeometryV1 } from './draft-cad-cut-geometry-executor-v1';
@@ -221,6 +222,9 @@ function rotateSize(size: PieceSizeSpec, pivot: PtMm, radians: number): PieceSiz
   output.internal = size.internal.map((feature) => ({
     ...structuredClone(feature),
     pts: feature.pts.map(point),
+    ...(feature.authoredQuadratic
+      ? { authoredQuadratic: mapAuthoredQuadratic(feature.authoredQuadratic, point) }
+      : {}),
   }));
   output.grain = size.grain
     ? {

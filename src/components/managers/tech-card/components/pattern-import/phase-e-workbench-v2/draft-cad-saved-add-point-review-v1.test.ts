@@ -1,5 +1,17 @@
-import { cancelSavedDartTipReviewV1 } from './draft-cad-saved-dart-tip-file-v1';
-import { compileSavedDartTipReviewV1 } from './draft-cad-saved-dart-tip-review-v1';
+import { authoredInternalVertices } from 'lib/pattern-import/manifest/authored-internal';
+import {
+  recordSavedFrenchCurveHandleV1,
+  selectSavedFrenchCurveTableEditV1,
+  selectSavedFrenchCurveV1,
+} from './draft-cad-saved-french-curve-v1';
+import {
+  cancelSavedDartTipReviewV1,
+  verifySavedDartTipApplyV1,
+} from './draft-cad-saved-dart-tip-file-v1';
+import {
+  compileSavedDartTipReviewV1,
+  openSavedDraftGeometryFileV1,
+} from './draft-cad-saved-dart-tip-review-v1';
 import {
   recordSavedDartTipV1,
   recordSavedFishEyeMoveV1,
@@ -45,6 +57,7 @@ async function fixture(
   nativeDarts: boolean | 'orphan' | 'ambiguous' | 'ambiguous-fish-eye' = false,
   sourceDialect: 'r12' | 'r2000' = 'r12',
   spreadHoles = false,
+  frenchCurve: 'exact' | 'legacy' | 'ambiguous' | undefined = undefined,
 ) {
   const seed = await createSavedThreePanelFixtureV1(2);
   if (stable) {
@@ -167,6 +180,27 @@ async function fixture(
           size.internal.push(structuredClone(size.internal.find((p) => p.label === label)!));
         }
       }
+  }
+  if (frenchCurve) {
+    const piece = seed.job.pieces[0]!;
+    const size = piece.sizes.find((s) => s.sizeToken === 'M')!;
+    const { minX, minY } = size.bbox;
+    const controls = [
+      { x: minX + 22, y: minY + 17 },
+      { x: minX + 38, y: minY + 35 },
+      { x: minX + 54, y: minY + 17 },
+    ] as const;
+    size.internal.push({
+      kind: 'internal',
+      label: 'draft-cad:french-curve',
+      closed: false,
+      pts: [controls[0], { x: minX + 38, y: minY + 26 }, controls[2]],
+      ...(frenchCurve === 'legacy' ? {} : { authoredQuadratic: controls }),
+      origin: 'operator',
+      confidence: 1,
+      ranges: [],
+    });
+    if (frenchCurve === 'ambiguous') size.internal.push(structuredClone(size.internal[0]!));
   }
   seed.written = writeDxfDetailed(seed.job, { now: () => new Date('2026-11-17T00:00:00.000Z') });
   if (fiveRanks) {
@@ -1705,6 +1739,12 @@ it.each(['internal-line', 'pattern-line', 'french-curve', 'guideline', 'cross'] 
           )?.sizes[0]?.internal.find((candidate) => candidate.label === label);
           expect(reopenedFeature?.pts).toHaveLength(feature!.pts.length);
           expect(reopenedFeature?.closed).toBe(false);
+          expect(first.authoredInternal?.[0]?.quadratic).toHaveLength(6);
+          expect(second.authoredInternal?.[0]?.quadratic).toEqual(
+            first.authoredInternal?.[0]?.quadratic,
+          );
+          expect(reopenedFeature?.authoredQuadratic).toEqual(feature?.authoredQuadratic);
+          expect(reopenedFeature?.authoredQuadratic).toHaveLength(3);
         } finally {
           reopened.dispose();
         }
@@ -2870,4 +2910,239 @@ it.each(['orphan', 'ambiguous'] as const)(
 it.each(['r12', 'r2000'] as const)(
   'applies a parallel opening to the saved %s piece and keeps ten graded blocks with their holes',
   (dialect) => checkNativeOutlinePointEdit('parallel-spread', true, dialect),
+);
+
+it.each(['r12', 'r2000'] as const)(
+  'reopens and moves exact %s M French-curve handles through manual Review, preserving the other ranks',
+  async (dialect) => {
+    const { parseDxf } = await import('lib/nesting/dxf/parse');
+    const { entityToChain } = await import('lib/nesting/dxf/entities');
+    const { tokenize } = await import('lib/pattern-import/adapters/dxf/tags');
+    const { buildAst } = await import('lib/pattern-import/adapters/dxf/ast');
+    vi.stubGlobal('Worker', InProcessTransport);
+    const f = await fixture(true, false, true, false, dialect, false, 'exact');
+    const worker = new ImportWorkerClient();
+    try {
+      const input = { ...f.compileInput, session: f.initial };
+      const piece = input.projection.pieces.find(({ pieceId }) => pieceId === 'FP')!;
+      const fallback = selectSavedFrenchCurveTableEditV1(
+        {
+          catalog: f.initial.source.catalog,
+          projection: input.projection,
+          selection: input.selection,
+          draftCadCompileSource: input.compileSource,
+        },
+        f.current.row,
+        piece,
+      );
+      expect(fallback?.row).toEqual(f.current.row);
+      expect(fallback?.curve).toEqual(selectSavedFrenchCurveV1(input, piece));
+      const selected = selectSavedFrenchCurveV1(input, piece);
+      if (!selected) throw Error('The unique saved French curve was not found.');
+      expect(selected.controlPointsMm).toHaveLength(3);
+      expect(selected.pointsMm.length).toBeGreaterThan(3);
+      expect(
+        selectSavedFrenchCurveV1(input, input.projection.pieces.find((p) => p.pieceId === 'BP')!),
+      ).toBeNull();
+      const center = selected.controlPointsMm[1];
+      const moved = { x: center.x + 2, y: center.y + 3 };
+      const first = recordSavedFrenchCurveHandleV1(input, piece, 1, moved);
+      if (!first?.ok) throw Error('The signed fixture French curve was not admitted.');
+      const command = first.session.history[0]!.commands[0]!;
+      if (command.tool !== 'french-curve') throw Error('Unexpected edit.');
+      const nextStart = { ...selected.controlPointsMm[0], y: selected.controlPointsMm[0].y + 1 };
+      const second = recordDraftCadFrenchCurveHandleV1(first.session, {
+        transactionId: 'move-saved-start',
+        commandId: command.commandId,
+        target: command.target,
+        expected: command.payload.controlPointsMm,
+        handle: 0,
+        pointMm: nextStart,
+      });
+      if (!second.ok) throw Error(second.blocker.detail);
+      const undone = undoPatternImportDxfPhaseEDraftCadSessionV1(second.session);
+      if (!undone.ok) throw Error(undone.blocker.detail);
+      const clean = undoPatternImportDxfPhaseEDraftCadSessionV1(undone.session);
+      if (!clean.ok) throw Error(clean.blocker.detail);
+      expect(clean.session.cursor).toBe(0);
+      expect(selectSavedFrenchCurveV1({ ...input, session: clean.session }, piece)).toEqual(
+        selected,
+      );
+      const redone = redoPatternImportDxfPhaseEDraftCadSessionV1(undone.session);
+      if (!redone.ok) throw Error(redone.blocker.detail);
+      const expectedControls = [nextStart, moved, selected.controlPointsMm[2]];
+      expect(activeDraftCadTransactionsV1(undone.session)[0]!.commands).toEqual([command]);
+      expect(activeDraftCadTransactionsV1(redone.session)[0]!.commands).toMatchObject([
+        { payload: { controlPointsMm: expectedControls } },
+      ]);
+      f.current.session = redone.session;
+      const edited = { ...input, session: redone.session };
+      const unverified = await compileDraftForOrdinaryReviewV1(edited);
+      expect(unverified).toMatchObject({
+        ok: false,
+        blockers: [{ code: 'source-binding-mismatch' }],
+      });
+
+      const verify = vi.fn(async () => {});
+      const { createSavedGeometryReviewRuntimeV1 } = await import(
+        './saved-row-production-runtime-v1'
+      );
+      const rowOnlyReads = vi.fn(async () => ({ row: f.seed.row, downloadUrl: f.seed.row.url }));
+      const runtime = createSavedGeometryReviewRuntimeV1({
+        resolveCard: async () => ({
+          card: f.seed.card,
+          cardLockVersion: f.seed.row.cardLockVersion,
+        }),
+        readAuthoritativeRow: rowOnlyReads,
+        fetch: (async () =>
+          new Response(f.seed.bytes.slice(), {
+            headers: { 'content-length': String(f.seed.bytes.length) },
+          })) as typeof fetch,
+      });
+      try {
+        const rowResult = await runtime.prepareSavedGeometryReview(f.current.row, () => f.current);
+        if (!rowResult.ok) throw Error(JSON.stringify(rowResult.blockers));
+        expect(rowResult.artifact.compiledFeatures).toMatchObject([
+          { output: 'moved-french-curve' },
+        ]);
+        expect(rowOnlyReads.mock.calls.length).toBeGreaterThanOrEqual(2);
+      } finally {
+        runtime.dispose();
+      }
+      const compiled = await compileDraftForOrdinaryReviewV1(edited, undefined, undefined, () =>
+        compileSavedDartTipReviewV1(f.request, verify),
+      );
+      if (!compiled.ok) throw Error(JSON.stringify(compiled.blockers));
+      expect(compiled.artifact.compiledFeatures).toMatchObject([
+        { output: 'moved-french-curve', sizeToken: 'M', pieceId: 'FP' },
+      ]);
+      const file = openSavedDraftGeometryFileV1(compiled.artifact, 'edited-exact-french.dxf');
+      const reviewed = await draftThroughWizardStages(
+        file,
+        f.current.card,
+        worker,
+        undefined,
+        undefined,
+        dialect,
+      );
+      await expect(verifySavedDartTipApplyV1(reviewed, [file], true, () => true)).rejects.toThrow(
+        'Apply',
+      );
+      await verifySavedDartTipApplyV1(reviewed, [file], false, () => true);
+      expect(verify).toHaveBeenCalledTimes(2);
+      const scope = reviewed.scopes[0]!;
+      const oldBlocks = f.source.native.draft.scopes[0]!.manifest.blocks;
+      const restOfGarment = (blocks: typeof oldBlocks) =>
+        blocks
+          .filter(({ identity, sizeToken }) => identity !== 'FP' || sizeToken !== 'M')
+          .map(({ block, contour, authoredInternal }) => [block, contour, authoredInternal]);
+      expect(restOfGarment(scope.manifest.blocks)).toEqual(restOfGarment(oldBlocks));
+      const block = scope.manifest.blocks.find(
+        ({ identity, sizeToken }) => identity === 'FP' && sizeToken === 'M',
+      )!;
+      expect(block.authoredInternal).toHaveLength(1);
+      const previous = oldBlocks.find(({ block: name }) => name === block.block)!;
+      const oldControls = previous.authoredInternal![0]!.quadratic!;
+      expect(block.authoredInternal?.[0]?.quadratic).toEqual([
+        oldControls[0],
+        oldControls[1] + 1_000_000,
+        oldControls[2] + 2_000_000,
+        oldControls[3] + 3_000_000,
+        oldControls[4],
+        oldControls[5],
+      ]);
+      const raw = parseDxf(new TextEncoder().encode(scope.dxfText).buffer, 'mm');
+      const native = raw.dxf.blocks[block.block]!.entities.filter(
+        ({ type, layer }) => layer === '8' && (type === 'POLYLINE' || type === 'LWPOLYLINE'),
+      );
+      expect(native).toHaveLength(1);
+      expect(authoredInternalVertices(entityToChain(native[0]!, 1, 0.001)!.pts)).toEqual(
+        block.authoredInternal![0]!.vertices,
+      );
+      const bytes = new TextEncoder().encode(scope.dxfText);
+      const row = {
+        ...f.seed.row,
+        revision: f.seed.row.revision + 1,
+        cardLockVersion: f.seed.row.cardLockVersion + 1,
+        sizeBytes: bytes.length,
+        sha256: await digestFullAssemblyFixture(bytes),
+      };
+      const card = structuredClone(f.seed.card);
+      card.existingPatterns![0]!.manifest = scope.manifest;
+      const cold = await createSavedThreePanelSourceV1({ ...f.seed, bytes, row, card }, true);
+      try {
+        expect(cold.native.row).toEqual(row);
+        const sizes = cold.native.draft.scopes[0]!.writerReplay!.job.pieces.find(
+          ({ identity }) => identity === 'FP',
+        )!.sizes;
+        expect(sizes.map(({ sizeToken }) => sizeToken)).toEqual(garmentRanks);
+        expect(sizes[2]!.internal[0]?.authoredQuadratic).toEqual(expectedControls);
+        expect(sizes[2]!.internal).toHaveLength(1);
+      } finally {
+        cold.dispose();
+      }
+      const tampered = readManifest(compiled.artifact.dxfText)!;
+      tampered.blocks.find(
+        ({ block: name }) => name === block.block,
+      )!.authoredInternal![0]!.quadratic![3] += 1_000_000;
+      const bad = new File([embedManifest(compiled.artifact.dxfText, tampered)], file.name, {
+        type: file.type,
+      });
+      await expect(draftThroughWizardStages(bad, f.seed.card)).rejects.toThrow(
+        'do not reproduce the native layer-8 path',
+      );
+      const rawText = compiled.artifact.dxfText;
+      const l8 = buildAst(tokenize(rawText).tags)
+        .blocks.get(block.block)!
+        .entities.find(
+          ({ type, layer }) => layer === '8' && (type === 'POLYLINE' || type === 'LWPOLYLINE'),
+        )!;
+      const vertex = l8.type === 'POLYLINE' ? l8.children[0]! : l8;
+      const afterY = vertex.tags.find(({ code }) => code === 20)!.line + 1;
+      const bulged = rawText.split('\r\n');
+      bulged.splice(afterY, 0, ' 42', '0.00000001');
+      await expect(
+        draftThroughWizardStages(new File([bulged.join('\r\n')], 'bulged-curve.dxf'), f.seed.card),
+      ).rejects.toThrow('saved French curve controls');
+      const beginning = f.current.row;
+      f.current.row = { ...beginning, revision: beginning.revision + 1 };
+      await expect(verifySavedDartTipApplyV1(reviewed, [file], false, () => true)).rejects.toThrow(
+        'changed',
+      );
+      expect(verify).toHaveBeenCalledTimes(2);
+    } finally {
+      worker.dispose();
+      f.source.dispose();
+      vi.unstubAllGlobals();
+    }
+  },
+);
+
+it.each(['legacy', 'ambiguous'] as const)(
+  'does not offer saved French-curve handles for %s native records',
+  async (kind) => {
+    const f = await fixture(true, false, false, false, 'r12', false, kind);
+    try {
+      const input = { ...f.compileInput, session: f.initial };
+      const piece = input.projection.pieces.find(({ pieceId }) => pieceId === 'FP')!;
+      const block = f.source.native.draft.scopes[0]!.manifest.blocks.find(
+        ({ identity }) => identity === 'FP',
+      )!;
+      expect(block.authoredInternal).toHaveLength(kind === 'legacy' ? 1 : 2);
+      if (kind === 'legacy') {
+        expect(block.authoredInternal![0]!.quadratic).toBeUndefined();
+        const size = input.compileSource.scopes[0]!.writerReplay!.job.pieces.find(
+          ({ identity }) => identity === 'FP',
+        )!.sizes[0]!;
+        expect(size.internal[0]?.authoredQuadratic).toBeUndefined();
+        expect(authoredInternalVertices(size.internal[0]!.pts)).toEqual(
+          block.authoredInternal![0]!.vertices,
+        );
+      }
+      expect(selectSavedFrenchCurveV1(input, piece)).toBeNull();
+      expect(recordSavedFrenchCurveHandleV1(input, piece, 1, { x: 41, y: 45 })).toBeNull();
+    } finally {
+      f.source.dispose();
+    }
+  },
 );

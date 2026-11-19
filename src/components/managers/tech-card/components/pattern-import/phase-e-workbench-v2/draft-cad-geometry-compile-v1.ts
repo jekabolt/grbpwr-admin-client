@@ -2,6 +2,11 @@ import { applyDraftParallelSpreadV1 } from './draft-cad-parallel-spread-v1';
 import { hasSavedDraftGeometrySourceV1 } from './draft-cad-saved-dart-tip-review-v1';
 import { sameDartVertices } from './draft-cad-saved-dart-tip-v1';
 import { applyAffine, closestOnPolyline, pointInPolygon } from 'lib/pattern-import/semantics/geom';
+import {
+  authoredQuadraticGrid,
+  decodeAuthoredQuadratic,
+  sampleAuthoredQuadratic,
+} from 'lib/pattern-import/manifest/authored-internal';
 import { normalizeAuthoredText } from 'lib/pattern-import/manifest/authored-text';
 import { segIntersect } from 'lib/pattern-import/pieces/geom';
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
@@ -104,6 +109,7 @@ export type PatternImportDxfPhaseEDraftCadCompiledFeatureV1 = Readonly<{
     | 'boundary-point'
     | 'moved-dart-tip'
     | 'moved-fish-eye'
+    | 'moved-french-curve'
     | 'moved-vertex'
     | 'deleted-vertex'
     | 'edge-length'
@@ -373,14 +379,27 @@ function internalFeature(
       label: `draft-cad:${command.tool}`,
       ...featureBase(),
     };
-  if (command.tool === 'french-curve' && primitive.kind === 'curve')
+  if (command.tool === 'french-curve' && primitive.kind === 'curve') {
+    const [start, control, end] = primitive.controlPointsMm;
+    const grid =
+      primitive.controlPointsMm.length === 3 && start && control && end
+        ? authoredQuadraticGrid([start, control, end])
+        : null;
+    // Historical draft payloads can have higher degree and remain sampled-only.
+    const pts =
+      primitive.controlPointsMm.length === 3
+        ? grid && sampleAuthoredQuadratic(grid)
+        : sampleBezier(primitive.controlPointsMm);
+    if (!pts) return null;
     return {
       kind: 'internal',
-      pts: sampleBezier(primitive.controlPointsMm),
+      pts,
       closed: false,
       label: 'draft-cad:french-curve',
+      ...(grid ? { authoredQuadratic: decodeAuthoredQuadratic(grid) } : {}),
       ...featureBase(),
     };
+  }
   if (command.tool === 'dart' && primitive.kind === 'dart')
     return {
       kind: 'internal',
@@ -1001,6 +1020,12 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
     }
 
     const internal = internalFeature(command, primitive);
+    if (!internal && command.tool === 'french-curve')
+      return blocked(
+        'preview-blocked',
+        'The French curve needs distinct endpoints and a representable native path.',
+        command,
+      );
     let output: PatternImportDxfPhaseEDraftCadCompiledFeatureV1['output'];
     if (internal) {
       if (
@@ -1057,6 +1082,28 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
           );
         dart.pts = internal.pts;
         output = 'moved-fish-eye';
+      } else if (command.tool === 'french-curve' && command.payload.savedCurve) {
+        const source = command.payload.savedCurve;
+        const curve = size.internal[source.index];
+        if (
+          !hasSavedDraftGeometrySourceV1(input) ||
+          commands.length !== 1 ||
+          curve?.label !== 'draft-cad:french-curve' ||
+          curve.closed ||
+          curve.graded ||
+          curve.ranges.length !== 1 ||
+          curve.ranges[0]?.path !== source.sourcePathId ||
+          !curve.authoredQuadratic ||
+          !internal.authoredQuadratic ||
+          !sameDartVertices(curve.authoredQuadratic, source.original)
+        )
+          return blocked(
+            'source-binding-mismatch',
+            'Review the original saved French curve on its exact piece and size.',
+            command,
+          );
+        size.internal[source.index] = internal;
+        output = 'moved-french-curve';
       } else {
         size.internal.push(internal);
         output = 'internal';

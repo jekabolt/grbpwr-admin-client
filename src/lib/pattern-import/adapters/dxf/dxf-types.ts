@@ -7,6 +7,7 @@ import type {
   AuthoredInternalLabel,
   AuthoredNotchStroke,
   AuthoredPointMark,
+  AuthoredQuadraticControls,
   AuthoredTextMark,
   BoxMm,
   Feature,
@@ -306,6 +307,7 @@ export type DxfBlockPiece = {
   drills: { at: PtMm; path: PathId; form: 'square' | 'circle' | 'point'; sizeMm: number }[];
   roles: Record<PathId, PathRole>;
   authoredInternalLabels?: ReadonlyMap<PathId, AuthoredInternalLabel>;
+  authoredQuadraticByPath?: ReadonlyMap<PathId, AuthoredQuadraticControls>;
   texts: TextId[];
   textMarks?: AuthoredTextMark[];
   pointMarks?: AuthoredPointMark[];

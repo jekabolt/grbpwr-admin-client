@@ -62,6 +62,7 @@ export function registerPatternImportDxfPhaseEPatternsFieldCompiledReimportOwner
         ({ output }) =>
           output === 'moved-dart-tip' ||
           output === 'moved-fish-eye' ||
+          output === 'moved-french-curve' ||
           output === 'parallel-spread',
       );
       const manualApply =
@@ -69,8 +70,11 @@ export function registerPatternImportDxfPhaseEPatternsFieldCompiledReimportOwner
         addPoint ||
         pairedAllowance ||
         artifact.compiledFeatures.some(
-          ({ output }) =>
-            output === 'piece-create' || output === 'moved-vertex' || output === 'deleted-vertex',
+          ({ tool, output }) =>
+            tool === 'french-curve' ||
+            output === 'piece-create' ||
+            output === 'moved-vertex' ||
+            output === 'deleted-vertex',
         );
       const file = addPoint
         ? takeCompiledSavedAddPointFileV1(artifact)

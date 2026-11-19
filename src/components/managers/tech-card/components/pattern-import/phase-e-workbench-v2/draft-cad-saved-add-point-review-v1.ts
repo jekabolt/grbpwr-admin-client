@@ -35,6 +35,7 @@ import {
 import { writeDxfWithAuthoredLineSplit } from 'lib/pattern-import/write';
 import { executePatternImportDxfPhaseEDraftCadAddPointGeometryV1 } from './draft-cad-add-point-geometry-executor-v1';
 import {
+  activeDraftCadTransactionsV1,
   isRecordedDraftCadSessionV1,
   type PatternImportDxfPhaseEDraftCadSessionV1,
 } from './draft-cad-session-v1';
@@ -331,13 +332,12 @@ export async function compileDraftForOrdinaryReviewV1(
   prepareAllowance?: () => Promise<SavedDraftPairedAllowanceAuthorityV1>,
   prepareGeometry?: () => Promise<PatternImportDxfPhaseEDraftCadGeometryCompileResultV1>,
 ): Promise<PatternImportDxfPhaseEDraftCadGeometryCompileResultV1> {
-  const commands = input.session.history
-    .slice(0, input.session.cursor)
-    .flatMap((tx) => tx.commands);
+  const commands = activeDraftCadTransactionsV1(input.session).flatMap((tx) => tx.commands);
   const savedEdit = commands.find(
     (command) =>
       (command.tool === 'dart' && command.payload.savedTip) ||
-      (command?.tool === 'fish-eye' && command.payload.savedMove) ||
+      (command.tool === 'fish-eye' && command.payload.savedMove) ||
+      (command.tool === 'french-curve' && command.payload.savedCurve) ||
       (command.tool === 'spread' && command.payload.mode === 'parallel'),
   );
   if (savedEdit && prepareGeometry) {

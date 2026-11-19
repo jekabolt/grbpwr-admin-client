@@ -1,3 +1,8 @@
+import { num as dxfCoordinate } from 'lib/pattern-import/write/format';
+import {
+  recordSavedFrenchCurveHandleV1,
+  selectSavedFrenchCurveV1,
+} from './draft-cad-saved-french-curve-v1';
 import { SavedJoinControl, type PrepareJoin } from './draft-cad-saved-join-control';
 import { SavedDartTipControlV1 } from './draft-cad-saved-dart-tip-control-v1';
 import {
@@ -48,7 +53,10 @@ import {
 import { usePatternImportDxfPhaseECadWorkbenchMeasurementUnitV1 } from './cad-workbench-split-shell-v1';
 import type { PatternImportDxfPhaseECadTableCrossScopeAuthoringHandoffResultV1 } from './cad-table-cross-scope-authoring-handoff-v1';
 import type { PatternImportDxfPhaseECadTableCrossScopeConnectSideV1 } from './cad-table-cross-scope-connect-v1';
-import { CadTablePressControlV1, type CreateCadTablePressDraftV1 } from './cad-table-press-control-v1';
+import {
+  CadTablePressControlV1,
+  type CreateCadTablePressDraftV1,
+} from './cad-table-press-control-v1';
 import { stagePatternImportDxfPhaseECadSemanticCompiledArtifactV1 } from './cad-command-semantic-reimport-session-owner-v1';
 import {
   PATTERN_IMPORT_DXF_PHASE_E_CAD_COMMAND_COMPILED_REIMPORT_HANDOFF_V1,
@@ -326,6 +334,15 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
     prepareSavedGeometryReview && compiledReimportCapability.available ? selectedForCopy : null;
   const savedDart = savedEditPiece ? selectSavedDartTipV1(dartInput, savedEditPiece) : null;
   const savedFishEye = savedEditPiece ? selectSavedFishEyeMoveV1(dartInput, savedEditPiece) : null;
+  const curvePiece =
+    !arrangeActive &&
+    !draftPieceId &&
+    session.cursor === 0 &&
+    prepareSavedGeometryReview &&
+    compiledReimportCapability.available
+      ? projection.pieces[activePieceIndex]
+      : null;
+  const savedCurve = curvePiece ? selectSavedFrenchCurveV1(dartInput, curvePiece) : null;
   const copySelection = useRef<SavedCopySelectionV1 | null>(null);
   copySelection.current = selectedForCopy?.pieceLineKey
     ? {
@@ -885,6 +902,38 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
             allowSavedParallelOpening={Boolean(
               prepareSavedGeometryReview && compiledReimportCapability.available,
             )}
+            savedFrenchCurve={
+              savedCurve && curvePiece
+                ? {
+                    key: JSON.stringify([
+                      savedCurve.savedCurve.sourceSha256,
+                      savedCurve.savedCurve.scopeKey,
+                      savedCurve.savedCurve.sizeToken,
+                      savedCurve.savedCurve.pieceLineKey,
+                      savedCurve.savedCurve.sourcePathId,
+                      confirmedImportGeneration,
+                    ]),
+                    primitive: {
+                      kind: 'curve',
+                      role: 'french-curve',
+                      tool: 'french-curve',
+                      commandId: 'saved-french-curve',
+                      entityId: 'saved-french-curve',
+                      target: curvePiece,
+                      controlPointsMm: savedCurve.controlPointsMm,
+                    },
+                    pointsMm: savedCurve.pointsMm,
+                    onEdit: (handle, point) => {
+                      if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+                      const edit = recordSavedFrenchCurveHandleV1(dartInput, curvePiece, handle, {
+                        x: Number(dxfCoordinate(point.x)),
+                        y: Number(dxfCoordinate(point.y)),
+                      });
+                      if (edit?.ok) publishSession(edit.session);
+                    },
+                  }
+                : null
+            }
             savedDartPaths={[
               ...(savedDart
                 ? [

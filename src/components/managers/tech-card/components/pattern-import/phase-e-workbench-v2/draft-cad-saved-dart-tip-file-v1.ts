@@ -5,12 +5,13 @@ type Verify = (draft: CardDraft, scope: Scope, isCurrent: () => boolean) => Prom
 const files = new WeakMap<File, Verify | null>();
 const scopes = new WeakMap<Scope, { file: File; text: string }>();
 
-const labels = new WeakMap<File, 'saved dart' | 'parallel opening'>();
+type SavedGeometryReviewLabel = 'saved dart' | 'parallel opening' | 'saved French curve';
+const labels = new WeakMap<File, SavedGeometryReviewLabel>();
 export const savedReviewLabelV1 = (file: File) => labels.get(file) ?? 'saved geometry';
 export function registerSavedDartTipFileV1(
   file: File,
   verify: Verify,
-  label: 'saved dart' | 'parallel opening' = 'saved dart',
+  label: SavedGeometryReviewLabel = 'saved dart',
 ) {
   if (files.has(file)) throw new Error('This dart review File is already bound.');
   labels.set(file, label);

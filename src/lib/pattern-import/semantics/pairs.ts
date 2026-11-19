@@ -1,3 +1,4 @@
+import { mapAuthoredQuadratic } from '../manifest/authored-internal';
 // Pairs (owner decision 9, D1'): a piece cut twice as a left and a right hand is written as TWO
 // blocks, `_L` and `_R`, the second the explicit mirror of the first across its grain line (the
 // axis gate G12 checks against). Both hands carry piecesPerGarment for ONE hand; the card cuts the
@@ -52,7 +53,13 @@ export function transformSizeSpec(s: PieceSizeSpec, t: Affine): PieceSizeSpec {
     seg: [P(n.seg[0]), P(n.seg[1])],
   }));
   const drills: DrillFeature[] = s.drills.map((d) => ({ ...d, at: P(d.at) }));
-  const internal: InternalFeature[] = s.internal.map((f) => ({ ...f, pts: f.pts.map(P) }));
+  const internal: InternalFeature[] = s.internal.map((f) => ({
+    ...f,
+    pts: f.pts.map(P),
+    ...(f.authoredQuadratic
+      ? { authoredQuadratic: mapAuthoredQuadratic(f.authoredQuadratic, P) }
+      : {}),
+  }));
   const fold: FoldFeature | null = s.fold ? { ...s.fold, a: P(s.fold.a), b: P(s.fold.b) } : null;
   const cut = ccw(s.cut.map(P));
   const cutLoops = transformCutLoops(t, s.cutLoops);

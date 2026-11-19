@@ -109,6 +109,13 @@ export type PatternImportDxfPhaseEDraftCadCanvasPropsV1 = Readonly<{
     kind: 'dart' | 'fish-eye';
     pointsMm: readonly PtMm[];
   }>[];
+  savedFrenchCurveOnly?: boolean;
+  savedFrenchCurve?: Readonly<{
+    key: string;
+    primitive: FrenchCurvePrimitive;
+    pointsMm: readonly PtMm[];
+    onEdit: (handle: DraftCadFrenchCurveHandleV1, point: PtMm) => void;
+  }> | null;
   arrangeActive?: boolean;
   panActive?: boolean;
   crossScopeConnectActive?: boolean;
@@ -1744,6 +1751,8 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
   activeTool,
   allowSavedParallelOpening = false,
   savedDartPaths = [],
+  savedFrenchCurve,
+  savedFrenchCurveOnly = false,
   arrangeActive = false,
   panActive = false,
   crossScopeConnectActive = false,
@@ -1876,6 +1885,9 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
     setInputError(null);
   }, [arrangeActive, panActive, crossScopeConnectActive, resetKey]);
 
+  const activeToolInstruction = savedFrenchCurveOnly
+    ? 'Move a start, control or end point.'
+    : toolInstruction(activeTool, projection.sizeToken);
   const unavailable = sourceMismatch
     ? 'The exact projection does not match this Draft session source.'
     : !projectedPiece || !target
@@ -1883,7 +1895,7 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
       : activeDraftPieceId && !canUseActiveTool
         ? 'Apply this piece before using the selected tool.'
         : !canUseActiveTool
-          ? toolInstruction(activeTool, projection.sizeToken)
+          ? activeToolInstruction
           : null;
   const bbox = arrangeActive
     ? arrangementViewportBounds(projection, arrangement?.transforms ?? {})
@@ -2138,7 +2150,13 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
             );
           }}
           onPoint={(pointMm) => {
-            if (!interactionEnabled || activeTopologyTool || outlineEditActive) return;
+            if (
+              !interactionEnabled ||
+              activeTopologyTool ||
+              outlineEditActive ||
+              savedFrenchCurveOnly
+            )
+              return;
             drawPoint(pointMm);
           }}
         >
@@ -2428,6 +2446,29 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
                 }
               >
                 <g data-draft-cad-committed-preview=''>
+                  {savedFrenchCurve &&
+                    (interactionEnabled &&
+                    activeTool === 'french-curve' &&
+                    !activeTopologyTool &&
+                    !crossScopeConnectActive &&
+                    !pendingPoints.length ? (
+                      <EditableFrenchCurve
+                        primitive={savedFrenchCurve.primitive}
+                        unit={unit}
+                        session={session}
+                        onEdit={savedFrenchCurve.onEdit}
+                      />
+                    ) : (
+                      <polyline
+                        data-draft-cad-saved-french-curve=''
+                        points={ptsAttr(savedFrenchCurve.pointsMm)}
+                        fill='none'
+                        stroke={SHEET_INK.ink}
+                        strokeWidth={1.1}
+                        vectorEffect='non-scaling-stroke'
+                        pointerEvents='none'
+                      />
+                    ))}
                   {primitives.map((primitive) =>
                     primitive.kind === 'curve' &&
                     primitive.controlPointsMm.length === 3 &&
@@ -2530,7 +2571,7 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
                   ? `Click inside the piece to place the ${markKind} mark in size ${projection.sizeToken}.`
                   : activeTool === 'notch' && notchKind !== 'single'
                     ? `Select an exact cut edge with space for the notch in size ${projection.sizeToken}.`
-                    : toolInstruction(activeTool, projection.sizeToken))}
+                    : activeToolInstruction)}
       </div>
       {activeTool === 'cut' && interactionEnabled && (
         <Selector

@@ -122,7 +122,7 @@ export type PatternImportDxfPhaseEDraftCadRoundPieceV1 = Readonly<{
   placementPolicy: 'separate-writer-block';
 }>;
 
-export type SavedDraftDartPathBindingV1 = Readonly<{
+export type SavedDraftInternalPathBindingV1 = Readonly<{
   pieceId: string;
   pieceLineKey: string;
   sourceSha256: string;
@@ -133,6 +133,11 @@ export type SavedDraftDartPathBindingV1 = Readonly<{
   index: number;
   original: readonly PtMm[];
 }>;
+
+export type SavedDraftDartPathBindingV1 = SavedDraftInternalPathBindingV1;
+export type SavedDraftFrenchCurveBindingV1 = SavedDraftInternalPathBindingV1 & {
+  readonly sourcePathId: number;
+};
 
 type Command<Tool extends PatternImportDxfPhaseEDraftCadToolV1, Payload> = Readonly<{
   commandId: string;
@@ -215,7 +220,14 @@ export type PatternImportDxfPhaseEDraftCadCommandV1 =
       }
     >
   | Command<'internal-line', { entityId: string; pointsMm: readonly PtMm[] }>
-  | Command<'french-curve', { entityId: string; controlPointsMm: readonly PtMm[] }>
+  | Command<
+      'french-curve',
+      {
+        entityId: string;
+        controlPointsMm: readonly PtMm[];
+        savedCurve?: SavedDraftFrenchCurveBindingV1;
+      }
+    >
   | Command<'draft-point', { entityId: string; pointMm: PtMm }>
   | Command<'guideline', { entityId: string; fromMm: PtMm; toMm: PtMm }>
   | Command<'pattern-line', { entityId: string; pointsMm: readonly PtMm[]; closed: boolean }>
@@ -393,7 +405,7 @@ function target(value: unknown): value is PatternImportDxfPhaseEDraftCadTargetV1
   return stableId(candidate.pieceId) && stableId(candidate.pieceLineKey);
 }
 
-function validSavedDartPath(value: unknown, pointCount: number, requireSourcePath = false) {
+function validSavedInternalPath(value: unknown, pointCount: number, requireSourcePath = false) {
   if (!value || typeof value !== 'object') return false;
   const p = value as Record<string, unknown>;
   return (
@@ -557,7 +569,12 @@ function validCommand(value: unknown): value is PatternImportDxfPhaseEDraftCadCo
     case 'internal-line':
       return points(payload.pointsMm, 2);
     case 'french-curve':
-      return points(payload.controlPointsMm, 3);
+      return (
+        points(payload.controlPointsMm, 3) &&
+        (payload.savedCurve === undefined ||
+          (payload.controlPointsMm.length === 3 &&
+            validSavedInternalPath(payload.savedCurve, 3, true)))
+      );
     case 'draft-point':
     case 'point-only':
       return point(payload.pointMm);
@@ -568,13 +585,13 @@ function validCommand(value: unknown): value is PatternImportDxfPhaseEDraftCadCo
         boundaryAnchor(payload.base) &&
         point(payload.apexMm) &&
         finitePositive(payload.intakeMm) &&
-        (payload.savedTip === undefined || validSavedDartPath(payload.savedTip, 3))
+        (payload.savedTip === undefined || validSavedInternalPath(payload.savedTip, 3))
       );
     case 'fish-eye':
       return (
         point(payload.centerMm) &&
         (payload.savedMove !== undefined
-          ? validSavedDartPath(payload.savedMove, 4, true) &&
+          ? validSavedInternalPath(payload.savedMove, 4, true) &&
             payload.axisMm === undefined &&
             payload.intakeMm === undefined &&
             payload.rotationDeg === undefined

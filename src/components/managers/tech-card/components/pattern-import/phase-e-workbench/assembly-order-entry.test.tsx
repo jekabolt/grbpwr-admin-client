@@ -206,9 +206,13 @@ describe('V1 selected durable physical source handoff', () => {
     const result = attribute(ordinary[0], 'result');
     const fallbackResult = { ok: false, blocker: { code: 'exact-connection-incomplete' } };
     expect(evaluate(result!, { savedCrossMaterialActions: {}, fallbackResult })).toBeNull();
-    expect(evaluate(result!, { savedCrossMaterialActions: null, fallbackResult })).toBe(
-      fallbackResult,
-    );
+    expect(
+      evaluate(result!, {
+        savedCrossMaterialActions: null,
+        pointClosureTarget: null,
+        fallbackResult,
+      }),
+    ).toBe(fallbackResult);
     expect(elements('SavedCompleteAssemblyNativeReviewActionV8')).toHaveLength(1);
     expect(source).toContain('!savedCrossMaterialActions && durableReloadBlocker');
   });
