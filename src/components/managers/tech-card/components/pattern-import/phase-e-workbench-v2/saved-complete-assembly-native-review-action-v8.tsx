@@ -154,7 +154,7 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
   const [state, setState] = useState<
     | { status: 'loading' | 'saving' }
     | { status: 'reviewed'; review: Review }
-    | { status: 'reopened'; review: Review; preview: SavedCrossMaterialReviewForPreviewV8 }
+    | { status: 'reopened'; review: Review; preview: SavedCrossMaterialReviewForPreviewV8 | null }
     | { status: 'error'; detail: string }
     | null
   >(null);
@@ -257,6 +257,14 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
         active.throwIfAborted();
         if (restored.document.selection.operationNumber !== operationNumber)
           throw new Error('The saved review belongs to a different Assembly Order operation.');
+        if (restored.document.selection.ownedSeamKeys.length === 1) {
+          if (placement || whole || rebuild)
+            throw new Error(
+              'A saved stitch review without a recorded pose cannot restore placement.',
+            );
+          setState({ status: 'reopened', review: restored, preview: null });
+          return;
+        }
         const { sha256 } = restored;
         const carrierSha256 = whole?.sha256 ?? placement?.sha256 ?? sha256;
         const authoredFolds = current.operations.some(({ foldKeys }) => foldKeys?.length)
@@ -653,7 +661,7 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
             <NativeRuns review={state.review} />
             <Text component='p' size='micro' role='status'>
               {state.status === 'reopened'
-                ? state.preview.placementRebuild
+                ? state.preview?.placementRebuild
                   ? 'Current Assembly reviewed. '
                   : 'Saved review verified. '
                 : ''}
@@ -704,7 +712,7 @@ export default function SavedCompleteAssemblyNativeReviewActionV8({
             Reopen saved review
           </Button>
           {prepareWholeAssemblyPreview &&
-            !(state?.status === 'reopened' && state.preview.placementRebuild) && (
+            !(state?.status === 'reopened' && state.preview?.placementRebuild) && (
               <Button
                 type='button'
                 variant='secondary'

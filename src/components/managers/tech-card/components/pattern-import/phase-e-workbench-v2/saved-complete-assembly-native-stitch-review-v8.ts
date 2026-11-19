@@ -277,8 +277,10 @@ export async function prepareSavedCompleteAssemblyNativeStitchReviewV8(
   );
   const operation = source.operations[operationOrdinal];
   const ownedSeamKeys = operation?.seamKeys;
-  if (!operation || ownedSeamKeys?.length !== 2)
-    throw new Error('This review requires one owned physical seam and its recorded pose.');
+  if (!operation || !ownedSeamKeys || ownedSeamKeys.length < 1 || ownedSeamKeys.length > 2)
+    throw new Error(
+      'This review requires one owned physical seam with its current recorded links.',
+    );
   const complete = await prepareSavedFullAssemblyCompleteNativeRowsV1(source, projection, signal, {
     ...dictionary,
     includeGeneratedCutGeometry: false,
@@ -331,28 +333,40 @@ export async function prepareSavedCompleteAssemblyNativeStitchReviewV8(
     return { index, anchor, path, patternVersion: savedRow.patternVersion, native: captured.value };
   };
   const boundSides = [nativeSide(0), nativeSide(1)] as const;
+  const seamOnly = ownedSeamKeys.length === 1;
+  const completeRuns =
+    seamOnly || explicit === undefined
+      ? await Promise.all(
+          boundSides.map(({ native, path, anchor }) =>
+            resolveSavedLegacyNativeStitchRunV8(
+              source,
+              projection,
+              native,
+              path,
+              anchor.anchor,
+              signal,
+            ),
+          ),
+        )
+      : null;
   const registrations =
     explicit ??
-    (await (async () => {
-      const [left, rightRaw] = await Promise.all(
-        boundSides.map(({ native, path, anchor }) =>
-          resolveSavedLegacyNativeStitchRunV8(
-            source,
-            projection,
-            native,
-            path,
-            anchor.anchor,
-            signal,
-          ),
-        ),
-      );
+    (() => {
+      const [left, rightRaw] = completeRuns!;
       const right = pairing === 'start-to-end' ? rightRaw!.slice().reverse() : rightRaw!;
-      if (!left || left.length !== right.length)
+      if (seamOnly)
+        return [
+          [left![0]!, right[0]!],
+          [left!.at(-1)!, right.at(-1)!],
+        ] as const;
+      if (left!.length !== right.length)
         throw new Error('The two saved runs have different native corner counts.');
-      return left.map((vertex, index) => [vertex, right[index]!] as const);
-    })());
+      return left!.map((vertex, index) => [vertex, right[index]!] as const);
+    })();
   if (registrations.length < 2 || registrations.length > 256)
     throw new Error('Select two native runs with a bounded number of registrations.');
+  if (seamOnly && registrations.length !== 2)
+    throw new Error('The saved edge review requires two exact endpoint registrations.');
   const side = async ({
     index,
     anchor,
@@ -363,7 +377,17 @@ export async function prepareSavedCompleteAssemblyNativeStitchReviewV8(
     const orderedVertexIds = registrations.map((pair) => pair[index]);
     if (new Set(orderedVertexIds).size !== orderedVertexIds.length)
       throw new Error('Native registrations must be distinct.');
-    const { span, direction } = await readDirectedSpan(native, path, orderedVertexIds, signal);
+    let spanVertexIds = orderedVertexIds;
+    if (seamOnly) {
+      // Original corners remain part of each native run even when only its endpoints are paired.
+      const run = completeRuns![index]!;
+      const [start, end] = orderedVertexIds;
+      if (start === run[0] && end === run.at(-1)) spanVertexIds = [...run];
+      else if (index === 1 && end === run[0] && start === run.at(-1))
+        spanVertexIds = [...run].reverse();
+      else throw new Error('The registrations do not match the complete saved native runs.');
+    }
+    const { span, direction } = await readDirectedSpan(native, path, spanVertexIds, signal);
     const row = { ...path.row, patternVersion };
     return {
       member: {

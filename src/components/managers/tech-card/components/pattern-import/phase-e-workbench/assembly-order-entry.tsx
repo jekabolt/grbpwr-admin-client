@@ -2885,18 +2885,16 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
     persisted.id === techCardId &&
     seamWriterCardId === techCardId &&
     seamWriterLockVersion === persisted.lockVersion &&
-    crossMaterialKeys.length === 2 &&
-    storedOperation?.seamKeys?.length === 2 &&
-    storedOperation.seamKeys[0] === physicalKey &&
-    storedOperation.seamKeys[1] === poseKey &&
+    selectedSeamKeys.length === 1 &&
+    crossMaterialKeys.length <= 2 &&
+    storedOperation?.seamKeys?.length === crossMaterialKeys.length &&
+    storedOperation.seamKeys.every((key, index) => key === crossMaterialKeys[index]) &&
     physicalKey &&
-    poseKey &&
     physical?.kind === 'edge' &&
     physical.status === 'confirmed' &&
     physical.direction !== 'unknown' &&
     !physical.stale &&
-    recordedPose?.status === 'confirmed' &&
-    !recordedPose.stale &&
+    (!poseKey || (recordedPose?.status === 'confirmed' && !recordedPose.stale)) &&
     physical.sideA.length === 1 &&
     physical.sideB.length === 1
   ) {
@@ -2932,7 +2930,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
             authority={savedAllScopeAuthority}
             orderSizeIds={orderSizeIds}
             sizeNameById={sizeNameById}
-            disabled={frozen || Boolean(pending[physicalKey] || posePending[poseKey])}
+            disabled={frozen || Boolean(pending[physicalKey] || (poseKey && posePending[poseKey]))}
           />
         </Suspense>
       );
