@@ -199,6 +199,9 @@ async function prepareComparison(
     return { pieceId, ringMm, angleDeg: 0, phaseX: 0.365, phaseY: 0.815, placement, lineMm };
   });
   const pieceIds = pieces.map(({ pieceId }) => pieceId);
+  // Both bindings name the same L14 endpoints. Encode them independently before joining them.
+  const pieceBinding = canonical(pieces);
+  const stitchBinding = canonical(target.stitch);
   const makeSource = async (degrees: number): Promise<RegisteredSourceCutPreviewInputV1> => {
     const sourceFingerprint = await sha256Hex(
       new TextEncoder().encode(
@@ -208,8 +211,8 @@ async function prepareComparison(
           layoutSha256,
           bodySha256,
           operation: target.operationNumber,
-          pieces,
-          stitch: target.stitch,
+          pieceBinding,
+          stitchBinding,
           degrees,
         }),
       ),
