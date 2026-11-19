@@ -68,6 +68,7 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
   const stepRequested = useRef(false);
   const pausedCheckpoint = useRef<SavedWholeAssemblyResumeV1 | null>(null);
   const activeWholeCloth = useRef<MeasurementSurfaceAcceptedClothV1 | null>(null);
+  const [showBackside, setShowBackside] = useState(true);
   const [showStrain, setShowStrain] = useState(false);
   const [strainReading, setStrainReading] = useState<Readonly<{
     cloth: MeasurementSurfaceAcceptedClothV1;
@@ -279,6 +280,7 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
       async stopPreview() {
         pausedCheckpoint.current = null;
         activeWholeCloth.current = null;
+        setShowBackside(true);
         setShowStrain(false);
         setStrainReading(null);
         setTape(null);
@@ -298,6 +300,7 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
       placementSave.current = null;
       setPlacementStatus({ pending: false, error: null });
       activeWholeCloth.current = null;
+      setShowBackside(true);
       setShowStrain(false);
       setStrainReading(null);
       setTape(null);
@@ -359,24 +362,30 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
   const currentStrainReading =
     showStrain && strainReading?.cloth === wholeCloth ? strainReading : null;
   const displayedStrain = currentStrainReading?.value;
+  const principalStrain = useMemo(
+    () =>
+      displayedStrain && wholeCloth
+        ? Object.freeze({
+            frameNumber: wholeCloth.frameNumber,
+            positionsM: wholeCloth.positionsM,
+            valuesInDrawOrder: displayedStrain.valuesInDrawOrder,
+          })
+        : undefined,
+    [displayedStrain, wholeCloth],
+  );
   useLayoutEffect(() => {
     if (!wholeCloth?.isCurrent() || activeWholeCloth.current !== wholeCloth) return;
     onAcceptedCloth(
-      displayedStrain || pickTapePoint
+      !showBackside || principalStrain || pickTapePoint
         ? Object.freeze({
             ...wholeCloth,
             onMeasurePoint: pickTapePoint,
-            ...(displayedStrain && {
-              principalStrain: Object.freeze({
-                frameNumber: wholeCloth.frameNumber,
-                positionsM: wholeCloth.positionsM,
-                valuesInDrawOrder: displayedStrain.valuesInDrawOrder,
-              }),
-            }),
+            ...(!showBackside && { showBackside: false }),
+            ...(principalStrain && { principalStrain }),
           })
         : wholeCloth,
     );
-  }, [displayedStrain, onAcceptedCloth, pickTapePoint, wholeCloth]);
+  }, [onAcceptedCloth, pickTapePoint, principalStrain, showBackside, wholeCloth]);
 
   useEffect(() => {
     if (!showStrain || !readPrincipalStrain || !wholeCloth?.isCurrent()) return;
@@ -577,6 +586,18 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
               Step one frame
             </Button>
           )}
+        {!disabled && wholeCloth?.isCurrent() && (
+          <Button
+            type='button'
+            variant={showBackside ? 'main' : 'secondary'}
+            size='xs'
+            aria-pressed={showBackside}
+            data-whole-assembly-backside-toggle=''
+            onClick={() => setShowBackside((visible) => !visible)}
+          >
+            Show backside
+          </Button>
+        )}
         {wholeCloth?.isCurrent() && (
           <Button
             type='button'

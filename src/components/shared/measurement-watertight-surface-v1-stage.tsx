@@ -181,6 +181,7 @@ export type MeasurementSurfaceAcceptedClothV1 = Readonly<{
     sourcePiece?: MeasurementSurfaceAcceptedClothPieceV1;
   }>[];
   isCurrent: () => boolean;
+  showBackside?: boolean;
   onSelectPiece?: (piece: MeasurementSurfaceAcceptedClothPieceV1) => void;
   onMeasurePoint?: (hit: MeasurementSurfaceAcceptedClothPointV1) => void;
   principalStrain?: Readonly<{
@@ -203,6 +204,19 @@ function sameAcceptedClothFrame(
 }
 
 type AcceptedClothMesh = THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial[]>;
+
+/** The rendered material side also controls ordinary raycasting against the same mesh. */
+export function updateMeasurementSurfaceAcceptedClothBacksideV1(
+  mesh: AcceptedClothMesh,
+  showBackside = true,
+) {
+  const side = showBackside ? THREE.DoubleSide : THREE.FrontSide;
+  for (const material of mesh.material) {
+    if (material.side === side) continue;
+    material.side = side;
+    material.needsUpdate = true;
+  }
+}
 
 /** Apply the exact frame's scalar data to its existing mesh without replacing geometry or groups. */
 export function updateMeasurementSurfaceAcceptedClothStrainV1(
@@ -3655,10 +3669,12 @@ export function MeasurementWatertightSurfaceV1Stage({
           acceptedClothMesh &&
           sameAcceptedClothFrame(mountedCloth, next)
         ) {
-          if (mountedCloth.principalStrain !== next.principalStrain) {
-            syncAcceptedClothStrain(acceptedClothMesh, next);
-            scheduleRender();
-          }
+          const strainChanged = mountedCloth.principalStrain !== next.principalStrain;
+          const backsideChanged = mountedCloth.showBackside !== next.showBackside;
+          if (strainChanged) syncAcceptedClothStrain(acceptedClothMesh, next);
+          if (backsideChanged)
+            updateMeasurementSurfaceAcceptedClothBacksideV1(acceptedClothMesh, next.showBackside);
+          if (strainChanged || backsideChanged) scheduleRender();
           mountedCloth = next;
           return;
         }
@@ -3694,9 +3710,10 @@ export function MeasurementWatertightSurfaceV1Stage({
         clothGeometry.computeVertexNormals();
         const materials = next.ranges.map(({ triangleOffset, triangleCount, color }, index) => {
           clothGeometry.addGroup(triangleOffset * 3, triangleCount * 3, index);
-          return new THREE.MeshStandardMaterial({ color, roughness: 0.75, side: THREE.DoubleSide });
+          return new THREE.MeshStandardMaterial({ color, roughness: 0.75 });
         });
         acceptedClothMesh = new THREE.Mesh(clothGeometry, materials);
+        updateMeasurementSurfaceAcceptedClothBacksideV1(acceptedClothMesh, next.showBackside);
         syncAcceptedClothStrain(acceptedClothMesh, next);
         scene.add(acceptedClothMesh);
         canvas.dataset.acceptedClothFrame = String(next.frameNumber);

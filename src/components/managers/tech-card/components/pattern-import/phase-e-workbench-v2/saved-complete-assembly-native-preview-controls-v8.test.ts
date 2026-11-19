@@ -231,6 +231,12 @@ it('toggles the current ordinary whole frame, ignores late readings and keeps th
     expect(page.text()).toContain('Measured range +80% to +80%');
     expect(button()).toBe(toggle);
     expect(page.focused()).toBe(toggle);
+    const strainOverlay = rendered?.principalStrain;
+    await act(async () => page.click('Show backside'));
+    expect(rendered?.principalStrain).toBe(strainOverlay);
+    await act(async () => page.click('Show backside'));
+    expect(rendered?.principalStrain).toBe(strainOverlay);
+    expect(second.read).toHaveBeenCalledTimes(1);
     await act(async () => late.resolve(available));
     expect(rendered?.frameNumber).toBe(2);
     await act(async () => run.resolve(second.progress));
@@ -258,7 +264,7 @@ it('toggles the current ordinary whole frame, ignores late readings and keeps th
   }
 });
 
-it('measures two points on the displayed accepted frame and cancels on mannequin change', async () => {
+it('keeps the displayed frame and tape point owner through backside toggles, then cancels on mannequin change', async () => {
   const page = mountTestRoot();
   type Props = ComponentProps<typeof SavedCompleteAssemblyNativePreviewControlsV8>;
   let bodyCurrent = true;
@@ -284,6 +290,7 @@ it('measures two points on the displayed accepted frame and cancels on mannequin
   const second = { triangleIndex: 0, barycentric: [0.25, 0.5, 0.25] as const };
   const late = Promise.withResolvers<number>();
   frameOne.measureSurfaceTape.mockResolvedValueOnce(0.5154).mockReturnValueOnce(late.promise);
+  const backside = () => page.element('data-whole-assembly-backside-toggle');
 
   try {
     await act(async () =>
@@ -297,13 +304,36 @@ it('measures two points on the displayed accepted frame and cancels on mannequin
       ),
     );
     expect(page.element('data-whole-assembly-tape-toggle')).toBeUndefined();
+    expect(backside()).toBeUndefined();
     await act(async () => page.click('Preview full layout'));
+    expect(backside()?.attrs.get('aria-pressed')).toBe('true');
+    expect(rendered).toBe(frameOne.progress.cloth);
     await act(async () => page.click('Surface tape'));
     const pick = rendered?.onMeasurePoint;
     expect(pick).toBeDefined();
     expect(rendered?.positionsM).toBe(frameOne.progress.cloth.positionsM);
     await act(async () => pick?.(first));
     expect(page.text()).toContain('Pick a second point on the same piece.');
+    const frameStatus = page.element('data-whole-assembly-frame');
+    const cancelCount = mocks.cancel.mock.calls.length;
+    await act(async () => page.click('Show backside'));
+    expect(backside()?.attrs.get('aria-pressed')).toBe('false');
+    expect(page.focused()).toBe(backside());
+    expect(rendered).toMatchObject({ frameNumber: 1, showBackside: false });
+    expect(rendered?.positionsM).toBe(frameOne.progress.cloth.positionsM);
+    expect(rendered?.ranges).toBe(frameOne.progress.cloth.ranges);
+    expect(rendered?.isCurrent).toBe(frameOne.progress.cloth.isCurrent);
+    expect(rendered?.onMeasurePoint).toBe(pick);
+    expect(frameStatus?.attrs.get('data-whole-assembly-contact')).toBe(
+      JSON.stringify(frameOne.progress.contact),
+    );
+    expect(page.element('data-whole-assembly-frame')).toBe(frameStatus);
+    expect(page.text()).toContain('Pick a second point on the same piece.');
+    await act(async () => page.click('Show backside'));
+    expect(backside()?.attrs.get('aria-pressed')).toBe('true');
+    expect(rendered?.showBackside).toBeUndefined();
+    expect(rendered?.onMeasurePoint).toBe(pick);
+    expect(mocks.cancel).toHaveBeenCalledTimes(cancelCount);
     await act(async () => pick?.(second));
     expect(frameOne.measureSurfaceTape).toHaveBeenCalledWith(
       first,
@@ -324,6 +354,7 @@ it('measures two points on the displayed accepted frame and cancels on mannequin
     expect(frameOne.measureSurfaceTape.mock.calls[1][2].aborted).toBe(true);
     await act(async () => late.resolve(1.23));
     expect(rendered).toBeUndefined();
+    expect(backside()).toBeUndefined();
     expect(page.element('data-whole-assembly-tape')).toBeUndefined();
     expect(mocks.start).toHaveBeenCalledTimes(1);
   } finally {

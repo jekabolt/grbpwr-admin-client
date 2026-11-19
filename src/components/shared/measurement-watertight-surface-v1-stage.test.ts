@@ -3,6 +3,8 @@ import {
   BufferAttribute,
   BufferGeometry,
   Color,
+  DoubleSide,
+  FrontSide,
   Group,
   Mesh,
   MeshBasicMaterial,
@@ -39,6 +41,7 @@ import {
   measurementSurfaceRestoreCameraV10,
   pickMeasurementSurfaceAcceptedClothPieceV1,
   pickMeasurementSurfaceAcceptedClothPointV1,
+  updateMeasurementSurfaceAcceptedClothBacksideV1,
   updateMeasurementSurfaceAcceptedClothStrainV1,
   measurementSurfaceRotationGizmoMatrixV6,
   measurementSurfaceRotationGizmoSignatureV6,
@@ -266,7 +269,7 @@ it('applies accepted-frame signed color without replacing positions, triangle gr
   expect(material.color.getHex()).toBe(0x405060);
 });
 
-it('uses the existing visible accepted cloth triangle ranges and rejects occluded or revoked hits', () => {
+it('picks the accepted mesh from each visible side and rejects hidden, occluded or revoked hits', () => {
   const first = {
     row: {
       techCardId: 11,
@@ -289,7 +292,8 @@ it('uses the existing visible accepted cloth triangle ranges and rejects occlude
   clothGeometry.setAttribute('position', new BufferAttribute(positionsM, 3));
   clothGeometry.addGroup(0, 3, 0);
   clothGeometry.addGroup(3, 3, 1);
-  const cloth = new Mesh(clothGeometry, [new MeshBasicMaterial(), new MeshBasicMaterial()]);
+  const materials = [new MeshStandardMaterial(), new MeshStandardMaterial()];
+  const cloth = new Mesh(clothGeometry, materials);
   const bodyGeometry = new BufferGeometry();
   bodyGeometry.setAttribute(
     'position',
@@ -305,6 +309,7 @@ it('uses the existing visible accepted cloth triangle ranges and rejects occlude
     raycaster.setFromCamera(new Vector2(p.x, p.y), camera);
     return raycaster;
   };
+  const rearRay = (x: number) => new Raycaster(new Vector3(x, 0, -5), new Vector3(0, 0, 1));
   let current = true;
   const accepted: MeasurementSurfaceAcceptedClothV1 = {
     positionsM,
@@ -315,6 +320,23 @@ it('uses the existing visible accepted cloth triangle ranges and rejects occlude
     ],
     isCurrent: () => current,
   };
+  updateMeasurementSurfaceAcceptedClothBacksideV1(cloth, accepted.showBackside);
+  expect(materials.map((material) => material.side)).toEqual([DoubleSide, DoubleSide]);
+  expect(pickMeasurementSurfaceAcceptedClothPieceV1(rearRay(-1), cloth, null, accepted)).toBe(
+    first,
+  );
+  expect(
+    pickMeasurementSurfaceAcceptedClothPointV1(rearRay(1), cloth, null, accepted)?.triangleIndex,
+  ).toBe(1);
+
+  const doubleSideVersions = materials.map((material) => material.version);
+  updateMeasurementSurfaceAcceptedClothBacksideV1(cloth, false);
+  expect(materials.map((material) => material.side)).toEqual([FrontSide, FrontSide]);
+  expect(materials.map((material) => material.version)).toEqual(
+    doubleSideVersions.map((v) => v + 1),
+  );
+  expect(pickMeasurementSurfaceAcceptedClothPieceV1(rearRay(-1), cloth, null, accepted)).toBeNull();
+  expect(pickMeasurementSurfaceAcceptedClothPointV1(rearRay(1), cloth, null, accepted)).toBeNull();
   expect(pickMeasurementSurfaceAcceptedClothPieceV1(ray(-1), cloth, null, accepted)).toBe(first);
   expect(pickMeasurementSurfaceAcceptedClothPieceV1(ray(1), cloth, body, accepted)).toBe(second);
   expect(pickMeasurementSurfaceAcceptedClothPieceV1(ray(-1), cloth, body, accepted)).toBeNull();
@@ -330,6 +352,17 @@ it('uses the existing visible accepted cloth triangle ranges and rejects occlude
       ranges: [accepted.ranges[0], { triangleOffset: 1, triangleCount: 1, color: 0 }],
     }),
   ).toBeNull();
+
+  updateMeasurementSurfaceAcceptedClothBacksideV1(cloth);
+  expect(pickMeasurementSurfaceAcceptedClothPieceV1(rearRay(-1), cloth, null, accepted)).toBe(
+    first,
+  );
+  expect(
+    pickMeasurementSurfaceAcceptedClothPointV1(rearRay(1), cloth, null, accepted)?.triangleIndex,
+  ).toBe(1);
+  expect(cloth.geometry).toBe(clothGeometry);
+  expect(cloth.geometry.getAttribute('position').array).toBe(positionsM);
+  expect(cloth.material).toBe(materials);
   current = false;
   expect(pickMeasurementSurfaceAcceptedClothPieceV1(ray(1), cloth, body, accepted)).toBeNull();
   expect(pickMeasurementSurfaceAcceptedClothPointV1(ray(1), cloth, body, accepted)).toBeNull();
