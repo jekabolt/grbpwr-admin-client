@@ -125,6 +125,7 @@ export type PatternImportDxfProductExactNSeamProductionMountPropsV2 = Readonly<{
   mannequin: PatternImportDxfProductExactNSeamProductionMannequinSlotV2;
   operationsPanel: PatternImportDxfPhaseECadWorkbenchSlotV1;
   operationIssueCount?: number;
+  editingLocked?: boolean;
   desktopGeometry?: PatternImportDxfProductExactNDesktopGeometryV2 | null;
   objectSidebar?: PatternImportDxfPhaseECadWorkbenchSlotV1;
   sceneOverlayInput?: PatternImportDxfProductExactNSeamProductionSceneOverlayInputV2 | null;
@@ -260,6 +261,7 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
   mannequin,
   operationsPanel,
   operationIssueCount,
+  editingLocked,
   desktopGeometry = null,
   objectSidebar,
   sceneOverlayInput = null,
@@ -436,6 +438,7 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
 
   return (
     <PatternImportDxfPhaseECadWorkbenchSplitShellV1
+      editingLocked={editingLocked}
       objectSidebar={
         objectSidebar ??
         (exactDesktop && tableSessionOwner ? (

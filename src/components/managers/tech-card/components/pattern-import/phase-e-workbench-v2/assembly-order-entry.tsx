@@ -2492,6 +2492,7 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
       {open && exactNSession && exactNResolution?.ok ? (
         <PatternImportDxfProductExactNSeamProductionMountV2
           session={exactNSession}
+          editingLocked={frozen}
           operationIssueCount={countPatternImportDxfPhaseECadSelectedOperationWarningsV1(
             operationNavigation,
             source.selectedOperationNumber,
@@ -2653,6 +2654,7 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
         />
       ) : open && !exactNSession ? (
         <PatternImportDxfPhaseECadWorkbenchSplitShellV1
+          editingLocked={frozen}
           selection={
             prepared && state
               ? {

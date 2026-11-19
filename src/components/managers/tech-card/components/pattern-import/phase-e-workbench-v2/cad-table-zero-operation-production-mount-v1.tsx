@@ -1353,6 +1353,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
 
   return (
     <PatternImportDxfPhaseECadWorkbenchSplitShellV1
+      editingLocked={disabled}
       selection={selection}
       objectSidebar={
         prepared && tableSessionOwner ? (

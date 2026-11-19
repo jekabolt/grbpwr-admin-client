@@ -85,6 +85,45 @@ describe('Assembly Table chrome', () => {
     expect(markup).toContain('role="separator"');
   });
 
+  it('shows the card edit lock distinctly from unavailable operation readiness', () => {
+    const workbench = (editingLocked: boolean) =>
+      renderToStaticMarkup(
+        <PatternImportDxfPhaseECadWorkbenchSplitShellV1
+          editingLocked={editingLocked}
+          desktop={<div>2D table</div>}
+          mannequin={<div>Mannequin</div>}
+          operationsPanel={<p>Current operation unavailable.</p>}
+        />,
+      );
+
+    const editable = workbench(false);
+    const locked = workbench(true);
+    expect(editable).not.toContain('data-cad-workbench-editing-locked');
+    expect(locked).toMatch(
+      /role="status"[^>]*data-cad-workbench-editing-locked=""[^>]*>Editing locked<\/p>/u,
+    );
+    for (const markup of [editable, locked]) {
+      expect(markup).toContain('Current operation unavailable.');
+      expect(markup).toContain('aria-label="Measurement unit"');
+    }
+  });
+
+  it('uses the existing frozen gate for the lock in selected and empty Workbench routes', () => {
+    const source = (file: string) => readFileSync(new URL(file, import.meta.url), 'utf8');
+    expect(source('./assembly-order-entry.tsx')).toMatch(
+      /<PatternImportDxfProductExactNSeamProductionMountV2\s+session=\{exactNSession\}\s+editingLocked=\{frozen\}/u,
+    );
+    expect(source('./assembly-order-entry.tsx')).toMatch(
+      /<PatternImportDxfPhaseECadWorkbenchSplitShellV1\s+editingLocked=\{frozen\}/u,
+    );
+    expect(source('./exact-n-seam-production-mount-v2.tsx')).toContain(
+      'editingLocked={editingLocked}',
+    );
+    expect(source('./cad-table-zero-operation-production-mount-v1.tsx')).toContain(
+      'editingLocked={disabled}',
+    );
+  });
+
   it('keeps the dock and a movable splitter when the track is narrower than the old 52rem floor', () => {
     const layout = resolvePatternImportDxfPhaseECadWorkbenchLayoutV1(
       1024,

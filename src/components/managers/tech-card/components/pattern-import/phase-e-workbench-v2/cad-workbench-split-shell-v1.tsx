@@ -266,6 +266,8 @@ export type PatternImportDxfPhaseECadWorkbenchSplitShellPropsV1 = Readonly<{
   desktop: PatternImportDxfPhaseECadWorkbenchSlotV1;
   mannequin: PatternImportDxfPhaseECadWorkbenchSlotV1;
   operationsPanel: PatternImportDxfPhaseECadWorkbenchSlotV1;
+  /** The caller already enforces the card's edit lock. */
+  editingLocked?: boolean;
   selection?: PatternImportDxfPhaseECadWorkbenchSelectionV1 | null;
   onSelectionFocus?: (event: PatternImportDxfPhaseECadWorkbenchSelectionEventV1) => void;
   onContentKeyDown?: KeyboardEventHandler<HTMLDivElement>;
@@ -306,6 +308,7 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
   desktop,
   mannequin,
   operationsPanel,
+  editingLocked = false,
   selection = null,
   onSelectionFocus,
   onContentKeyDown,
@@ -560,6 +563,18 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
             >
               Current operation {dockedOperations || compactOperationsVisible ? '›' : '‹'}
             </Button>
+          ) : null}
+          {editingLocked ? (
+            <Text
+              component='p'
+              size='micro'
+              variant='label'
+              className='mx-2 shrink-0 font-bold'
+              role='status'
+              data-cad-workbench-editing-locked=''
+            >
+              Editing locked
+            </Text>
           ) : null}
           {desktopVisible ? (
             <div className='mr-1 flex items-center' role='group' aria-label='Measurement unit'>
