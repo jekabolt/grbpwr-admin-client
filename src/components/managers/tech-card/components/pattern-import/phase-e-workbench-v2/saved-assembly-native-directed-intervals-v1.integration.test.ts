@@ -38,6 +38,7 @@ import {
 } from '../phase-e-workbench/assembly-order-entry';
 import { DirectClient } from '../ordinary-dxf-wizard.test-fixture';
 import { derivePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1 } from './cad-table-connect-edge-segments-v1';
+import CadTableSavedSeamSubrangePanelV1 from './cad-table-saved-seam-subrange-panel-v1';
 import { finalizePatternImportDxfPhaseEExistingLinkedN1V1 } from './cad-table-existing-linked-n1-finalize-v1';
 import type {
   PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1,
@@ -99,7 +100,9 @@ import { readCompleteSavedAssemblySourceV1 } from './saved-assembly-complete-sou
 import { createPatternImportDxfPhaseESavedAssemblySnapshotProductionRpcV1 } from './saved-assembly-snapshot-production-rpc-v1';
 import {
   isVerifiedSavedAssemblyNativeDirectedIntervalReceiptV1,
+  isVerifiedSavedAssemblyNativeDirectedSubrangeReceiptV1,
   resolveSavedAssemblyNativeDirectedIntervalsV1,
+  resolveSavedAssemblyNativeDirectedSubrangesV1,
 } from './saved-assembly-native-directed-intervals-v1';
 import {
   canonicalizePatternImportDxfPhaseESavedAssemblyValueV1 as canonicalize,
@@ -635,6 +638,45 @@ it('refuses casting a real saved native partial seam into whole-edge semantic ch
     },
   });
   const current = await savedSource(seed, [wire]);
+  const partialRead = {
+    source: current,
+    expectedRow: seed.row,
+    replay: authored.replay,
+    operationNumber,
+    sizeToken,
+  };
+  expect(await resolveSavedAssemblyNativeDirectedIntervalsV1(partialRead, signal)).toMatchObject({
+    ok: false,
+    blocker: { code: 'saved-interval-seam-unsupported' },
+  });
+  const ranges = await resolveSavedAssemblyNativeDirectedSubrangesV1(partialRead, signal);
+  if (!ranges.ok) throw new Error(JSON.stringify(ranges.blocker));
+  expect(isVerifiedSavedAssemblyNativeDirectedSubrangeReceiptV1(ranges.receipt)).toBe(true);
+  expect(isVerifiedSavedAssemblyNativeDirectedIntervalReceiptV1(ranges.receipt)).toBe(false);
+  const [left, right] = ranges.receipt.orderedSeams[0]!.sides;
+  expect(left.nativeSubrange).toBeUndefined();
+  expect(right).toMatchObject({
+    direction: 'reverse',
+    boundaryVertexIds: b.boundaryVertexIds,
+    nativeSubrange: {
+      denominator: 10_000,
+      forwardNumerators: [3_200, 8_250],
+      parentLengthMm: runLengthMm,
+    },
+  });
+  expect(JSON.parse(right.canonicalAnchorWire)).toEqual(wire.sideB!.parts![0]);
+
+  const offGrid = structuredClone(wire);
+  offGrid.sideB!.parts![0]!.rangeFrom = 0.17501;
+  expect(
+    await resolveSavedAssemblyNativeDirectedSubrangesV1(
+      { ...partialRead, source: await savedSource(seed, [offGrid]) },
+      signal,
+    ),
+  ).toMatchObject({
+    ok: false,
+    blocker: { code: 'saved-interval-seam-unsupported', sideIndex: 1 },
+  });
   const source = buildPatternImportDxfPhaseEAssemblyOrderSourceV1(
     current.operations,
     [fromWire(wire)!],
@@ -1091,6 +1133,107 @@ function installWorkbenchCpuRoot() {
       ...listeners,
     } as unknown as HTMLElement);
 }
+
+it('shows a verified saved PARTIAL span through the ordinary N1 operations route', async () => {
+  const { row } = seed;
+  const wire = structuredClone(wires[0]!);
+  wire.kind = 'TECH_CARD_SEAM_KIND_PARTIAL';
+  const part = wire.sideA!.parts![0]!;
+  part.rangeFrom = 0.25;
+  part.rangeTo = 0.75;
+  const response = await completeSourceReply(seed, [wire]);
+  ui.card = cardForSavedNativeFixture(seed, [wire], response.operations!);
+  ui.operations = mapTechCardToForm(ui.card).operations ?? [];
+  const initial = useSeamsStore.getState();
+  useSeamsStore.setState({
+    cardId: row.techCardId,
+    serverVersion: row.cardLockVersion,
+    server: [fromWire(wire)!],
+  });
+  ports.GetTechCardSavedAssemblySnapshot.mockResolvedValue(response);
+  ports.PutTechCardPatternSemanticSidecar.mockClear();
+  ports.UpdateTechCard.mockClear();
+  ui.renderNativeN1.mockClear();
+  const handoff: PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1 = {
+    status: 'available',
+    ingest: vi.fn(),
+  };
+  const createCpuRoot = installWorkbenchCpuRoot();
+  const route = createCpuRoot();
+  const panel = createCpuRoot();
+  try {
+    await act(async () =>
+      route.render(
+        createElement(PatternImportDxfPhaseEAssemblyOrderEntryMountV1, {
+          techCardId: row.techCardId,
+          selectedIndex: 0,
+          autoOpen: true,
+          zeroConnectAuthoringHandoff: handoff,
+        }),
+      ),
+    );
+    const mounted = ui.renderNativeN1.mock.lastCall?.[0] as Parameters<
+      typeof PatternImportDxfPhaseECadTableZeroOperationProductionMountV1
+    >[0];
+    expect(mounted).toMatchObject({
+      sourceSurface: 'explicit-native-drawn-sewing',
+      savedSeamSubrangeTarget: {
+        operationNumber,
+        seamKey: wire.seamKey,
+        cardLockVersion: row.cardLockVersion,
+        sizeToken,
+      },
+      zeroConnectAuthoringHandoff: { status: 'unavailable' },
+    });
+    const target = mounted.savedSeamSubrangeTarget!;
+    let output: ReactNode;
+    const read = {
+      target,
+      replay: authored.replay,
+      catalogCanonicalSha256: authored.catalog.canonicalSha256,
+    };
+    function Inspector(props: typeof read) {
+      output = CadTableSavedSeamSubrangePanelV1(props);
+      return null;
+    }
+    await act(async () => panel.render(createElement(Inspector, read)));
+    await waitForWorkbench(() =>
+      expect(actionText(output).replace(/\s+/g, ' ')).toContain(
+        `Side A · ${part.lenMm! / 4} mm to ${part.lenMm! * 0.75} mm along the edge · ${part.lenMm! / 2} mm length`,
+      ),
+    );
+    expect(actionText(output).replace(/\s+/g, ' ')).not.toContain('Side B');
+    expect(ports.GetTechCardSavedAssemblySnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceOnly: true,
+        expectedCardLockVersion: row.cardLockVersion,
+        expectedSavedRowRevision: row.revision,
+        expectedSha256: row.sha256,
+      }),
+    );
+    const wrongLocator = structuredClone(wire);
+    wrongLocator.sideA!.parts![0]!.edgeHint = part.edgeHint!.replace('#dxf:0:', '#dxf:1:');
+    ports.GetTechCardSavedAssemblySnapshot.mockResolvedValue(
+      await completeSourceReply(seed, [wrongLocator]),
+    );
+    await act(async () => panel.render(createElement(Inspector, { ...read, key: 'new-read' })));
+    await waitForWorkbench(() =>
+      expect(actionText(output)).toContain('The saved seam range could not be verified'),
+    );
+    expect(actionText(output)).not.toContain('along the edge');
+    expect(handoff.ingest).not.toHaveBeenCalled();
+    expect(ports.PutTechCardPatternSemanticSidecar).not.toHaveBeenCalled();
+    expect(ports.UpdateTechCard).not.toHaveBeenCalled();
+  } finally {
+    await act(async () => {
+      panel.unmount();
+      route.unmount();
+    });
+    useSeamsStore.setState(initial);
+    ports.GetTechCardSavedAssemblySnapshot.mockReset();
+    vi.unstubAllGlobals();
+  }
+});
 
 async function verifyNativeWorkbenchMount(
   seams: WireSeam[],

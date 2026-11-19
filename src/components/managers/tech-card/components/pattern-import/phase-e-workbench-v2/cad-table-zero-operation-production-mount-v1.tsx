@@ -54,6 +54,7 @@ import {
 import { CadTablePressControlV1 } from './cad-table-press-control-v1';
 import type { CadTableSavedTopstitchOverlayV1 } from './cad-table-saved-topstitch-overlay-v1';
 import type { SavedPointClosureOperationTargetV1 } from './cad-table-saved-point-closure-panel-v1';
+import type { SavedSeamSubrangeTargetV1 } from './cad-table-saved-seam-subrange-panel-v1';
 import {
   bindPatternImportDxfPhaseECadTableZeroOperationFreshToSavedAuthorityV1,
   capturePatternImportDxfPhaseECadTableZeroOperationSavedRebindExpectationV1,
@@ -114,6 +115,7 @@ const SavedGeneratedFusingView = lazy(() => import('./saved-generated-fusing-vie
 const SavedRankedPointEdit = lazy(() => import('./cad-table-saved-ranked-point-edit-v1'));
 const SavedFrenchCurveEdit = lazy(() => import('./cad-table-saved-french-curve-edit-v1'));
 const SavedPointClosurePanel = lazy(() => import('./cad-table-saved-point-closure-panel-v1'));
+const SavedSeamSubrangePanel = lazy(() => import('./cad-table-saved-seam-subrange-panel-v1'));
 
 export const PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_OPERATION_PRODUCTION_MOUNT_V1 =
   'pattern-import-dxf-phase-e-cad-table-zero-operation-production-mount/1' as const;
@@ -717,6 +719,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
   sourceSurface,
   savedDraftSourceOnly = false,
   pointClosureTarget,
+  savedSeamSubrangeTarget,
   linkedPieceRename,
 }: Readonly<{
   techCardId?: number;
@@ -738,6 +741,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
   sourceSurface?: 'explicit-native-drawn-sewing';
   savedDraftSourceOnly?: boolean;
   pointClosureTarget?: SavedPointClosureOperationTargetV1;
+  savedSeamSubrangeTarget?: SavedSeamSubrangeTargetV1;
   linkedPieceRename?: Required<Pick<GuardedSavedPieceRename, 'row' | 'attachment'>>;
 }>) {
   const savePieceRename = useGuardedPieceRename();
@@ -1266,6 +1270,14 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
     );
   }, [cardSession, prepared, selectedScope?.label]);
   const resolvedSavedCard = currentPreparation?.resolvedSavedCard ?? effectiveSavedCard;
+  const verifiedSubrangeReplay =
+    savedSeamSubrangeTarget &&
+    resolvedSource === 'saved' &&
+    prepared &&
+    'verifiedNativeReplay' in prepared &&
+    prepared.verifiedNativeReplay?.row.cardLockVersion === savedSeamSubrangeTarget.cardLockVersion
+      ? prepared.verifiedNativeReplay
+      : undefined;
   const fasteningRow =
     pointClosureTarget &&
     resolvedSavedCard &&
@@ -1846,6 +1858,36 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
             )}
             {operationsPanel}
           </>
+        ) : savedSeamSubrangeTarget ? (
+          <>
+            {sizeToken !== savedSeamSubrangeTarget.sizeToken ? (
+              <Text component='p' size='micro' className='px-3 py-2' role='status'>
+                Choose size {savedSeamSubrangeTarget.sizeToken} to inspect the saved seam range.
+              </Text>
+            ) : verifiedSubrangeReplay && prepared ? (
+              <Suspense fallback={null}>
+                <SavedSeamSubrangePanel
+                  key={JSON.stringify([
+                    preparationKey,
+                    verifiedSubrangeReplay.row.patternLineKey,
+                    verifiedSubrangeReplay.row.revision,
+                    verifiedSubrangeReplay.row.sha256,
+                    prepared.catalog.canonicalSha256,
+                    savedSeamSubrangeTarget.operationNumber,
+                    savedSeamSubrangeTarget.seamKey,
+                  ])}
+                  target={savedSeamSubrangeTarget}
+                  replay={verifiedSubrangeReplay}
+                  catalogCanonicalSha256={prepared.catalog.canonicalSha256}
+                />
+              </Suspense>
+            ) : prepared ? (
+              <Text component='p' size='micro' className='px-3 py-2' role='status'>
+                The saved seam range requires a verified sewing edge for this pattern.
+              </Text>
+            ) : null}
+            {operationsPanel}
+          </>
         ) : (
           operationsPanel ?? (
             <div className='space-y-1 p-3' data-cad-zero-operation-current-operation='absent'>
@@ -1875,6 +1917,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
   sourceSurface,
   savedDraftSourceOnly,
   pointClosureTarget,
+  savedSeamSubrangeTarget,
   linkedPieceRename,
 }: Readonly<{
   techCardId?: number;
@@ -1889,6 +1932,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
   sourceSurface?: 'explicit-native-drawn-sewing';
   savedDraftSourceOnly?: boolean;
   pointClosureTarget?: SavedPointClosureOperationTargetV1;
+  savedSeamSubrangeTarget?: SavedSeamSubrangeTargetV1;
   linkedPieceRename?: Required<Pick<GuardedSavedPieceRename, 'row' | 'attachment'>>;
 }>) {
   const subscribe = useCallback(
@@ -1929,6 +1973,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
       sourceSurface={sourceSurface}
       savedDraftSourceOnly={savedDraftSourceOnly}
       pointClosureTarget={pointClosureTarget}
+      savedSeamSubrangeTarget={savedSeamSubrangeTarget}
       linkedPieceRename={linkedPieceRename}
       mannequin={({
         sources,
