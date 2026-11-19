@@ -197,6 +197,11 @@ export type AccessLevel =
   | "ACCESS_LEVEL_UNSPECIFIED"
   | "ACCESS_LEVEL_READ"
   | "ACCESS_LEVEL_WRITE";
+export type TranslateContext =
+  // TRANSLATE_CONTEXT_UNKNOWN: shop copy (fashion e-commerce translator).
+  | "TRANSLATE_CONTEXT_UNKNOWN"
+  // TRANSLATE_CONTEXT_TECHPACK: a tech pack for a sewing factory (garment technologist).
+  | "TRANSLATE_CONTEXT_TECHPACK";
 export type GetDictionaryRequest = {
 };
 
@@ -20451,6 +20456,9 @@ export type TranslateFieldsRequest = {
   targets: TranslateTarget[] | undefined;
   // constraints by field name; a field without an entry has no limit.
   constraints: { [key: string]: TranslateConstraint } | undefined;
+  // context picks who reads the translation (the client's `context: 'techpack'`);
+  // unspecified = shop copy, as before.
+  context: TranslateContext | undefined;
 };
 
 export type TranslateSource = {

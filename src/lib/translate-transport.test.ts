@@ -3,7 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const { translateFields } = vi.hoisted(() => ({ translateFields: vi.fn() }));
 vi.mock('api/api', () => ({ adminService: { TranslateFields: translateFields } }));
 
-import { requestTranslations, translateViaRpc, translationsFromRpc } from './translate-transport';
+import {
+  requestTranslations,
+  rpcTranslateContext,
+  translateViaRpc,
+  translationsFromRpc,
+} from './translate-transport';
 
 const body = {
   source: { langName: 'English', fields: { f0: 'sleeve' } },
@@ -79,7 +84,7 @@ describe('requestTranslations', () => {
     await expect(requestTranslations(body, (s) => `translate ${s}`)).rejects.toThrow('busy');
   });
 
-  it("'1' → the RPC, without the legacy-only context, answer mapped from .fields", async () => {
+  it("'1' → the RPC with the tech pack context, answer mapped from .fields", async () => {
     vi.stubEnv('VITE_TRANSLATE_RPC', '1');
     translateFields.mockResolvedValue({ translations: { fr: { fields: { f0: 'manche' } } } });
 
@@ -91,6 +96,27 @@ describe('requestTranslations', () => {
       source: body.source,
       targets: body.targets,
       constraints: body.constraints,
+      context: 'TRANSLATE_CONTEXT_TECHPACK',
     });
+  });
+
+  it("'1' without a context → the RPC leaves it out (shop copy)", async () => {
+    vi.stubEnv('VITE_TRANSLATE_RPC', '1');
+    translateFields.mockResolvedValue({ translations: {} });
+    await requestTranslations({ ...body, context: undefined }, (s) => `translate ${s}`);
+
+    expect(translateFields).toHaveBeenCalledWith({
+      source: body.source,
+      targets: body.targets,
+      constraints: body.constraints,
+      context: undefined,
+    });
+  });
+});
+
+describe('rpcTranslateContext', () => {
+  it("maps 'techpack' to TECHPACK and nothing to nothing", () => {
+    expect(rpcTranslateContext('techpack')).toBe('TRANSLATE_CONTEXT_TECHPACK');
+    expect(rpcTranslateContext(undefined)).toBeUndefined();
   });
 });

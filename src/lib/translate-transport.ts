@@ -1,5 +1,5 @@
 import { adminService } from 'api/api';
-import type { TranslateFieldsResponse } from 'api/proto-http/admin';
+import type { TranslateContext, TranslateFieldsResponse } from 'api/proto-http/admin';
 
 // The one way to the translation model. `VITE_TRANSLATE_RPC` unset → the legacy `/api/translate`
 // (Vercel function / Vite dev middleware), called exactly as before. '1' → the backend RPC
@@ -11,9 +11,16 @@ export type TranslateBody = {
   source: { langName: string; fields: Record<string, string> };
   targets: Array<{ code: string; langName: string }>;
   constraints: Record<string, { maxLength: number }>;
-  /** Legacy endpoint only: the RPC has no such field yet. */
+  /** Tech pack sheet: factory vocabulary, not shop copy. */
   context?: 'techpack';
 };
+
+/** The legacy `context` → the RPC enum; none = shop copy (the field is left out). */
+export function rpcTranslateContext(
+  context: TranslateBody['context'],
+): TranslateContext | undefined {
+  return context === 'techpack' ? 'TRANSLATE_CONTEXT_TECHPACK' : undefined;
+}
 
 /** Translations by target code, then by field name. */
 export type TranslationsByCode = Record<string, Record<string, string>>;
@@ -46,6 +53,7 @@ export async function requestTranslations(
       source: body.source,
       targets: body.targets,
       constraints: body.constraints,
+      context: rpcTranslateContext(body.context),
     });
     return translationsFromRpc(res);
   }
