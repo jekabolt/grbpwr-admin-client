@@ -281,6 +281,8 @@ export function Matrix({
       {declining && (
         <ConfirmationModal
           open
+          lowercase
+          sheet
           width='sm'
           title={`decline ${declining.name || declining.slug}`}
           confirmLabel='decline'

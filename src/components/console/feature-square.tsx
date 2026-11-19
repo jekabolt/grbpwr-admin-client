@@ -27,23 +27,27 @@ export function FeatureSquare({
   onChange: (on: boolean) => void;
 }) {
   if (cell && locked && !checked) return <div className='min-h-11' />;
+  const square = (
+    <CheckboxCommon
+      name={name}
+      role='switch'
+      checked={checked}
+      locked={locked}
+      cell={cell}
+      aria-label={label}
+      onChange={(v: boolean) => onChange(v)}
+    />
+  );
+  if (cell) return square;
   return (
     <label
       htmlFor={name}
       className={cn(
-        'flex items-center',
-        cell ? 'min-h-11 w-full justify-center' : 'min-h-8 gap-2 whitespace-nowrap',
+        'flex min-h-8 items-center gap-2 whitespace-nowrap',
         locked ? 'cursor-not-allowed text-labelColor' : 'cursor-pointer',
       )}
     >
-      <CheckboxCommon
-        name={name}
-        role='switch'
-        checked={checked}
-        disabled={locked}
-        aria-label={label}
-        onChange={(v: boolean) => onChange(v)}
-      />
+      {square}
       {children}
     </label>
   );

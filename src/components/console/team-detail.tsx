@@ -38,6 +38,8 @@ function DeleteTeamSheet({ team, onClose }: { team: PlatformTeam; onClose: () =>
     <ConfirmationModal
       open
       width='sm'
+      lowercase
+      sheet
       title={`delete ${team.name || slug}`}
       confirmLabel='delete'
       cancelLabel='cancel'
