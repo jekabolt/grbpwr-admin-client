@@ -88,6 +88,10 @@ async function fixture(seamKeys: string[], mediaType: string) {
     ...structuredClone(wire.selectedSeams[0]),
     seamKey,
   }));
+  // The stored protobuf uses 0/0 for an EDGE whole run, including in the signed topology.
+  for (const seam of wire.selectedSeams)
+    for (const anchor of [...seam.sideA.parts, ...seam.sideB.parts])
+      Object.assign(anchor, { rangeFrom: 0, rangeTo: 0 });
   const topology = JSON.parse(Buffer.from(wire.topologyCanonicalJson, 'base64').toString());
   Object.assign(topology.operations[0], {
     seamKeys: [...seamKeys],
@@ -98,6 +102,8 @@ async function fixture(seamKeys: string[], mediaType: string) {
     ...structuredClone(topology.seams[0]),
     seamKey,
   }));
+  for (const seam of topology.seams)
+    for (const anchor of [...seam.sideA, ...seam.sideB]) anchor.range = [0, 0];
   const canonical = canonicalizePatternImportDxfPhaseESavedAssemblyValueV1(topology);
   wire.topologyCanonicalJson = Buffer.from(canonical).toString('base64');
   wire.assemblyTopologySha256 = await digestFullAssemblyFixture(
@@ -120,16 +126,46 @@ async function fixture(seamKeys: string[], mediaType: string) {
     mediaType: PATTERN_IMPORT_DXF_PRODUCT_SEMANTIC_SIDECAR_MEDIA_TYPE_V1,
     postSaveReceiptSha256: '3'.repeat(64),
   } as TechCardPatternSemanticSidecar;
+  const { revision: _revision, ...wireRow } = {
+    ...wire.row,
+    patternVersion: stored.patternVersion,
+  };
+  const { downloadUrl: _downloadUrl, ...canonicalRow } = wireRow;
+  const completeSource = {
+    ownedSeams: wire.selectedSeams,
+    aliases: [],
+    garmentLabels: [],
+  };
+  const completeCanonical = canonicalizePatternImportDxfPhaseESavedAssemblyValueV1({
+    ...completeSource,
+    rows: [canonicalRow],
+    operations: wire.operations,
+    serverAssemblyRevision: wire.serverAssemblyRevision,
+  });
+  const completeSha = await digestFullAssemblyFixture(
+    new TextEncoder().encode(`tech-card-saved-assembly-complete-source/1\0${completeCanonical}`),
+  );
   ports.getSnapshot.mockImplementation(async (request) => {
     expect(request).toMatchObject({
       expectedSavedRowRevision: row.revision,
       expectedCardLockVersion: row.cardLockVersion,
       expectedSha256: row.sha256,
-      selectedOperationNumber,
     });
+    const complete =
+      request.profile === 'TECH_CARD_SAVED_ASSEMBLY_SNAPSHOT_PROFILE_COMPLETE_SOURCE_V1';
+    if (complete) expect(request.expectedServerAssemblyRevision).toBe(wire.serverAssemblyRevision);
+    else expect(request.selectedOperationNumber).toBe(selectedOperationNumber);
     return {
       ...wire,
-      row: { ...wire.row, patternVersion: stored.patternVersion },
+      row: complete ? wireRow : { ...wire.row, patternVersion: stored.patternVersion },
+      ...(complete && {
+        completeSourceV1: {
+          ...completeSource,
+          rows: [wireRow],
+          sourceSha256: completeSha,
+          canonicalJson: Buffer.from(completeCanonical).toString('base64'),
+        },
+      }),
       semanticSidecar: structuredClone(stored),
     } as unknown as Awaited<ReturnType<AdminService['GetTechCardSavedAssemblySnapshot']>>;
   });
@@ -205,6 +241,20 @@ it('saves two confirmed exact seams with production V3 and restores their exact 
     getStored,
   } = await fixture(seamKeys, PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V3);
   const { selectedOperationNumber } = current;
+  const opening = newSnapshotOwner();
+  await expect(
+    opening.authorityAdapter.readAuthoritativeAssembly({ row, selectedOperationNumber }, signal),
+  ).rejects.toMatchObject({ code: 'exact-carrier-unavailable' });
+  const initialEvidence = await opening.readInitialAssembly(
+    { row, selectedOperationNumber },
+    signal,
+  );
+  expect(initialEvidence).toMatchObject({
+    exactTopology: null,
+    semanticV1Sha256: getStored().sidecarSha256,
+    serverAssemblyRevision: current.serverAssemblyRevision,
+    serverTopologySha256: current.assemblyTopologySha256,
+  });
   expect(routePatternImportDxfPhaseEAssemblyOrderEntryV2(seamKeys)).toBe('v2');
   const proposed = proposePatternImportDxfProductPhaseEMultiseamAssemblyV2(
     catalog,
@@ -212,6 +262,25 @@ it('saves two confirmed exact seams with production V3 and restores their exact 
   );
   if (!proposed.ok) throw new Error(JSON.stringify(proposed.blockers));
   const { proposal } = proposed;
+  expect(current.topology.seams.map(({ sideA }) => sideA[0]?.range)).toEqual([
+    [0, 0],
+    [0, 0],
+  ]);
+  expect(
+    proposal.seams.flatMap(({ sides }) => sides.map(({ evidence }) => evidence.range)),
+  ).toEqual([
+    [0, 1],
+    [0, 1],
+    [0, 1],
+    [0, 1],
+  ]);
+  const zeroPartial = proposePatternImportDxfProductPhaseEMultiseamAssemblyV2(catalog, {
+    ...current.topology,
+    seams: current.topology.seams.map((seam, index) =>
+      index === 0 ? { ...seam, kind: 'partial' } : seam,
+    ),
+  });
+  expect(zeroPartial).toMatchObject({ ok: false, blockers: [{ code: 'seam-shape-unsupported' }] });
   const initial = createPatternImportDxfProductPhaseEMultiseamWorkbenchStateV2(
     catalog,
     proposal,
@@ -263,12 +332,46 @@ it('saves two confirmed exact seams with production V3 and restores their exact 
     crypto,
   );
   if (!choices.ok) throw new Error(JSON.stringify(choices.blockers));
-  const saved = await persistPatternImportDxfPhaseEMultiseamExactChoicesV2(
-    {
-      authorityAdapter,
-      exactComposite: createPatternImportDxfPhaseEExactCompositeProductionPersistenceV3(),
+  const persistence = {
+    authorityAdapter,
+    exactComposite: createPatternImportDxfPhaseEExactCompositeProductionPersistenceV3(),
+  };
+  const request = {
+    row,
+    selectedOperationNumber,
+    catalog,
+    proposal,
+    choices,
+    initialAuthority: {
+      serverAssemblyRevision: initialEvidence.serverAssemblyRevision,
+      assemblyTopologySha256: initialEvidence.serverTopologySha256,
+      semanticV1Sha256: initialEvidence.semanticV1Sha256,
     },
-    { row, selectedOperationNumber, catalog, proposal, choices },
+  };
+  const changedV1 = semanticDocument(row);
+  changedV1.product.phaseEPlanSha256 = '8'.repeat(64);
+  const changedBytes = bytesOf(changedV1);
+  ports.getSidecar.mockResolvedValueOnce({
+    semanticSidecar: {
+      ...getStored(),
+      byteLength: changedBytes.length,
+      sidecarBytes: Buffer.from(changedBytes).toString('base64'),
+      sidecarSha256: await digestFullAssemblyFixture(changedBytes),
+    },
+  });
+  const stale = await persistPatternImportDxfPhaseEMultiseamExactChoicesV2(
+    persistence,
+    request,
+    signal,
+  );
+  expect(stale).toMatchObject({
+    persistence: 'not-attempted',
+    blockers: [{ code: 'exact-composite-current-sidecar-invalid' }],
+  });
+  expect(ports.putSidecar).not.toHaveBeenCalled();
+  const saved = await persistPatternImportDxfPhaseEMultiseamExactChoicesV2(
+    persistence,
+    request,
     signal,
   );
   expect(saved, JSON.stringify(saved)).toMatchObject({
@@ -278,6 +381,9 @@ it('saves two confirmed exact seams with production V3 and restores their exact 
   expect(ports.putSidecar).toHaveBeenCalledTimes(1);
 
   const fresh = newSnapshotOwner();
+  await expect(fresh.readInitialAssembly({ row, selectedOperationNumber }, signal)).rejects.toThrow(
+    'current standalone Product Semantic V1',
+  );
   const read = await fresh.authorityAdapter.readAuthoritativeAssembly(
     { row, selectedOperationNumber },
     new AbortController().signal,

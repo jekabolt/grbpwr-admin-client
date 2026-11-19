@@ -377,6 +377,21 @@ function validAnchor(anchor: PatternImportDxfProductPhaseEExistingAssemblyAnchor
   );
 }
 
+/** The Assembly wire uses 0/0 for a whole edge. Keep the signed topology untouched. */
+function proposalAnchor(
+  anchor: PatternImportDxfProductPhaseEExistingAssemblyAnchorV1,
+  kind: ProposalSeamV2['kind'],
+): PatternImportDxfProductPhaseEExistingAssemblyAnchorV1 {
+  if (
+    kind !== 'edge' ||
+    anchor?.range?.length !== 2 ||
+    anchor.range[0] !== 0 ||
+    anchor.range[1] !== 0
+  )
+    return anchor;
+  return { ...anchor, range: [0, 1] };
+}
+
 function derivedOperationId(seamIds: readonly [string, string]): string {
   return `${PATTERN_IMPORT_DXF_PRODUCT_PHASE_E_MULTISEAM_DERIVED_OPERATION_ID_PREFIX_V2}${fnv1a64(canonical(seamIds))}`;
 }
@@ -506,23 +521,22 @@ export function proposePatternImportDxfProductPhaseEMultiseamAssemblyV2(
     const seam = matches[0];
     if (!seam.confirmed || seam.stale)
       return proposalBlocked('seam-not-current', `Seam ${seamId} must be confirmed and non-stale.`);
+    const sideA = proposalAnchor(seam.sideA[0], seam.kind);
+    const sideB = proposalAnchor(seam.sideB[0], seam.kind);
     if (
       seam.anchoredSize !== catalog.sizeToken ||
       seam.sideA.length !== 1 ||
       seam.sideB.length !== 1 ||
-      !validAnchor(seam.sideA[0]) ||
-      !validAnchor(seam.sideB[0]) ||
-      seam.sideA[0].pieceLineKey === seam.sideB[0].pieceLineKey ||
+      !validAnchor(sideA) ||
+      !validAnchor(sideB) ||
+      sideA.pieceLineKey === sideB.pieceLineKey ||
       seam.direction === 'unknown'
     )
       return proposalBlocked(
         'seam-shape-unsupported',
         `Seam ${seamId} must expose one exact anchor per distinct piece and an explicit direction.`,
       );
-    const seamPieceLineKeys = [seam.sideA[0].pieceLineKey, seam.sideB[0].pieceLineKey].sort() as [
-      string,
-      string,
-    ];
+    const seamPieceLineKeys = [sideA.pieceLineKey, sideB.pieceLineKey].sort() as [string, string];
     const priorPieceLineKeys = participatingPieceLineKeys;
     if (
       seamPieceLineKeys.some(
@@ -537,12 +551,8 @@ export function proposePatternImportDxfProductPhaseEMultiseamAssemblyV2(
         `Seam ${seamId} must bind the same exact two catalog piece line identities as the selected operation.`,
       );
     participatingPieceLineKeys ??= seamPieceLineKeys;
-    const pieceA = catalog.pieces.find(
-      ({ pieceLineKey }) => pieceLineKey === seam.sideA[0].pieceLineKey,
-    )!;
-    const pieceB = catalog.pieces.find(
-      ({ pieceLineKey }) => pieceLineKey === seam.sideB[0].pieceLineKey,
-    )!;
+    const pieceA = catalog.pieces.find(({ pieceLineKey }) => pieceLineKey === sideA.pieceLineKey)!;
+    const pieceB = catalog.pieces.find(({ pieceLineKey }) => pieceLineKey === sideB.pieceLineKey)!;
     proposalSeams.push({
       id: seam.seamKey,
       kind: seam.kind,
@@ -554,14 +564,14 @@ export function proposePatternImportDxfProductPhaseEMultiseamAssemblyV2(
           pieceLineKey: pieceA.pieceLineKey,
           sourceSide: 'A',
           requiredDirection: 'forward',
-          evidence: { ...seam.sideA[0], range: [...seam.sideA[0].range] as [number, number] },
+          evidence: { ...sideA, range: [...sideA.range] as [number, number] },
         },
         {
           pieceId: pieceB.pieceId,
           pieceLineKey: pieceB.pieceLineKey,
           sourceSide: 'B',
           requiredDirection: seam.direction === 'reversed' ? 'reverse' : 'forward',
-          evidence: { ...seam.sideB[0], range: [...seam.sideB[0].range] as [number, number] },
+          evidence: { ...sideB, range: [...sideB.range] as [number, number] },
         },
       ],
     });

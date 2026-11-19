@@ -60,6 +60,7 @@ type SnapshotAuthority = Readonly<{
     PatternImportDxfPhaseESavedAssemblySnapshotProductionRpcV1['authorityAdapter'],
     'readAuthoritativeAssembly'
   >;
+  readInitialAssembly?: PatternImportDxfPhaseESavedAssemblySnapshotProductionRpcV1['readInitialAssembly'];
 }>;
 
 export type PatternImportDxfPhaseESavedRowRuntimeDepsV1 = Readonly<{
@@ -450,6 +451,9 @@ export function createPatternImportDxfPhaseESavedRowRuntimeV1(
   const preparationOwner = createPatternImportDxfPhaseESavedRowPreparationOwnerV1({
     createSavedReprocessHost,
     readAuthoritativeAssembly: deps.snapshot.authorityAdapter.readAuthoritativeAssembly,
+    ...(deps.snapshot.readInitialAssembly && {
+      readInitialAssembly: deps.snapshot.readInitialAssembly,
+    }),
     ...(crypto ? { crypto } : {}),
   });
 

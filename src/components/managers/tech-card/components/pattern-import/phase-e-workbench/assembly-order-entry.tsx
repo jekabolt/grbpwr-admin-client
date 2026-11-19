@@ -2279,6 +2279,13 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
                 catalog: prepared.catalog,
                 proposal: prepared.proposal,
                 choices,
+                ...('semanticV1Sha256' in prepared && {
+                  initialAuthority: {
+                    serverAssemblyRevision: prepared.serverAssemblyRevision,
+                    assemblyTopologySha256: prepared.assemblyTopologySha256,
+                    semanticV1Sha256: prepared.semanticV1Sha256,
+                  },
+                }),
               },
               signal,
             )

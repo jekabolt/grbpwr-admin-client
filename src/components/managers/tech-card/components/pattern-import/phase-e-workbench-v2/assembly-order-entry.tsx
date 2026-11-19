@@ -50,6 +50,7 @@ import type { PatternImportDxfPhaseESavedAssemblyAuthorityTransportAdapterV1 } f
 import {
   PATTERN_IMPORT_DXF_PHASE_E_SAVED_ROW_PREPARATION_REQUEST_V1,
   type PatternImportDxfPhaseESavedRowPreparedV1,
+  type PatternImportDxfPhaseESavedRowWorkbenchPreparedV1,
 } from './saved-row-preparation-owner-v1';
 import type { PatternImportDxfPhaseESavedRowProductionRuntimeV1 } from './saved-row-production-runtime-v1';
 import type { PatternImportDxfPhaseEStitchVisualV1 } from './stitch-visual-v1';
@@ -350,7 +351,7 @@ export type PatternImportDxfPhaseEMultiseamSavedSubmissionV2 =
 
 /** Typed persistence seam; optional consumers remain fail-closed, while the real mount wires Wave M. */
 export type PatternImportDxfPhaseEMultiseamSavedConfirmV2 = (
-  prepared: PatternImportDxfPhaseESavedRowPreparedV1,
+  prepared: PatternImportDxfPhaseESavedRowWorkbenchPreparedV1,
   choices: Extract<PatternImportDxfProductPhaseEMultiseamChoicesResultV2, { ok: true }>,
   signal: AbortSignal,
 ) => Promise<PatternImportDxfPhaseEMultiseamSavedSubmissionV2>;
@@ -396,7 +397,7 @@ export type PatternImportDxfPhaseEMultiseamSavedSessionV2 = Readonly<{
 export type PatternImportDxfPhaseEMultiseamSavedPreparationResultV2 =
   | Readonly<{
       ok: true;
-      prepared: PatternImportDxfPhaseESavedRowPreparedV1;
+      prepared: PatternImportDxfPhaseESavedRowWorkbenchPreparedV1;
       state: PatternImportDxfProductPhaseEMultiseamWorkbenchStateV2;
       blockers: readonly [];
     }>
@@ -465,7 +466,7 @@ export type PatternImportDxfPhaseEMultiseamAssemblyOrderPreparationResultV2 =
 
 type PreparedForDesktop =
   | PatternImportDxfPhaseEMultiseamAssemblyOrderPreparedV2
-  | PatternImportDxfPhaseESavedRowPreparedV1;
+  | PatternImportDxfPhaseESavedRowWorkbenchPreparedV1;
 
 export function createPatternImportDxfPhaseEBoundDraftCadForPreparedV1(
   prepared: PreparedForDesktop,
@@ -593,11 +594,29 @@ export async function preparePatternImportDxfPhaseEMultiseamSavedEntryV2(
   restoreExact: SavedExactRestore = restorePatternImportDxfPhaseESavedExactPrefillV1,
 ): Promise<PatternImportDxfPhaseEMultiseamSavedPreparationResultV2> {
   try {
-    const preparation = await savedSession.runtime.preparationOwner.prepare({
+    const owner = savedSession.runtime.preparationOwner;
+    const request = {
       schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_SAVED_ROW_PREPARATION_REQUEST_V1,
       row: savedSession.row,
       selectedOperationNumber: savedSession.selectedOperationNumber,
-    });
+    };
+    const preparation = await owner.prepare(request);
+    if (!preparation.ok && preparation.blockers[0]?.code === 'assembly-read-failed') {
+      const initial = await owner.prepareInitial(request);
+      if (initial.ok)
+        return Object.freeze({
+          ok: true as const,
+          prepared: initial.prepared,
+          state: initial.prepared.initialState,
+          blockers: Object.freeze([]) as readonly [],
+        });
+      return Object.freeze({
+        ok: false as const,
+        prepared: null,
+        state: null,
+        blockers: initial.blockers,
+      });
+    }
     if (!preparation.ok)
       return Object.freeze({
         ok: false as const,
@@ -640,7 +659,7 @@ export async function preparePatternImportDxfPhaseEMultiseamSavedEntryV2(
 /** Saved confirmation remains a typed integration seam and refuses by default until Wave M owns it. */
 export async function submitPatternImportDxfPhaseEMultiseamSavedChoicesV2(
   savedSession: PatternImportDxfPhaseEMultiseamSavedSessionV2,
-  prepared: PatternImportDxfPhaseESavedRowPreparedV1,
+  prepared: PatternImportDxfPhaseESavedRowWorkbenchPreparedV1,
   result: PatternImportDxfProductPhaseEMultiseamChoicesResultV2,
   signal: AbortSignal,
 ): Promise<PatternImportDxfPhaseEMultiseamSavedSubmissionV2> {
@@ -655,6 +674,22 @@ export async function submitPatternImportDxfPhaseEMultiseamSavedChoicesV2(
             },
           ],
     );
+  if (
+    'semanticV1Sha256' in prepared &&
+    (signal.aborted ||
+      !savedSession.runtime.preparationOwner.isCurrentInitial(prepared) ||
+      prepared.selectedOperationNumber !== savedSession.selectedOperationNumber ||
+      !sameSavedRow(prepared.row, savedSession.row) ||
+      result.choices.importGeneration !== prepared.preparationGeneration ||
+      result.choices.documentId !== prepared.documentAuthority.documentId ||
+      result.choices.revision !== prepared.documentAuthority.revision)
+  )
+    return savedSubmissionBlocked([
+      {
+        code: 'current-assembly-topology-stale',
+        detail: 'First exact two-seam preparation changed before confirmation.',
+      },
+    ]);
   if (!savedSession.onConfirm)
     return savedSubmissionBlocked([
       {
@@ -697,6 +732,11 @@ export type PatternImportDxfPhaseEMultiseamExactPersistenceRequestV2 = Readonly<
   catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1;
   proposal: PatternImportDxfProductPhaseEMultiseamProposalV2;
   choices: Extract<PatternImportDxfProductPhaseEMultiseamChoicesResultV2, { ok: true }>;
+  initialAuthority?: Readonly<{
+    serverAssemblyRevision: string;
+    assemblyTopologySha256: string;
+    semanticV1Sha256: string;
+  }>;
 }>;
 
 function sameSavedRow(
@@ -754,7 +794,10 @@ export async function persistPatternImportDxfPhaseEMultiseamExactChoicesV2(
   if (
     signal.aborted ||
     authority.selectedOperationNumber !== request.selectedOperationNumber ||
-    !sameSavedRow(authority.row, request.row)
+    !sameSavedRow(authority.row, request.row) ||
+    (request.initialAuthority &&
+      (request.initialAuthority.serverAssemblyRevision !== authority.serverAssemblyRevision ||
+        request.initialAuthority.assemblyTopologySha256 !== authority.assemblyTopologySha256))
   )
     return savedSubmissionBlocked([
       {
@@ -780,6 +823,9 @@ export async function persistPatternImportDxfPhaseEMultiseamExactChoicesV2(
         catalog: request.catalog,
         proposal: request.proposal,
         choices: request.choices.choices,
+        ...(request.initialAuthority && {
+          requiredSemanticV1Sha256: request.initialAuthority.semanticV1Sha256,
+        }),
       },
       signal,
     );
@@ -1976,7 +2022,9 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
   const savedTwoSeamSceneOverlayRequest = (
     selection: PatternImportDxfPhaseECadMannequinDxfStagingSelectionV1 | null | undefined,
   ) =>
-    savedPreparedResult?.ok && prepared === savedPreparedResult.prepared
+    savedPreparedResult?.ok &&
+    !('semanticV1Sha256' in savedPreparedResult.prepared) &&
+    prepared === savedPreparedResult.prepared
       ? {
           prepared: savedPreparedResult.prepared,
           sources: mannequinDxfSources,
