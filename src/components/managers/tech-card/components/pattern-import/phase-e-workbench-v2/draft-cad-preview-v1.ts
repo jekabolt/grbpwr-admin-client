@@ -16,6 +16,7 @@ import {
   resizeDraftStraightEdgeV1,
   selectDraftSharpCornerV1,
 } from './draft-cad-edge-length-geometry-v1';
+import { roundDraftRectangularCornerV1 } from './draft-cad-round-corner-v1';
 import { selectDraftCutAllowanceOffsetV1 } from './draft-cad-allowance-offset-geometry-v1';
 import {
   draftOutlineMoveHistoryV1,
@@ -651,6 +652,45 @@ export function buildPatternImportDxfPhaseEDraftCadPreviewV1(
           }),
         );
         if (!outlineMoves || command === lastOutlineMove) bounds = extendPoints(bounds, path);
+        break;
+      }
+      case 'round-corner': {
+        const { contourId, vertexId, setbackMm, sizeToken } = command.payload;
+        const piece = projection.pieces.find(
+          ({ pieceId, pieceLineKey }) =>
+            pieceId === command.target.pieceId && pieceLineKey === command.target.pieceLineKey,
+        );
+        const contour = piece?.contours.find((item) => item.contourId === contourId);
+        const rounded =
+          contour?.closed && contour.role === 'cut-boundary' && projection.sizeToken === sizeToken
+            ? roundDraftRectangularCornerV1(
+                contour.vertices.map(({ pointMm }) => pointMm),
+                contour.vertices.findIndex(({ vertexId: id }) => id === vertexId),
+                setbackMm,
+              )
+            : null;
+        if (!rounded) {
+          blockers.push(
+            commandBlocker(
+              command,
+              'anchor-unavailable',
+              'Choose a right-angle corner on the saved rectangle and keep a straight rail on both sides.',
+            ),
+          );
+          break;
+        }
+        const pointsMm = rounded.ring.map(clonePoint);
+        primitives.push(
+          deepFreeze({
+            ...base,
+            kind: 'path' as const,
+            pointsMm,
+            closed: true,
+            role: 'outline' as const,
+            stroke: 'solid' as const,
+          }),
+        );
+        bounds = extendPoints(bounds, pointsMm);
         break;
       }
       case 'sharpen-corner': {

@@ -15,12 +15,14 @@ import {
   sameDraftAllowanceRingV1,
   type SavedDraftPairedAllowanceProofV1,
 } from './draft-cad-paired-allowance-authority-v1';
+import { roundDraftRectangularCornerV1 } from './draft-cad-round-corner-v1';
+import { DRILL_SQUARE_MM } from 'lib/pattern-import/write/plan';
 import type { PatternImportDxfPhaseEDraftCadCommandV1 } from './draft-cad-session-v1';
 
 type Command = Extract<PatternImportDxfPhaseEDraftCadCommandV1, { tool: 'edge-length' }>;
 type VertexEdit = Extract<
   PatternImportDxfPhaseEDraftCadCommandV1,
-  { tool: 'move-point' | 'delete-point' | 'sharpen-corner' }
+  { tool: 'move-point' | 'delete-point' | 'sharpen-corner' | 'round-corner' }
 >;
 type SelectedSizePhaseD = Extract<DxfProductPhaseDSizeSelectionResultV1, { ok: true }>['phaseD'];
 type Result =
@@ -184,8 +186,14 @@ function editExactOutlineVertex(
   const cut = ring(source.cut);
   const separate =
     seam && (seam.length !== cut.length || seam.some((point, i) => !samePoint(point, cut[i]!)));
-  if (command.tool === 'sharpen-corner' && !seam)
-    return { ok: false, detail: 'Sharpening needs matching saved cut and sewing outlines.' };
+  if ((command.tool === 'sharpen-corner' || command.tool === 'round-corner') && !seam)
+    return {
+      ok: false,
+      detail:
+        command.tool === 'sharpen-corner'
+          ? 'Sharpening needs matching saved cut and sewing outlines.'
+          : 'Rounding needs matching saved cut and sewing outlines.',
+    };
   let allowanceWidthMm: number | null = null;
   if (separate) {
     const supportedCut =
@@ -302,6 +310,11 @@ function editExactOutlineVertex(
       return { ok: false, detail: 'Rebind the notch on this bevel corner before sharpening.' };
     sharpCorner = candidate.corner;
   }
+  const rounding =
+    command.tool === 'round-corner' &&
+    roundDraftRectangularCornerV1(vertices, index, command.payload.setbackMm);
+  if (command.tool === 'round-corner' && (!rounding || contour.role !== 'cut-boundary'))
+    return { ok: false, detail: 'Choose one right-angle corner on an exact saved rectangle.' };
   if (!movedPoint && vertices.length <= 3)
     return { ok: false, detail: 'Keep at least three vertices in a closed outline.' };
   const oldPoint = vertices[moving]!;
@@ -320,11 +333,13 @@ function editExactOutlineVertex(
     };
 
   const bevelEnd = (index + 1) % vertices.length;
-  const nextRing = sharpCorner
-    ? vertices.flatMap((point, i) => (i === bevelEnd ? [] : [i === index ? sharpCorner : point]))
-    : movedPoint
-      ? vertices.map((point, i) => (i === moving ? movedPoint : point))
-      : vertices.filter((_, i) => i !== moving);
+  const nextRing = rounding
+    ? rounding.ring
+    : sharpCorner
+      ? vertices.flatMap((point, i) => (i === bevelEnd ? [] : [i === index ? sharpCorner : point]))
+      : movedPoint
+        ? vertices.map((point, i) => (i === moving ? movedPoint : point))
+        : vertices.filter((_, i) => i !== moving);
   const area = signedArea(nextRing);
   if (
     !Number.isFinite(area) ||
@@ -342,8 +357,12 @@ function editExactOutlineVertex(
     return { ok: false, detail: 'Move the text anchor inside the resized outline.' };
   if (source.pointMarks?.some(({ at }) => !pointInPolygon(at, nextRing)))
     return { ok: false, detail: 'Move the construction point inside the resized outline.' };
-  if (command.tool === 'delete-point' || previousMoves) {
-    const chain = movedPoint ? [before, movedPoint, after] : [before, after];
+  if (command.tool === 'delete-point' || previousMoves || rounding) {
+    const chain = rounding
+      ? [before, ...rounding.samples, after]
+      : movedPoint
+        ? [before, movedPoint, after]
+        : [before, after];
     const crosses = (point: PtMm, next?: PtMm) =>
       !pointInPolygon(point, nextRing) ||
       chain.slice(0, -1).some((a, i) => {
@@ -353,7 +372,13 @@ function editExactOutlineVertex(
         );
       });
     if (
-      source.drills.some(({ at }) => crosses(at)) ||
+      source.drills.some(({ at, form, sizeMm }) => {
+        if (!rounding || form === 'point') return crosses(at);
+        const half = (sizeMm ?? DRILL_SQUARE_MM) / 2;
+        return [-half, half].some((x) =>
+          [-half, half].some((y) => crosses({ x: at.x + x, y: at.y + y })),
+        );
+      }) ||
       source.internal.some(({ pts, closed }) =>
         pts.some((point, i) => crosses(point, pts[i + 1] ?? (closed ? pts[0] : undefined))),
       )
@@ -363,7 +388,9 @@ function editExactOutlineVertex(
         detail:
           command.tool === 'delete-point'
             ? 'The joined edge would cut through a retained drill or internal line.'
-            : 'The moved vertex would cut through a retained drill or internal line.',
+            : rounding
+              ? 'The rounded corner would cut through a retained drill or internal line.'
+              : 'The moved vertex would cut through a retained drill or internal line.',
       };
   }
   if (holes.some((hole) => !ringStrictlyInside(hole, nextRing)))

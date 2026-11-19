@@ -384,6 +384,7 @@ function createSavedDraftSourceReaderV1(deps: SavedDraftSourceReaderDepsV1) {
         (command?.tool === 'french-curve' && command.payload.savedCurve) ||
         command?.tool === 'cut' ||
         command?.tool === 'sharpen-corner' ||
+        (command?.tool === 'round-corner' && commands.length === 1 && opening.sharedOutlineBlock) ||
         ((commands.length > 1 || opening.sharedOutlineBlock) && draftOutlineMoveHistoryV1(commands))
       )
     )

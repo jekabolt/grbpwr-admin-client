@@ -1,3 +1,4 @@
+import { validDraftCornerSetbackV1 } from './draft-cad-round-corner-v1';
 import { normalizeAuthoredText } from 'lib/pattern-import/manifest/authored-text';
 import type { PatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import type { DxfProductPhaseDReplayCarrierV1 } from 'lib/pattern-import/dxf-product-phase-d-replay-v1';
@@ -15,6 +16,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_TOOLS_V1 = Object.freeze([
   'move-point',
   'delete-point',
   'sharpen-corner',
+  'round-corner',
   'edge-length',
   'allowance-offset',
   'internal-line',
@@ -58,6 +60,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_PRODUCTIVE_TOOLS_V1 = Object.f
   'move-point',
   'delete-point',
   'sharpen-corner',
+  'round-corner',
   'edge-length',
   'allowance-offset',
   'dart',
@@ -216,6 +219,16 @@ export type PatternImportDxfPhaseEDraftCadCommandV1 =
   | Command<
       'sharpen-corner',
       { entityId: string; edge: PatternImportDxfPhaseEDraftCadBoundaryAnchorV1; sizeToken: string }
+    >
+  | Command<
+      'round-corner',
+      {
+        entityId: string;
+        contourId: string;
+        vertexId: string;
+        sizeToken: string;
+        setbackMm: number;
+      }
     >
   | Command<
       'edge-length',
@@ -579,6 +592,14 @@ function validCommand(value: unknown): value is PatternImportDxfPhaseEDraftCadCo
       );
     case 'sharpen-corner':
       return boundaryAnchor(payload.edge) && stableId(payload.sizeToken);
+    case 'round-corner':
+      return (
+        stableId(payload.contourId) &&
+        stableId(payload.vertexId) &&
+        stableId(payload.sizeToken) &&
+        typeof payload.setbackMm === 'number' &&
+        validDraftCornerSetbackV1(payload.setbackMm)
+      );
     case 'edge-length':
       return (
         boundaryAnchor(payload.edge) &&

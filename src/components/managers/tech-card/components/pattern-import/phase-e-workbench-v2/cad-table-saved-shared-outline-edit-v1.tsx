@@ -61,6 +61,7 @@ export default function CadTableSavedSharedOutlineEditV1({
     [catalog],
   );
   const [session, setSession] = useState(initial.session);
+  const [tool, setTool] = useState<'move-point' | 'round-corner'>('move-point');
   const sessionRef = useRef(session);
   const runtimeRef = useRef<ReturnType<typeof createSavedGeometryReviewRuntimeV1> | null>(null);
   const pending = useRef(false);
@@ -81,13 +82,18 @@ export default function CadTableSavedSharedOutlineEditV1({
   const publish = (next: PatternImportDxfPhaseEDraftCadSessionV1) => {
     if (pending.current) return;
     const commands = activeDraftCadTransactionsV1(next).flatMap((tx) => tx.commands);
-    const [move] = draftOutlineMoveHistoryV1(commands) ?? [];
+    const [command] = commands;
+    const validHistory =
+      tool === 'round-corner'
+        ? commands.length === 1 && command?.tool === 'round-corner'
+        : draftOutlineMoveHistoryV1(commands);
     if (
       next.cursor &&
-      (!move ||
+      (!validHistory ||
+        !command ||
         !piece ||
-        move.target.pieceId !== piece.pieceId ||
-        move.target.pieceLineKey !== piece.pieceLineKey)
+        command.target.pieceId !== piece.pieceId ||
+        command.target.pieceLineKey !== piece.pieceLineKey)
     )
       return;
     sessionRef.current = next;
@@ -144,6 +150,15 @@ export default function CadTableSavedSharedOutlineEditV1({
           <div className='flex flex-wrap items-center gap-2'>
             <Button
               type='button'
+              size='xs'
+              variant='secondary'
+              disabled={session.history.length > 0 || preparing}
+              onClick={() => setTool(tool === 'move-point' ? 'round-corner' : 'move-point')}
+            >
+              {tool === 'move-point' ? 'Round corner' : 'Move points'}
+            </Button>
+            <Button
+              type='button'
               variant='main'
               size='xs'
               disabled={!session.cursor || preparing}
@@ -190,9 +205,9 @@ export default function CadTableSavedSharedOutlineEditV1({
           projection={projection}
           scopeKey={scopeKey}
           activePieceIndex={pieceIndex}
-          activeTool='move-point'
+          activeTool={tool}
           moveSharedOutline
-          panActive={preparing}
+          panActive={preparing || (tool === 'round-corner' && session.cursor > 0)}
           topologySession={topology}
           activeTopologyTool={null}
           onSessionChange={publish}

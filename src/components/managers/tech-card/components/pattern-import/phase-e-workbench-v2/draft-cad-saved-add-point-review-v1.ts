@@ -341,7 +341,8 @@ export async function compileDraftForOrdinaryReviewV1(
         (command.tool === 'fish-eye' && command.payload.savedMove) ||
         (command.tool === 'french-curve' && command.payload.savedCurve) ||
         (command.tool === 'spread' && command.payload.mode === 'parallel') ||
-        command.tool === 'sharpen-corner',
+        command.tool === 'sharpen-corner' ||
+        command.tool === 'round-corner',
     ) ?? (commands.length > 1 ? draftOutlineMoveHistoryV1(commands)?.[0] : undefined);
   if (savedEdit && prepareGeometry) {
     try {

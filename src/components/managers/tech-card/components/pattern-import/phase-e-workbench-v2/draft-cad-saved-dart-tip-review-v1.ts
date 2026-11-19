@@ -186,16 +186,24 @@ export async function compileSavedDraftGeometryReviewV1(
   const savedDart = savedTip ?? savedMove;
   const savedCurve = command?.tool === 'french-curve' ? command.payload.savedCurve : undefined;
   const sharpen = command?.tool === 'sharpen-corner';
+  const round = command?.tool === 'round-corner' && commands.length === 1 && sharedOutlineBlock;
   const orderedMoves =
     commands.length > 1 || sharedOutlineBlock ? draftOutlineMoveHistoryV1(commands) : null;
   requireSavedEdit(
-    !sharedOutlineBlock || orderedMoves,
-    'Review only point moves on the shared outline.',
+    !sharedOutlineBlock || orderedMoves || round,
+    'Review point moves or one corner on the shared outline.',
   );
-  const contourId = sharpen ? command.payload.edge.contourId : orderedMoves?.[0]?.payload.contourId;
+  const contourId = sharpen
+    ? command.payload.edge.contourId
+    : command?.tool === 'round-corner'
+      ? command.payload.contourId
+      : orderedMoves?.[0]?.payload.contourId;
   requireSavedEdit(
     command &&
-      (orderedMoves || parallel || (commands.length === 1 && (savedDart || savedCurve || sharpen))),
+      (orderedMoves ||
+        round ||
+        parallel ||
+        (commands.length === 1 && (savedDart || savedCurve || sharpen))),
     'Record saved outline points, a corner, curve, dart or parallel opening edit.',
   );
   const { pieceId, pieceLineKey } = command.target;
@@ -643,7 +651,7 @@ export async function compileSavedDraftGeometryReviewV1(
           ? 'parallel opening'
           : sharpen
             ? 'saved corner'
-            : orderedMoves
+            : orderedMoves || round
               ? sharedOutlineBlock
                 ? 'saved shared outline'
                 : 'saved outline points'

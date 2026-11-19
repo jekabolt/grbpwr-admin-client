@@ -83,6 +83,7 @@ export type PatternImportDxfPhaseEDraftCadGeometryCompileBlockerCodeV1 =
   | 'move-point-geometry-blocked'
   | 'delete-point-geometry-blocked'
   | 'sharpen-corner-geometry-blocked'
+  | 'round-corner-geometry-blocked'
   | 'add-point-geometry-blocked'
   | 'rectangle-geometry-blocked'
   | 'pen-geometry-blocked'
@@ -122,6 +123,7 @@ export type PatternImportDxfPhaseEDraftCadCompiledFeatureV1 = Readonly<{
     | 'moved-saved-vertex'
     | 'deleted-vertex'
     | 'sharpened-corner'
+    | 'rounded-outline-corner'
     | 'edge-length'
     | 'allowance-offset'
     | 'piece-create'
@@ -302,7 +304,8 @@ function supported(command: PatternImportDxfPhaseEDraftCadCommandV1): boolean {
     command.tool === 'allowance-offset' ||
     command.tool === 'move-point' ||
     command.tool === 'delete-point' ||
-    command.tool === 'sharpen-corner'
+    command.tool === 'sharpen-corner' ||
+    command.tool === 'round-corner'
   )
     return true;
   if (command.tool === 'cut') return command.payload.keepSide === 'both';
@@ -710,7 +713,7 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
   let job = structuredClone(replay.job);
   const createdTopologyIds = new Set(sourceIds);
   const compiledFeatures: PatternImportDxfPhaseEDraftCadCompiledFeatureV1[] = [];
-  let sharpenedRing: readonly PtMm[] | null = null;
+  let editedCornerRing: readonly PtMm[] | null = null;
   let pairedWrite: { commandId: string; cut: readonly PtMm[]; seam: readonly PtMm[] } | null = null;
   const createdPieceLineKeys = new Map<string, string>();
   for (const command of compileCommands) {
@@ -970,8 +973,15 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
       command.tool === 'allowance-offset' ||
       command.tool === 'move-point' ||
       command.tool === 'delete-point' ||
-      command.tool === 'sharpen-corner'
+      command.tool === 'sharpen-corner' ||
+      command.tool === 'round-corner'
     ) {
+      if (command.tool === 'round-corner' && (!sharedOutlineBlock || commands.length !== 1))
+        return blocked(
+          'round-corner-geometry-blocked',
+          'Review one corner of the exact saved shared outline for all sizes.',
+          command,
+        );
       if (command.tool === 'move-point' && writerPieces[0]!.ungraded && !sharedOutlineBlock)
         return blocked(
           'move-point-geometry-blocked',
@@ -999,7 +1009,7 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
           command,
         );
       if (
-        orderedMoves &&
+        (orderedMoves || command.tool === 'round-corner') &&
         (writerPieces[0]!.pairOf ||
           job.pieces.some(({ pairOf }) => pairOf === command.target.pieceId))
       )
@@ -1047,7 +1057,8 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
           seam: edited.size.seam,
         };
       }
-      if (command.tool === 'sharpen-corner') sharpenedRing = edited.size.cut;
+      if (command.tool === 'sharpen-corner' || command.tool === 'round-corner')
+        editedCornerRing = edited.size.cut;
       Object.assign(size, edited.size);
       if (command.tool === 'move-point')
         previousMoves?.set(command.payload.vertexId, command.payload.pointMm);
@@ -1066,7 +1077,9 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
                 : 'moved-vertex'
               : command.tool === 'sharpen-corner'
                 ? 'sharpened-corner'
-                : 'deleted-vertex',
+                : command.tool === 'round-corner'
+                  ? 'rounded-outline-corner'
+                  : 'deleted-vertex',
       });
       continue;
     }
@@ -1395,7 +1408,8 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
       command.tool !== 'allowance-offset' &&
       command.tool !== 'move-point' &&
       command.tool !== 'delete-point' &&
-      command.tool !== 'sharpen-corner'
+      command.tool !== 'sharpen-corner' &&
+      command.tool !== 'round-corner'
     )
       continue;
     if (command.tool === 'edge-length' && pairedWrite?.commandId !== command.commandId) continue;
@@ -1436,17 +1450,19 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
         );
       continue;
     }
-    if (command.tool === 'sharpen-corner') {
-      const expected = sharpenedRing?.map((point) => applyAffine(block.transform, point));
+    if (command.tool === 'sharpen-corner' || command.tool === 'round-corner') {
+      const expected = editedCornerRing?.map((point) => applyAffine(block.transform, point));
       if (
         !expected ||
         !block.seam ||
+        (command.tool === 'round-corner' &&
+          (block.name !== sharedOutlineBlock || block.sizeToken !== 'UNI')) ||
         !sameDraftAllowanceRingV1(block.cut, expected) ||
         !sameDraftAllowanceRingV1(block.seam, expected)
       )
         return blocked(
-          'sharpen-corner-geometry-blocked',
-          'The DXF writer would change the sharp corner or another outline point.',
+          `${command.tool}-geometry-blocked`,
+          'The DXF writer would change the selected corner or another outline point.',
           command,
         );
       continue;

@@ -2,6 +2,10 @@ import {
   draftOutlineMoveHistoryV1,
   draftOutlineMovePositionsV1,
 } from './draft-cad-outline-move-history-v1';
+import {
+  roundDraftRectangularCornerV1,
+  validDraftCornerSetbackV1,
+} from './draft-cad-round-corner-v1';
 import { selectDraftSharpCornerV1 } from './draft-cad-edge-length-geometry-v1';
 import {
   hasDraftCutAllowanceJoinsV1,
@@ -459,9 +463,17 @@ export function recordPatternImportDxfPhaseEDraftCadDeletePointV1(
   return recordOutlinePointEdit(input, { tool: 'delete-point' });
 }
 
+export function recordPatternImportDxfPhaseEDraftCadRoundCornerV1(
+  input: OutlinePointEditInput & Readonly<{ setbackMm: number }>,
+): PatternImportDxfPhaseEDraftCadCanvasPointResultV1 {
+  return recordOutlinePointEdit(input, { tool: 'round-corner', setbackMm: input.setbackMm });
+}
 function recordOutlinePointEdit(
   input: OutlinePointEditInput,
-  edit: Readonly<{ tool: 'move-point'; pointMm: PtMm }> | Readonly<{ tool: 'delete-point' }>,
+  edit:
+    | Readonly<{ tool: 'move-point'; pointMm: PtMm }>
+    | Readonly<{ tool: 'delete-point' }>
+    | Readonly<{ tool: 'round-corner'; setbackMm: number }>,
 ): PatternImportDxfPhaseEDraftCadCanvasPointResultV1 {
   const { session, projection, activePieceIndex, sequence } = input;
   const fail = (blocker: string) => ({
@@ -500,12 +512,38 @@ function recordOutlinePointEdit(
       target,
       payload: { ...payload, pointMm },
     };
+  } else if (edit.tool === 'round-corner') {
+    const contour = activeProjectedPiece(session, projection, activePieceIndex)?.contours.find(
+      (candidate) => candidate.contourId === contourId,
+    );
+    const index = contour?.vertices.findIndex((vertex) => vertex.vertexId === vertexId) ?? -1;
+    if (
+      !contour?.closed ||
+      contour.role !== 'cut-boundary' ||
+      !roundDraftRectangularCornerV1(
+        contour.vertices.map(({ pointMm }) => pointMm),
+        index,
+        edit.setbackMm,
+      )
+    )
+      return fail('Choose a right-angle corner and keep a straight rail on each side.');
+    command = {
+      commandId: ids.commandId,
+      tool: 'round-corner',
+      target,
+      payload: { ...payload, setbackMm: edit.setbackMm },
+    };
   } else {
     command = { commandId: ids.commandId, tool: 'delete-point', target, payload };
   }
   const result = recordPatternImportDxfPhaseEDraftCadTransactionV1(session, {
     transactionId: ids.transactionId,
-    label: edit.tool === 'move-point' ? 'Move outline point' : 'Delete outline point',
+    label:
+      edit.tool === 'move-point'
+        ? 'Move outline point'
+        : edit.tool === 'round-corner'
+          ? 'Round outline corner'
+          : 'Delete outline point',
     commands: [command],
   });
   return result.ok
@@ -1802,6 +1840,8 @@ function toolInstruction(tool: PatternImportDxfPhaseEDraftCadToolV1, sizeToken: 
     return `Choose an exact outline point in size ${sizeToken} and confirm Delete point.`;
   if (tool === 'move-point')
     return `Drag an exact outline point or click it to enter X and Y in millimetres for size ${sizeToken}.`;
+  if (tool === 'round-corner')
+    return 'Choose one right-angle corner to set the same setback along both sides.';
   if (tool === 'sharpen-corner')
     return `Choose a highlighted bevel between perpendicular sides in size ${sizeToken}.`;
   if (tool === 'edge-length') return `Choose an exact edge to set its length in size ${sizeToken}.`;
@@ -1864,6 +1904,7 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
     useState<PatternImportDxfPhaseEDraftCadCanvasDartBaseV1 | null>(null);
   const [resizeLength, setResizeLength] = useState('');
   const [resizeFixed, setResizeFixed] = useState<'start' | 'end'>('start');
+  const [cornerSetback, setCornerSetback] = useState('4');
   const [outlinePointInput, setOutlinePointInput] = useState<{
     key: string;
     x: string;
@@ -1958,7 +1999,7 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
   const outlineEditActive =
     !crossScopeConnectActive &&
     !activeTopologyTool &&
-    (activeTool === 'move-point' || activeTool === 'delete-point');
+    (activeTool === 'move-point' || activeTool === 'delete-point' || activeTool === 'round-corner');
   const movePointActive = outlineEditActive && activeTool === 'move-point';
   const exactVertexOptions = useMemo(
     () =>
@@ -2070,7 +2111,12 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
     const input = { session, projection, activePieceIndex, vertexKey, sequence: sequence.current };
     const result = pointMm
       ? recordPatternImportDxfPhaseEDraftCadMovePointV1({ ...input, pointMm })
-      : recordPatternImportDxfPhaseEDraftCadDeletePointV1(input);
+      : activeTool === 'round-corner'
+        ? recordPatternImportDxfPhaseEDraftCadRoundCornerV1({
+            ...input,
+            setbackMm: Number(cornerSetback),
+          })
+        : recordPatternImportDxfPhaseEDraftCadDeletePointV1(input);
     setInputError(result.blocker);
     if (!result.recorded) return;
     sequence.current = result.sequence;
@@ -2820,6 +2866,33 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
             }
           >
             Move point
+          </Button>
+        </div>
+      )}
+      {activeTool === 'round-corner' && outlinePointInput && interactionEnabled && (
+        <div className='flex flex-wrap items-end gap-2'>
+          <label className='grid gap-1 text-small'>
+            Setback on both sides (mm)
+            <Input
+              className='w-28'
+              type='number'
+              step='0.000001'
+              min='1'
+              value={cornerSetback}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                setCornerSetback(event.target.value);
+                setInputError(null);
+              }}
+            />
+          </label>
+          <Button
+            type='button'
+            size='xs'
+            variant='secondary'
+            disabled={!validDraftCornerSetbackV1(Number(cornerSetback))}
+            onClick={() => commitOutlinePointEdit(outlinePointInput.key)}
+          >
+            Round corner
           </Button>
         </div>
       )}

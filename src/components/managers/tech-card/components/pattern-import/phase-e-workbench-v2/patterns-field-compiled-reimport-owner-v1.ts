@@ -67,6 +67,7 @@ export function registerPatternImportDxfPhaseEPatternsFieldCompiledReimportOwner
           output === 'parallel-spread' ||
           output === 'allowance-offset' ||
           output === 'sharpened-corner' ||
+          output === 'rounded-outline-corner' ||
           output === 'moved-saved-vertex',
       );
       const manualApply =
