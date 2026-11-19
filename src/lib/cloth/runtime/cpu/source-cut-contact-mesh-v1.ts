@@ -5,30 +5,11 @@ import {
   validateMeasurementReferenceSurfaceClearanceV1,
   validateMeasurementReferenceSurfaceIntersectionsV1,
 } from '../../body/measurement-surface-self-intersection-v1';
-import { TRIANGLE_INDICES_GPU_V1 } from '../../compiler/material-package';
 import type { SourceCutCarrierMaterialPackV1 } from '../../compiler/source-cut-carrier-material-v1';
 import { prepareSourceCutSurfaceProjectionV1 } from './source-cut-surface-projection-v1';
 
 const axes = [0, 1, 2] as const;
 const sortedPair = (a: number, b: number) => (a < b ? `${a}/${b}` : `${b}/${a}`);
-
-function cutCornerKey(
-  sourceVertices: number[],
-  sourceMask: number,
-  carrierVertices: number[],
-  weights: Float64Array,
-) {
-  if (sourceMask < 1 || sourceMask > 7)
-    throw new RangeError('Cut corner has invalid source support.');
-  const activeCarrier = carrierVertices.filter((_, i) => weights[i] > 0);
-  if (activeCarrier.length === 1) return `carrier/${activeCarrier[0]}`;
-  const activeSource = sourceVertices.filter((_, i) => (sourceMask & (1 << i)) !== 0);
-  if (activeSource.length === 1) return `source/${activeSource[0]}`;
-  if (activeSource.length === 2 && activeCarrier.length === 2)
-    return `crossing/${sortedPair(activeSource[0], activeSource[1])}/${sortedPair(activeCarrier[0], activeCarrier[1])}`;
-  throw new RangeError('Cut corner has no supported vertex or edge provenance.');
-}
-
 function checkPieceTopology(triangles: Uint32Array, vertexOffset: number, vertexCount: number) {
   const edges = new Map<string, { from: number; to: number; interior: boolean }>();
   const parents = Uint32Array.from({ length: vertexCount }, (_, i) => i);
@@ -94,8 +75,6 @@ export function prepareSourceCutContactMeshV1(
   maxSurfaceTriangles: number,
 ) {
   const draw = prepareSourceCutSurfaceProjectionV1(material, maxSurfaceTriangles);
-  const { strideBytes, offsets } = TRIANGLE_INDICES_GPU_V1;
-  const faces = new DataView(material.base.triangleIndices);
   const indices = new Uint32Array(
     3 * draw.drawRanges.reduce((sum, range) => sum + range.triangleCount, 0),
   );
@@ -104,37 +83,13 @@ export function prepareSourceCutContactMeshV1(
   const topology: ((typeof draw.drawRanges)[number] &
     Readonly<{ vertexCount: number; boundaryLoops: number }>)[] = [];
   for (const [pieceIndex, piece] of material.pieces.entries()) {
-    const surface = piece.surface!;
     const drawRange = draw.drawRanges[pieceIndex];
-    if (
-      surface.sourceCornerSupportMasks.length !== drawRange.triangleCount * 3 ||
-      surface.sourceTriangleVertices.length % 3 !== 0
-    )
-      throw new RangeError('Cut surface provenance is incomplete.');
-    const pieceCoordinates = new Map<string, number>();
+    const pieceCoordinates = new Map<number, number>();
     const vertexOffset = sourceCorners.length;
     for (let index = 0; index < drawRange.triangleCount; index++) {
-      const sourceTriangle = surface.sourceTriangleIndices[index];
-      if (sourceTriangle * 3 + 2 >= surface.sourceTriangleVertices.length)
-        throw new RangeError('Cut fragment references an unavailable source triangle.');
-      const vertices = axes.map(
-        (axis) => surface.sourceTriangleVertices[sourceTriangle * 3 + axis],
-      );
-      const carrierOffset =
-        (piece.carrierTriangleOffset + surface.carrierTriangleIndices[index]) * strideBytes;
-      const carrierVertices = [offsets.vertex0, offsets.vertex1, offsets.vertex2].map((offset) =>
-        faces.getUint32(carrierOffset + offset, true),
-      );
       for (const corner of axes) {
-        const item = index * 3 + corner;
-        const firstWeight = item * 3;
-        const key = cutCornerKey(
-          vertices,
-          surface.sourceCornerSupportMasks[item],
-          carrierVertices,
-          surface.cornerWeights.subarray(firstWeight, firstWeight + 3),
-        );
-        const globalItem = drawRange.triangleOffset * 3 + item;
+        const globalItem = (drawRange.triangleOffset + index) * 3 + corner;
+        const key = draw.cornerRepresentative(globalItem);
         let vertex = pieceCoordinates.get(key);
         if (vertex === undefined) {
           vertex = sourceCorners.length;
