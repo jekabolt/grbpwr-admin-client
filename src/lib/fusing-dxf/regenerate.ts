@@ -763,6 +763,7 @@ export async function regenerateFusingSheets(
         snapshotReason: 'Regenerate generated fusing DXF sheets',
         guardedPieceRename: undefined,
         guardedPieceJoin: undefined,
+        guardedAssemblyPatternUpdate: undefined,
         saveSessionId,
       });
     wroteOver = await writeOverOnlyVersionMoved(

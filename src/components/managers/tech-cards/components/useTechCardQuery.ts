@@ -412,7 +412,7 @@ export async function updateTechCardDocument(request: UpdateTechCardRequest) {
   // The ordinary document writer replaces pattern-row revisions and removes their sidecars. Use
   // the lock of the accepted write, before any fresh query or semantic-session reconstruction.
   if (
-    (request.techCard || request.guardedPieceJoin) &&
+    (request.techCard || request.guardedPieceJoin || request.guardedAssemblyPatternUpdate) &&
     id !== undefined &&
     expectedLockVersion !== undefined &&
     saved.lockVersion === expectedLockVersion + 1
@@ -430,6 +430,7 @@ export function useUpdateTechCard() {
       expectedLockVersion,
       snapshotReason = '',
       saveSessionId,
+      expectedServerAssemblyRevision,
       guardedPieceRename,
       guardedPieceJoin,
     }: { id: number; expectedLockVersion: number } & (
@@ -437,6 +438,7 @@ export function useUpdateTechCard() {
           techCard: common_TechCardInsert;
           snapshotReason?: string;
           saveSessionId: string;
+          expectedServerAssemblyRevision?: string;
           guardedPieceRename?: never;
           guardedPieceJoin?: never;
         }
@@ -444,6 +446,7 @@ export function useUpdateTechCard() {
           techCard?: never;
           snapshotReason?: never;
           saveSessionId?: never;
+          expectedServerAssemblyRevision?: never;
           guardedPieceRename: GuardedZeroOperationPieceRename;
           guardedPieceJoin?: never;
         }
@@ -451,19 +454,26 @@ export function useUpdateTechCard() {
           techCard?: never;
           snapshotReason?: never;
           saveSessionId?: never;
+          expectedServerAssemblyRevision?: never;
           guardedPieceRename?: never;
           guardedPieceJoin: GuardedNativePieceJoin;
         }
-    )) =>
-      updateTechCardDocument({
+    )) => {
+      const guardedAssemblyPatternUpdate =
+        techCard && expectedServerAssemblyRevision !== undefined
+          ? { techCard, expectedServerAssemblyRevision }
+          : undefined;
+      return updateTechCardDocument({
         id,
-        techCard,
+        techCard: guardedAssemblyPatternUpdate ? undefined : techCard,
         expectedLockVersion,
         snapshotReason,
         saveSessionId,
         guardedPieceRename,
         guardedPieceJoin,
-      }),
+        guardedAssemblyPatternUpdate,
+      });
+    },
     onSuccess: (_data, variables) => {
       // Operations or patterns may have moved: the card's hints map catches up by itself (§5a).
       wakeSeamHints(variables.id);

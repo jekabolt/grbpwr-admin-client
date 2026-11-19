@@ -12099,6 +12099,9 @@ export type UpdateTechCardRequest = {
   // additional authority fields inside this message; older servers still refuse linked cards.
   guardedPieceRename: GuardedZeroOperationPieceRename | undefined;
   guardedPieceJoin: GuardedNativePieceJoin | undefined;
+  // Pattern edit bound to the same Assembly state used by Review. Send the document inside
+  // the guard, without tech_card, so an older handler cannot save it without the precondition.
+  guardedAssemblyPatternUpdate: GuardedAssemblyPatternUpdate | undefined;
 };
 
 // Pins a display name edit to a saved DXF row. With no attached authority fields,
@@ -12158,6 +12161,11 @@ export type GuardedNativePieceJoin_Boundary = {
   curveId: string | undefined;
   startVertexId: string | undefined;
   endVertexId: string | undefined;
+};
+
+export type GuardedAssemblyPatternUpdate = {
+  techCard: common_TechCardInsert | undefined;
+  expectedServerAssemblyRevision: string | undefined;
 };
 
 export type UpdateTechCardResponse = {

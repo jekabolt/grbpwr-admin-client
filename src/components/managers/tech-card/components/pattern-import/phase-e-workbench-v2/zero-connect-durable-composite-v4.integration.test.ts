@@ -750,6 +750,7 @@ describe('zero-connect durable N=1 genuine production chain', () => {
           saveSessionId: undefined,
           guardedPieceRename: undefined,
           guardedPieceJoin: undefined,
+          guardedAssemblyPatternUpdate: undefined,
         });
         return 'ok';
       } catch {

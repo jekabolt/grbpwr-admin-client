@@ -1901,11 +1901,15 @@ export function TechCardForm({
             cardId,
             (data.patterns ?? []).map((p) => p.url),
           );
+          const assemblyGuard = snapshot?.assemblyGuard;
+          if (assemblyGuard && assemblyGuard.expectedLockVersion !== expected)
+            throw new Error('The saved card changed. Reopen the pattern review before applying.');
           await updateTechCard.mutateAsync({
             id: cardId,
             techCard: techCardInsert,
             expectedLockVersion: expected,
             saveSessionId,
+            expectedServerAssemblyRevision: assemblyGuard?.expectedServerAssemblyRevision,
             ...(snapshot ? { snapshotReason: snapshot.reason } : {}),
           });
           consumeReuploadSnapshot(cardId, snapshot);
@@ -2090,13 +2094,17 @@ export function TechCardForm({
           newId,
           (data.patterns ?? []).map((p) => p.url),
         );
+        // The version read a moment ago, including any panels written since create.
+        const expected = current.techCard?.lockVersion ?? 0;
+        const assemblyGuard = snapshot?.assemblyGuard;
+        if (assemblyGuard && assemblyGuard.expectedLockVersion !== expected)
+          throw new Error('The saved card changed. Reopen the pattern review before applying.');
         await updateTechCard.mutateAsync({
           id: newId,
           techCard: payload,
-          // The version read a moment ago. This card is seconds old and only this page knows it; a
-          // version remembered from the create would 409 against the panels written since.
-          expectedLockVersion: current.techCard?.lockVersion ?? 0,
+          expectedLockVersion: expected,
           saveSessionId,
+          expectedServerAssemblyRevision: assemblyGuard?.expectedServerAssemblyRevision,
           ...(snapshot ? { snapshotReason: snapshot.reason } : {}),
         });
         consumeReuploadSnapshot(newId, snapshot);
