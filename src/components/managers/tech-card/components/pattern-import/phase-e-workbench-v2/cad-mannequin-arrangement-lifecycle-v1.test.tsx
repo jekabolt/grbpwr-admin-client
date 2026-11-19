@@ -15,9 +15,11 @@ import {
 } from './cad-workbench-mannequin-model-picker-v1';
 import {
   captureMeasurementSurfaceTranslationGroupV1,
+  captureMeasurementSurfaceRotationGroupV1,
+  measurementSurfaceRotationGroupForHitV1,
   focusMeasurementSurfacePatternHitV1,
 } from 'components/shared/measurement-watertight-surface-v1-stage';
-import { Vector3 } from 'three';
+import { Group, Vector3 } from 'three';
 import {
   activatePatternImportDxfPhaseECadTableZeroCanvasPieceV1,
   createPatternImportDxfPhaseECadTableZeroCanvasSessionV1,
@@ -390,6 +392,191 @@ describe('mounted mannequin arrangement lifecycle', () => {
     expect(overlay().translationGroup).toBeUndefined();
     await act(async () => old.onTranslateBy([-1, 0, 0]));
     expect(overlay().pieces.map((p) => p.transform)).toEqual(expected);
+  });
+
+  it('rotates the table group about the explicitly hit piece on world Z, then undoes, saves and reopens', async () => {
+    const source = input.patternPieceScene!.sources[0];
+    const front = source.projection.pieces[0];
+    const back = { ...front, pieceId: 'back', pieceLineKey: 'back-line' };
+    const extra = { ...front, pieceId: 'other', pieceLineKey: 'other-line' };
+    const projection = { ...source.projection, pieces: [front, back, extra] };
+    let table = createPatternImportDxfPhaseECadTableZeroCanvasSessionV1(projection);
+    const [a, b] = table.layout.pieces.map((p) => p.identity.key);
+    table = activatePatternImportDxfPhaseECadTableZeroCanvasPieceV1(table, a, false);
+    table = activatePatternImportDxfPhaseECadTableZeroCanvasPieceV1(table, b, true);
+    const baseline = [
+      stored[0],
+      {
+        ...stored[0],
+        pieceKey: 'main:back:back-line',
+        pieceId: 'back',
+        pieceLineKey: 'back-line',
+        transform: { offsetM: [0.12, -0.25, 0.37] as const, rotationRad: -0.2 },
+      },
+    ];
+    let durable: string | null = null;
+    const save = vi.fn<NonNullable<typeof input.onSaveMannequinArrangement>>(
+      async ({ pieces, mannequin }) => {
+        durable = encodeCadMannequinArrangementDocumentV1(
+          createCadMannequinArrangementDocumentV1({
+            bindings: {
+              card: { techCardId: 12, cardLockVersion: 1 },
+              scope: { scopeKey: 'main', patternLineKey: 'pattern-line', sizeToken: 'M' },
+              savedRow: { revision: 1, dxfSha256: 'a'.repeat(64) },
+              source: {
+                catalogCanonicalSha256: 'b'.repeat(64),
+                sizeSelectionCanonicalSha256: 'c'.repeat(64),
+              },
+              mannequin,
+            },
+            pieces,
+          }),
+        );
+      },
+    );
+    input = {
+      ...input,
+      onSaveMannequinArrangement: save,
+      onReadMannequinArrangement: async () =>
+        durable ? parseCadMannequinArrangementDocumentV1(durable).pieces : baseline,
+      patternPieceScene: {
+        ...input.patternPieceScene!,
+        sources: [{ ...source, projection }],
+        tableSelection: {
+          scopeKey: 'main',
+          projection,
+          selectedPieceKeys: table.layout.selectedPieceKeys,
+        },
+        selection: { scopeKey: 'main', pieceId: front.pieceId, pieceLineKey: front.pieceLineKey },
+      },
+    };
+    await render();
+    const setTool = (tool: 'rotate' | 'select') =>
+      (
+        visit(tree, (x) => typeof x.onPatternTool === 'function')!.onPatternTool as (
+          value: string,
+        ) => void
+      )(tool);
+    const toggle = () =>
+      (visit(tree, (x) => x.children === 'Rotate group about a piece')!.onClick as () => void)();
+    await act(async () => setTool('rotate'));
+    expect(overlay().rotationGroup).toBeUndefined();
+    await act(async () => toggle());
+    expect(strings(tree)).toContain('Drag a selected piece');
+    const [first, pivot, other] = overlay().pieces.map((x) => x.pieceKey);
+    const bindings = new Map(
+      (
+        [
+          [first, new Vector3(4, 1, 3)],
+          [pivot, new Vector3(3, 1, 5)],
+          [other, new Vector3(-1, 0, 7)],
+        ] as const
+      ).map(([key, pos], i) => {
+        const anchor = new Group(),
+          content = new Group();
+        anchor.position.copy(pos);
+        content.rotation.z = baseline[i]?.transform.rotationRad ?? 0;
+        return [key, { anchor, content }] as const;
+      }),
+    );
+    const begin = () => {
+      const group = measurementSurfaceRotationGroupForHitV1(overlay(), pivot)!;
+      expect(group).toBeDefined();
+      expect(measurementSurfaceRotationGroupForHitV1(overlay(), other)).toBeUndefined();
+      return captureMeasurementSurfaceRotationGroupV1(
+        group,
+        bindings,
+        pivot,
+        new Vector3(4, 1, 5),
+      )!;
+    };
+    const preview = () => {
+      const turn = begin();
+      turn.preview(new Vector3(3, 2, 5));
+      expect(bindings.get(first)!.anchor.position.toArray()).toEqual([3, 2, 3]);
+      expect(bindings.get(pivot)!.anchor.position.toArray()).toEqual([3, 1, 5]);
+      expect(bindings.get(other)!.anchor.position.toArray()).toEqual([-1, 0, 7]);
+      return turn;
+    };
+    const cancelled = preview();
+    cancelled.finish(false);
+    expect(bindings.get(first)!.anchor.position.toArray()).toEqual([4, 1, 3]);
+    expect(bindings.get(first)!.content.rotation.z).toBe(0.7);
+    expect(undoButton().disabled).toBe(true);
+    const group = overlay().rotationGroup!;
+    const incomplete = new Map<string, readonly [number, number]>([[pivot, [0, 0]]]);
+    await act(async () => {
+      group.onRotate(pivot, Math.PI / 2, incomplete);
+      group.onRotate(
+        'other',
+        Math.PI / 2,
+        new Map([
+          [pivot, [0, 0]],
+          [first, [1, 1]],
+        ]),
+      );
+      group.onRotate(
+        pivot,
+        Math.PI / 2,
+        new Map([
+          [pivot, [1, 0]],
+          [first, [1, 1]],
+        ]),
+      );
+      group.onRotate(
+        pivot,
+        Math.PI / 2,
+        new Map([
+          [pivot, [0, 0]],
+          [first, [100, 0]],
+        ]),
+      );
+      group.onRotate(
+        pivot,
+        100,
+        new Map([
+          [pivot, [0, 0]],
+          [first, [0, 0]],
+        ]),
+      );
+    });
+    expect(undoButton().disabled).toBe(true);
+    const stale = begin();
+    await act(async () => preview().finish(true));
+    expect(overlay().pieces.map((x) => x.transform)).toEqual([
+      { offsetM: [-0.6, 1.2, 0], rotationRad: 0.7 + Math.PI / 2 },
+      { offsetM: [0.12, -0.25, 0.37], rotationRad: -0.2 + Math.PI / 2 },
+      null,
+    ]);
+    await act(async () => undoButton().onClick());
+    expect(undoButton().disabled).toBe(true);
+    expect(overlay().pieces.map((x) => x.transform)).toEqual([
+      baseline[0].transform,
+      baseline[1].transform,
+      null,
+    ]);
+    await act(async () => {
+      stale.preview(new Vector3(3, 2, 5));
+      stale.finish(true);
+    });
+    expect(undoButton().disabled).toBe(true);
+    await act(async () => preview().finish(true));
+    const expected = overlay()
+      .pieces.slice(0, 2)
+      .map((x) => x.transform);
+    expect(save).not.toHaveBeenCalled();
+    await clickSave();
+    expect(save).toHaveBeenCalledTimes(1);
+    await act(async () => root.unmount());
+    root = createRoot(container() as never);
+    await render();
+    expect(
+      overlay()
+        .pieces.slice(0, 2)
+        .map((x) => x.transform),
+    ).toEqual(expected);
+    expect(overlay().rotationGroup).toBeUndefined();
+    expect(undoButton().disabled).toBe(true);
   });
 
   it('undoes numeric and gesture commits in reverse order and saves only on explicit request', async () => {

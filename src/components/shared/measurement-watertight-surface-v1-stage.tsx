@@ -124,6 +124,14 @@ export interface MeasurementSurfacePatternPieceOverlayV1 {
   readonly pieces: readonly MeasurementSurfacePatternPieceV1[];
   readonly tool: 'select' | 'translate' | 'rotate';
   readonly dragPlane?: MeasurementSurfacePatternDragPlaneV1;
+  readonly rotationGroup?: Readonly<{
+    pieceKeys: readonly string[];
+    onRotate: (
+      pivotKey: string,
+      radians: number,
+      displacements: ReadonlyMap<string, readonly [number, number]>,
+    ) => void;
+  }>;
   readonly translationGroup?: Readonly<{
     pieceKeys: readonly string[];
     onTranslateBy: (deltaM: readonly [number, number, number]) => void;
@@ -574,6 +582,98 @@ export function captureMeasurementSurfaceTranslationGroupV1(
     finish(commit: boolean) {
       for (const [position, start] of starts) position.copy(start);
       if (commit && delta.lengthSq() > 0) group.onTranslateBy([delta.x, delta.y, delta.z]);
+    },
+  };
+}
+
+export function measurementSurfaceRotationGroupForHitV1(
+  overlay: MeasurementSurfacePatternPieceOverlayV1 | undefined,
+  pieceKey: string,
+) {
+  return overlay?.tool === 'rotate' && overlay.rotationGroup?.pieceKeys.includes(pieceKey)
+    ? overlay.rotationGroup
+    : undefined;
+}
+
+export function captureMeasurementSurfaceRotationGroupV1(
+  group: NonNullable<MeasurementSurfacePatternPieceOverlayV1['rotationGroup']>,
+  bindings: ReadonlyMap<
+    string,
+    { anchor: Pick<THREE.Group, 'position'>; content: Pick<THREE.Group, 'rotation'> }
+  >,
+  pivotKey: string,
+  startPoint: THREE.Vector3,
+) {
+  if (group.pieceKeys.length < 2 || !group.pieceKeys.includes(pivotKey)) return null;
+  const pivot = bindings.get(pivotKey)?.anchor.position.clone();
+  if (!pivot) return null;
+  function bearing(point: THREE.Vector3, center: THREE.Vector3) {
+    const x = point.x - center.x;
+    const y = point.y - center.y;
+    // A ray through the pivot does not define an angle.
+    return Number.isFinite(x) && Number.isFinite(y) && Math.hypot(x, y) > 1e-6
+      ? Math.atan2(y, x)
+      : null;
+  }
+  const initial = bearing(startPoint, pivot);
+  if (initial === null) return null;
+  const members = new Map<
+    string,
+    { position: THREE.Vector3; start: THREE.Vector3; rotation: THREE.Euler; angle: number }
+  >();
+  const anchors = new Set<THREE.Vector3>();
+  for (const key of group.pieceKeys) {
+    const binding = bindings.get(key);
+    if (!binding || anchors.has(binding.anchor.position)) return null;
+    anchors.add(binding.anchor.position);
+    members.set(key, {
+      position: binding.anchor.position,
+      start: binding.anchor.position.clone(),
+      rotation: binding.content.rotation,
+      angle: binding.content.rotation.z,
+    });
+  }
+  let previous = initial;
+  let turns = 0;
+  let radians = 0;
+  let finished = false;
+  return {
+    group,
+    preview(point: THREE.Vector3) {
+      if (finished) return;
+      const current = bearing(point, pivot);
+      if (current === null) return;
+      if (current - previous > Math.PI) turns--;
+      else if (current - previous < -Math.PI) turns++;
+      previous = current;
+      const relative = current - initial;
+      radians = relative + 2 * Math.PI * turns;
+      const cos = Math.cos(relative),
+        sin = Math.sin(relative);
+      for (const [key, member] of members) {
+        member.position.copy(member.start);
+        if (key !== pivotKey && relative !== 0) {
+          const x = member.start.x - pivot.x,
+            y = member.start.y - pivot.y;
+          member.position.x = pivot.x + x * cos - y * sin;
+          member.position.y = pivot.y + x * sin + y * cos;
+        }
+        member.rotation.z = member.angle + radians;
+      }
+    },
+    finish(commit: boolean) {
+      if (finished) return;
+      finished = true;
+      const displacements = new Map<string, readonly [number, number]>();
+      for (const [key, member] of members) {
+        displacements.set(key, [
+          member.position.x - member.start.x,
+          member.position.y - member.start.y,
+        ]);
+        member.position.copy(member.start);
+        member.rotation.z = member.angle;
+      }
+      if (commit && radians !== 0) group.onRotate(pivotKey, radians, displacements);
     },
   };
 }
@@ -1450,10 +1550,13 @@ function createPatternPieceLayerV1(
   const bindings = new Map<string, MeasurementSurfacePatternPieceSceneBindingV1>();
   const addOrdinalBadge = createMeasurementSurfaceSeamOrdinalBadgeBuilderV1();
 
-  const groupKeys = new Set(overlay.translationGroup?.pieceKeys);
+  const groupKeys = new Set(
+    overlay.tool === 'rotate'
+      ? overlay.rotationGroup?.pieceKeys
+      : overlay.translationGroup?.pieceKeys,
+  );
   for (const piece of overlay.pieces) {
-    const highlighted =
-      piece.selected || (overlay.tool === 'translate' && groupKeys.has(piece.pieceKey));
+    const highlighted = piece.selected || groupKeys.has(piece.pieceKey);
     const piecePoints = piece.contours.flatMap((contour) =>
       contour.vertices.map(({ pointMm }) => pointMm),
     );
@@ -1874,6 +1977,7 @@ export function MeasurementWatertightSurfaceV1Stage({
         patternPieceOverlay.revision,
         patternPieceOverlay.tool,
         patternPieceOverlay.translationGroup?.pieceKeys,
+        patternPieceOverlay.rotationGroup?.pieceKeys,
         patternPieceOverlay.visibility,
         patternPieceOverlay.guides,
         patternPieceOverlay.pieces.map(
@@ -2008,6 +2112,7 @@ export function MeasurementWatertightSurfaceV1Stage({
       binding: MeasurementSurfacePatternPieceSceneBindingV1;
       tool: 'translate' | 'rotate';
       groupMove: ReturnType<typeof captureMeasurementSurfaceTranslationGroupV1>;
+      groupRotation: ReturnType<typeof captureMeasurementSurfaceRotationGroupV1>;
       dragPlane: MeasurementSurfacePatternDragPlaneV1;
       plane: THREE.Plane;
       startPoint: THREE.Vector3;
@@ -2230,6 +2335,8 @@ export function MeasurementWatertightSurfaceV1Stage({
     function isPatternPieceGestureCurrent(gesture: NonNullable<typeof patternPieceGesture>) {
       return (
         gesture.overlayKey === patternPieceOverlayRenderKeyRef.current &&
+        (!gesture.groupRotation ||
+          gesture.groupRotation.group === patternPieceOverlayRef.current?.rotationGroup) &&
         (!gesture.groupMove ||
           gesture.groupMove.group === patternPieceOverlayRef.current?.translationGroup) &&
         (gesture.tool !== 'translate' ||
@@ -2253,7 +2360,8 @@ export function MeasurementWatertightSurfaceV1Stage({
       }
       if (controls) controls.enabled = interactive;
       const transform = commit ? measurementSurfaceCommittedPatternGestureV1(gesture) : null;
-      if (gesture.groupMove) gesture.groupMove.finish(commit);
+      if (gesture.groupRotation) gesture.groupRotation.finish(commit);
+      else if (gesture.groupMove) gesture.groupMove.finish(commit);
       else if (transform) gesture.onTransform(gesture.binding.piece.pieceKey, transform);
       if (contextCanvas) {
         contextCanvas.dataset.patternPieceGesture = 'idle';
@@ -3206,15 +3314,29 @@ export function MeasurementWatertightSurfaceV1Stage({
         if (!binding) return;
         const overlay = patternPieceOverlayRef.current;
         const tool = overlay?.tool ?? 'select';
-        const group = focusMeasurementSurfacePatternHitV1(overlay, binding.piece);
+        const rotateGroup = measurementSurfaceRotationGroupForHitV1(
+          overlay,
+          binding.piece.pieceKey,
+        );
+        const group = rotateGroup
+          ? undefined
+          : focusMeasurementSurfacePatternHitV1(overlay, binding.piece);
         const onTransform = overlay?.onTransformPiece;
-        if ((!binding.piece.selected && !group) || tool === 'select' || !onTransform) {
+        if (
+          (!binding.piece.selected && !group && !rotateGroup) ||
+          tool === 'select' ||
+          !onTransform
+        ) {
           event.preventDefault();
           event.stopImmediatePropagation();
           scheduleRender();
           return;
         }
-        const dragPlane = tool === 'translate' ? overlay?.dragPlane ?? 'view' : 'view';
+        const dragPlane = rotateGroup
+          ? 'xy'
+          : tool === 'translate'
+            ? overlay?.dragPlane ?? 'view'
+            : 'view';
         const plane = measurementSurfacePatternDragPlaneV1(
           dragPlane,
           camera,
@@ -3233,7 +3355,16 @@ export function MeasurementWatertightSurfaceV1Stage({
         const bindings = runtimeRef.current?.patternPieceBindings;
         const groupMove =
           group && bindings ? captureMeasurementSurfaceTranslationGroupV1(group, bindings) : null;
-        if (group && !groupMove) return;
+        const groupRotation =
+          rotateGroup && bindings
+            ? captureMeasurementSurfaceRotationGroupV1(
+                rotateGroup,
+                bindings,
+                binding.piece.pieceKey,
+                startPoint,
+              )
+            : null;
+        if ((group && !groupMove) || (rotateGroup && !groupRotation)) return;
         patternPieceGesture = Object.freeze({
           pointerId: event.pointerId,
           overlayKey: mountedPatternPieceKey,
@@ -3241,6 +3372,7 @@ export function MeasurementWatertightSurfaceV1Stage({
           binding,
           tool,
           groupMove,
+          groupRotation,
           dragPlane,
           plane,
           startPoint,
@@ -3265,20 +3397,29 @@ export function MeasurementWatertightSurfaceV1Stage({
           finishPatternPieceGesture('cancel');
           return;
         }
-        if (gesture.tool === 'translate') {
+        if (gesture.tool === 'translate' || gesture.groupRotation) {
           const pointer = normalizedTransformPointer(event, -1);
           if (!pointer) return;
           const raycaster = new THREE.Raycaster();
           raycaster.setFromCamera(new THREE.Vector2(pointer.x, pointer.y), camera);
-          measurementSurfaceMovePatternOnPlaneV1(
-            raycaster.ray,
-            camera,
-            gesture,
-            gesture.binding.anchor.position,
-          );
-          gesture.groupMove?.preview(
-            gesture.binding.anchor.position.clone().sub(gesture.startPosition),
-          );
+          if (gesture.groupRotation) {
+            const point = measurementSurfacePatternDragIntersectionV1(
+              raycaster.ray,
+              gesture.plane,
+              camera,
+            );
+            if (point) gesture.groupRotation.preview(point);
+          } else {
+            measurementSurfaceMovePatternOnPlaneV1(
+              raycaster.ray,
+              camera,
+              gesture,
+              gesture.binding.anchor.position,
+            );
+            gesture.groupMove?.preview(
+              gesture.binding.anchor.position.clone().sub(gesture.startPosition),
+            );
+          }
         } else {
           const angle = pointerAngleAroundPatternPiece(event, gesture.binding);
           gesture.binding.content.rotation.z = gesture.startRotation + (angle - gesture.startAngle);
@@ -3770,6 +3911,7 @@ export function MeasurementWatertightSurfaceV1Stage({
     patternPieceOverlayRenderKey,
     patternPieceOverlay?.onTransformPiece,
     patternPieceOverlay?.translationGroup,
+    patternPieceOverlay?.rotationGroup,
     patternPieceOverlay?.dragPlane,
   ]);
 

@@ -850,6 +850,63 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
       currentGroup.current = undefined;
     };
   }, [translationGroup]);
+  const rotationTurn = useMemo(
+    () => (placementTurn && patternTool === 'rotate' && groupKeys.length > 1 ? Symbol() : null),
+    [placementTurn, patternTool, groupKeys],
+  );
+  const [enabledRotationTurn, setEnabledRotationTurn] = useState<symbol | null>(null);
+  const currentRotationGroup =
+    useRef<MeasurementSurfacePatternPieceOverlayV1['rotationGroup']>(undefined);
+  const rotationGroup = useMemo<MeasurementSurfacePatternPieceOverlayV1['rotationGroup']>(() => {
+    if (!rotationTurn || enabledRotationTurn !== rotationTurn) return undefined;
+    const group: NonNullable<MeasurementSurfacePatternPieceOverlayV1['rotationGroup']> = {
+      pieceKeys: groupKeys,
+      onRotate(pivotKey, radians, displacements) {
+        if (
+          currentRotationGroup.current !== group ||
+          latestTransforms.current !== patternTransforms ||
+          !Number.isFinite(radians) ||
+          radians === 0 ||
+          displacements.size !== groupKeys.length ||
+          !groupKeys.includes(pivotKey)
+        )
+          return;
+        const pivot = displacements.get(pivotKey);
+        if (!pivot || pivot[0] !== 0 || pivot[1] !== 0) return;
+        const updates: Record<string, MeasurementSurfacePatternPieceTransformV1> = {};
+        for (const key of groupKeys) {
+          const delta = displacements.get(key);
+          if (!delta) return;
+          const previous = patternTransforms[key];
+          const offset = previous?.offsetM ?? ZERO_PATTERN_OFFSET_M;
+          const offsetM: [number, number, number] = [
+            offset[0] + delta[0],
+            offset[1] + delta[1],
+            offset[2],
+          ];
+          const rotationRad = (previous?.rotationRad ?? 0) + radians;
+          if (
+            offsetM.some(
+              (value) =>
+                !Number.isFinite(value) ||
+                Math.abs(value) > CAD_MANNEQUIN_ARRANGEMENT_LIMITS_V1.maxOffsetMetres,
+            ) ||
+            Math.abs(rotationRad) > CAD_MANNEQUIN_ARRANGEMENT_LIMITS_V1.maxRotationRadians
+          )
+            return;
+          updates[key] = { offsetM, rotationRad };
+        }
+        commitPlacement(updates);
+      },
+    };
+    return group;
+  }, [rotationTurn, enabledRotationTurn, groupKeys, patternTransforms, commitPlacement]);
+  useLayoutEffect(() => {
+    currentRotationGroup.current = rotationGroup;
+    return () => {
+      currentRotationGroup.current = undefined;
+    };
+  }, [rotationGroup]);
   const undoPlacement = () => {
     if (!placementTurn || currentPlacementTurn.current !== placementTurn) return;
     const edit = placementHistory.current.pop();
@@ -880,6 +937,7 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
             tool: placementTurn ? patternTool : 'select',
             dragPlane,
             translationGroup,
+            rotationGroup,
             transformsByPieceKey: patternTransforms,
             onTransform: placementTurn ? handlePatternTransform : undefined,
           })
@@ -888,6 +946,7 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
       dragPlane,
       handlePatternTransform,
       translationGroup,
+      rotationGroup,
       patternPieceScene,
       patternTool,
       patternTransforms,
@@ -1025,6 +1084,24 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
           onPoseEditingChange={setPoseEditing}
           topstitchVisibility={patternPieceScene?.topstitchVisibility}
         />
+      ) : null}
+      {rotationTurn ? (
+        <div className='flex flex-wrap items-center gap-2 px-2'>
+          <Button
+            type='button'
+            size='xs'
+            variant={rotationGroup ? 'simpleReverseWithBorder' : 'secondary'}
+            aria-pressed={Boolean(rotationGroup)}
+            onClick={() => setEnabledRotationTurn(rotationGroup ? null : rotationTurn)}
+          >
+            Rotate group about a piece
+          </Button>
+          {rotationGroup && (
+            <Text component='span' size='micro'>
+              Drag a selected piece to use its center as the world Z pivot.
+            </Text>
+          )}
+        </div>
       ) : null}
       {offsetPiece ? (
         <CadMannequinPatternOffsetControlsV1

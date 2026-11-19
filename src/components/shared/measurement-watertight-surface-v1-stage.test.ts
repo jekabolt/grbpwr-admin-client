@@ -20,6 +20,7 @@ import {
   MEASUREMENT_SURFACE_JOINT_MARKER_HIT_DIAMETER_CSS_PX_V1,
   MEASUREMENT_SURFACE_PATTERN_PIECE_PROJECTED_HIT_RECEIPT_V1,
   measurementSurfaceCommittedPatternGestureV1,
+  captureMeasurementSurfaceRotationGroupV1,
   measurementSurfaceMovePatternOnPlaneV1,
   measurementSurfacePatternDragIntersectionV1,
   measurementSurfacePatternDragPlaneV1,
@@ -49,6 +50,61 @@ import {
   type MeasurementSurfacePatternPieceOverlayV1,
   type MeasurementSurfaceAcceptedClothV1,
 } from './measurement-watertight-surface-v1-stage';
+
+it('tracks signed group Z rotation through the angle boundary, rejects ambiguous pivots and finishes once', () => {
+  const pivot = { anchor: new Group(), content: new Group() };
+  const other = { anchor: new Group(), content: new Group() };
+  pivot.anchor.position.set(0, 0, 1);
+  other.anchor.position.set(1, 0, 2);
+  const bindings = new Map([
+    ['pivot', pivot],
+    ['other', other],
+  ]);
+  const commits: number[] = [];
+  const group = {
+    pieceKeys: ['other', 'pivot'],
+    onRotate: (_key: string, angle: number) => commits.push(angle),
+  };
+  const point = (degrees: number) =>
+    new Vector3(Math.cos((degrees * Math.PI) / 180), Math.sin((degrees * Math.PI) / 180), 1);
+  const capture = (start: Vector3) =>
+    captureMeasurementSurfaceRotationGroupV1(group, bindings, 'pivot', start);
+  expect(capture(pivot.anchor.position)).toBeNull();
+  expect(
+    captureMeasurementSurfaceRotationGroupV1(group, bindings, 'unknown', point(170)),
+  ).toBeNull();
+  expect(
+    captureMeasurementSurfaceRotationGroupV1(
+      group,
+      new Map([
+        ['pivot', pivot],
+        ['other', pivot],
+      ]),
+      'pivot',
+      point(170),
+    ),
+  ).toBeNull();
+  const gesture = capture(point(170))!;
+  gesture.preview(point(-170));
+  expect(other.content.rotation.z).toBeCloseTo((20 * Math.PI) / 180);
+  gesture.preview(pivot.anchor.position);
+  expect(other.content.rotation.z).toBeCloseTo((20 * Math.PI) / 180);
+  gesture.preview(point(-60));
+  gesture.preview(point(60));
+  gesture.preview(point(170));
+  expect(other.content.rotation.z).toBeCloseTo(2 * Math.PI);
+  expect(other.anchor.position.toArray()).toEqual([1, 0, 2]);
+  gesture.finish(true);
+  gesture.finish(true);
+  gesture.preview(point(20));
+  expect(commits).toHaveLength(1);
+  expect(commits[0]).toBeCloseTo(2 * Math.PI);
+  expect(other.content.rotation.z).toBe(0);
+  const backwards = capture(point(-170))!;
+  backwards.preview(point(170));
+  backwards.finish(true);
+  expect(commits[1]).toBeCloseTo((-20 * Math.PI) / 180);
+});
 
 describe('staged piece translation using the selected world plane', () => {
   const start = new Vector3(0.12, -0.53, 0.74);
