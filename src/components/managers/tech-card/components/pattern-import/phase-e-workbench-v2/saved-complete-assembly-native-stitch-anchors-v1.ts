@@ -17,6 +17,7 @@ import { prepareSavedFullAssemblyCompleteNativeRowsV1 } from './saved-full-assem
 import type { SavedAssemblyNativeSewingPathV1 } from './saved-full-assembly-native-boundaries-v1';
 import {
   parseSavedNativeStitchRowV1,
+  prepareSavedTaggedNativeStitchRangeV1,
   readSavedNativeStraightStitchPathsV1,
   resolveSavedLegacyNativeStitchRangeV1,
   savedNativeStitchRawBlockV1,
@@ -413,6 +414,12 @@ export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
                 new Set(projection.card.sizes.map(({ token }) => token)),
               ).grainLayer
             : '';
+        const resolveTagged = jobs.some(
+          ({ anchor, internalIndex }) =>
+            internalIndex === null && anchor.edgeHint?.includes('#dxf:'),
+        )
+          ? await prepareSavedTaggedNativeStitchRangeV1(native.value, size.token, signal)
+          : null;
         for (const { path, anchor, identity, index, internalIndex } of jobs) {
           signal.throwIfAborted();
           const rawBlock = savedNativeStitchRawBlockV1(native.value, path);
@@ -425,14 +432,15 @@ export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
                 ? Object.freeze({
                     ...identity,
                     kind: 'native-directed-l14',
-                    span: Object.freeze(
-                      resolveSavedLegacyNativeStitchRangeV1(
-                        block,
-                        path,
-                        anchor,
-                        edgesByPath.get(path.nativePathId) ?? [],
-                      ),
-                    ),
+                    span:
+                      anchor.edgeHint?.includes('#dxf:') && resolveTagged
+                        ? resolveTagged(path, anchor, edgesByPath.get(path.nativePathId) ?? [])
+                        : resolveSavedLegacyNativeStitchRangeV1(
+                            block,
+                            path,
+                            anchor,
+                            edgesByPath.get(path.nativePathId) ?? [],
+                          ),
                   })
                 : Object.freeze({
                     ...identity,

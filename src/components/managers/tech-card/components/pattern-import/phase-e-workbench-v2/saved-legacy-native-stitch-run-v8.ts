@@ -1,6 +1,9 @@
 import { seamLoopOf, seamPieceOf, segmentPiece } from 'lib/assembly-skeleton/geometry/segment';
+import { buildPatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
+import { selectPatternImportDxfProductDraftPhaseDSizeV1 } from 'lib/cloth/domain/pattern-import-dxf-product-draft-phase-d-selection-v1';
 import { NEST_DEFAULTS, type PieceDTO } from 'lib/nesting/types';
 import { parseSheets } from 'lib/nesting/worker/parse-files';
+import { projectPatternImportDxfProductPhaseEAssemblyV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 import {
   DXF_SOURCE_NATIVE_STRAIGHT_EDGE_SELECTED_PATHS_REQUEST_V1,
   projectDxfSourceNativeStraightEdgeSelectedPathsV1,
@@ -10,14 +13,19 @@ import {
 import { PATIMPORT } from 'lib/pattern-import/types';
 import type { DxfProductSavedNativeCompilerSourceProjectionV1 } from 'lib/pattern-import/dxf-product-saved-native-reprocess-owner-v1';
 import { grainRotation } from 'lib/pom/upright';
-import { anchorOf } from 'lib/seams/anchor';
+import { anchorOf, anchorOfRunId } from 'lib/seams/anchor';
 import { runById } from 'lib/seams/frame';
 import { anchorFromWire, anchorToWire } from 'lib/seams/wire';
 import type { TechCardSeamAnchor } from 'api/proto-http/common';
+import {
+  buildPatternImportDxfPhaseEExactAnchorEdgeV1,
+  readPatternImportDxfPhaseEExactAnchorEdgeHintV1,
+} from './cad-table-zero-connect-exact-anchor-geometry-v1';
 import type { CompleteSavedAssemblySourceV1 } from './saved-assembly-complete-source-rpc-v1';
 import { canonicalizePatternImportDxfPhaseESavedAssemblyValueV1 as canonical } from './saved-assembly-topology-hash-v1';
 import type { SavedAssemblyNativeSewingPathV1 } from './saved-full-assembly-native-boundaries-v1';
 import { createSavedFullAssemblyCompleteDxfHostsV1 } from './saved-full-assembly-complete-dxf-host-v1';
+import { createSavedNativeSewingAuthoringViewV1 } from './saved-native-sewing-authoring-view-v1';
 
 export type SavedNativeStitchCompilerSourceV1 = DxfProductSavedNativeCompilerSourceProjectionV1;
 type CardProjection = Parameters<typeof createSavedFullAssemblyCompleteDxfHostsV1>[1];
@@ -247,6 +255,143 @@ export function resolveSavedLegacyNativeStitchRangeV1(
   anchor: TechCardSeamAnchor,
   descriptors: readonly DxfSourceNativeStraightEdgeDescriptorV1[],
 ) {
+  return resolveNativeStitchRange(path, descriptors, () =>
+    captureSavedLegacyNativeStitchRun(block, path, anchor),
+  );
+}
+
+/** Replays the exact native anchor serializer for saved `#dxf` edges in one current row and rank. */
+export async function prepareSavedTaggedNativeStitchRangeV1(
+  native: SavedNativeStitchCompilerSourceV1,
+  sizeToken: string,
+  signal: AbortSignal,
+) {
+  signal.throwIfAborted();
+  const draft = createSavedNativeSewingAuthoringViewV1(
+    native.draft,
+    native.nativeSewingReplay,
+    native.row.sha256,
+  );
+  const { scopeKey } = native.row;
+  const [built, selected] = await Promise.all([
+    buildPatternImportDxfProductPhaseEAuthoringCatalogV1(draft, scopeKey, sizeToken),
+    selectPatternImportDxfProductDraftPhaseDSizeV1(draft, scopeKey, sizeToken),
+  ]);
+  signal.throwIfAborted();
+  if (
+    !built.ok ||
+    !selected.ok ||
+    built.catalog.sourceFileId !== native.sourceFileId ||
+    selected.selection.pipeline.contentBinding?.sourceSha256 !== native.row.sha256
+  )
+    throw new Error('The tagged sewing contour has no current native catalog.');
+  const { catalog } = built;
+  const projected = projectPatternImportDxfProductPhaseEAssemblyV1(catalog, selected.selection);
+  if (!projected.ok) throw new Error('The tagged sewing contour has no current native projection.');
+  const { projection } = projected;
+
+  return (
+    path: SavedAssemblyNativeSewingPathV1,
+    anchor: TechCardSeamAnchor,
+    descriptors: readonly DxfSourceNativeStraightEdgeDescriptorV1[],
+  ) => {
+    signal.throwIfAborted();
+    if (
+      path.sourceFileId !== native.sourceFileId ||
+      path.sizeToken !== sizeToken ||
+      !Object.entries(native.row).every(
+        ([key, value]) => path.row[key as keyof typeof path.row] === value,
+      ) ||
+      descriptors.some(
+        ({ sourceFileId, instancePath }) =>
+          sourceFileId !== path.sourceFileId ||
+          instancePath.length !== path.sourceInstancePath.length ||
+          instancePath.some((step, index) => step !== path.sourceInstancePath[index]),
+      )
+    )
+      throw new Error(
+        'The tagged sewing contour differs from the current native row or occurrence.',
+      );
+    return resolveNativeStitchRange(path, descriptors, () => {
+      const saved = anchorFromWire(anchor);
+      const [start, end] = saved.range;
+      if (
+        saved.piece !== path.pieceLineKey ||
+        saved.placement ||
+        anchor.pointClosure != null ||
+        (anchor.layer != null &&
+          anchor.layer !== 'TECH_CARD_SEAM_LAYER_UNKNOWN' &&
+          anchor.layer !== 'TECH_CARD_SEAM_LAYER_UNDER' &&
+          anchor.layer !== 'TECH_CARD_SEAM_LAYER_OVER') ||
+        !(start >= 0 && start < end && end <= 1) ||
+        saved.samples.length !== 5 ||
+        !saved.contourSig
+      )
+        throw new Error('A tagged sewing anchor requires a valid untransformed saved range.');
+      const locator = readPatternImportDxfPhaseEExactAnchorEdgeHintV1(saved.piece, saved.edgeHint);
+      const piece = catalog.pieces.find(
+        (candidate) =>
+          candidate.pieceId === path.pieceId && candidate.pieceLineKey === path.pieceLineKey,
+      );
+      const contour = locator && piece?.contours[locator.contourOrdinal];
+      if (
+        !locator ||
+        contour?.contourId !== path.contourId ||
+        contour.role !== 'sewing-boundary' ||
+        !contour.closed
+      )
+        throw new Error('The tagged locator differs from the current native sewing contour.');
+      const from = contour.boundaryVertices[locator.edgeOrdinal];
+      const to = contour.boundaryVertices[locator.edgeOrdinal + 1] ?? contour.boundaryVertices[0];
+      if (!from || !to) throw new Error('The tagged locator names no current native edge.');
+      const expectedWire = canonical(anchorToWire(saved));
+      const matches: [string, string][] = [];
+      for (const ids of [
+        [from.vertexId, to.vertexId],
+        [to.vertexId, from.vertexId],
+      ] as [string, string][]) {
+        const rebuilt = buildPatternImportDxfPhaseEExactAnchorEdgeV1(
+          {
+            pieceId: path.pieceId,
+            pieceLineKey: path.pieceLineKey,
+            contourId: path.contourId,
+            boundaryVertexIds: ids,
+          },
+          catalog,
+          projection,
+        );
+        if (!rebuilt.ok || rebuilt.target !== saved.edgeHint) continue;
+        const fingerprint = anchorOfRunId([rebuilt.piece], rebuilt.target);
+        if (
+          !fingerprint ||
+          canonical(anchorToWire({ ...fingerprint, range: saved.range, layer: saved.layer })) !==
+            expectedWire
+        )
+          continue;
+        const points = rebuilt.piece.edges[0].pts;
+        if (
+          ids.some((id, index) => {
+            const point = path.nativePointsMm[path.vertexIds.indexOf(id)];
+            return !point || points[index][0] !== point.x || points[index][1] !== point.y;
+          })
+        )
+          throw new Error(
+            'The tagged sewing endpoints differ from their original native vertices.',
+          );
+        matches.push(ids);
+      }
+      if (matches.length !== 1)
+        throw new Error('The tagged sewing fingerprint must match exactly one native direction.');
+      return { ids: matches[0], range: saved.range };
+    });
+  };
+}
+
+function resolveNativeStitchRange(
+  path: SavedAssemblyNativeSewingPathV1,
+  descriptors: readonly DxfSourceNativeStraightEdgeDescriptorV1[],
+  captureRun: () => { ids: string[]; range: readonly [number, number] },
+) {
   const exact = descriptors.toSorted(
     (left, right) => left.path.startPointIndex - right.path.startPointIndex,
   );
@@ -265,7 +410,7 @@ export function resolveSavedLegacyNativeStitchRangeV1(
     )
   )
     throw new Error('The exact directed L14 ring differs from the saved run source.');
-  const { ids, range } = captureSavedLegacyNativeStitchRun(block, path, anchor);
+  const { ids, range } = captureRun();
   const points = new Map(path.vertexIds.map((vertex, i) => [vertex, path.nativePointsMm[i]!]));
   const originalEdge = (from: string, to: string) => {
     const index = path.vertexIds.indexOf(from);
