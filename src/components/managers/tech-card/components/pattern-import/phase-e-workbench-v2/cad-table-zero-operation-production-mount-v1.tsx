@@ -1238,7 +1238,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
     );
     const size = ranked[0];
     const nativeBlocks =
-      scope?.manifest.blocks.filter(
+      scope?.rankedOutlineBlocks?.filter(
         (b) =>
           b.identity === writer.identity && b.sizeToken === sizeToken && b.sizeId === size?.sizeId,
       ) ?? [];
@@ -1255,8 +1255,8 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
       !size.authoredAllowanceCorner &&
       !size.internal.some((line) => line.authoredTurnAllowance) &&
       (size.authoredOutlineCorner
-        ? nativeBlock.authoredInsetOutlineCorner?.widthMm === width
-        : !nativeBlock.authoredInsetOutlineCorner) &&
+        ? nativeBlock.insetWidthMm === width
+        : nativeBlock.insetWidthMm === undefined) &&
       matchesCut(size.cut) &&
       hasDraftNativeStraightOutlineV1(
         nativeEditPrepared.selection.phaseD,

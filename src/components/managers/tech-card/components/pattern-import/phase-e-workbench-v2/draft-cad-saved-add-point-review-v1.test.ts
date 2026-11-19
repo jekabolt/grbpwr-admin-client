@@ -1442,6 +1442,30 @@ it.each([
   },
 );
 
+it('carries the exact ranked block identities into the saved CAD editor', async () => {
+  const f = await fixture(true);
+  try {
+    const { draft } = f.source.native;
+    const compileSource = createPatternImportDxfPhaseEDraftCadCompileSourceV1(draft);
+    const scope = compileSource?.scopes.find(({ target }) => target.scopeKey === 'main');
+    const blocks = draft.scopes.find(({ target }) => target.scopeKey === 'main')!.manifest.blocks;
+    expect(blocks.length).toBeGreaterThan(0);
+    expect(scope?.rankedOutlineBlocks).toEqual(
+      blocks.map(({ block, identity, sizeToken, sizeId, authoredInsetOutlineCorner }) => ({
+        block,
+        identity,
+        sizeToken,
+        sizeId,
+        insetWidthMm: authoredInsetOutlineCorner?.widthMm,
+      })),
+    );
+    expect(scope).not.toHaveProperty('manifest');
+    expect(scope).not.toHaveProperty('dxfText');
+  } finally {
+    f.source.dispose();
+  }
+});
+
 it('retains one authored single notch on its exact saved-size piece through the ordinary Wizard', async () => {
   const f = await fixture(true);
   vi.stubGlobal('Worker', InProcessTransport);
