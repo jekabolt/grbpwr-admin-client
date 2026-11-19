@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer';
 import { beforeEach, expect, it, vi } from 'vitest';
 import type { AdminService, TechCardPatternSemanticSidecar } from 'api/proto-http/admin';
 import {
@@ -126,11 +127,13 @@ async function fixture(seamKeys: string[], mediaType: string) {
     mediaType: PATTERN_IMPORT_DXF_PRODUCT_SEMANTIC_SIDECAR_MEDIA_TYPE_V1,
     postSaveReceiptSha256: '3'.repeat(64),
   } as TechCardPatternSemanticSidecar;
-  const { revision: _revision, ...wireRow } = {
+  const { revision, ...wireRow } = {
     ...wire.row,
     patternVersion: stored.patternVersion,
   };
-  const { downloadUrl: _downloadUrl, ...canonicalRow } = wireRow;
+  const { downloadUrl, ...canonicalRow } = wireRow;
+  expect(revision).toBe(row.revision);
+  expect(downloadUrl).toBe(row.url);
   const completeSource = {
     ownedSeams: wire.selectedSeams,
     aliases: [],
