@@ -4,13 +4,14 @@ import { formatDateShort } from 'components/managers/orders-catalog/components/u
 import { buildOrderTrackingUrl } from 'lib/storefront-links';
 import { ReactNode } from 'react';
 import { PatternQR } from 'components/managers/tech-card/patterns/pattern-qr';
-import { GrbpwrMark } from 'ui';
+import { PaperMark, usePaperBrand } from 'lib/workspace/paper-brand-context';
 
 const TD = 'border border-black px-1.5 py-1 align-top';
 const TH = 'border border-black px-1.5 py-1 text-left font-semibold uppercase';
 
-// GRBPWR seller identity printed as the invoice "from" party. Contact only — no legal
-// entity address is carried in the client, so we surface what we know.
+// The seller printed as the invoice "from" party comes from the team's paper brand
+// (`usePaperBrand`): teams OFF → GRBPWR, grbpwr.com, customercare@grbpwr.com, as before. Contact
+// only — no legal entity address is carried here, so we surface what we know.
 //
 // vatId is GRBPWR's own VAT/NIP number and it prints verbatim on a legal document, so it is
 // ENVIRONMENT CONFIG, not a constant: beta and prod must be able to differ, and a hardcoded
@@ -20,13 +21,6 @@ const TH = 'border border-black px-1.5 py-1 text-left font-semibold uppercase';
 // "not configured" marker instead of a plausible-looking number — an invoice that is obviously
 // unfinished is safe, one that quietly lies is not.
 const SELLER_VAT_ID = String(import.meta.env.VITE_SELLER_VAT_ID ?? '').trim();
-
-const SELLER = {
-  name: 'GRBPWR',
-  site: 'grbpwr.com',
-  email: 'customercare@grbpwr.com',
-  vatId: SELLER_VAT_ID,
-};
 
 const toNum = (s?: string): number => {
   const n = parseFloat(s ?? '');
@@ -106,6 +100,8 @@ export function InvoiceDocument({
   /** Pick product-name translations in this dictionary language; falls back to the first. */
   languageId?: number;
 }) {
+  const paper = usePaperBrand(SELLER_VAT_ID);
+  const seller = paper.seller;
   const order = orderDetails?.order;
   if (!order) return null;
 
@@ -180,10 +176,10 @@ export function InvoiceDocument({
       <header className='mb-5 border-b-2 border-black pb-3'>
         <div className='flex items-start justify-between gap-4'>
           <div className='flex items-start gap-3'>
-            <GrbpwrMark className='mt-0.5 h-12 w-12 shrink-0 text-black' />
+            <PaperMark brand={paper} className='mt-0.5 h-12 w-12 shrink-0 text-black' />
             <div>
               <div className='text-[10px] uppercase tracking-[0.2em] text-labelColor'>
-                {SELLER.name} · commercial invoice
+                {seller.name ? <>{seller.name} · commercial invoice</> : 'commercial invoice'}
               </div>
               <div className='text-2xl font-bold uppercase leading-tight'>
                 invoice #{order.id ?? '—'}
@@ -216,15 +212,17 @@ export function InvoiceDocument({
             from
           </div>
           <div className='text-[11px] leading-snug'>
-            <div className='font-bold uppercase'>{SELLER.name}</div>
-            <div>{SELLER.site}</div>
-            <div>{SELLER.email}</div>
-            {SELLER.vatId ? (
-              <div>VAT {SELLER.vatId}</div>
+            {seller.name && <div className='font-bold uppercase'>{seller.name}</div>}
+            {seller.site && <div>{seller.site}</div>}
+            {seller.email && <div>{seller.email}</div>}
+            {seller.vatId ? (
+              <div>VAT {seller.vatId}</div>
             ) : (
-              <div className='mt-0.5 inline-block border border-black px-1 font-bold uppercase'>
-                seller vat id not configured
-              </div>
+              seller.vatExpected && (
+                <div className='mt-0.5 inline-block border border-black px-1 font-bold uppercase'>
+                  seller vat id not configured
+                </div>
+              )
             )}
           </div>
         </div>
@@ -360,7 +358,7 @@ export function InvoiceDocument({
           <div>{reverseChargeNote}</div>
           {/* A reverse-charge invoice must carry the SELLER's VAT number to substantiate the
               zero-rated supply — without it the sheet is not valid for the regime it claims. */}
-          {!SELLER.vatId && (
+          {!seller.vatId && seller.vatExpected && (
             <div className='mt-1 font-bold uppercase'>
               seller vat id not configured — this sheet is not valid for reverse charge until
               VITE_SELLER_VAT_ID is set
@@ -388,7 +386,9 @@ export function InvoiceDocument({
       </Sheet>
 
       <footer className='mt-6 border-t border-borderColor pt-2 text-[9px] uppercase tracking-wide text-labelColor'>
-        {SELLER.name} · invoice #{order.id ?? ''} · questions? {SELLER.email}
+        {seller.name ? <>{seller.name} · invoice #</> : 'invoice #'}
+        {order.id ?? ''}
+        {seller.email ? <> · questions? {seller.email}</> : null}
       </footer>
     </div>
   );

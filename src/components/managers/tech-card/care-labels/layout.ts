@@ -329,6 +329,8 @@ export type AFaceInput = {
   country: string;
   /** Своё лого составника (разобранный SVG); нет — монограмма бренда, как было. */
   logo?: Art | null;
+  /** Нет своего лого: монограмма бренда (нет поля — как было) или пусто (команда не первая). */
+  houseMark?: boolean;
 };
 
 /** Фразы ухода → строки не шире `maxW`: фраза не рвётся, пока влезает целиком (как на макете). */
@@ -408,7 +410,7 @@ function typesetAFaceVertical(sh: Shaper, input: AFaceInput, requestedSeam: Seam
   const right = LV.RIGHT;
   const maxW = right - left;
   const logoY = bounds.top;
-  b.prims.push(...logoPrims(left, logoY, m.logo, input.logo));
+  b.prims.push(...logoPrims(left, logoY, m.logo, input.logo, input.houseMark));
 
   const sku = input.sku.trim().toUpperCase();
   const colour = input.colour.trim().toUpperCase();
@@ -578,7 +580,7 @@ export function typesetAFace(
   const ox = originX(seam);
   const b = new SideBuilder(sh, 'A face');
   b.prims.push(seamDash(seam));
-  b.prims.push(...logoPrims(ox + m.logoX, m.logoY, m.logo, input.logo));
+  b.prims.push(...logoPrims(ox + m.logoX, m.logoY, m.logo, input.logo, input.houseMark));
 
   const left = ox + m.x;
   const right = ox + L.RIGHT;
@@ -723,9 +725,14 @@ export type ABackInput = {
   url: string;
   /** Подпись QR (строка над кодом, строка под ним); пусто — `QR_CAPTION`. */
   caption?: readonly string[];
-  /** Адрес; пусто — `COMPANY_ADDRESS`. */
+  /** Адрес карточки; пусто — `company`. */
   address?: readonly string[];
+  /** Юрстроки команды; нет поля — `COMPANY_ADDRESS` (как было), [] — адреса нет. */
+  company?: readonly string[];
 };
+
+const backAddress = (input: ABackInput): readonly string[] =>
+  input.address?.length ? input.address : input.company ?? COMPANY_ADDRESS;
 
 function typesetABackVertical(sh: Shaper, input: ABackInput, requestedSeam: Seam): CareSide {
   const seam = verticalSeam(requestedSeam, 'back');
@@ -769,7 +776,7 @@ function typesetABackVertical(sh: Shaper, input: ABackInput, requestedSeam: Seam
       b.holes.push(hole('care-overflow', `A back: caption "${line}" is too long for the label`));
   });
 
-  const address = (input.address?.length ? input.address : COMPANY_ADDRESS).map((line) =>
+  const address = backAddress(input).map((line) =>
     line.trim().toUpperCase(),
   );
   const addrLines = Math.max(
@@ -869,7 +876,7 @@ export function typesetABack(
       b.holes.push(hole('care-overflow', `A back: caption "${s}" is too long for the label`));
     b.text(s, 'en', L.PT, cx - w / 2, i === 0 ? m.scanBase : m.metaBase);
   });
-  const address = (input.address?.length ? input.address : COMPANY_ADDRESS).map((s) =>
+  const address = backAddress(input).map((s) =>
     s.trim().toUpperCase(),
   );
   const addrMaxW = L.RIGHT - m.addrX;

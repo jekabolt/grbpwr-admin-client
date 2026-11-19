@@ -114,6 +114,7 @@ import {
   PX_PER_MM,
   type Region,
 } from './regions';
+import { useLabelBrand } from 'lib/workspace/paper-brand-context';
 import { usePublishBuiltRibbons } from './built-ribbons-context';
 import { Ribbon, type RegionView, type RibbonSide } from './ribbon';
 import { builtRibbonPages } from './ribbon-pages';
@@ -703,6 +704,8 @@ function CompositionEditor({
   holes,
   jump,
 }: EditorProps) {
+  const brand = useLabelBrand();
+  const houseMark = !brand || brand.houseMark;
   const { getValues, setValue, control } = useFormContext<TechCardFormData>();
   const careLabel = useWatch({ control, name: 'careLabel' }) as FormCareLabel | undefined;
   const { canWrite } = usePermissions();
@@ -763,7 +766,7 @@ function CompositionEditor({
       return null;
     }
   }, [shaper, cw?.countryName]);
-  const address = addressLines(data);
+  const address = addressLines(data, brand);
   const caption = captionLines(data);
   const symbols = (data?.care.codes ?? []).filter(hasCareArtwork).length;
 
@@ -1008,7 +1011,7 @@ function CompositionEditor({
       case 'logo':
         return {
           ...base,
-          label: `logo: ${logoCustom ? 'your SVG' : 'the GRBPWR mark'}, click to change`,
+          label: `logo: ${logoCustom ? 'your SVG' : houseMark ? 'the GRBPWR mark' : 'none'}, click to change`,
           disabled: !edit,
           title: readOnly,
         };
@@ -1113,10 +1116,11 @@ function CompositionEditor({
           <EditorStrip
             key={key}
             {...common}
-            resetTitle='the GRBPWR mark'
+            resetTitle={houseMark ? 'the GRBPWR mark' : 'none'}
             onReset={() => setCareLabel(g, s, { logoMediaId: 0 })}
           >
             <LogoEditor
+              houseMark={houseMark}
               url={model.logoUrl}
               custom={logoCustom}
               disabled={!edit}
@@ -1301,7 +1305,9 @@ function CompositionEditor({
                 lines={address}
                 rows={3}
                 onCommit={(t) =>
-                  setCareLabel(g, s, { addressLines: linesOverride(t, COMPANY_ADDRESS) })
+                  setCareLabel(g, s, {
+                    addressLines: linesOverride(t, brand ? brand.company : COMPANY_ADDRESS),
+                  })
                 }
                 onClose={close}
               />

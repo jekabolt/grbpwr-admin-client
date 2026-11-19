@@ -9,6 +9,7 @@ import {
   useRunCutPlan,
 } from 'components/managers/production-runs/components/useProductionRuns';
 import { depStatus, usePrintReady, type PrintDep } from 'components/managers/print/use-print-ready';
+import { usePaperBrandDep } from 'lib/workspace/paper-brand-context';
 import { useTechCardRelease } from 'components/managers/tech-card/components/useSamples';
 import { wireInt } from 'components/managers/tech-card/components/schema';
 import {
@@ -190,9 +191,11 @@ export function TechCardPrint() {
   const fontDep = usePdfFonts(classic ? 'en' : lang);
   // Свой текст карточки — на тот же язык, моделью; документ перемонтируется, когда перевод пришёл.
   const own = useOwnTranslation(classic ? 'en' : lang);
+  const brandDep = usePaperBrandDep();
 
   const { ready, degraded } = usePrintReady([
     { label: 'tech card', status: depStatus(isLoading, isError) },
+    brandDep,
     { label: 'on-garment assembly', status: depStatus(assemblyLoading, assemblyError) },
     ...(!releaseId
       ? [{ label: 'construction audit', status: depStatus(audit.isLoading, audit.isError) }]

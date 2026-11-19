@@ -3,6 +3,7 @@
 // колорвея по умолчанию — той же выводкой, что у блока на вкладке (`compositionLabelSummary`), —
 // а этикетки и предметы упаковки таблицами с мокапом в первой колонке. Мокапа нет — клетка так и
 // говорит: пустая клетка на бумаге читается как «картинка не нужна».
+import { useLabelBrand } from 'lib/workspace/paper-brand-context';
 import { labelAttachmentFact } from './label-attach-stitch';
 import type {
   common_Dictionary,
@@ -62,6 +63,7 @@ export function useCompositionLabels({
   const labelDict = useLabelDictionary().dictionary;
   const dict = labelDict ?? dictionary;
   const orderSizes = useSizeOrdering();
+  const brand = useLabelBrand();
   const summaries = useMemo(() => {
     if (!techCard || !ids.length) return [];
     const data = sizesInOrder(
@@ -76,10 +78,10 @@ export function useCompositionLabels({
     );
     // The summary falls back to the card's first colour: paper must not print another colour's label.
     return ids.flatMap((id) => {
-      const summary = compositionLabelSummary(data, id);
+      const summary = compositionLabelSummary(data, id, brand);
       return summary?.colorway.id === id ? [summary] : [];
     });
-  }, [techCard, ids, full.byId, materials, dict, orderSizes]);
+  }, [techCard, ids, full.byId, materials, dict, orderSizes, brand]);
   return { summaries, status: depStatus(full.loading, full.error) };
 }
 

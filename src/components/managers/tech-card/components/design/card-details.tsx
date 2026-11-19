@@ -1,4 +1,5 @@
 import { adminService } from 'api/api';
+import { usePaperBrand } from 'lib/workspace/paper-brand-context';
 import {
   common_AdminColorwayRef,
   common_AuxMadeBy,
@@ -639,6 +640,7 @@ export function CardDetails({
   /** Colour picked by the aux create quiz; the page creates its first MAKES row after card mint. */
   onAuxColour?: (code: string) => void;
 }) {
+  const brandPlaceholder = usePaperBrand().placeholder || undefined;
   const { control } = useFormContext<TechCardFormData>();
   const { dictionary } = useDictionary();
   const { canWrite, canReadCosting } = usePermissions();
@@ -805,7 +807,7 @@ export function CardDetails({
                 <InputField
                   name='brand'
                   label='brand'
-                  placeholder='GRBPWR'
+                  placeholder={brandPlaceholder}
                   disabled={seededLocked}
                 />
                 <StyleLockNote locked={seededLocked} />
@@ -919,7 +921,7 @@ export function CardDetails({
             data-style-lock={seededLocked ? 'locked' : 'open'}
             title={seededLocked ? 'needs products:write' : undefined}
           >
-            <InputField name='brand' label='brand' placeholder='GRBPWR' disabled={seededLocked} />
+            <InputField name='brand' label='brand' placeholder={brandPlaceholder} disabled={seededLocked} />
             <StyleLockNote locked={seededLocked} />
           </div>
         </div>

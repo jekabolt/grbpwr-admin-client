@@ -81,7 +81,12 @@ export type PrintJobInput = {
   colorwayIds: readonly number[];
   /** Копий этикетки A варианта (ячейка сетки с запасом); 0 — размер не печатается. */
   copies: (colorwayId: number, sizeId: number) => number;
+  /** Бренд команды (`labelBrand`); нет — teams OFF, лента как была. */
+  brand?: LabelBrand;
 };
+
+/** Что этикетка берёт у бренда команды: юрстроки (карточные выигрывают) и монограмму. */
+export type LabelBrand = { company: readonly string[]; houseMark: boolean };
 
 export function buildPrintJob(input: PrintJobInput): PrintJob {
   const { data, mode, qr } = input;
@@ -96,6 +101,7 @@ export function buildPrintJob(input: PrintJobInput): PrintJob {
     ...(logo ? { logo } : {}),
     ...(caption?.length ? { caption } : {}),
     ...(address?.length ? { address } : {}),
+    ...(input.brand ? { company: input.brand.company, houseMark: input.brand.houseMark } : {}),
     colorways: data.colorways
       .filter((cw) => want.has(cw.id))
       .map((cw) => ({
@@ -141,6 +147,7 @@ export function planAll(
   mode: PrintMode,
   qr: QrPrefs,
   orientation?: LabelOrientation,
+  brand?: LabelBrand,
 ): FullPlan {
   const sets = new Map<number, PrintSet>();
   const layoutHoles = new Map<number, Hole[]>();
@@ -150,6 +157,7 @@ export function planAll(
       compositions,
       mode,
       ...(orientation ? { orientation } : {}),
+      ...(brand ? { brand } : {}),
       qr,
       colorwayIds: [cw.id],
       copies: () => 1,

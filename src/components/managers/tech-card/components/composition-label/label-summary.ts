@@ -7,6 +7,7 @@ import { labelComposition } from '../../care-labels/composition-override';
 import type { FiberDict, PartComposition } from '../../care-labels/composition-resolver';
 import { LABEL_PART_NAME } from '../../care-labels/label-parts';
 import { COMPANY_ADDRESS, QR_CAPTION } from '../../care-labels/layout';
+import type { LabelBrand } from '../../care-labels/print-job';
 import { qrLink } from '../../care-labels/use-care-label-prefs';
 import type { LineKey } from './label-lines';
 
@@ -51,8 +52,16 @@ export function compositionPartTexts(
 /** Подпись QR и адрес: переопределение карточки, иначе константы ленты. */
 export const captionLines = (data: CareLabelData | null | undefined): readonly string[] =>
   data?.label.caption.length ? data.label.caption : QR_CAPTION;
-export const addressLines = (data: CareLabelData | null | undefined): readonly string[] =>
-  data?.label.address.length ? data.label.address : COMPANY_ADDRESS;
+/** Адрес карточки, иначе юрстроки команды (`brand`; нет — teams OFF, `COMPANY_ADDRESS`). */
+export const addressLines = (
+  data: CareLabelData | null | undefined,
+  brand?: LabelBrand,
+): readonly string[] =>
+  data?.label.address.length ? data.label.address : brand ? brand.company : COMPANY_ADDRESS;
+
+/** Что лента напечатает на месте лого без своего SVG. */
+export const houseMarkLine = (brand?: LabelBrand): readonly string[] =>
+  !brand || brand.houseMark ? ['GRBPWR mark'] : [];
 
 /** Пример ссылки QR для варианта (колорвей × размер). */
 export function qrExample(
@@ -103,6 +112,7 @@ export type CompositionLabelSummary = {
 export function compositionLabelSummary(
   data: CareLabelData,
   colorwayId: number,
+  brand?: LabelBrand,
 ): CompositionLabelSummary | null {
   const cw = data.colorways.find((c) => c.id === colorwayId) ?? data.colorways[0];
   if (!cw) return null;
@@ -116,7 +126,7 @@ export function compositionLabelSummary(
     override: cw.fiberOverride,
   }).parts;
   const caption = captionLines(data);
-  const address = addressLines(data);
+  const address = addressLines(data, brand);
   const L = (line: LineKey, value: readonly string[], overridden: boolean): SummaryLine => ({
     line,
     ...LINE_META[line],
@@ -130,11 +140,9 @@ export function compositionLabelSummary(
     lines: [
       L(
         'logo',
-        [
-          data.label.logoMediaId > 0
-            ? `custom SVG · media #${data.label.logoMediaId}`
-            : 'GRBPWR mark',
-        ],
+        data.label.logoMediaId > 0
+          ? [`custom SVG · media #${data.label.logoMediaId}`]
+          : houseMarkLine(brand),
         data.label.logoMediaId > 0,
       ),
       L(

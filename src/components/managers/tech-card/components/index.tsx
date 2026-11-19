@@ -8,6 +8,7 @@
                   в студию узлом — печатный порядок concept → aspects → notes сохранён. */
 }
 
+import { usePaperBrand } from 'lib/workspace/paper-brand-context';
 import { fusingBaseResolver } from 'lib/grade-map/fusing-base-store';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useQueryClient } from '@tanstack/react-query';
@@ -606,6 +607,8 @@ export function TechCardForm({
   // One server coalescing identity for the life of this mounted edit screen. Every ordinary card
   // PUT from this screen carries it, including retries after a partially-created card.
   const [saveSessionId] = useState(() => crypto.randomUUID());
+  // a new card starts with the team's card brand: `grbpwr` for teams OFF and the first team only
+  const { cardBrand } = usePaperBrand();
   const initialStage = techCardStageOptions.some((o) => o.value === stageParam)
     ? (stageParam as TechCardFormData['stage'])
     : undefined;
@@ -615,8 +618,8 @@ export function TechCardForm({
     defaultValues: techCard
       ? mapTechCardToForm(techCard)
       : initialStage
-        ? { ...techCardDefaultData, stage: initialStage }
-        : techCardDefaultData,
+        ? { ...techCardDefaultData, brand: cardBrand, stage: initialStage }
+        : { ...techCardDefaultData, brand: cardBrand },
     mode: 'onSubmit',
   });
 

@@ -1,3 +1,4 @@
+import { HOUSE_BRAND, paperName, type PaperBrand } from 'lib/workspace/paper-brand';
 import type { common_TechCard } from 'api/proto-http/admin';
 import { labelAttachmentFact } from 'components/managers/tech-card/components/label-attach-stitch';
 import type { GarmentLabelLike } from 'components/managers/tech-card/components/garment-label-pieces';
@@ -49,6 +50,8 @@ export type LabelsDeriveOptions = {
   sizeNames?: Readonly<Record<number, string>>;
   /** Grade order from the dictionary; without it, ascending size ids. */
   orderSizes?: (ids: number[]) => number[];
+  /** The team's paper brand (`usePaperBrand`); absent = teams OFF. */
+  paper?: PaperBrand;
 };
 export type LabelsModel = ReturnType<typeof deriveLabels>;
 
@@ -349,7 +352,7 @@ export function deriveLabels(
       colour: identityColour,
       colourFact: colorwayColour(primary),
       size: identitySize,
-      brand: clean(card?.brand) || 'GRBPWR',
+      brand: paperName(options.paper ?? HOUSE_BRAND, card?.brand),
       logo,
     },
     composition: fallbackComposition,

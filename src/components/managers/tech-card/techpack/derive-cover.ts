@@ -1,3 +1,4 @@
+import { HOUSE_BRAND, paperName, type PaperBrand } from 'lib/workspace/paper-brand';
 import type { common_TechCard } from 'api/proto-http/admin';
 import {
   isCountedLine,
@@ -28,6 +29,8 @@ import { genderText, materialRoleText, statusText } from './i18n/vocabulary';
 export type CoverDeriveOptions = {
   sampleSizeName?: string;
   revisionLabel?: string;
+  /** The team's paper brand (`usePaperBrand`); absent = teams OFF. */
+  paper?: PaperBrand;
 };
 
 export type CoverModel = ReturnType<typeof deriveCover>;
@@ -134,7 +137,7 @@ export function deriveCover(
   };
 
   return {
-    brand: clean(card?.brand) || 'GRBPWR',
+    brand: paperName(options.paper ?? HOUSE_BRAND, card?.brand),
     name: clean(card?.name),
     styleNumber: clean(card?.styleNumber),
     collection: clean(card?.collection),

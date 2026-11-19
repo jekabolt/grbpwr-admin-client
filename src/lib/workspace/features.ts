@@ -1,5 +1,6 @@
 // Team feature switches (design §8). Pure: no React, no api — the nav, the route guard and the
 // permission hook read them through `useWorkspace()`.
+import type { TeamBrand } from 'api/proto-http/admin';
 
 export const FEATURE = {
   core: 'core', // not a switch: accounts, profile, people
@@ -35,6 +36,9 @@ export interface WorkspaceInfo {
   role: string;
   features: string[];
   readOnly: boolean;
+  /** The team's paper brand; absent = teams OFF (a backend before teams). */
+  brand?: TeamBrand | null;
+  logoUrl?: string;
 }
 
 /** Is this feature on? No workspace (a backend before teams) means everything is on, as today. */
