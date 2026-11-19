@@ -15,6 +15,7 @@ import {
   resolveSavedLegacyNativeStitchRangeV1,
 } from './saved-legacy-native-stitch-run-v8';
 import {
+  listSavedNativePointClosureMarksV1,
   resolveSavedNativePointClosureMarkV1,
   type SavedNativePointClosureMarkRequestV1,
 } from './saved-native-point-closure-mark-v1';
@@ -38,7 +39,7 @@ const line = [
   [31, 32],
   [47, 32],
 ];
-function polyline(layer: string, points: number[][], closed: boolean) {
+function polyline(layer: string, points: number[][], closed: boolean, firstBulge = 0) {
   return [
     0,
     'POLYLINE',
@@ -52,14 +53,34 @@ function polyline(layer: string, points: number[][], closed: boolean) {
     0,
     20,
     0,
-    ...points.flatMap(([x, y]) => [0, 'VERTEX', 8, layer, 10, x, 20, y, 30, 0, 70, 0]),
+    ...points.flatMap(([x, y], index) => [
+      0,
+      'VERTEX',
+      8,
+      layer,
+      10,
+      x,
+      20,
+      y,
+      30,
+      0,
+      70,
+      0,
+      ...(index === 0 && firstBulge ? [42, firstBulge] : []),
+    ]),
     0,
     'SEQEND',
     8,
     layer,
   ];
 }
-function fixtureFile(innerPath: number[][], closed = false, rankLabels = false) {
+type ExtraDxf = { extraPaths?: (number | string)[]; copyAtX?: number };
+function fixtureFile(
+  innerPath: number[][],
+  closed = false,
+  rankLabels = false,
+  { extraPaths = [], copyAtX }: ExtraDxf = {},
+) {
   return new TextEncoder().encode(
     [
       0,
@@ -113,6 +134,7 @@ function fixtureFile(innerPath: number[][], closed = false, rankLabels = false) 
         true,
       ),
       ...polyline('8', innerPath, closed),
+      ...extraPaths,
       ...(rankLabels
         ? ['PIECE NAME: POCKET', 'SIZE: M'].flatMap((label) => [
             0,
@@ -147,6 +169,7 @@ function fixtureFile(innerPath: number[][], closed = false, rankLabels = false) 
       0,
       20,
       0,
+      ...(copyAtX === undefined ? [] : [0, 'INSERT', 8, 0, 2, blockName, 10, copyAtX, 20, 0]),
       0,
       'ENDSEC',
       0,
@@ -229,8 +252,8 @@ async function fixture(reverse = false, innerPath = line) {
   };
 }
 
-async function pointMark(innerPath: number[][], closed = false) {
-  const file = fixtureFile(innerPath, closed, true);
+async function pointMark(innerPath: number[][], closed = false, extra?: ExtraDxf) {
+  const file = fixtureFile(innerPath, closed, true, extra);
   const row = {
     techCardId: 1,
     scopeKey: 'main',
@@ -304,6 +327,88 @@ describe('saved native point closure marks', () => {
     await expect(resolve(source, { ...request, dxfSha256: '0'.repeat(64) })).rejects.toThrow(
       'selected row or its bytes changed',
     );
+  });
+
+  it('lists exact marks in entity order, filtering by role and native L8 scope', async () => {
+    const { source, request } = await pointMark(line.slice(0, 2), false, {
+      extraPaths: [
+        ...polyline(
+          '8',
+          [
+            [8, 16],
+            [12, 16],
+          ],
+          false,
+        ),
+        ...polyline(
+          '8',
+          [
+            [40, 25],
+            [50, 25],
+            [50, 35],
+            [40, 35],
+          ],
+          true,
+        ),
+        ...polyline(
+          '9',
+          [
+            [16, 44],
+            [18, 44],
+          ],
+          false,
+        ),
+      ],
+    });
+    const list = listSavedNativePointClosureMarksV1;
+    const slit = await list(source, request);
+    expect(slit.map(({ pointMm }) => pointMm)).toEqual([
+      [23, 20],
+      [10, 16],
+    ]);
+    for (const mark of slit)
+      expect(await resolveSavedNativePointClosureMarkV1(source, mark)).toEqual(mark);
+    const closed = await list(source, { ...request, role: 'BUTTON_MARK_CENTER' });
+    expect(closed.map(({ pointMm }) => pointMm)).toEqual([[45, 30]]);
+    expect(await resolveSavedNativePointClosureMarkV1(source, closed[0]!)).toEqual(closed[0]);
+  });
+
+  it('keeps exact options when a different closed candidate has a native bulge', async () => {
+    const { source, request } = await pointMark(
+      [
+        [15, 20],
+        [31, 20],
+        [31, 32],
+        [15, 32],
+      ],
+      true,
+      {
+        extraPaths: polyline(
+          '8',
+          [
+            [40, 25],
+            [50, 25],
+            [50, 35],
+            [40, 35],
+          ],
+          true,
+          0.4,
+        ),
+      },
+    );
+    expect(
+      (await listSavedNativePointClosureMarksV1(source, request)).map(({ pointMm }) => pointMm),
+    ).toEqual([[23, 26]]);
+  });
+
+  it('refuses to choose a repeated block occurrence or stale bytes', async () => {
+    const { source, request } = await pointMark(line.slice(0, 2), false, { copyAtX: 130 });
+    const list = listSavedNativePointClosureMarksV1;
+    await expect(list(source, request)).rejects.toThrow('one original occurrence');
+    const bytes = source.bytes.slice(0);
+    const rankOffset = new TextDecoder().decode(bytes).indexOf('SIZE: M') + 'SIZE: '.length;
+    new Uint8Array(bytes)[rankOffset] = 'L'.charCodeAt(0);
+    await expect(list({ ...source, bytes }, request)).rejects.toThrow('DXF hash differs');
   });
 });
 
