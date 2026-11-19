@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { common_OrderFull } from 'api/proto-http/admin';
 import { formatDateShort } from 'components/managers/orders-catalog/components/utility';
-import { Avatar, Button, Text, Textarea } from 'ui';
+import { MentionText, PersonAvatar, PersonLabel } from 'components/people/person';
+import { Button, Text, Textarea } from 'ui';
 import { useAddOrderComment, useOrderComments } from '../hooks/useOrderComments';
 
 /**
@@ -47,18 +48,18 @@ export function Comment({
         ) : (
           comments.map((c) => (
             <div key={c.id} className='flex gap-2 border-b border-borderColor pb-2 last:border-b-0'>
-              <Avatar name={c.author} title={c.author} />
+              <PersonAvatar handle={c.author} />
               <div className='flex min-w-0 flex-1 flex-col gap-0.5'>
                 <div className='flex items-baseline justify-between gap-2'>
-                  <Text size='micro' component='span' className='font-bold uppercase tracking-label'>
-                    {c.author || 'unknown'}
+                  <Text size='micro' component='span' className='font-bold tracking-label'>
+                    {c.author ? <PersonLabel handle={c.author} /> : 'unknown'}
                   </Text>
                   <Text size='nano' variant='label' component='span' className='shrink-0'>
                     {formatDateShort(c.createdAt, true)}
                   </Text>
                 </div>
                 <Text size='micro' component='span' className='whitespace-pre-wrap break-words'>
-                  {c.body}
+                  <MentionText text={c.body ?? ''} />
                 </Text>
               </div>
             </div>

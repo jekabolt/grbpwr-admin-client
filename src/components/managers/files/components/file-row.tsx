@@ -1,5 +1,6 @@
 import { cn } from 'lib/utility';
-import { Avatar, Button, CheckboxCommon, Text } from 'ui';
+import { PersonAvatar } from 'components/people/person';
+import { Button, CheckboxCommon, Text } from 'ui';
 import { isProjectTopic } from '../hooks/useFiles';
 import { extensionOf, formatBytes, formatDay, stemOf } from '../utils/format';
 import { hasViewPath, type FileTile } from './file-tile';
@@ -186,7 +187,7 @@ export function FileRow({
             </div>
 
             <span className='flex md:hidden'>
-              <Avatar name={uploader} size={22} />
+              <PersonAvatar handle={uploader} size={22} />
             </span>
 
             <Text
@@ -211,7 +212,7 @@ export function FileRow({
               {date}
             </Text>
             <span className='hidden md:flex'>
-              <Avatar name={uploader} size={22} />
+              <PersonAvatar handle={uploader} size={22} />
             </span>
           </div>
         </div>

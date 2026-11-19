@@ -7,8 +7,10 @@
 export { Accordion } from './components/accordion';
 /** @primitive Dashed «+ noun» door after a list */
 export { AddDoor, addDoorClass, type AddDoorShape } from './components/board';
-/** @primitive Person initials circle */
+/** @primitive Person photo or initials circle */
 export { Avatar, AvatarPicker, initials } from './components/avatar';
+/** @primitive Person name and @username */
+export { PersonName } from './components/avatar';
 /** @primitive «← word» way back */
 export { BackLink } from './components/button';
 /** @primitive Horizontal bar chart row */

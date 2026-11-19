@@ -1,8 +1,9 @@
 import { useState } from 'react';
+import { PersonAvatar, PersonLabel } from 'components/people/person';
 import type { FileTopic, LibraryFile } from 'api/proto-http/admin';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAdmins } from 'components/managers/tech-card/components/useRoles';
-import { Avatar, Button, CalloutBox, HATCH, Text, Tiles } from 'ui';
+import { Button, CalloutBox, HATCH, Text, Tiles } from 'ui';
 import { MAX_UPLOAD_BYTES, uploadLibraryPreview } from '../api/filesService';
 import { invalidateFileViews, type PersonRoleFilter } from '../hooks/useFiles';
 import { formatBytes } from '../utils/format';
@@ -110,9 +111,9 @@ export function NoAccessState() {
           <div className='flex flex-wrap items-center justify-center gap-2'>
             {supers.map((a) => (
               <span key={a.id ?? a.username} className='flex items-center gap-1'>
-                <Avatar name={a.username} size={20} />
-                <Text size='micro' component='span' className='uppercase'>
-                  {a.username}
+                <PersonAvatar handle={a.username} size={20} />
+                <Text size='micro' component='span'>
+                  <PersonLabel handle={a.username} short />
                 </Text>
               </span>
             ))}

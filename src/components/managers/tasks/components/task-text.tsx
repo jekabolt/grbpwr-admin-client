@@ -2,6 +2,7 @@ import { cn } from 'lib/utility';
 import { Fragment, useMemo } from 'react';
 import { Chip, Text } from 'ui';
 import { autolinkNodes } from 'components/shared/markdown/autolink';
+import { swapMentions, usePeopleDirectory } from 'components/people/directory';
 import type { TaskMedia } from '../api/types';
 import { SHEET_TOKEN_SOURCE } from '../utils/sheet-token';
 
@@ -130,6 +131,8 @@ export function TaskText({
   className?: string;
 }) {
   const parts = useMemo(() => parseTaskText(text), [text]);
+  // mentions keep the handle in the text; they read as the person's current @username
+  const { byHandle } = usePeopleDirectory();
 
   return (
     <Text
@@ -144,7 +147,9 @@ export function TaskText({
         ) : p.ref ? (
           <MediaRefChip key={i} refr={p.ref} media={media} onOpen={onOpen} />
         ) : (
-          <Fragment key={i}>{autolinkNodes(p.text ?? '', String(i))}</Fragment>
+          <Fragment key={i}>
+            {autolinkNodes(swapMentions(p.text ?? '', byHandle), String(i))}
+          </Fragment>
         ),
       )}
     </Text>

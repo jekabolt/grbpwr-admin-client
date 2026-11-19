@@ -68,6 +68,24 @@ const SEED_SPECIALTIES: Record<string, string[]> = {
   sam: ['photographer'],
 };
 
+// who they are (P0 profile): name, @username, photo — a stub photo is an inline grey head
+const PHOTO = (bg: string, fg: string) =>
+  `data:image/svg+xml,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24" fill="${bg}"/><path d="M12 5a4 4 0 1 1 0 8 4 4 0 0 1 0-8Zm-8 19c0-5 3.6-8 8-8s8 3 8 8Z" fill="${fg}"/></svg>`,
+  )}`;
+const WHO: Record<string, { name: string; publicUsername: string; avatarUrl: string }> = {
+  'mira.kolesnikova': {
+    name: 'mira kolesnikova',
+    publicUsername: 'mira.k',
+    avatarUrl: PHOTO('#d8d2c8', '#8a7f72'),
+  },
+  teo: { name: 'teo vance', publicUsername: 'teo', avatarUrl: '' },
+  'lena.ruiz': { name: 'lena ruiz', publicUsername: 'lena', avatarUrl: PHOTO('#c9d1d6', '#5d6a73') },
+  sam: { name: '', publicUsername: 'sam', avatarUrl: '' },
+  ada: { name: 'ada brook', publicUsername: 'ada.b', avatarUrl: '' },
+  nika: { name: '', publicUsername: 'nika', avatarUrl: '' },
+};
+
 const member = (
   username: string,
   email: string,
@@ -81,9 +99,9 @@ const member = (
   lastSeenAt: ago(DAY),
   you,
   permissions,
-  name: undefined,
-  publicUsername: undefined,
-  avatarUrl: undefined,
+  name: WHO[username]?.name,
+  publicUsername: WHO[username]?.publicUsername ?? username,
+  avatarUrl: WHO[username]?.avatarUrl,
 });
 
 function seed(s: Scenario) {
@@ -209,6 +227,9 @@ export function workspaceStubAnswer(method: string, body: string | null): unknow
           username: m.username,
           specialties: s.specialties[m.username ?? ''] ?? [],
           isSuper: false,
+          name: m.name,
+          publicUsername: m.publicUsername,
+          avatarUrl: m.avatarUrl,
         })),
         specialties: [
           ...new Set(

@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState, type ChangeEvent, type FocusEvent } from 'react';
+import { usePeopleDirectory } from 'components/people/directory';
+import { PersonAvatar, PersonLabel } from 'components/people/person';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { LibraryFile, LibraryFileAccess } from 'api/proto-http/admin';
 import { publicFilePageUrl, shareTokenOf } from 'components/file-share-viewer/link';
@@ -6,7 +8,6 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useAdmins } from 'components/managers/tech-card/components/useRoles';
 import { useSnackBarStore } from 'lib/stores/store';
 import {
-  Avatar,
   Button,
   CalloutBox,
   Chip,
@@ -158,6 +159,7 @@ export function FileAccessSection({
   };
 
   const admins = useMemo(() => adminsData?.admins ?? [], [adminsData]);
+  const { who } = usePeopleDirectory();
   const pickerRows = useMemo(() => {
     const seen = new Set<number>();
     const known = new Set(admins.map((admin) => Number(admin.id ?? 0)).filter((id) => id > 0));
@@ -191,6 +193,8 @@ export function FileAccessSection({
     ? pickerRows.filter(
         (person) =>
           person.username.toLowerCase().includes(normalizedQuery) ||
+          who(person.username).label.toLowerCase().includes(normalizedQuery) ||
+          who(person.username).username.toLowerCase().includes(normalizedQuery) ||
           person.specialties.some((specialty) => specialty.toLowerCase().includes(normalizedQuery)),
       )
     : pickerRows;
@@ -248,7 +252,7 @@ export function FileAccessSection({
           <ChipRow>
             {people.map((person) => (
               <Chip key={person.id} selected>
-                {person.username || `#${person.id}`}
+                {person.username ? who(person.username).label : `#${person.id}`}
               </Chip>
             ))}
             {!people.length && (
@@ -475,10 +479,10 @@ export function FileAccessSection({
                   >
                     {selected && <span className='text-nano leading-none'>✓</span>}
                   </span>
-                  <Avatar name={person.username} size={20} />
+                  <PersonAvatar handle={person.username} size={20} />
                   <span className='flex min-w-0 flex-col'>
-                    <Text size='micro' component='span' className='truncate uppercase'>
-                      {person.username}
+                    <Text size='micro' component='span' className='truncate'>
+                      <PersonLabel handle={person.username} short />
                     </Text>
                     <Text
                       size='nano'

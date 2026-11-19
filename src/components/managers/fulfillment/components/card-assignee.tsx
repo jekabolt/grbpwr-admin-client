@@ -1,6 +1,7 @@
 import { useAdmins } from 'components/managers/tech-card/components/useRoles';
 import { useState } from 'react';
-import { Avatar, GenericPopover, Text } from 'ui';
+import { PersonAvatar, PersonLabel } from 'components/people/person';
+import { GenericPopover, Text } from 'ui';
 import { useSetFulfillmentAssignee } from '../hooks/useFulfillment';
 
 // ffAssign v2 — the assignee is an Avatar on the card that opens a Popover to
@@ -37,7 +38,7 @@ export function CardAssignee({
 
   // Read-only viewers just see the face, never the picker.
   if (!canWrite) {
-    return <Avatar name={assignee} />;
+    return <PersonAvatar handle={assignee} />;
   }
 
   const pick = (username: string) => {
@@ -52,7 +53,7 @@ export function CardAssignee({
         onOpenChange={setOpen}
         title='assignee'
         triggerProps={{ 'aria-label': assignee ? `assigned to ${assignee}` : 'assign someone' }}
-        openElement={<Avatar name={assignee} />}
+        openElement={<PersonAvatar handle={assignee} />}
       >
         <div className='flex flex-col'>
           <AssigneeRow
@@ -64,7 +65,7 @@ export function CardAssignee({
           {usernames.map((u) => (
             <AssigneeRow
               key={u}
-              label={u}
+              label={<PersonLabel handle={u} short />}
               name={u}
               selected={assignee === u}
               onClick={() => pick(u)}
@@ -87,7 +88,7 @@ function AssigneeRow({
   selected,
   onClick,
 }: {
-  label: string;
+  label: React.ReactNode;
   name: string;
   selected: boolean;
   onClick: () => void;
@@ -102,8 +103,8 @@ function AssigneeRow({
         (selected ? 'text-textColor' : 'text-labelColor')
       }
     >
-      <Avatar name={name} />
-      <Text size='micro' component='span' className='uppercase tracking-label'>
+      <PersonAvatar handle={name} />
+      <Text size='micro' component='span' className='tracking-label'>
         {label}
       </Text>
       {selected && (
