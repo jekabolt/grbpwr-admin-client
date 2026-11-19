@@ -1,6 +1,7 @@
 import { contourSignature, contourSigCap } from 'lib/pattern-import/manifest/contour-sig';
 import { DXF_NATIVE_SEWING_REPLAY_REQUEST_V1 } from 'lib/pattern-import/dxf-native-sewing-replay-v1';
 import { readManifestBytes } from 'lib/pattern-import/manifest';
+import { blockNameOf, UNI_TOKEN } from 'lib/pattern-import/write/plan';
 import {
   DXF_PIPELINE_PROVENANCE_REQUEST_V1,
   type DxfPipelineProvenanceStageOutputV1,
@@ -530,12 +531,21 @@ function savedHalfFoldChoices(
 
 function restoreExactSavedWriterPieces(
   pieces: readonly PieceSpec[],
-  manifest: Pick<ConversionManifest, 'pieces' | 'blocks'>,
+  manifest: Pick<ConversionManifest, 'pieces' | 'blocks' | 'sizes'>,
 ): PieceSpec[] {
   const manifestIndexes = exactManifestPieceIndexes(pieces, manifest);
   const usedBlockIndexes = new Set<number>();
   const restored = pieces.map((piece, pieceIndex) => {
     const saved = manifest.pieces[manifestIndexes[pieceIndex]];
+    const savedBlocks = manifest.blocks.flatMap((block, index) =>
+      block.identity === saved.identity ? [{ block, index }] : [],
+    );
+    const ungraded =
+      saved.ungraded === true &&
+      piece.ungraded &&
+      piece.identity === saved.identity &&
+      piece.sizes.length === 1 &&
+      savedBlocks.length === 1;
     return {
       ...piece,
       // Restore the authoritative written outline semantics from the embedded manifest. The
@@ -547,11 +557,21 @@ function restoreExactSavedWriterPieces(
       }),
       fabrics: [...saved.fabrics],
       sizes: piece.sizes.map((size) => {
-        const blockIndexes = manifest.blocks.flatMap((block, blockIndex) =>
-          block.identity === saved.identity &&
+        // The one ungraded block has a UNI token and retains the authoring rank's SIZE label.
+        // Keep the reconstructed rank and the stored block token in their original roles.
+        const authoringRank =
+          ungraded &&
+          manifest.sizes.filter(
+            ({ token, sizeId, rank }) =>
+              token === size.sizeToken && sizeId === size.sizeId && rank === size.rank,
+          ).length === 1;
+        const blockIndexes = savedBlocks.flatMap(({ block, index }) =>
           block.sizeId === size.sizeId &&
-          block.sizeToken === size.sizeToken
-            ? [blockIndex]
+          (block.sizeToken === size.sizeToken ||
+            (authoringRank &&
+              block.sizeToken === UNI_TOKEN &&
+              block.block === blockNameOf(piece, size)))
+            ? [index]
             : [],
         );
         if (blockIndexes.length !== 1)
