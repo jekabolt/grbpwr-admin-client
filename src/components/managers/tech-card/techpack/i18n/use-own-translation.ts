@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { PrintDep, PrintDepStatus } from 'components/managers/print/use-print-ready';
+import { requestTranslations } from 'lib/translate-transport';
 
 import type { PdfLang } from './langs';
 import { onOwnSeen, setOwnState } from './own';
@@ -52,22 +53,16 @@ function persist(lang: string, t: Map<string, string>) {
 
 async function translateBatch(lang: PdfLang, texts: string[]): Promise<Map<string, string>> {
   const fields = Object.fromEntries(texts.map((s, i) => [`f${i}`, s]));
-  const res = await fetch('/api/translate', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+  const translations = await requestTranslations(
+    {
       source: { langName: 'English', fields },
       targets: [{ code: lang, langName: MODEL_LANG[lang] }],
       constraints: {},
       context: 'techpack',
-    }),
-  });
-  const data = (await res.json().catch(() => ({}))) as {
-    translations?: Record<string, Record<string, string>>;
-    error?: string;
-  };
-  if (!res.ok) throw new Error(data.error || `translate ${res.status}`);
-  const got = data.translations?.[lang] ?? {};
+    },
+    (status) => `translate ${status}`,
+  );
+  const got = translations[lang] ?? {};
   const out = new Map<string, string>();
   texts.forEach((s, i) => {
     const v = got[`f${i}`];

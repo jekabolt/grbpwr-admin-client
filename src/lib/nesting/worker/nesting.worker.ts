@@ -123,6 +123,7 @@ async function handleParseSources(
   id: number,
   sources: ParseSource[],
   opts: ParseOpts,
+  proxyHeaders?: Record<string, string>,
 ): Promise<void> {
   const seq = ++parseSeq;
   const result = await parseCachedSources(
@@ -130,7 +131,7 @@ async function handleParseSources(
     opts,
     parserVersion,
     parseCache,
-    async (source) => (await fetchMediaBlob(source.url)).arrayBuffer(),
+    async (source) => (await fetchMediaBlob(source.url, undefined, proxyHeaders)).arrayBuffer(),
   );
   postParsed(
     id,
@@ -219,7 +220,7 @@ self.onmessage = (ev: MessageEvent<WorkerRequest>) => {
       );
       break;
     case 'parse-sources':
-      void handleParseSources(msg.id, msg.sources, msg.opts).catch((e) =>
+      void handleParseSources(msg.id, msg.sources, msg.opts, msg.proxyHeaders).catch((e) =>
         post({ type: 'error', id: msg.id, message: e instanceof Error ? e.message : String(e) }),
       );
       break;

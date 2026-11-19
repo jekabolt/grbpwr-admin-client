@@ -20444,6 +20444,43 @@ export type SetTeamMemberRoleRequest = {
 export type SetTeamMemberRoleResponse = {
 };
 
+// TranslateFieldsRequest — the admin client's /api/translate body
+// ({source:{langName, fields}, targets:[{code, langName}], constraints}).
+export type TranslateFieldsRequest = {
+  source: TranslateSource | undefined;
+  targets: TranslateTarget[] | undefined;
+  // constraints by field name; a field without an entry has no limit.
+  constraints: { [key: string]: TranslateConstraint } | undefined;
+};
+
+export type TranslateSource = {
+  // lang_name is the source language in words ("English").
+  langName: string | undefined;
+  // fields by name; empty values are not sent to the model.
+  fields: { [key: string]: string } | undefined;
+};
+
+export type TranslateTarget = {
+  // code is the key the answer uses for this language ("fr", "zh").
+  code: string | undefined;
+  langName: string | undefined;
+};
+
+export type TranslateConstraint = {
+  // max_length caps the translation in characters; 0 = no cap.
+  maxLength: number | undefined;
+};
+
+export type TranslateFieldsResponse = {
+  // translations by target code; each holds the translated fields by name.
+  // A language or field the model did not return is absent.
+  translations: { [key: string]: TranslatedFields } | undefined;
+};
+
+export type TranslatedFields = {
+  fields: { [key: string]: string } | undefined;
+};
+
 export interface AdminService {
   // Retrieves a key-value dictionary.
   GetDictionary(request: GetDictionaryRequest): Promise<GetDictionaryResponse>;
@@ -21208,6 +21245,11 @@ export interface AdminService {
   // is an authoring grant. The route sits under /api/admin/ai/, not /tech-card/,
   // so it cannot be shadowed by /tech-card/{id}.
   EnhanceText(request: EnhanceTextRequest): Promise<EnhanceTextResponse>;
+  // TranslateFields translates a few named text fields from one language into
+  // every requested target language in one model call (the AI router, purpose
+  // chat.email_translate; spend booked to the caller's team). Stores nothing.
+  // Replaces the admin client's Vercel /api/translate function: same body shape.
+  TranslateFields(request: TranslateFieldsRequest): Promise<TranslateFieldsResponse>;
   // SuggestPrompts — the `Ideas ▾` door of a PLAYGROUND prompt field: 3–5 short starting phrases for one field of one
   // workflow, from the field's purpose, the card facts the client attaches, the text so far and at most two pictures
   // (their thumbnails). Nothing is stored; the answer is cached in memory for ten minutes per identical request.
@@ -26722,6 +26764,23 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "EnhanceText",
       }) as Promise<EnhanceTextResponse>;
+    },
+    TranslateFields(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/ai/translate`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "TranslateFields",
+      }) as Promise<TranslateFieldsResponse>;
     },
     SuggestPrompts(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/ai/suggest-prompts`; // eslint-disable-line quotes

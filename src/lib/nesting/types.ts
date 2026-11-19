@@ -455,6 +455,8 @@ export type WorkerRequest =
       id: number;
       sources: Array<{ name: string; url: string }>;
       opts: ParseOpts;
+      /** Auth for the backend media proxy (a worker has no localStorage); absent on the legacy proxy. */
+      proxyHeaders?: Record<string, string>;
     }
   | { type: 'nest'; id: number; parseId: number; config: NestConfig }
   /** Roll print layout (pattern-export/roll-search.ts): seed first, then the budgeted GA. */

@@ -1,4 +1,5 @@
 import { readAuthToken as readStoredAuthToken, teamHeaders } from 'api/auth-headers';
+import { mediaProxyHeaders } from 'lib/features/media-proxy';
 import { readManifestBytes } from 'lib/pattern-import/manifest';
 import {
   DXF_PIPELINE_PROVENANCE_REQUEST_V1,
@@ -177,9 +178,11 @@ async function fetchSavedDxfBytes(
     return await fetcher(byteUrl, init);
   } catch (error) {
     if (signal.aborted) throw error;
+    const proxyHeaders = mediaProxyHeaders();
     return fetcher(resolvePatternImportDxfPhaseESavedMediaProxyUrlV1(byteUrl, mediaProxyUrl), {
       method: 'GET',
       credentials: 'same-origin',
+      ...(Object.keys(proxyHeaders).length > 0 ? { headers: proxyHeaders } : {}),
       signal,
     });
   }

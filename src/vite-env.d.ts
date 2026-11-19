@@ -4,8 +4,11 @@ interface ImportMetaEnv {
   readonly VITE_SERVER_URL?: string;
   /** Backend target for Vite's local /api proxy. Default: http://localhost:3999. */
   readonly VITE_API_BASE_URL?: string;
-  /** URL for media proxy (bypasses CORS when cropping). Default: /media-proxy (dev only). Set in prod if backend has proxy. */
+  /** Media proxy (CORS way round for CDN objects). Unset: same-origin /media-proxy (Vercel / dev).
+   *  Set (`https://<api host>/api/files/proxy`): the backend file proxy, called with the auth headers. */
   readonly VITE_MEDIA_PROXY_URL?: string;
+  /** '1' sends translations to the backend RPC TranslateFields; unset keeps the Vercel /api/translate. */
+  readonly VITE_TRANSLATE_RPC?: string;
   /** Storefront base URL for the hero live-preview iframe (/preview/hero). */
   readonly VITE_STOREFRONT_URL?: string;
   /** Seller VAT/NIP printed on commercial invoices. Unset -> invoices carry a visible

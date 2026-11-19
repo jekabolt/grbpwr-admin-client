@@ -16,6 +16,7 @@ import type {
   RollSearchPlan,
   RollSearchResult,
 } from 'lib/pattern-export/roll-search';
+import { mediaProxyHeaders } from 'lib/features/media-proxy';
 import { workerLoadFailed } from 'lib/stale-reload';
 import { classifyWorkerError } from 'lib/worker-load';
 import { unpackPieces } from './piece-transfer';
@@ -161,7 +162,11 @@ export class NestingWorkerClient {
     opts: ParseOpts,
   ): Promise<SourceParseOutcome> {
     const id = this.nextId++;
-    return this.parseRequest({ type: 'parse-sources', id, sources, opts }).then((out) => ({
+    const proxyHeaders = mediaProxyHeaders();
+    const request = Object.keys(proxyHeaders).length
+      ? ({ type: 'parse-sources', id, sources, opts, proxyHeaders } as const)
+      : ({ type: 'parse-sources', id, sources, opts } as const);
+    return this.parseRequest(request).then((out) => ({
       ...out,
       sourceIndices: out.sourceIndices ?? [],
       downloadFailedIndices: out.downloadFailedIndices ?? [],

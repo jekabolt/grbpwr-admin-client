@@ -1,15 +1,11 @@
 import { LANGUAGES } from 'constants/constants';
+import { requestTranslations } from 'lib/translate-transport';
 
 export type TranslatableField = {
   name: string;
   value: string;
   /** Optional character limit the translation must respect. */
   maxLength?: number;
-};
-
-type TranslateResponse = {
-  translations?: Record<string, Record<string, string>>;
-  error?: string;
 };
 
 /**
@@ -49,18 +45,10 @@ export async function translateToAllLanguages({
     fields: Object.fromEntries(nonEmpty.map((f) => [f.name, f.value])),
   };
 
-  const res = await fetch('/api/translate', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ source, targets, constraints }),
-  });
-
-  const data = (await res.json().catch(() => ({}))) as TranslateResponse;
-  if (!res.ok) {
-    throw new Error(data.error || `Translation failed (${res.status})`);
-  }
-
-  const translations = data.translations || {};
+  const translations = await requestTranslations(
+    { source, targets, constraints },
+    (status) => `Translation failed (${status})`,
+  );
   const byLanguageId: Record<number, Record<string, string>> = {};
   for (const lang of LANGUAGES) {
     if (lang.id === sourceLanguageId) continue;

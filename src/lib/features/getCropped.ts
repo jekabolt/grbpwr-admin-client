@@ -1,19 +1,18 @@
 import { Area } from 'react-easy-crop';
 
-const MEDIA_PROXY =
-  (typeof window !== 'undefined' && (import.meta.env.VITE_MEDIA_PROXY_URL as string | undefined)) ||
-  (typeof window !== 'undefined' ? `${window.location.origin}/media-proxy` : '/media-proxy');
+import { mediaProxyHeaders, mediaProxyUrl } from './media-proxy';
 
-function getFetchUrl(url: string): string {
-  if (url.startsWith('data:') || url.startsWith('blob:')) return url;
+/** Where to fetch the pixels from, and whether that is the proxy (which may want auth headers). */
+function getFetchTarget(url: string): { url: string; proxied: boolean } {
+  if (url.startsWith('data:') || url.startsWith('blob:')) return { url, proxied: false };
   try {
     const u = new URL(url);
     const origin = typeof window !== 'undefined' ? window.location.origin : '';
     const sameOrigin = u.origin === origin || u.hostname === 'localhost';
-    if (sameOrigin) return url;
-    return `${MEDIA_PROXY}?url=${encodeURIComponent(url)}`;
+    if (sameOrigin) return { url, proxied: false };
+    return { url: mediaProxyUrl(url), proxied: true };
   } catch {
-    return url;
+    return { url, proxied: false };
   }
 }
 
@@ -31,13 +30,15 @@ export async function urlToDataUrl(imageUrl: string): Promise<string> {
     return imageUrl;
   }
 
-  const fetchUrl = getFetchUrl(imageUrl);
+  const target = getFetchTarget(imageUrl);
+  const proxyHeaders = target.proxied ? mediaProxyHeaders() : {};
 
   try {
-    const response = await fetch(fetchUrl, {
+    const response = await fetch(target.url, {
       mode: 'cors',
       credentials: 'omit',
       cache: 'default',
+      ...(Object.keys(proxyHeaders).length > 0 ? { headers: proxyHeaders } : {}),
     });
     if (!response.ok) {
       throw new Error(`Failed to fetch image: ${response.statusText}`);
