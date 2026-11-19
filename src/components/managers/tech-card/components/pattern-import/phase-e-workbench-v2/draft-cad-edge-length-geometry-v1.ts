@@ -17,7 +17,7 @@ import {
 } from './draft-cad-paired-allowance-authority-v1';
 import {
   readPairedAuthoredOutlineCorner,
-  roundDraftRectangularCornerV1,
+  roundDraftConvexOrthogonalCornerV1,
 } from 'lib/pattern-import/manifest/authored-outline-corner';
 import {
   authoredQuadraticGrid,
@@ -206,6 +206,12 @@ function editExactOutlineVertex(
           ? 'Sharpening needs matching saved cut and sewing outlines.'
           : 'Rounding needs matching saved cut and sewing outlines.',
     };
+  if (
+    command.tool === 'round-corner' &&
+    seam &&
+    (seam.length !== cut.length || cut.some(({ x, y }, i) => x !== seam[i]?.x || y !== seam[i]?.y))
+  )
+    return { ok: false, detail: 'Rounding needs exactly coincident cut and sewing outlines.' };
   let allowanceWidthMm: number | null = null;
   if (separate) {
     const supportedCut =
@@ -245,6 +251,8 @@ function editExactOutlineVertex(
     allowanceWidthMm = pairedAllowance.widthMm;
   }
   const holes = (source.cutLoops ?? []).map(ring);
+  if (command.tool === 'round-corner' && holes.length)
+    return { ok: false, detail: 'Rounding requires an outline without cut holes.' };
   if (
     holes.some(
       (hole, index) =>
@@ -340,15 +348,29 @@ function editExactOutlineVertex(
       originalCorner.setbackMm === command.payload.setbackMm)
   )
     return { ok: false, detail: 'The selected saved corner or its setback changed.' };
+  const originalOutline = originalCorner ? originalCorner.originalOutline : vertices;
   const rounding =
     command.tool === 'round-corner' &&
-    roundDraftRectangularCornerV1(
-      originalCorner ? originalCorner.rectangle : vertices,
-      index,
-      command.payload.setbackMm,
-    );
+    roundDraftConvexOrthogonalCornerV1(originalOutline, index, command.payload.setbackMm);
+  const nonRectangularRound = Boolean(
+    rounding &&
+      (originalOutline.length !== 4 ||
+        originalOutline.some(({ x, y }, i) => {
+          const next = originalOutline[(i + 1) % originalOutline.length]!;
+          return x !== next.x && y !== next.y;
+        })),
+  );
+  if (
+    nonRectangularRound &&
+    source.drills.some(
+      ({ form, sizeMm }) =>
+        form !== 'point' &&
+        (form !== 'square' || sizeMm === undefined || !Number.isFinite(sizeMm) || sizeMm <= 0),
+    )
+  )
+    return { ok: false, detail: 'Rounding this outline requires exact point or square drills.' };
   if (command.tool === 'round-corner' && (!rounding || contour.role !== 'cut-boundary'))
-    return { ok: false, detail: 'Choose one right-angle corner on an exact saved rectangle.' };
+    return { ok: false, detail: 'Choose one right-angle corner on an exact convex saved outline.' };
   if (!movedPoint && vertices.length <= 3)
     return { ok: false, detail: 'Keep at least three vertices in a closed outline.' };
   const oldPoint = vertices[moving]!;
@@ -406,6 +428,28 @@ function editExactOutlineVertex(
           footOnSegment(point, a, b).d <= EPS || (next && segIntersect(point, next, a, b) !== null)
         );
       });
+    // The native grain annotation may extend beyond the piece. Refuse only if its line
+    // reaches the original corner triangle, which bounds the material removed by this command.
+    const affectedGrain =
+      nonRectangularRound &&
+      rounding &&
+      source.grain &&
+      (() => {
+        const { a, b } = source.grain;
+        const triangle = [rounding.samples[0]!, originalOutline[index]!, rounding.samples.at(-1)!];
+        return (
+          pointInPolygon(a, triangle) ||
+          pointInPolygon(b, triangle) ||
+          triangle.some((point, i) => {
+            const next = triangle[(i + 1) % triangle.length]!;
+            return (
+              footOnSegment(a, point, next).d <= EPS ||
+              footOnSegment(b, point, next).d <= EPS ||
+              segIntersect(a, b, point, next) !== null
+            );
+          })
+        );
+      })();
     if (
       source.drills.some(({ at, form, sizeMm }) => {
         if (!rounding || form === 'point') return crosses(at);
@@ -416,7 +460,8 @@ function editExactOutlineVertex(
       }) ||
       source.internal.some(({ pts, closed }) =>
         pts.some((point, i) => crosses(point, pts[i + 1] ?? (closed ? pts[0] : undefined))),
-      )
+      ) ||
+      affectedGrain
     )
       return {
         ok: false,
@@ -424,7 +469,7 @@ function editExactOutlineVertex(
           command.tool === 'delete-point'
             ? 'The joined edge would cut through a retained drill or internal line.'
             : rounding
-              ? 'The rounded corner would cut through a retained drill or internal line.'
+              ? 'The rounded corner would cut through a retained drill, internal line or grain line.'
               : 'The moved vertex would cut through a retained drill or internal line.',
       };
   }

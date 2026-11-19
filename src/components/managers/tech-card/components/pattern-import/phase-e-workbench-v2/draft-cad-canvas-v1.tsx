@@ -4,7 +4,7 @@ import {
   draftOutlineMovePositionsV1,
 } from './draft-cad-outline-move-history-v1';
 import {
-  roundDraftRectangularCornerV1,
+  roundDraftConvexOrthogonalCornerV1,
   validDraftCornerSetbackV1,
 } from './draft-cad-round-corner-v1';
 import { selectDraftSharpCornerV1 } from './draft-cad-edge-length-geometry-v1';
@@ -537,7 +537,11 @@ function recordOutlinePointEdit(
       !points ||
       (edit.savedCorner &&
         (!prior || prior.start !== index || prior.setbackMm === edit.setbackMm)) ||
-      !roundDraftRectangularCornerV1(prior ? prior.rectangle : points, index, edit.setbackMm)
+      !roundDraftConvexOrthogonalCornerV1(
+        prior ? prior.originalOutline : points,
+        index,
+        edit.setbackMm,
+      )
     )
       return fail('Choose a right-angle corner and keep a straight rail on each side.');
     command = {
@@ -2026,19 +2030,21 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
       activePieceIndex,
       outlineEditActive,
     );
-    if (activeTool !== 'round-corner' || !savedRoundCorner) return options;
+    if (activeTool !== 'round-corner') return options;
     const contour = activeProjectedPiece(session, projection, activePieceIndex)?.contours.find(
       ({ role }) => role === 'cut-boundary',
     );
     if (!contour) return [];
-    const corner = readAuthoredOutlineCorner(
-      contour.vertices.map(({ pointMm }) => pointMm),
-      savedRoundCorner,
+    const points = contour.vertices.map(({ pointMm }) => pointMm);
+    const corner = savedRoundCorner && readAuthoredOutlineCorner(points, savedRoundCorner);
+    const select = savedRoundCorner
+      ? (index: number) => corner && corner.start === index
+      : (index: number) => roundDraftConvexOrthogonalCornerV1(points, index, 1);
+    const vertexIds = new Set(
+      contour.vertices.flatMap(({ vertexId }, index) => (select(index) ? [vertexId] : [])),
     );
-    if (!corner) return [];
-    const firstSample = contour.vertices[corner.start]?.vertexId;
     return options.filter(
-      ({ anchor }) => anchor.contourId === contour.contourId && anchor.vertexId === firstSample,
+      ({ anchor }) => anchor.contourId === contour.contourId && vertexIds.has(anchor.vertexId),
     );
   }, [activePieceIndex, activeTool, outlineEditActive, projection, savedRoundCorner, session]);
   const canUseActiveTool = activeDraftPieceId

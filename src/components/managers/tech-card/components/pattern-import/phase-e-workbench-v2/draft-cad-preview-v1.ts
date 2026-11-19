@@ -18,7 +18,7 @@ import {
 } from './draft-cad-edge-length-geometry-v1';
 import {
   readAuthoredOutlineCorner,
-  roundDraftRectangularCornerV1,
+  roundDraftConvexOrthogonalCornerV1,
 } from 'lib/pattern-import/manifest/authored-outline-corner';
 import { selectDraftCutAllowanceOffsetV1 } from './draft-cad-allowance-offset-geometry-v1';
 import {
@@ -673,14 +673,18 @@ export function buildPatternImportDxfPhaseEDraftCadPreviewV1(
           projection.sizeToken === sizeToken &&
           points &&
           (!savedCorner || (prior && prior.start === index))
-            ? roundDraftRectangularCornerV1(prior ? prior.rectangle : points, index, setbackMm)
+            ? roundDraftConvexOrthogonalCornerV1(
+                prior ? prior.originalOutline : points,
+                index,
+                setbackMm,
+              )
             : null;
         if (!rounded) {
           blockers.push(
             commandBlocker(
               command,
               'anchor-unavailable',
-              'Choose a right-angle corner on the saved rectangle and keep a straight rail on both sides.',
+              'Choose a right-angle corner on an exact convex saved outline and keep a straight rail on both sides.',
             ),
           );
           break;

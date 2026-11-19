@@ -10,6 +10,7 @@ import { createPatternImportDxfPhaseEBoundDraftCadSessionV1 } from './draft-cad-
 import type { PatternImportDxfPhaseECadTableZeroOperationSavedPreparationResultV1 } from './cad-table-zero-operation-saved-preparation-v1';
 import { PatternImportDxfPhaseEDraftCadCanvasV1 } from './draft-cad-canvas-v1';
 import { draftOutlineMoveHistoryV1 } from './draft-cad-outline-move-history-v1';
+import { roundDraftConvexOrthogonalCornerV1 } from './draft-cad-round-corner-v1';
 import {
   activeDraftCadTransactionsV1,
   redoPatternImportDxfPhaseEDraftCadSessionV1,
@@ -62,13 +63,22 @@ export default function CadTableSavedSharedOutlineEditV1({
     [catalog],
   );
   const [session, setSession] = useState(initial.session);
+  const outlineSize = prepared.draftCadCompileSource.scopes
+    .find(({ target }) => target.scopeKey === scopeKey)
+    ?.writerReplay?.job.pieces.find(({ identity }) => identity === piece?.pieceId)?.sizes[0];
   const savedRoundCorner = useMemo(() => {
-    const authored = prepared.draftCadCompileSource.scopes
-      .find(({ target }) => target.scopeKey === scopeKey)
-      ?.writerReplay?.job.pieces.find(({ identity }) => identity === piece?.pieceId)
-      ?.sizes[0]?.authoredOutlineCorner;
+    const authored = outlineSize?.authoredOutlineCorner;
     return authored ? authoredQuadraticGrid(authored) ?? undefined : undefined;
-  }, [prepared, scopeKey, piece]);
+  }, [outlineSize]);
+  const canStartRounding = useMemo(() => {
+    if (!outlineSize || outlineSize.cutLoops?.length || outlineSize.fold) return false;
+    const contour = projection.pieces[pieceIndex]?.contours.find(
+      ({ role }) => role === 'cut-boundary',
+    );
+    if (!contour?.closed) return false;
+    const points = contour.vertices.map(({ pointMm }) => pointMm);
+    return points.some((_, index) => roundDraftConvexOrthogonalCornerV1(points, index, 1));
+  }, [outlineSize, pieceIndex, projection]);
   const [tool, setTool] = useState<'move-point' | 'round-corner'>(
     savedRoundCorner ? 'round-corner' : 'move-point',
   );
@@ -158,15 +168,17 @@ export default function CadTableSavedSharedOutlineEditV1({
         </p>
         {session && piece ? (
           <div className='flex flex-wrap items-center gap-2'>
-            <Button
-              type='button'
-              size='xs'
-              variant='secondary'
-              disabled={Boolean(savedRoundCorner) || session.history.length > 0 || preparing}
-              onClick={() => setTool(tool === 'move-point' ? 'round-corner' : 'move-point')}
-            >
-              {tool === 'move-point' ? 'Round corner' : 'Move points'}
-            </Button>
+            {canStartRounding && !savedRoundCorner && (
+              <Button
+                type='button'
+                size='xs'
+                variant='secondary'
+                disabled={session.history.length > 0 || preparing}
+                onClick={() => setTool(tool === 'move-point' ? 'round-corner' : 'move-point')}
+              >
+                {tool === 'move-point' ? 'Round corner' : 'Move points'}
+              </Button>
+            )}
             <Button
               type='button'
               variant='main'

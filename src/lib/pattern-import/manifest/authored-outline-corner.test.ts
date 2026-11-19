@@ -3,7 +3,7 @@ import {
   parseAuthoredOutlineCorner,
   readAuthoredOutlineCorner,
   readNativePairedAuthoredOutlineCorner,
-  roundDraftRectangularCornerV1,
+  roundDraftConvexOrthogonalCornerV1,
 } from './authored-outline-corner';
 
 const rectangle = [
@@ -14,7 +14,7 @@ const rectangle = [
 ];
 
 function roundedCorner() {
-  const corner = roundDraftRectangularCornerV1(rectangle, 2, 4);
+  const corner = roundDraftConvexOrthogonalCornerV1(rectangle, 2, 4);
   if (!corner?.controls) throw new Error('Fixture could not round');
   return { ...corner, controls: corner.controls };
 }
@@ -28,7 +28,7 @@ describe('a signed linked outline corner', () => {
       start: 2,
       sampleCount: 9,
       setbackMm: 4,
-      rectangle,
+      originalOutline: rectangle,
     });
     expect(readAuthoredOutlineCorner(rectangle, controls)).toBeNull();
     expect(readAuthoredOutlineCorner([...ring].reverse(), controls)).toBeNull();
@@ -41,7 +41,7 @@ describe('a signed linked outline corner', () => {
     );
     expect(readNativePairedAuthoredOutlineCorner(ring, shifted, controls)).toBeNull();
     expect(readNativePairedAuthoredOutlineCorner(shifted, shifted, controls)).toBeNull();
-    const alternate = roundDraftRectangularCornerV1(rectangle, 2, 6)?.controls;
+    const alternate = roundDraftConvexOrthogonalCornerV1(rectangle, 2, 6)?.controls;
     if (!alternate) throw new Error('Fixture could not round a second setback');
     expect(readNativePairedAuthoredOutlineCorner(ring, ring, alternate)).toBeNull();
     const invalidControl = [...controls];

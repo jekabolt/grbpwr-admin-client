@@ -10,57 +10,92 @@ export function validDraftCornerSetbackV1(value: number) {
   return Number.isFinite(value) && value >= 1 && Number(value.toFixed(6)) === value;
 }
 
-/** A bounded quadratic tangent to both rails of an exact rectangular outline. */
-export function roundDraftRectangularCornerV1(
+type WirePoint = Readonly<{ x: bigint; y: bigint }>;
+
+function wirePoint({ x, y }: PtMm): WirePoint | null {
+  const [gx, gy] = authoredInternalVertices([{ x, y }]);
+  return Number.isSafeInteger(gx) && Number.isSafeInteger(gy) && gx! / 1e6 === x && gy! / 1e6 === y
+    ? { x: BigInt(gx!), y: BigInt(gy!) }
+    : null;
+}
+
+const vector = (from: WirePoint, to: WirePoint) => ({ x: to.x - from.x, y: to.y - from.y });
+const cross = (u: WirePoint, v: WirePoint) => u.x * v.y - u.y * v.x;
+const normSq = ({ x, y }: WirePoint) => x * x + y * y;
+const abs = (value: bigint) => (value < 0n ? -value : value);
+
+function strictlyConvexWireRing(ring: readonly WirePoint[]) {
+  const direction = cross(vector(ring[0]!, ring[1]!), vector(ring[0]!, ring[2]!)) >= 0n ? 1n : -1n;
+  const contains = (a: WirePoint, b: WirePoint, p: WirePoint) =>
+    direction * cross(vector(a, b), vector(a, p));
+  if (
+    !ring.every((current, index) => {
+      const next = ring[(index + 1) % ring.length]!;
+      const previous = ring[(index + ring.length - 1) % ring.length]!;
+      const incoming = vector(previous, current),
+        outgoing = vector(current, next);
+      const turn = cross(incoming, outgoing);
+      // One-millimetre minimum rails and a lower bound on the sine of each turn (1/1000).
+      return (
+        normSq(outgoing) >= 1_000_000_000_000n &&
+        turn * turn * 1_000_000n >= normSq(incoming) * normSq(outgoing) &&
+        ring.every(
+          (point, i) =>
+            i === index || i === (index + 1) % ring.length || contains(current, next, point) > 0n,
+        )
+      );
+    })
+  )
+    return null;
+  return (point: WirePoint) =>
+    ring.every((a, i) => contains(a, ring[(i + 1) % ring.length]!, point) >= 0n);
+}
+
+/** The existing wire controls bind a single tangent corner with perpendicular grid-aligned rails. */
+export function roundDraftConvexOrthogonalCornerV1(
   ring: readonly PtMm[],
   index: number,
   setbackMm: number,
 ) {
   if (
-    ring.length !== 4 ||
+    (ring.length !== 4 && ring.length !== 5) ||
     !Number.isInteger(index) ||
     index < 0 ||
-    index >= 4 ||
+    index >= ring.length ||
     !validDraftCornerSetbackV1(setbackMm)
   )
     return null;
-  const xs = ring.map(({ x }) => x),
-    ys = ring.map(({ y }) => y);
-  const minX = Math.min(...xs),
-    maxX = Math.max(...xs);
-  const minY = Math.min(...ys),
-    maxY = Math.max(...ys);
+  const wire = ring.map(wirePoint);
+  if (!wire.every((point): point is WirePoint => point !== null)) return null;
+  const contains = strictlyConvexWireRing(wire);
+  if (!contains) return null;
+  const corner = wire[index]!;
+  const before = vector(corner, wire[(index + wire.length - 1) % wire.length]!);
+  const after = vector(corner, wire[(index + 1) % wire.length]!);
   if (
-    new Set(ring.map(({ x, y }) => `${x},${y}`)).size !== 4 ||
-    !ring.every(({ x, y }, i) => {
-      const next = ring[(i + 1) % 4]!;
-      return (
-        [x, y].every((value) => Number.isFinite(value) && Number(value.toFixed(6)) === value) &&
-        (x === minX || x === maxX) &&
-        (y === minY || y === maxY) &&
-        (x === next.x || y === next.y)
-      );
-    }) ||
-    setbackMm * 3 > Math.min(maxX - minX, maxY - minY)
+    (before.x === 0n) === (after.x === 0n) ||
+    (before.x !== 0n && before.y !== 0n) ||
+    (after.x !== 0n && after.y !== 0n)
   )
     return null;
-
-  const corner = ring[index]!;
-  const trimToward = (neighbor: PtMm): PtMm => ({
-    x: Number((corner.x + Math.sign(neighbor.x - corner.x) * setbackMm).toFixed(6)),
-    y: Number((corner.y + Math.sign(neighbor.y - corner.y) * setbackMm).toFixed(6)),
+  const setback = wirePoint({ x: setbackMm, y: 0 })?.x;
+  if (!setback || [before, after].some(({ x, y }) => abs(x) + abs(y) < 3n * setback)) return null;
+  const trim = (d: WirePoint): PtMm => ({
+    x: Number(corner.x + (d.x === 0n ? 0n : d.x > 0n ? setback : -setback)) / 1e6,
+    y: Number(corner.y + (d.y === 0n ? 0n : d.y > 0n ? setback : -setback)) / 1e6,
   });
-  const start = trimToward(ring[(index + 3) % 4]!);
-  const end = trimToward(ring[(index + 1) % 4]!);
-  const controls = authoredQuadraticGrid([start, corner, end]);
+  const controls = authoredQuadraticGrid([trim(before), ring[index]!, trim(after)]);
   const samples = controls && sampleAuthoredQuadratic(controls);
-  return (
-    samples && {
-      controls,
-      samples,
-      ring: ring.flatMap((point, i) => (i === index ? samples : [point])),
-    }
-  );
+  if (
+    !controls ||
+    !samples ||
+    !samples.every((sample) => {
+      const point = wirePoint(sample);
+      return point && contains(point);
+    })
+  )
+    return null;
+  return { controls, samples, ring: ring.flatMap((point, i) => (i === index ? samples : [point])) };
 }
 
 export function parseAuthoredOutlineCorner(value: unknown): AuthoredQuadraticGrid | null {
@@ -77,11 +112,11 @@ export function parseAuthoredOutlineCorner(value: unknown): AuthoredQuadraticGri
     : null;
 }
 
-/** This lookup only admits the single exact, ordered rounded span on its original rectangle. */
+/** This lookup only admits the single exact, ordered rounded span on its reconstructed original outline. */
 export function readAuthoredOutlineCorner(ring: readonly PtMm[], grid: AuthoredQuadraticGrid) {
   if (!parseAuthoredOutlineCorner(grid)) return null;
   const samples = sampleAuthoredQuadratic(grid);
-  if (!samples || ring.length !== samples.length + 3) return null;
+  if (!samples || ![3, 4].includes(ring.length - samples.length)) return null;
   const fixed = authoredInternalVertices(ring);
   const expected = authoredInternalVertices(samples);
   const matches = ring.flatMap((_, i) =>
@@ -91,15 +126,19 @@ export function readAuthoredOutlineCorner(ring: readonly PtMm[], grid: AuthoredQ
   const start = matches[0]!;
   const controls = decodeAuthoredQuadratic(grid);
   const local = ring.map((_, i) => ({ x: fixed[i * 2]! / 1e6, y: fixed[i * 2 + 1]! / 1e6 }));
-  const rectangle = [...local.slice(0, start), controls[1], ...local.slice(start + samples.length)];
+  const originalOutline = [
+    ...local.slice(0, start),
+    controls[1],
+    ...local.slice(start + samples.length),
+  ];
   const setbackMm = Math.abs(grid[0] - grid[2] + grid[1] - grid[3]) / 1e6;
-  const rebuilt = roundDraftRectangularCornerV1(rectangle, start, setbackMm);
+  const rebuilt = roundDraftConvexOrthogonalCornerV1(originalOutline, start, setbackMm);
   if (!rebuilt?.controls || !rebuilt.controls.every((v, i) => v === grid[i])) return null;
   return {
     start,
     sampleCount: samples.length,
     setbackMm,
-    rectangle,
+    originalOutline,
   };
 }
 
