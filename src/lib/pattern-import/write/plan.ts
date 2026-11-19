@@ -402,7 +402,7 @@ export function planBlocks(
   warnings: string[] = [],
   options: { keepOriginalGrainAnchor?: true; preserveNativeLayout?: true } = {},
 ): Plan {
-  const { keepOriginalGrainAnchor, preserveNativeLayout } = options;
+  const { keepOriginalGrainAnchor = false, preserveNativeLayout } = options;
   // 1. scope membership
   const inScope: PieceSpec[] = [];
   for (const p of input) {
