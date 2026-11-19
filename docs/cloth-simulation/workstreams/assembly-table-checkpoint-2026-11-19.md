@@ -4,7 +4,7 @@ The linked source revisions are the tested local integration snapshot.
 
 | Repository | Code revision |
 | --- | --- |
-| Admin client | `c43bffa173b9b822604c99db4695bb6b94516b15` |
+| Admin client | `d74daa7b58fbefdfa42ee487737e53812daa4e73` |
 | Products manager | `341297e6f87fd935d794445a872ef938821fe854` |
 | Protocol | `fcd245b2f607423181718048bdfc0b4387437df9` |
 
@@ -17,9 +17,9 @@ Local verification covers 26 of 48 criteria. Beta qualification covers 0 of 48. 
 - Card169 stored a single-turn hem and a cut-on facing on independent copies. Two further copies saved the 10 mm paired allowance with either fixed end during a 1 mm straight-edge extension. Fresh Workbench sessions reopened both exact edited edges and measured 60.999939 mm and 61.000061 mm respectively.
 - Card169 fixed a race in which delayed reads could restore an older cloth document and transforms after the card advanced. Regression tests cover stale responses before and after the saved-arrangement request.
 - Card169 now supports explicit Square, Mitre and Auto treatments at the selected PCK_L_2 corner across five sizes. The archived signed-DXF replay exercised guarded Apply in process, then repeated the owner read. The three treatments still need ordinary browser Save and cold reload. Foldback and Clip remain open.
-- A Card169 fish-eye draft reached ordinary Apply. Its captured upload also removed ten existing Level 15 DXF labels, so the write was held before reaching persistence.
+- Card169 saved a fish-eye as one closed four-vertex L8 feature on PCK_L_1 M. The ordinary Apply and separate cold Patterns view retained all ten original Level 15 labels, the other nine blocks and all five signed sizes. The existing AO and raw seam records remained present. The three prior source bindings were marked stale and the prior carrier was retired. Fish-eye edit variants and the other AC-16 effects remain open.
 - The guarded pattern writer checks the Assembly revision inside the existing card write transaction. A stale request received HTTP 409 and its fresh counterpart received HTTP 200 on an isolated MySQL schema.
 
-The separate Card11 display experiment is committed as `3f9d34feafec50ba04eac89d3c6fb37786e9022e` against the previously verified 4197 fixture source. Its isolated read-only build at loopback port 4207 verified the four signed Open attachments against the exact accepted frame 29 bytes in unit tests. The build and local HTTP checks passed. ROOT's browser verification is pending.
+The separate Card11 display experiment is committed as `3f9d34feafec50ba04eac89d3c6fb37786e9022e` against the previously verified 4197 fixture source. ROOT verified its isolated read-only build at loopback port 4207 in an ordinary browser session. The four test button seats appeared on the exact accepted paused frame 29 and disappeared after Resume and Reset. The raw frame export matched the stock viewer byte for byte.
 
 The acceptance ledger and receipts are maintained in the local TABLE handoff at `~/.codex/handoffs/assembly-table-2026-11-17/`. Full seam closure, complete Card6 qualification and beta delivery remain open.
