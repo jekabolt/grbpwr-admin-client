@@ -18,6 +18,7 @@ import {
   tabCounts,
   teamOneSlug,
   usd,
+  visibleDeleted,
   visibleTeams,
 } from './model';
 import { useConsoleData } from './use-console';
@@ -77,10 +78,11 @@ export default function ConsolePage() {
     () => visibleTeams(board.teams, { q, tab, sort }),
     [board.teams, q, tab, sort],
   );
+  const deleted = useMemo(() => visibleDeleted(board.deleted, { q, tab }), [board.deleted, q, tab]);
   const teamOne = teamOneSlug(board.teams, catalog);
   // sign-ups wait above the teams, only on the unfiltered view
   const requests = tab === 'all' && !q.trim() ? board.requests : [];
-  const empty = !board.teams.length && !board.requests.length;
+  const empty = !board.teams.length && !board.requests.length && !board.deleted.length;
 
   const tabs: { value: Tab; label: string }[] = [
     { value: 'all', label: `all ${counts.all}` },
@@ -128,10 +130,11 @@ export default function ConsolePage() {
             <Words label='team order' value={sort} options={SORTS} onChange={setSort} />
           </Toolbar>
           <Section className='p-0'>
-            {list.length || requests.length ? (
+            {list.length || requests.length || deleted.length ? (
               <Matrix
                 teams={list}
                 requests={requests}
+                deleted={deleted}
                 catalog={catalog}
                 teamOne={teamOne}
                 open={open}

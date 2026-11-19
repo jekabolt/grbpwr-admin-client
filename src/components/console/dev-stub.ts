@@ -9,6 +9,9 @@
 //   stub.member = '1'      the signed-in person is a plain member (no people actions)
 //   stub.ownerOnly = '1'   people writes are refused `owner_only` (demoted a moment ago)
 //   stub.unauth = '1'      EnterTeam answers 401 (console session revoked)
+//   stub.tooMany = '1'     DeleteTeam answers 429 (too many password attempts)
+//
+// DeleteTeam accepts only the password `stub-password`; deleted teams stay in memory until reload.
 
 import type {
   FeatureInfo,
@@ -70,7 +73,12 @@ const ALL = CATALOG.map((f) => f.key as string);
 
 interface StubTeam extends PlatformTeam {
   members: PlatformMember[];
+  /** the status a deleted team returns to */
+  deletedFrom?: string;
 }
+
+const STUB_PASSWORD = 'stub-password';
+const RETENTION = 30 * DAY;
 
 function team(
   slug: string,
@@ -181,8 +189,9 @@ let teams: StubTeam[] = [
   team('draft-x', 'draft x', 0, '0', [], { status: 'pending', features: [] }),
 ];
 
-const pub = ({ members, ...t }: StubTeam): PlatformTeam => {
+const pub = ({ members, deletedFrom, ...t }: StubTeam): PlatformTeam => {
   void members;
+  void deletedFrom;
   return t;
 };
 
@@ -280,7 +289,14 @@ export function consoleStubAnswer(method: string, body: string | null, path = ''
       return { features: CATALOG };
     case 'ListTeams':
       if (flag('stub.noTeams')) return { teams: [], aiSpendMonthTotalUsd: '0' };
-      return { teams: teams.map(pub), aiSpendMonthTotalUsd: total() };
+      // deleted teams whose data is not wiped yet come after every other team
+      return {
+        teams: [
+          ...teams.filter((t) => t.status !== 'deleted'),
+          ...teams.filter((t) => t.status === 'deleted'),
+        ].map(pub),
+        aiSpendMonthTotalUsd: total(),
+      };
     case 'GetTeam': {
       const t = find(slug);
       return { team: pub(t), members: t.members };
@@ -312,6 +328,26 @@ export function consoleStubAnswer(method: string, body: string | null, path = ''
       failWrite();
       teams = teams.filter((t) => t.slug !== slug);
       return {};
+    case 'DeleteTeam': {
+      if (flag('stub.tooMany')) refuse(429, 'too many attempts');
+      if (req.password !== STUB_PASSWORD) refuse(403, 'wrong_password');
+      const t = find(slug);
+      if (t.slug === 'grbpwr') refuse(400, 'team_one');
+      if (t.status !== 'active' && t.status !== 'read_only') refuse(400, 'wrong_status');
+      t.deletedFrom = t.status;
+      t.status = 'deleted';
+      t.purgeAt = new Date(Date.now() + RETENTION).toISOString();
+      return { team: pub(t) };
+    }
+    case 'RestoreTeam': {
+      failWrite();
+      const t = find(slug);
+      if (t.status !== 'deleted') refuse(400, 'wrong_status');
+      t.status = t.deletedFrom ?? 'active';
+      t.deletedFrom = undefined;
+      t.purgeAt = undefined;
+      return { team: pub(t) };
+    }
     case 'EnterTeam':
       if (flag('stub.unauth')) refuse(401, 'unauthorized');
       find(slug);

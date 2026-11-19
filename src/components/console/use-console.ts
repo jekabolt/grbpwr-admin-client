@@ -4,7 +4,7 @@ import type { ListTeamsResponse, PlatformTeam } from 'api/proto-http/admin';
 import { currentHost, goToUrl, teamUrl } from 'lib/host';
 import { useSnackBarStore } from 'lib/stores/store';
 import { consoleKeys, platformService } from './api';
-import { patchTeam, refusalWord, STATUS, withFeature, withReadOnly } from './model';
+import { deleteRefusal, patchTeam, refusalWord, STATUS, withFeature, withReadOnly } from './model';
 
 /** `ostra.lekalo.studio`: the team's address on this contour. */
 export const addressOf = (slug: string) => `${slug}.${currentHost().base}`;
@@ -130,6 +130,16 @@ export function useConsoleActions() {
     },
   });
 
+  // No confirmation: a deleted team comes back in its old status at once.
+  const restore = useMutation({
+    mutationFn: (slug: string) => platformService.RestoreTeam({ teamSlug: slug }),
+    onSuccess: (r, slug) => {
+      if (r.team) setRows((rows) => patchTeam(rows, slug, () => r.team as PlatformTeam));
+      qc.invalidateQueries({ queryKey: key });
+    },
+    onError: stale,
+  });
+
   const busy = (m: { isPending: boolean; variables?: unknown }, slug: string) =>
     m.isPending && m.variables === slug;
 
@@ -139,8 +149,32 @@ export function useConsoleActions() {
     approve: (slug: string) => approve.mutate(slug),
     decline: (slug: string) => decline.mutate(slug),
     enter: (slug: string) => enter.mutate(slug),
+    restore: (slug: string) => restore.mutate(slug),
     approving: (slug: string) => busy(approve, slug),
     declining: (slug: string) => busy(decline, slug),
     entering: (slug: string) => busy(enter, slug),
+    restoring: (slug: string) => busy(restore, slug),
+  };
+}
+
+/**
+ * Delete a team with the operator's own password. A plain call, not a mutation: a mutation keeps its
+ * variables in the query client's cache after the sheet is gone, and the password must live only in
+ * the sheet's state. Resolves to `null` on success, else the word the sheet shows.
+ */
+export function useDeleteTeam() {
+  const qc = useQueryClient();
+  const key = consoleKeys.teams();
+  return async (slug: string, password: string): Promise<string | null> => {
+    try {
+      const r = await platformService.DeleteTeam({ teamSlug: slug, password });
+      qc.setQueryData<ListTeamsResponse>(key, (d) =>
+        d && r.team ? { ...d, teams: patchTeam(d.teams, slug, () => r.team as PlatformTeam) } : d,
+      );
+      qc.invalidateQueries({ queryKey: key });
+      return null;
+    } catch (e) {
+      return deleteRefusal(e);
+    }
   };
 }

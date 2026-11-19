@@ -10,6 +10,8 @@ export const STATUS = {
   pending: 'pending',
   /** confirmed sign-up waiting for the operator */
   review: 'review',
+  /** hidden at once, wiped at `purgeAt`; listed last until then */
+  deleted: 'deleted',
 } as const;
 
 export type Tab = 'all' | 'active' | 'read_only';
@@ -18,18 +20,26 @@ export type Sort = 'newest' | 'name' | 'people';
 export interface Board {
   teams: PlatformTeam[];
   requests: PlatformTeam[];
+  /** deleted teams whose data is not wiped yet, in the server's order */
+  deleted: PlatformTeam[];
 }
 
-/** Server rows → listed teams and waiting sign-ups. */
+/** Server rows → listed teams, waiting sign-ups and deleted teams. */
 export function splitBoard(rows: PlatformTeam[] | undefined): Board {
   const teams: PlatformTeam[] = [];
   const requests: PlatformTeam[] = [];
+  const deleted: PlatformTeam[] = [];
   for (const t of rows ?? []) {
     if (t.status === STATUS.review) requests.push(t);
+    else if (t.status === STATUS.deleted) deleted.push(t);
     else if (t.status !== STATUS.pending) teams.push(t);
   }
-  return { teams, requests };
+  return { teams, requests, deleted };
 }
+
+/** Only a live team can be deleted, and never team #1. */
+export const canDelete = (t: PlatformTeam, teamOne: boolean) =>
+  !teamOne && (t.status === STATUS.active || t.status === STATUS.readOnly);
 
 export const isReadOnly = (t: PlatformTeam) => t.status === STATUS.readOnly;
 
@@ -40,6 +50,21 @@ export function tabCounts(teams: PlatformTeam[]): Record<Tab, number> {
 
 const time = (ts: string | undefined) => (ts ? Date.parse(ts) || 0 : 0);
 
+const matches = (t: PlatformTeam, needle: string) =>
+  !needle ||
+  (t.slug ?? '').toLowerCase().includes(needle) ||
+  (t.name ?? '').toLowerCase().includes(needle);
+
+/** Deleted teams show under the `all` tab only, filtered by the same search. */
+export function visibleDeleted(
+  deleted: PlatformTeam[],
+  { q, tab }: { q: string; tab: Tab },
+): PlatformTeam[] {
+  if (tab !== 'all') return [];
+  const needle = q.trim().toLowerCase();
+  return deleted.filter((t) => matches(t, needle));
+}
+
 export function visibleTeams(
   teams: PlatformTeam[],
   { q, tab, sort }: { q: string; tab: Tab; sort: Sort },
@@ -48,10 +73,7 @@ export function visibleTeams(
   const list = teams.filter((t) => {
     if (tab === 'active' && isReadOnly(t)) return false;
     if (tab === 'read_only' && !isReadOnly(t)) return false;
-    if (!needle) return true;
-    return (
-      (t.slug ?? '').toLowerCase().includes(needle) || (t.name ?? '').toLowerCase().includes(needle)
-    );
+    return matches(t, needle);
   });
   if (sort === 'name') list.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''));
   else if (sort === 'people') list.sort((a, b) => (b.people ?? 0) - (a.people ?? 0));
@@ -146,4 +168,13 @@ export function refusalWord(e: unknown, fallback = 'not saved'): string {
   if (msg.includes('last_owner')) return 'last owner';
   if (msg.includes('read_only') || msg.includes('read only')) return 'read only';
   return fallback;
+}
+
+/** The red word under the delete sheet's password field. */
+export function deleteRefusal(e: unknown): string {
+  const msg = e instanceof Error ? e.message : String(e ?? '');
+  const status = (e as { status?: number } | null)?.status;
+  if (msg.includes('wrong_password')) return 'wrong password';
+  if (status === 429 || /resource.?exhausted|too many/i.test(msg)) return 'try later';
+  return refusalWord(e, 'not deleted');
 }

@@ -1,6 +1,8 @@
 import type { FeatureInfo, PlatformTeam } from 'api/proto-http/admin';
 import { describe, expect, it } from 'vitest';
 import {
+  canDelete,
+  deleteRefusal,
   featureGroups,
   onCount,
   patchTeam,
@@ -10,6 +12,7 @@ import {
   tabCounts,
   teamOneSlug,
   usd,
+  visibleDeleted,
   visibleTeams,
   withFeature,
   withReadOnly,
@@ -54,6 +57,45 @@ describe('splitBoard', () => {
     ]);
     expect(b.teams.map((x) => x.slug)).toEqual(['a', 'd']);
     expect(b.requests.map((x) => x.slug)).toEqual(['b']);
+    expect(b.deleted).toEqual([]);
+  });
+  it('keeps deleted teams apart, in the server order', () => {
+    const b = splitBoard([
+      t('a'),
+      t('x', { status: 'deleted', purgeAt: '2026-12-19T00:00:00Z' }),
+      t('w', { status: 'deleted', purgeAt: '2026-12-01T00:00:00Z' }),
+    ]);
+    expect(b.teams.map((x) => x.slug)).toEqual(['a']);
+    expect(b.deleted.map((x) => x.slug)).toEqual(['x', 'w']);
+    expect(tabCounts(b.teams)).toEqual({ all: 1, active: 1, read_only: 0 });
+  });
+});
+
+describe('delete and restore', () => {
+  it('only a live team that is not team #1 can be deleted', () => {
+    expect(canDelete(t('a'), false)).toBe(true);
+    expect(canDelete(t('a', { status: 'read_only' }), false)).toBe(true);
+    expect(canDelete(t('grbpwr'), true)).toBe(false);
+    for (const status of ['provisioning', 'review', 'pending', 'deleted']) {
+      expect(canDelete(t('a', { status }), false)).toBe(false);
+    }
+  });
+  it('deleted teams show under all only, searched like the rest', () => {
+    const gone = [t('golden-a', { name: 'golden a', status: 'deleted' }), t('vela')];
+    expect(visibleDeleted(gone, { q: '', tab: 'all' })).toHaveLength(2);
+    expect(visibleDeleted(gone, { q: 'GOLDEN', tab: 'all' }).map((x) => x.slug)).toEqual([
+      'golden-a',
+    ]);
+    expect(visibleDeleted(gone, { q: '', tab: 'active' })).toEqual([]);
+    expect(visibleDeleted(gone, { q: '', tab: 'read_only' })).toEqual([]);
+  });
+  it('deleteRefusal maps the server answers', () => {
+    const err = (message: string, status: number) => Object.assign(new Error(message), { status });
+    expect(deleteRefusal(err('wrong_password', 403))).toBe('wrong password');
+    expect(deleteRefusal(err('too many attempts', 429))).toBe('try later');
+    expect(deleteRefusal(err('rpc error: ResourceExhausted', 500))).toBe('try later');
+    expect(deleteRefusal(err('team_one', 400))).toBe('team one');
+    expect(deleteRefusal(err('wrong_status', 400))).toBe('not deleted');
   });
 });
 

@@ -1,8 +1,116 @@
 import type { PlatformTeam } from 'api/proto-http/admin';
 import { teamUrl } from 'lib/host';
-import { Avatar, GroupLabel, Loader, Pill, Text, ToggleSwitch } from 'ui';
-import { isReadOnly, seenWord, shortDate, usd } from './model';
-import { addressOf, useTeamDetail } from './use-console';
+import { type ChangeEvent, type KeyboardEvent, useRef, useState } from 'react';
+import {
+  Avatar,
+  Button,
+  ConfirmationModal,
+  GroupLabel,
+  Input,
+  Loader,
+  Pill,
+  Text,
+  ToggleSwitch,
+} from 'ui';
+import { canDelete, isReadOnly, seenWord, shortDate, usd } from './model';
+import { addressOf, useDeleteTeam, useTeamDetail } from './use-console';
+
+/**
+ * The `delete team` sheet: the operator's own password confirms it. The password lives only in this
+ * component's state; the sheet is mounted while open, so closing it drops the password with it.
+ */
+function DeleteTeamSheet({
+  team,
+  people,
+  onClose,
+}: {
+  team: PlatformTeam;
+  people: number;
+  onClose: () => void;
+}) {
+  const slug = team.slug ?? '';
+  const run = useDeleteTeam();
+  const field = useRef<HTMLInputElement>(null);
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const close = () => {
+    setPassword('');
+    onClose();
+  };
+
+  const submit = async () => {
+    if (!password || busy) return;
+    setBusy(true);
+    setError('');
+    const refusal = await run(slug, password);
+    setBusy(false);
+    if (!refusal) return close();
+    if (refusal === 'wrong password') setPassword('');
+    setError(refusal);
+    field.current?.focus();
+  };
+
+  return (
+    <ConfirmationModal
+      open
+      width='sm'
+      title='delete team'
+      confirmLabel='delete'
+      cancelLabel='cancel'
+      confirmDisabled={!password || busy}
+      closeOnConfirm={false}
+      cancelDisabled={busy}
+      onConfirm={submit}
+      onOpenChange={(v) => {
+        if (!v && !busy) close();
+      }}
+      onOpenAutoFocus={(e) => {
+        e.preventDefault();
+        field.current?.focus();
+      }}
+    >
+      <div className='flex flex-col gap-3'>
+        <div>
+          {addressOf(slug)} · {people} people
+        </div>
+        <div className='flex flex-col gap-1'>
+          <Text
+            variant='label'
+            size='micro'
+            tracking='label'
+            component='label'
+            className='uppercase'
+            htmlFor='console-delete-password'
+          >
+            password
+          </Text>
+          <Input
+            ref={field}
+            name='console-delete-password'
+            type='password'
+            autoComplete='current-password'
+            value={password}
+            aria-invalid={!!error}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => setPassword(e.target.value)}
+            onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                submit();
+              }
+            }}
+          />
+          {error && (
+            <Text variant='errorLabel' role='alert'>
+              {error}
+            </Text>
+          )}
+        </div>
+      </div>
+    </ConfirmationModal>
+  );
+}
 
 /** The unfolded team row: workspace facts, the read-only switch and who is in the team. */
 export function TeamDetail({
@@ -11,7 +119,7 @@ export function TeamDetail({
   onReadOnly,
 }: {
   team: PlatformTeam;
-  /** Team #1 can never go read-only (the server refuses `team_one`). */
+  /** Team #1 can never go read-only or be deleted (the server refuses `team_one`). */
   teamOne: boolean;
   onReadOnly: (on: boolean) => void;
 }) {
@@ -19,6 +127,8 @@ export function TeamDetail({
   const detail = useTeamDetail(slug);
   const people = detail.data?.members ?? [];
   const ro = isReadOnly(team);
+  const [deleting, setDeleting] = useState(false);
+  const count = detail.data ? people.length : team.people ?? 0;
 
   return (
     <div className='sticky left-0 flex w-[min(68.75rem,100cqw)] flex-col gap-1.5 px-3 pb-3.5 pt-2.5'>
@@ -50,8 +160,16 @@ export function TeamDetail({
           disabled={teamOne}
           onCheckedChange={onReadOnly}
         />
+        {canDelete(team, teamOne) && (
+          <Button variant='underline' onClick={() => setDeleting(true)}>
+            delete
+          </Button>
+        )}
       </div>
-      <GroupLabel>people {detail.data ? people.length : team.people ?? 0}</GroupLabel>
+      {deleting && (
+        <DeleteTeamSheet team={team} people={count} onClose={() => setDeleting(false)} />
+      )}
+      <GroupLabel>people {count}</GroupLabel>
       {detail.isLoading ? (
         <Loader />
       ) : (

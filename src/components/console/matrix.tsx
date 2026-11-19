@@ -22,6 +22,7 @@ const SUB = 'truncate text-micro tracking-label text-labelColor';
 export function Matrix({
   teams,
   requests,
+  deleted,
   catalog,
   teamOne,
   open,
@@ -29,6 +30,8 @@ export function Matrix({
 }: {
   teams: PlatformTeam[];
   requests: PlatformTeam[];
+  /** deleted teams, last; they do not unfold */
+  deleted: PlatformTeam[];
   catalog: FeatureInfo[];
   teamOne: string;
   open: string;
@@ -224,6 +227,32 @@ export function Matrix({
                   </tr>
                 )}
               </Fragment>
+            );
+          })}
+          {deleted.map((t) => {
+            const slug = t.slug ?? '';
+            return (
+              <tr key={slug}>
+                <td className={cn(CELL, STICKY)}>
+                  <div className='flex min-w-0 items-baseline gap-2'>
+                    <span className='truncate text-labelColor'>{t.name || slug}</span>
+                    <span className='shrink-0 text-error'>deleted</span>
+                    <span className='shrink-0 text-labelColor'>{shortDate(t.purgeAt)}</span>
+                  </div>
+                </td>
+                <td className={cn(CELL, NUM, 'text-labelColor')}>{t.people ?? 0}</td>
+                <td colSpan={3} className={cn(CELL, 'hidden md:table-cell')} />
+                <td colSpan={catalog.length} className={cn(CELL, 'px-1.5 align-middle')}>
+                  <Button
+                    variant='underline'
+                    aria-label={`restore ${t.name || slug}`}
+                    disabled={act.restoring(slug)}
+                    onClick={() => act.restore(slug)}
+                  >
+                    restore
+                  </Button>
+                </td>
+              </tr>
             );
           })}
         </tbody>
