@@ -135,48 +135,49 @@ function sameArray(left: Uint32Array, right: Uint32Array): boolean {
 }
 
 function mirrorMap(positionsM: Float32Array, vertexCount: number): Uint32Array | string {
-  // Exact matching on the float bit patterns; -0 is folded into +0.
+  // Reflecting changes only the sign of X. Hash each pair under the same magnitude and Y/Z.
   const bits = new Uint32Array(positionsM.buffer, positionsM.byteOffset, vertexCount * 3);
   const normal = (value: number) => (value === 0x80000000 ? 0 : value);
   let size = 1;
   while (size < vertexCount * 2) size *= 2;
   const mask = size - 1;
   const table = new Int32Array(size).fill(-1);
-  const find = (x: number, y: number, z: number): number => {
+  const missing = 0xffffffff;
+  const mirror = new Uint32Array(vertexCount).fill(missing);
+  for (let vertex = 0; vertex < vertexCount; vertex += 1) {
+    const offset = vertex * 3;
+    const rawX = bits[offset];
+    const x = rawX & 0x7fffffff;
+    const y = normal(bits[offset + 1]);
+    const z = normal(bits[offset + 2]);
     let hash = Math.imul(x ^ 0x9e3779b9, 0x85ebca6b);
     hash = Math.imul(hash ^ y, 0xc2b2ae35);
     hash = Math.imul(hash ^ z, 0x27d4eb2f);
     for (let slot = (hash ^ (hash >>> 15)) & mask; ; slot = (slot + 1) & mask) {
-      const vertex = table[slot];
-      if (vertex < 0) return -1 - slot;
-      const offset = vertex * 3;
-      if (
-        normal(bits[offset]) === x &&
-        normal(bits[offset + 1]) === y &&
-        normal(bits[offset + 2]) === z
-      ) {
-        return vertex;
+      const other = table[slot];
+      if (other < 0) {
+        table[slot] = vertex;
+        if (x === 0) mirror[vertex] = vertex;
+        break;
       }
+      const otherOffset = other * 3;
+      const otherRawX = bits[otherOffset];
+      if (
+        (otherRawX & 0x7fffffff) !== x ||
+        normal(bits[otherOffset + 1]) !== y ||
+        normal(bits[otherOffset + 2]) !== z
+      )
+        continue;
+      if (rawX === otherRawX || mirror[other] !== missing) {
+        return 'Mirror construction requires unique exact vertex coordinates.';
+      }
+      mirror[vertex] = other;
+      mirror[other] = vertex;
+      break;
     }
-  };
-  for (let vertex = 0; vertex < vertexCount; vertex += 1) {
-    const offset = vertex * 3;
-    const found = find(normal(bits[offset]), normal(bits[offset + 1]), normal(bits[offset + 2]));
-    if (found >= 0) return 'Mirror construction requires unique exact vertex coordinates.';
-    table[-1 - found] = vertex;
   }
-  const mirror = new Uint32Array(vertexCount);
-  for (let vertex = 0; vertex < vertexCount; vertex += 1) {
-    const offset = vertex * 3;
-    const found = find(
-      normal((bits[offset] ^ 0x80000000) >>> 0),
-      normal(bits[offset + 1]),
-      normal(bits[offset + 2]),
-    );
-    if (found < 0) return `Vertex ${vertex} has no exact reflected partner.`;
-    mirror[vertex] = found;
-  }
-  return mirror;
+  const firstMissing = mirror.indexOf(missing);
+  return firstMissing < 0 ? mirror : `Vertex ${firstMissing} has no exact reflected partner.`;
 }
 
 function orderedMidlineComponents(

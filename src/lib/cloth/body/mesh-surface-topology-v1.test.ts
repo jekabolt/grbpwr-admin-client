@@ -103,6 +103,37 @@ describe('mesh surface topology v1', () => {
     expect(runs[2].ok && runs[2].cached).toBe(true);
   });
 
+  it('matches signed zero exactly across reflected and midline vertices', () => {
+    const result = createMeshSurfaceTopologyV1({
+      positionsM: Float32Array.of(-1, 0, -0, 1, -0, 0, -0, 1, 0),
+      triangleIndices: Uint16Array.of(0, 1, 2),
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      topology: {
+        mirrorVertexMap: Uint32Array.of(1, 0, 2),
+        midlineVertexOrder: [Uint32Array.of(2)],
+      },
+    });
+  });
+
+  it('rejects duplicate vertices on the midline and after a reflected pair is complete', () => {
+    for (const positionsM of [
+      Float32Array.of(0, 1, -0, -0, 1, 0, 2, 0, 0),
+      Float32Array.of(1, 0, 0, -1, 0, 0, -1, -0, -0),
+    ]) {
+      const result = createMeshSurfaceTopologyV1({
+        positionsM,
+        triangleIndices: Uint16Array.of(0, 1, 2),
+      });
+      expect(result).toMatchObject({
+        ok: false,
+        code: 'symmetry-mismatch',
+        errors: ['Mirror construction requires unique exact vertex coordinates.'],
+      });
+    }
+  });
+
   it('rejects an index buffer that is not the topology it cached', () => {
     const { basis, positionsM } = fixture('base');
     const result = createMeshSurfaceTopologyV1({ positionsM, triangleIndices: basis.indices });
