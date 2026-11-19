@@ -1679,3 +1679,24 @@ Verdict: accepted on the corrected run. The new outlines matched all 17 visually
 ### M3 — measured local corridor (19 November 2026)
 
 Deferred after the complete 40 + 40 comparison against accepted M2. Set40 closed 3746 → 3745 of 4725 and holdout40 stayed at 2604 of 3032. Neither corpus gained a closure, so there were no new outlines to review visually. Memoir View C lost sleeve I size 10 on set40. Its saved strict probe passed under M2 and failed E5-nest under M3, then the draw fallback failed D-cross. Two other previously closed set40 contours changed geometry (MDF432 skirt F XL and MDF535 lower top front D XL). Every previously closed holdout outline was unchanged. With no recovered cells across 80 files, the corridor stays opt-in. M4 starts from M2.
+
+### M4 — one size beyond the last anchor (19 November 2026)
+
+Deferred. Comparing M4 with accepted M2 across all 80 PDFs, set40 remained at 3746/4725 and holdout40 at 2604/3032. No gained or lost closures, so there were no newly closed outlines to review. Four existing outlines changed geometry: MDF346 belt Q size 6, sleeve ruffles G size 6 (2-MDF35 series), MDF404 cuffs D size 10 and MDF383 cuffs P size 10. No change from this trial is promoted.
+
+### M5 — remaining open outlines under the accepted defaults
+
+Each cell counts once, against its first recorded refusal. These counts come from the saved M2 shots.
+
+| First refusal | Set40 | Holdout40 | Total |
+| --- | ---: | ---: | ---: |
+| Size lacks bracketing anchors | 342 | 133 | 475 |
+| Too little coverage by the size’s own lines | 267 | 116 | 383 |
+| Missing stretch or unsupported ends | 179 | 46 | 225 |
+| Sizes merged or indistinguishable | 106 | 85 | 191 |
+| No usable model or piece too small | 42 | 39 | 81 |
+| Drawing fails geometric checks | 36 | 8 | 44 |
+| Earlier closure withdrawn by the ladder check | 7 | 1 | 8 |
+| Total open | 979 | 428 | 1407 |
+
+Next target: the 475 cells without bracketing anchors. M4 left 421 at the same refusal. The other 54 reached downstream checks: 32 failed own-line coverage, 16 failed gap or endpoint checks and six failed corridor or area checks. None closed. First classify those 421 by the number of trusted outlines, distance to the target size and whether the family can only be fitted locally. For families with one usable reference, test whether the target size’s own drawn strokes support corresponding sections of that reference. Benchmark by hiding known closed outlines and comparing the recovered geometry against the originals, including adjacent-size swaps and shared lines. Accept a proposed join only when the target strokes identify its ends and size unambiguously. Keep unsupported stretches open. Report eligibility and accuracy separately before testing this as a production rule.
