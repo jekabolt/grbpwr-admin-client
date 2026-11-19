@@ -6,6 +6,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type ComponentProps,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
@@ -27,6 +28,47 @@ export type PatternImportDxfPhaseECadWorkbenchOperationsModeV1 =
   | 'docked'
   | 'floating'
   | 'collapsed';
+
+type LayoutControlProps = ComponentProps<typeof Button> & {
+  editingLocked: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+};
+
+function WorkbenchLayoutControl({
+  editingLocked,
+  disabled,
+  onClick,
+  children,
+  ...appearance
+}: LayoutControlProps) {
+  if (!editingLocked)
+    return (
+      <Button {...appearance} type='button' disabled={disabled} onClick={onClick}>
+        {children}
+      </Button>
+    );
+
+  // The form fieldset locks native edit controls. Layout actions only change this view.
+  const activate = disabled ? undefined : onClick;
+  return (
+    <Button {...appearance} asChild>
+      <span
+        role='button'
+        aria-disabled={disabled || undefined}
+        tabIndex={disabled ? -1 : 0}
+        onClick={activate}
+        onKeyDown={(event: ReactKeyboardEvent<HTMLSpanElement>) => {
+          if (!activate || event.repeat || (event.key !== 'Enter' && event.key !== ' ')) return;
+          event.preventDefault();
+          activate();
+        }}
+      >
+        {children}
+      </span>
+    </Button>
+  );
+}
 
 type MeasurementUnitContextV1 = Readonly<{
   unit: PatternImportDxfPhaseEMeasurementUnitV1;
@@ -542,8 +584,8 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
           aria-label='Workbench layout controls'
         >
           {dockedOperations || compactDock ? (
-            <Button
-              type='button'
+            <WorkbenchLayoutControl
+              editingLocked={editingLocked}
               variant='underline'
               size='xs'
               className='mr-auto'
@@ -562,7 +604,7 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
               }}
             >
               Current operation {dockedOperations || compactOperationsVisible ? '›' : '‹'}
-            </Button>
+            </WorkbenchLayoutControl>
           ) : null}
           {editingLocked ? (
             <Text
@@ -579,16 +621,16 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
           {desktopVisible ? (
             <div className='mr-1 flex items-center' role='group' aria-label='Measurement unit'>
               {(['mm', 'cm', 'in'] as const).map((unit) => (
-                <Button
+                <WorkbenchLayoutControl
                   key={unit}
-                  type='button'
+                  editingLocked={editingLocked}
                   size='xs'
                   variant={measurementUnit === unit ? 'main' : 'underline'}
                   aria-pressed={measurementUnit === unit}
                   onClick={() => setMeasurementUnit(unit)}
                 >
                   {unit}
-                </Button>
+                </WorkbenchLayoutControl>
               ))}
             </div>
           ) : null}
@@ -604,8 +646,8 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
                 Workspace
               </Text>
               <div className='grid grid-cols-1 gap-1' aria-label='Workbench focus mode'>
-                <Button
-                  type='button'
+                <WorkbenchLayoutControl
+                  editingLocked={editingLocked}
                   size='xs'
                   variant='default'
                   className={
@@ -618,9 +660,9 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
                   }}
                 >
                   2D table
-                </Button>
-                <Button
-                  type='button'
+                </WorkbenchLayoutControl>
+                <WorkbenchLayoutControl
+                  editingLocked={editingLocked}
                   size='xs'
                   variant='default'
                   className={viewMode === 'split' ? 'bg-textColor text-bgColor' : 'hover:bg-pageBg'}
@@ -632,9 +674,9 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
                   }}
                 >
                   2D table + mannequin
-                </Button>
-                <Button
-                  type='button'
+                </WorkbenchLayoutControl>
+                <WorkbenchLayoutControl
+                  editingLocked={editingLocked}
                   size='xs'
                   variant='default'
                   className={
@@ -647,14 +689,14 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
                   }}
                 >
                   Mannequin
-                </Button>
+                </WorkbenchLayoutControl>
               </div>
               <Text component='p' size='micro' variant='label' className='mt-3 mb-1 uppercase'>
                 Assembly Order panel
               </Text>
               <div className='grid grid-cols-1 gap-1' aria-label='Assembly Order window mode'>
-                <Button
-                  type='button'
+                <WorkbenchLayoutControl
+                  editingLocked={editingLocked}
                   size='xs'
                   variant='default'
                   className={
@@ -668,9 +710,9 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
                   }}
                 >
                   Docked
-                </Button>
-                <Button
-                  type='button'
+                </WorkbenchLayoutControl>
+                <WorkbenchLayoutControl
+                  editingLocked={editingLocked}
                   size='xs'
                   variant='default'
                   className={
@@ -683,9 +725,9 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
                   }}
                 >
                   Floating
-                </Button>
-                <Button
-                  type='button'
+                </WorkbenchLayoutControl>
+                <WorkbenchLayoutControl
+                  editingLocked={editingLocked}
                   size='xs'
                   variant='default'
                   className={
@@ -698,7 +740,7 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
                   }}
                 >
                   Collapsed
-                </Button>
+                </WorkbenchLayoutControl>
               </div>
             </div>
           </details>
