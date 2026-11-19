@@ -19,7 +19,7 @@ const axis = (a: PtMm, b: PtMm) =>
 export function isAuthoredAllowanceCornerVariant(
   value: unknown,
 ): value is AuthoredAllowanceCornerVariant {
-  return value === 'auto' || value === 'mitre' || value === 'square';
+  return value === 'auto' || value === 'mitre' || value === 'square' || value === 'clip';
 }
 
 export function parseAuthoredAllowanceCorner(
@@ -91,7 +91,12 @@ function isStrictlyConvexRing(points: readonly PtMm[], inside: readonly PtMm[] =
   );
 }
 
-type Join = { cut: readonly PtMm[]; start: number; points: PtMm[]; mitre: PtMm[]; square: PtMm[] };
+type Join = {
+  cut: readonly PtMm[];
+  start: number;
+  points: PtMm[];
+  joins: Record<AuthoredAllowanceCornerVariant, PtMm[]>;
+};
 
 function inspect(
   inputCut: readonly PtMm[],
@@ -103,7 +108,7 @@ function inspect(
     sewing = closedWithoutRepeat(inputSewing);
   if (
     sewing.length !== 4 ||
-    cut.length !== (variant === 'square' ? 5 : 4) ||
+    (cut.length !== 4 && cut.length !== 5) ||
     !isStrictlyConvexRing(sewing) ||
     !isStrictlyConvexRing(cut, sewing) ||
     !isAuthoredAllowanceCornerVariant(variant) ||
@@ -119,15 +124,18 @@ function inspect(
   const incoming = axis(a, p),
     outgoing = axis(p, b);
   if (!incoming || !outgoing || incoming === outgoing) return null;
-  const join = (square: boolean) =>
-    offsetNativeOrthogonalAllowanceCornerV1(sewing, matches[0]!, widthMm, square)?.map(
+  const join = (kind: Exclude<AuthoredAllowanceCornerVariant, 'auto'>) =>
+    offsetNativeOrthogonalAllowanceCornerV1(sewing, matches[0]!, widthMm, kind)?.map(
       ({ x, y }) => ({ x: grid(x) / units, y: grid(y) / units }),
     );
-  const mitre = join(false),
-    square = join(true);
-  if (mitre?.length !== 1 || square?.length !== 2) return null;
+  const mitre = join('mitre');
+  const square = join('square');
+  const clip = join('clip');
+  if (mitre?.length !== 1 || square?.length !== 2 || clip?.length !== 2) return null;
   const [tip] = mitre;
-  const points = variant === 'square' ? square : mitre;
+  const joins = { auto: mitre, mitre, square, clip };
+  const points = joins[variant];
+  if (cut.length !== 3 + points.length) return null;
   const starts = cut.flatMap((_, i) => {
     const prev = cut[(i + cut.length - 1) % cut.length]!;
     const next = cut[(i + points.length) % cut.length]!;
@@ -137,7 +145,7 @@ function inspect(
       ? [i]
       : [];
   });
-  return starts.length === 1 ? { cut, start: starts[0]!, points, mitre, square } : null;
+  return starts.length === 1 ? { cut, start: starts[0]!, points, joins } : null;
 }
 
 /** Pair the saved authoring record with the exact single current native L1/L14 occurrence. */
@@ -163,8 +171,8 @@ export function editAuthoredAllowanceCorner(
   if (variant === previous.variant || !isAuthoredAllowanceCornerVariant(variant)) return null;
   const native = inspect(cut, sewing, previous);
   if (!native) return null;
-  const { cut: ring, start, points, mitre, square } = native;
-  const next = variant === 'square' ? square : mitre;
+  const { cut: ring, start, points, joins } = native;
+  const next = joins[variant];
   const result =
     start + points.length <= ring.length
       ? [...ring.slice(0, start), ...next, ...ring.slice(start + points.length)]

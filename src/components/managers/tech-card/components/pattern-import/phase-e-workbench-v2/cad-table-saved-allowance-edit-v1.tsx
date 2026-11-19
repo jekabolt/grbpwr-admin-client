@@ -37,6 +37,7 @@ type AllowanceTool = 'allowance-offset' | 'edge-length' | 'allowance-corner';
 const cornerLabels: Record<AuthoredAllowanceCornerVariant, string> = {
   square: 'Square',
   mitre: 'Mitre',
+  clip: 'Clip',
   auto: 'Auto',
 };
 

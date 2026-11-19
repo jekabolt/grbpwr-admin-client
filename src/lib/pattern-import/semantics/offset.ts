@@ -329,7 +329,7 @@ export function offsetNativeOrthogonalAllowanceCornerV1(
   sewing: readonly PtMm[],
   index: number,
   widthMm: number,
-  square: boolean,
+  kind: 'mitre' | 'square' | 'clip',
 ): PtMm[] | null {
   const point = sewing[index];
   if (!point || !Number.isFinite(widthMm) || widthMm <= 0 || signedArea(sewing) <= 0) return null;
@@ -345,9 +345,19 @@ export function offsetNativeOrthogonalAllowanceCornerV1(
     run.turnDeg !== 90
   )
     return null;
+  if (kind === 'clip') {
+    const normals = edgeNormals(sewing);
+    const incoming = normals[(index + sewing.length - 1) % sewing.length]!;
+    const outgoing = normals[index]!;
+    // Where each extended sewing edge meets the neighbouring cut support.
+    return [incoming, outgoing].map(({ x, y }) => ({
+      x: point.x + x * widthMm,
+      y: point.y + y * widthMm,
+    }));
+  }
   return (
     cornerJoins(sewing, widthMm, MITER_LIMIT, false, (corner) =>
-      square && atPoint(corner) ? 'square' : null,
+      kind === 'square' && atPoint(corner) ? 'square' : null,
     ).get(index)?.pts ?? null
   );
 }

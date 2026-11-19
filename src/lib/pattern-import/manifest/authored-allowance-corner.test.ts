@@ -55,7 +55,7 @@ it('refuses a stale, reversed, changed or unsupported corner declaration', () =>
   const square = { ...baseline, variant: 'square' as const };
   expect(parseAuthoredAllowanceCorner(undefined)).toBeNull();
   expect(
-    parseAuthoredAllowanceCorner({ ...authoredAllowanceCornerMarker(square), variant: 'clip' }),
+    parseAuthoredAllowanceCorner({ ...authoredAllowanceCornerMarker(square), variant: 'unknown' }),
   ).toBeNull();
   expect(matchesAuthoredAllowanceCorner(squared, sewing, baseline)).toBe(false);
   expect(matchesAuthoredAllowanceCorner(squared, sewing.toReversed(), square)).toBe(false);
@@ -65,11 +65,30 @@ it('refuses a stale, reversed, changed or unsupported corner declaration', () =>
   expect(matchesAuthoredAllowanceCorner(changedCut, sewing, square)).toBe(false);
 });
 
-it.each(['r12', 'r2000'] as const)(
-  'writes and independently reads one authored %s allowance corner',
-  async (dialect) => {
-    const square = { ...baseline, variant: 'square' as const };
-    const updated = editAuthoredAllowanceCorner(cut, sewing, baseline, 'square')!;
+it('clips one corner at the sewing-to-cut intersections and can restore either prior finish', () => {
+  const clip = { ...baseline, variant: 'clip' as const };
+  const result = editAuthoredAllowanceCorner(cut, sewing, baseline, 'clip')!;
+  expect(result).toEqual([{ x: 320.000137, y: 210 }, { x: 310.000137, y: 220 }, ...cut.slice(1)]);
+  expect(matchesAuthoredAllowanceCorner(result, sewing, clip)).toBe(true);
+  expect(matchesAuthoredAllowanceCorner(result, sewing, { ...baseline, variant: 'square' })).toBe(
+    false,
+  );
+  expect(editAuthoredAllowanceCorner(result, sewing, clip, 'mitre')).toEqual(cut);
+  expect(editAuthoredAllowanceCorner(result, sewing, clip, 'square')).toEqual(
+    editAuthoredAllowanceCorner(cut, sewing, baseline, 'square'),
+  );
+});
+
+it.each([
+  ['r12', 'square'],
+  ['r2000', 'square'],
+  ['r12', 'clip'],
+  ['r2000', 'clip'],
+] as const)(
+  'writes and independently reads one authored %s %s allowance corner',
+  async (dialect, variant) => {
+    const corner = { ...baseline, variant };
+    const updated = editAuthoredAllowanceCorner(cut, sewing, baseline, variant)!;
     const size: PieceSizeSpec = {
       sizeId: 60,
       sizeToken: 'XL',
@@ -80,7 +99,7 @@ it.each(['r12', 'r2000'] as const)(
       notches: [],
       drills: [],
       internal: [],
-      authoredAllowanceCorner: square,
+      authoredAllowanceCorner: corner,
       fold: null,
       offset: null,
       walls: [],
@@ -129,7 +148,7 @@ it.each(['r12', 'r2000'] as const)(
     };
     const { dxfText, manifest } = writeDxfDetailed(job);
     const marker = manifest.blocks[0]?.authoredAllowanceCorner;
-    expect(marker?.variant).toBe('square');
+    expect(marker?.variant).toBe(variant);
     const read = (text: string) =>
       readDxf(
         {

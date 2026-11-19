@@ -1537,7 +1537,7 @@ export type FoldFeature = FeatureBase & {
 };
 export type AuthoredQuadraticControls = readonly [PtMm, PtMm, PtMm];
 
-export type AuthoredAllowanceCornerVariant = 'auto' | 'mitre' | 'square';
+export type AuthoredAllowanceCornerVariant = 'auto' | 'mitre' | 'square' | 'clip';
 export type AuthoredAllowanceCorner = {
   variant: AuthoredAllowanceCornerVariant;
   /** Previous vertex, corner and following vertex on the original directed sewing ring. */
