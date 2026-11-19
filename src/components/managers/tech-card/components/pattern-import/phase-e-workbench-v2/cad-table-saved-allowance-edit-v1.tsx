@@ -12,6 +12,7 @@ import {
 import { stagePatternImportDxfPhaseECadSemanticCompiledArtifactV1 } from './cad-command-semantic-reimport-session-owner-v1';
 import type { PatternImportDxfPhaseECadTableZeroOperationSavedPreparationResultV1 } from './cad-table-zero-operation-saved-preparation-v1';
 import { PatternImportDxfPhaseEDraftCadCanvasV1 } from './draft-cad-canvas-v1';
+import { readCompiledPairedAllowanceReviewV1 } from './draft-cad-geometry-compile-v1';
 import { compileDraftForOrdinaryReviewV1 } from './draft-cad-saved-add-point-review-v1';
 import {
   createPatternImportDxfPhaseEDraftCadSessionV1,
@@ -156,6 +157,12 @@ export default function CadTableSavedAllowanceEditV1({
       if (!readCurrent()) return;
       if (!result.ok)
         throw new Error(result.blockers[0]?.detail ?? 'The saved allowance could not be compiled.');
+      if (
+        guardedAuthority &&
+        readCompiledPairedAllowanceReviewV1(result.artifact)?.fixedEndReplacement !==
+          guardedAuthority.replacement
+      )
+        throw new Error('The saved edit requires a verified cut and sewing allowance pair.');
       const staged = await stagePatternImportDxfPhaseECadSemanticCompiledArtifactV1(
         result.artifact,
         {

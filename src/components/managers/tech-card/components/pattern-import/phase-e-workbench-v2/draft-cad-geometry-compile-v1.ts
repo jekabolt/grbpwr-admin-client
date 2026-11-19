@@ -1402,6 +1402,27 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
     );
   }
 
+  if (pairedAllowance?.fixedEndReplacement && compileCommands[0]?.tool === 'edge-length') {
+    const absoluteOutlines = written.plan.blocks.every((block) => {
+      const size = job.pieces
+        .find(({ identity }) => identity === block.identity)
+        ?.sizes.find(({ sizeToken }) => sizeToken === block.labelSize);
+      return (
+        size &&
+        sameDraftAllowanceRingV1(block.cut, size.cut) &&
+        (block.seam && size.seam
+          ? sameDraftAllowanceRingV1(block.seam, size.seam)
+          : block.seam === size.seam)
+      );
+    });
+    if (!absoluteOutlines)
+      return blocked(
+        'edge-length-geometry-blocked',
+        'The DXF layout would move an exact saved endpoint or another native outline.',
+        compileCommands[0],
+      );
+  }
+
   for (const command of compileCommands) {
     if (
       command.tool !== 'edge-length' &&
