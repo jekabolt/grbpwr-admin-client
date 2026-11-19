@@ -202,6 +202,60 @@ describe('workbench preview lifecycle', () => {
     await lifecycle.cancel(nextHost);
   });
 
+  it('waits for a cancelled viewport device to finish disposal before a new viewport requests one', async () => {
+    const previousHost = boundedHost();
+    const nextHost = boundedHost();
+    const previousDevice = device();
+    const nextDevice = device();
+    const outstandingDevice = deferred<ReturnType<typeof device>>();
+    const disposing = deferred<void>();
+    const disposed = deferred<void>();
+    const order: string[] = [];
+    previousDevice.dispose.mockImplementationOnce(async () => {
+      order.push('previous disposal started');
+      disposing.resolve();
+      await disposed.promise;
+      order.push('previous disposed');
+      return { contextUnconfigured: true, deviceDestroyed: true, releasedLeaseCount: 0 };
+    });
+    const createPrevious = vi.fn(() => outstandingDevice.promise);
+    const createNext = vi.fn(async () => {
+      order.push('next requested');
+      return nextDevice;
+    });
+    const previousLifecycle = createCadWorkbenchPreviewLifecycleV1(createPrevious);
+    const nextLifecycle = createCadWorkbenchPreviewLifecycleV1(createNext);
+    const stale = vi.fn();
+    const current = vi.fn();
+
+    const previous = previousLifecycle.start(previousHost, computeCanvas, null, stale);
+    await vi.waitFor(() => expect(createPrevious).toHaveBeenCalledOnce());
+    const cancelled = previousLifecycle.cancel(previousHost);
+    const next = nextLifecycle.start(nextHost, {} as HTMLCanvasElement, null, current);
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    const requestsBeforePreviousConstruction = createNext.mock.calls.length;
+    outstandingDevice.resolve(previousDevice);
+    await disposing.promise;
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    disposed.resolve();
+    await Promise.all([previous, next, cancelled]);
+    await nextLifecycle.cancel(nextHost);
+
+    expect(requestsBeforePreviousConstruction).toBe(0);
+    expect(order).toEqual(['previous disposal started', 'previous disposed', 'next requested']);
+    expect(previousDevice.acquireExclusive).not.toHaveBeenCalled();
+    expect(previousHost.runBounded).not.toHaveBeenCalled();
+    expect(previousDevice.dispose).toHaveBeenCalledOnce();
+    expect(stale).toHaveBeenCalledExactlyOnceWith({ pending: true, error: null });
+    expect(nextDevice.acquireExclusive).toHaveBeenCalledOnce();
+    expect(nextHost.runBounded).toHaveBeenCalledOnce();
+    expect(nextDevice.drain).toHaveBeenCalledOnce();
+    expect(nextDevice.lease.release).toHaveBeenCalledOnce();
+    expect(nextDevice.dispose).toHaveBeenCalledOnce();
+    expect(current).toHaveBeenLastCalledWith({ pending: false, error: null });
+  });
+
   it.each(['run16', 'run32', 'mountPreview'] as const)(
     'stops the captured host before releasing resources when cancelled during %s',
     async (stage) => {

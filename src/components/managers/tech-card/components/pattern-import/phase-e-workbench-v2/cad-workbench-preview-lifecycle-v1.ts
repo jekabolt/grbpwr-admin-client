@@ -49,12 +49,22 @@ function requireSuccessful(result: PreviewResult) {
   if (!result.ok) throw new Error(result.detail || 'The cloth preview could not complete.');
 }
 
+// A viewport can unmount before its device has opened or drained. Its replacement must still
+// wait for that disposal, even when React creates a new lifecycle for the replacement.
+const closingPreviewTurns = new Set<Promise<void>>();
+
+async function waitForClosingPreviewTurns(signal: AbortSignal) {
+  while (closingPreviewTurns.size > 0) {
+    await Promise.allSettled(closingPreviewTurns);
+    signal.throwIfAborted();
+  }
+}
+
 /** Owns one viewport's preview request, borrowed lease, and underlying device session. */
 export function createCadWorkbenchPreviewLifecycleV1(
   createDevice: CreatePreviewDevice = createXpbdDeviceSession,
 ) {
   let current: PreviewTurn | null = null;
-  let closing = Promise.resolve();
   let cleanupCount = 0;
 
   const isCurrent = (turn: PreviewTurn) =>
@@ -113,13 +123,12 @@ export function createCadWorkbenchPreviewLifecycleV1(
       }
     });
     turn.cleanup = cleanup;
+    closingPreviewTurns.add(cleanup);
     const settled = () => {
       cleanupCount -= 1;
+      closingPreviewTurns.delete(cleanup);
     };
     void cleanup.then(settled, settled);
-    // A late create can configure the shared canvas before resolving. Wait for its disposal
-    // before a subsequent turn attempts to configure that canvas.
-    closing = Promise.allSettled([closing, cleanup]).then(() => undefined);
     if (!turn.lease) turn.controller.abort();
     return cleanup;
   }
@@ -182,11 +191,13 @@ export function createCadWorkbenchPreviewLifecycleV1(
       let deviceLost: Promise<void> | undefined;
 
       try {
-        await (previous && !suspended ? close(previous) : closing);
+        if (previous && !suspended) await close(previous);
+        await waitForClosingPreviewTurns(signal);
         if (!isCurrent(turn)) return;
         if (!suspended && previous?.host !== host) {
           turn.initialStop = host.stopPreview();
           await turn.initialStop;
+          await waitForClosingPreviewTurns(signal);
           if (!isCurrent(turn)) return;
         }
         turn.device = Promise.resolve().then(() => {
