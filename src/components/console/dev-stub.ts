@@ -215,6 +215,7 @@ let members: TeamMember[] = [
     role: flag('stub.member') ? 'member' : 'owner',
     lastSeenAt: ago(0),
     you: true,
+    permissions: [],
   },
   {
     username: 'tomas',
@@ -222,6 +223,7 @@ let members: TeamMember[] = [
     role: flag('stub.soleOwner') ? 'member' : 'owner',
     lastSeenAt: ago(2 * 3_600_000),
     you: false,
+    permissions: [],
   },
   {
     username: 'ana',
@@ -229,6 +231,7 @@ let members: TeamMember[] = [
     role: 'member',
     lastSeenAt: ago(30 * 3_600_000),
     you: false,
+    permissions: [],
   },
   {
     username: 'lena',
@@ -236,6 +239,7 @@ let members: TeamMember[] = [
     role: 'member',
     lastSeenAt: ago(5 * DAY),
     you: false,
+    permissions: [],
   },
   {
     username: 'sami',
@@ -243,6 +247,7 @@ let members: TeamMember[] = [
     role: 'member',
     lastSeenAt: ago(9 * DAY),
     you: false,
+    permissions: [],
   },
 ];
 let invites: TeamInvite[] = [

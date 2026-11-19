@@ -53,7 +53,11 @@ export function usePeopleActions() {
   /** A new invite, or a changed role of an open one (the server re-sends it). */
   const invite = useMutation({
     mutationFn: (v: { email: string; role: string }) =>
-      adminService.InviteTeamMember({ email: normalEmail(v.email), role: v.role }),
+      adminService.InviteTeamMember({
+        email: normalEmail(v.email),
+        role: v.role,
+        permissions: undefined,
+      }),
     onSuccess: (r) => {
       const fresh = r.invite;
       if (!fresh) return void reload();

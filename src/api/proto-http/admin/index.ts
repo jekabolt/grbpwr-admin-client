@@ -16134,6 +16134,22 @@ export type Workspace = {
   readOnly: boolean | undefined;
   // logo_url is the absolute URL of the team's logo (changes when the logo does); empty when there is none.
   logoUrl: string | undefined;
+  // brand is the team's brand data; set only in teams mode, null otherwise.
+  brand: TeamBrand | undefined;
+};
+
+// TeamBrand is the calling team's brand data; only in teams mode.
+export type TeamBrand = {
+  brandName: string | undefined;
+  legalEntity: string | undefined;
+  // legal_address is up to three address lines.
+  legalAddress: string[] | undefined;
+  contactEmail: string | undefined;
+  website: string | undefined;
+  // first_team is true for team #1: the house vector mark and the build's VAT id are this team's.
+  firstTeam: boolean | undefined;
+  // unavailable is true when the control plane could not be read: values are empty, nothing may print or save.
+  unavailable: boolean | undefined;
 };
 
 export type ListAccountSectionsRequest = {
@@ -20391,6 +20407,8 @@ export type TeamMember = {
   lastSeenAt: wellKnownTimestamp | undefined;
   // you is true for the calling account.
   you: boolean | undefined;
+  // permissions are the member's grants inside the grantable set; empty for an owner (full access).
+  permissions: AdminPermission[] | undefined;
 };
 
 // TeamInvite is one invite of the calling team.
@@ -20411,11 +20429,15 @@ export type ListTeamMembersRequest = {
 export type ListTeamMembersResponse = {
   members: TeamMember[] | undefined;
   invites: TeamInvite[] | undefined;
+  // sections are the sections a member can be given, in screen order (key, title = screen word).
+  sections: AdminSectionInfo[] | undefined;
 };
 
 export type InviteTeamMemberRequest = {
   email: string | undefined;
   role: string | undefined;
+  // permissions are the rights the invited person gets on joining; empty = the team's default.
+  permissions: AdminPermission[] | undefined;
 };
 
 export type InviteTeamMemberResponse = {
@@ -20449,6 +20471,29 @@ export type SetTeamMemberRoleRequest = {
 };
 
 export type SetTeamMemberRoleResponse = {
+};
+
+export type SetTeamBrandRequest = {
+  brandName: string | undefined;
+  legalEntity: string | undefined;
+  // legal_address is up to three address lines.
+  legalAddress: string[] | undefined;
+  contactEmail: string | undefined;
+  website: string | undefined;
+};
+
+export type SetTeamBrandResponse = {
+  brand: TeamBrand | undefined;
+};
+
+export type SetTeamMemberAccessRequest = {
+  username: string | undefined;
+  // permissions is the full set of the member's grants; a section left out gets none.
+  permissions: AdminPermission[] | undefined;
+};
+
+export type SetTeamMemberAccessResponse = {
+  member: TeamMember | undefined;
 };
 
 // TranslateFieldsRequest — the admin client's /api/translate body
@@ -22635,6 +22680,10 @@ export interface AdminService {
   RemoveTeamMember(request: RemoveTeamMemberRequest): Promise<RemoveTeamMemberResponse>;
   // SetTeamMemberRole sets a member's role (owner or member).
   SetTeamMemberRole(request: SetTeamMemberRoleRequest): Promise<SetTeamMemberRoleResponse>;
+  // SetTeamBrand replaces the calling team's brand data and answers the stored (normalised) values.
+  SetTeamBrand(request: SetTeamBrandRequest): Promise<SetTeamBrandResponse>;
+  // SetTeamMemberAccess replaces a member's section rights with the full set sent; a section left out gets none.
+  SetTeamMemberAccess(request: SetTeamMemberAccessRequest): Promise<SetTeamMemberAccessResponse>;
 }
 
 type RequestType = {
@@ -32104,6 +32153,43 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "SetTeamMemberRole",
       }) as Promise<SetTeamMemberRoleResponse>;
+    },
+    SetTeamBrand(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/team/brand`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetTeamBrand",
+      }) as Promise<SetTeamBrandResponse>;
+    },
+    SetTeamMemberAccess(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.username) {
+        throw new Error("missing required field request.username");
+      }
+      const path = `api/admin/team/members/${request.username}/access`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetTeamMemberAccess",
+      }) as Promise<SetTeamMemberAccessResponse>;
     },
   };
 }

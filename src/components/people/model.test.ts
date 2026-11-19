@@ -18,6 +18,7 @@ const m = (username: string, role: string, you = false): TeamMember => ({
   role,
   lastSeenAt: undefined,
   you,
+  permissions: [],
 });
 const inv = (ref: string, extra: Partial<TeamInvite> = {}): TeamInvite => ({
   inviteRef: ref,
