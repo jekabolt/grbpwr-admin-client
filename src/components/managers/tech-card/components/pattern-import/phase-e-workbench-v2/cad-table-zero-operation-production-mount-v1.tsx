@@ -39,6 +39,12 @@ import {
   CadTablePieceSelection,
   handleCadTablePieceSelectionKey,
 } from './cad-table-piece-selection-panel-v1';
+import {
+  isCurrentCadTableClothHitV1,
+  matchesCadTableClothFocusInstanceV1,
+  resolveCadTableClothFocusScopeV1,
+} from './cad-table-accepted-cloth-focus-v1';
+import { sameSavedDraftRowV1 } from './draft-cad-saved-source-selection-v1';
 import { projectCadTablePieceFeatures } from './cad-table-piece-features-v1';
 import {
   planPatternImportDxfPhaseECadTablePressForProjectionV1,
@@ -840,12 +846,54 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
       : sourceRoute.choices;
   const [chosenScopeKey, setChosenScopeKey] = useState('');
   const [chosenSize, setChosenSize] = useState<TableSizeChoice | null>(null);
+  type Cloth = NonNullable<CadWorkbenchPhysicalHostV1['acceptedCloth']>;
+  type SelectClothPiece = NonNullable<Cloth['onSelectPiece']>;
+  type ClothHit = Parameters<SelectClothPiece>[0];
+  const clothFocusContext = useMemo(
+    () =>
+      !disabled && currentReviewSize && savedAuthority && !pointClosureTarget
+        ? {
+            card: effectiveSavedCard,
+            review: currentReviewSize,
+            choices,
+            savedAuthority,
+            generation,
+            cardSession,
+            sourceSurface,
+          }
+        : null,
+    [
+      cardSession,
+      choices,
+      currentReviewSize,
+      disabled,
+      effectiveSavedCard,
+      generation,
+      pointClosureTarget,
+      savedAuthority,
+      sourceSurface,
+    ],
+  );
+  const [clothFocus, setClothFocus] = useState<Readonly<{
+    context: NonNullable<typeof clothFocusContext>;
+    frame: Cloth;
+    hit: ClothHit;
+  }> | null>(null);
+  const currentClothFocus =
+    clothFocus &&
+    clothFocus.context === clothFocusContext &&
+    isCurrentCadTableClothHitV1(clothFocus.frame, acceptedCloth, clothFocus.hit)
+      ? clothFocus
+      : null;
+  // A foreign hit borrows the ordinary saved-row preparation. Commit it only after the exact
+  // occurrence arrives, so a refused or revoked hit leaves the operator's scope unchanged.
+  const requestedScopeKey = currentClothFocus?.hit.row.scopeKey ?? chosenScopeKey;
   const defaultScope = choices.ok
     ? choices.choices.find(({ scopeKey }) => scopeKey === currentReviewSize?.row.scopeKey) ??
       choices.choices[0]
     : undefined;
   const selectedScope = choices.ok
-    ? choices.choices.find(({ scopeKey }) => scopeKey === chosenScopeKey) ?? defaultScope
+    ? choices.choices.find(({ scopeKey }) => scopeKey === requestedScopeKey) ?? defaultScope
     : undefined;
   const scopeKey = selectedScope?.scopeKey ?? '';
   const { selectedSize, matchesReview } = resolveCadTableSavedReviewSizeV1(
@@ -1070,13 +1118,47 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
   useEffect(() => {
     if (pointEdit && !activePointEdit) setPointEdit(null);
   }, [activePointEdit, pointEdit]);
-  type SelectClothPiece = NonNullable<
-    NonNullable<CadWorkbenchPhysicalHostV1['acceptedCloth']>['onSelectPiece']
-  >;
-  const selectClothPieceRef = useRef<SelectClothPiece | null>(null);
+  useLayoutEffect(() => {
+    if (!clothFocus) return;
+    if (!currentClothFocus) {
+      setClothFocus(null);
+      return;
+    }
+    if (currentPreparation?.status !== 'settled') return;
+    const { hit, frame, context } = currentClothFocus;
+    if (
+      resolvedSource === 'saved' &&
+      prepared &&
+      'authoringAuthority' in prepared &&
+      tableSessionOwner &&
+      isPatternImportDxfPhaseEZeroConnectPreparedAuthorityV1(prepared.authoringAuthority) &&
+      prepared.authoringAuthority.selectedRank.sizeId === context.review.sizeId
+    ) {
+      const { row } = prepared.authoringAuthority;
+      const carrier = prepared.draftCadCompileSource.dxfPhaseDReplay?.carrier;
+      const pick = (session: typeof tableSessionOwner.session) =>
+        frame.isCurrent() && matchesCadTableClothFocusInstanceV1(row, carrier, hit)
+          ? selectCadTableAcceptedClothPieceV1(session, row, prepared.projection, hit)
+          : session;
+      if (pick(tableSessionOwner.session) !== tableSessionOwner.session) {
+        setChosenScopeKey(hit.row.scopeKey);
+        tableSessionOwner.update(pick);
+      }
+    }
+    setClothFocus(null);
+  }, [
+    clothFocus,
+    currentClothFocus,
+    currentPreparation,
+    prepared,
+    resolvedSource,
+    tableSessionOwner,
+  ]);
+
+  const selectClothPieceRef = useRef<((frame: Cloth, hit: ClothHit) => void) | null>(null);
   useLayoutEffect(() => {
     if (
-      disabled ||
+      !tableSizeMatchesReview ||
       resolvedSource !== 'saved' ||
       !tableSessionOwner ||
       !prepared ||
@@ -1084,20 +1166,40 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
     )
       return;
     const { row } = prepared.authoringAuthority;
-    selectClothPieceRef.current = (hit) =>
-      tableSessionOwner.update((session) =>
-        selectCadTableAcceptedClothPieceV1(session, row, prepared.projection, hit),
-      );
+    selectClothPieceRef.current = (frame, hit) => {
+      if (!isCurrentCadTableClothHitV1(frame, acceptedCloth, hit)) return;
+      if (sameSavedDraftRowV1(row, hit.row)) {
+        tableSessionOwner.update((session) =>
+          selectCadTableAcceptedClothPieceV1(session, row, prepared.projection, hit),
+        );
+        return;
+      }
+      if (
+        clothFocusContext &&
+        row.scopeKey !== hit.row.scopeKey &&
+        resolveCadTableClothFocusScopeV1({ ...clothFocusContext, hit })
+      ) {
+        setClothFocus({ context: clothFocusContext, frame, hit });
+      }
+    };
     return () => {
       selectClothPieceRef.current = null;
     };
-  }, [disabled, prepared, resolvedSource, tableSessionOwner]);
+  }, [
+    acceptedCloth,
+    clothFocusContext,
+    prepared,
+    resolvedSource,
+    tableSessionOwner,
+    tableSizeMatchesReview,
+  ]);
   const selectableCloth = useMemo(() => {
     if (!tableSizeMatchesReview) return undefined;
     return acceptedCloth?.ranges.some(({ sourcePiece }) => sourcePiece)
       ? Object.freeze({
           ...acceptedCloth,
-          onSelectPiece: ((hit) => selectClothPieceRef.current?.(hit)) satisfies SelectClothPiece,
+          onSelectPiece: ((hit) =>
+            selectClothPieceRef.current?.(acceptedCloth, hit)) satisfies SelectClothPiece,
         })
       : acceptedCloth;
   }, [acceptedCloth, tableSizeMatchesReview]);
@@ -1481,6 +1583,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
                     label: choice.label,
                   }))}
                   onValueChange={(value) => {
+                    setClothFocus(null);
                     setChosenScopeKey(value);
                     setChosenSize(null);
                   }}
@@ -1500,7 +1603,10 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
                     const chosen = selectedScope?.sizes.find(
                       ({ sizeId }) => String(sizeId) === value,
                     );
-                    if (chosen) setChosenSize({ sizeId: chosen.sizeId, review: currentReviewSize });
+                    if (chosen) {
+                      setClothFocus(null);
+                      setChosenSize({ sizeId: chosen.sizeId, review: currentReviewSize });
+                    }
                   }}
                   readOnly={disabled}
                 />

@@ -1,3 +1,4 @@
+import { matchesCadTableClothFocusInstanceV1 } from './cad-table-accepted-cloth-focus-v1';
 import { createSavedNativeSewingAuthoringViewV1 } from './saved-native-sewing-authoring-view-v1';
 import { buildPatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import { compileDxfGarmentAssemblyMaterialStageV1 } from 'lib/cloth/domain/dxf-garment-assembly-material-compile-stage-v1';
@@ -168,6 +169,54 @@ describe('foreign native source capability', () => {
       if (!tableSource.ok) throw new Error('Ordinary table replay required');
       expect(tableSource.nativeSewingReplay?.replayReady).toBe(true);
       expect(Object.isFrozen(tableSource.nativeSewingReplay)).toBe(true);
+      const carrier = tableSource.draft.dxfPhaseDReplay?.carrier;
+      const contour = carrier?.contours.find(
+        ({ role, sizeToken }) => role === 'cut-boundary' && sizeToken === 'M',
+      );
+      const path = carrier?.source.paths.find(
+        ({ pathId }) => pathId === contour?.lineage.sourcePathIds[0],
+      );
+      if (!carrier || !contour || !path)
+        throw new Error('The native table source needs a cut occurrence from the original DXF.');
+      const alias = tableSource.draft.aliases.find(
+        ({ blockName }) => blockName === contour.pieceId,
+      );
+      if (!alias) throw new Error('The replayed cut has no exact saved piece alias.');
+      const instance = {
+        row,
+        sizeToken: 'M',
+        pieceId: contour.pieceId,
+        pieceLineKey: alias.pieceLineKey,
+        sourceInstancePath: path.provenance.instancePath,
+      };
+      expect(matchesCadTableClothFocusInstanceV1(row, carrier, instance)).toBe(true);
+      expect(
+        matchesCadTableClothFocusInstanceV1(row, carrier, {
+          ...instance,
+          sourceInstancePath: [...instance.sourceInstancePath, 'mirror'],
+        }),
+      ).toBe(false);
+      expect(
+        matchesCadTableClothFocusInstanceV1(
+          { ...row, revision: row.revision + 1 },
+          carrier,
+          instance,
+        ),
+      ).toBe(false);
+      expect(
+        matchesCadTableClothFocusInstanceV1(
+          row,
+          { ...carrier, contours: [...carrier.contours, contour] },
+          instance,
+        ),
+      ).toBe(false);
+      expect(
+        matchesCadTableClothFocusInstanceV1(
+          row,
+          { ...carrier, source: { ...carrier.source, paths: [...carrier.source.paths, path] } },
+          instance,
+        ),
+      ).toBe(false);
       let rebuilt: Awaited<ReturnType<typeof host.reprocess>> | undefined;
       const owner = createDxfProductSavedForeignNativeReprocessOwnerV1({
         ...host,
