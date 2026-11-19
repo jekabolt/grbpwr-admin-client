@@ -16,6 +16,7 @@ import {
   resizeDraftStraightEdgeV1,
   selectDraftSharpCornerV1,
 } from './draft-cad-edge-length-geometry-v1';
+import { selectDraftCutAllowanceOffsetV1 } from './draft-cad-allowance-offset-geometry-v1';
 
 export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_PREVIEW_V1 =
   'pattern-import-dxf-phase-e-draft-cad-preview/1' as const;
@@ -701,6 +702,39 @@ export function buildPatternImportDxfPhaseEDraftCadPreviewV1(
           }),
         );
         bounds = extendPoints(bounds, resized);
+        break;
+      }
+      case 'allowance-offset': {
+        const { edge, offsetMm, sizeToken } = command.payload;
+        const piece = projection.pieces.find(
+          ({ pieceId, pieceLineKey }) =>
+            pieceId === command.target.pieceId && pieceLineKey === command.target.pieceLineKey,
+        );
+        const contour = piece?.contours.find(({ contourId }) => contourId === edge.contourId);
+        const offset =
+          sizeToken === projection.sizeToken &&
+          selectDraftCutAllowanceOffsetV1(contour, edge.boundaryVertexIds, offsetMm);
+        if (!offset) {
+          blockers.push(
+            commandBlocker(
+              command,
+              'anchor-unavailable',
+              'Choose an exact side of the rectangular cut outline and a representable offset.',
+            ),
+          );
+          break;
+        }
+        primitives.push(
+          deepFreeze({
+            ...base,
+            kind: 'path' as const,
+            pointsMm: offset.ring.map(clonePoint),
+            closed: true,
+            role: 'outline' as const,
+            stroke: 'dashed' as const,
+          }),
+        );
+        bounds = extendPoints(bounds, offset.ring);
         break;
       }
       case 'add-point': {

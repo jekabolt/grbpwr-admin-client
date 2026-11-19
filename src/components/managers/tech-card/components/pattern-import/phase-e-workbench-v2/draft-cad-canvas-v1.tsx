@@ -1,4 +1,8 @@
 import { selectDraftSharpCornerV1 } from './draft-cad-edge-length-geometry-v1';
+import {
+  isDraftRectangularCutOutlineV1,
+  selectDraftCutAllowanceOffsetV1,
+} from './draft-cad-allowance-offset-geometry-v1';
 import { parallelOpeningAxisV1, validParallelDisplacementV1 } from './draft-cad-session-v1';
 import {
   useCallback,
@@ -65,6 +69,7 @@ const INPUT_TOOLS = new Set<PatternImportDxfPhaseEDraftCadToolV1>([
   'ellipse',
   'add-point',
   'edge-length',
+  'allowance-offset',
   'fish-eye',
   'spread',
   'gather',
@@ -93,6 +98,7 @@ const EXACT_EDGE_TOOLS = new Set<PatternImportDxfPhaseEDraftCadToolV1>([
   'dart',
   'add-point',
   'edge-length',
+  'allowance-offset',
   'sharpen-corner',
   'gather',
   'notch',
@@ -179,6 +185,7 @@ type BoundaryPickInput = Readonly<{
   baseKey: string;
   sequence: number;
   resize?: Readonly<{ fixed: 'start' | 'end'; lengthMm: number }>;
+  allowanceOffsetMm?: number;
   notchKind?: 'single' | AuthoredNotchShape;
 }>;
 
@@ -582,6 +589,38 @@ export function recordPatternImportDxfPhaseEDraftCadCanvasBoundaryPickV1(
         edge: base.anchor,
         fixed: resize.fixed,
         lengthMm: resize.lengthMm,
+        sizeToken: input.projection.sizeToken,
+      },
+    };
+  } else if (input.activeTool === 'allowance-offset') {
+    const amount = input.allowanceOffsetMm;
+    const contour = activeProjectedPiece(
+      input.session,
+      input.projection,
+      input.activePieceIndex,
+    )?.contours.find(({ contourId }) => contourId === base.anchor.contourId);
+    if (
+      amount === undefined ||
+      !selectDraftCutAllowanceOffsetV1(contour, base.anchor.boundaryVertexIds, amount)
+    )
+      return {
+        session: input.session,
+        pendingPoints: [],
+        pendingDartBase: null,
+        sequence: input.sequence,
+        recorded: false,
+        blocker:
+          'Choose a rectangular cut edge and enter a nonzero offset with up to six decimals.',
+      };
+    label = 'Offset seam allowance';
+    command = {
+      commandId: ids.commandId,
+      tool: 'allowance-offset',
+      target,
+      payload: {
+        entityId: ids.entityId,
+        edge: base.anchor,
+        offsetMm: amount,
         sizeToken: input.projection.sizeToken,
       },
     };
@@ -1747,6 +1786,8 @@ function toolInstruction(tool: PatternImportDxfPhaseEDraftCadToolV1, sizeToken: 
   if (tool === 'sharpen-corner')
     return `Choose a highlighted bevel between perpendicular sides in size ${sizeToken}.`;
   if (tool === 'edge-length') return `Choose an exact edge to set its length in size ${sizeToken}.`;
+  if (tool === 'allowance-offset')
+    return `Choose a straight side to offset its cut line in size ${sizeToken}.`;
   if (tool === 'add-point')
     return 'Select an exact edge to insert its midpoint across the piece’s grade.';
   if (tool === 'fish-eye')
@@ -1877,14 +1918,18 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
       projection,
       activePieceIndex,
     );
-    if (activeTool !== 'sharpen-corner' || crossScopeConnectActive) return bases;
+    if (
+      (activeTool !== 'sharpen-corner' && activeTool !== 'allowance-offset') ||
+      crossScopeConnectActive
+    )
+      return bases;
     const piece = activeProjectedPiece(session, projection, activePieceIndex);
-    return bases.filter(({ anchor }) =>
-      selectDraftSharpCornerV1(
-        piece?.contours.find(({ contourId }) => contourId === anchor.contourId),
-        anchor.boundaryVertexIds,
-      ),
-    );
+    return bases.filter(({ anchor }) => {
+      const contour = piece?.contours.find(({ contourId }) => contourId === anchor.contourId);
+      return activeTool === 'allowance-offset'
+        ? isDraftRectangularCutOutlineV1(contour)
+        : Boolean(selectDraftSharpCornerV1(contour, anchor.boundaryVertexIds));
+    });
   }, [activePieceIndex, activeTool, crossScopeConnectActive, projection, session]);
   const outlineEditActive =
     !crossScopeConnectActive &&
@@ -2151,10 +2196,10 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
             }
             if (!EXACT_EDGE_TOOLS.has(activeTool)) return;
             const base = dartBases.find((candidate) => candidate.key === key) ?? null;
-            if (activeTool === 'edge-length') {
+            if (activeTool === 'edge-length' || activeTool === 'allowance-offset') {
               setPendingDartBase(base);
               setResizeLength(
-                base
+                base && activeTool === 'edge-length'
                   ? String(Math.hypot(base.toMm.x - base.fromMm.x, base.toMm.y - base.fromMm.y))
                   : '',
               );
@@ -2764,68 +2809,76 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
           </Button>
         </div>
       )}
-      {activeTool === 'edge-length' && pendingDartBase && interactionEnabled && (
-        <div
-          className='flex flex-wrap items-end gap-2'
-          onKeyDown={(event) => {
-            if (event.key !== 'Escape') return;
-            event.stopPropagation();
-            setPendingDartBase(null);
-            setInputError(null);
-          }}
-        >
-          <label className='grid gap-1 text-small'>
-            Edge length (mm)
-            <Input
-              className='w-28'
-              type='number'
-              min='0'
-              step='any'
-              value={resizeLength}
-              onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                setResizeLength(event.target.value)
-              }
-            />
-          </label>
-          <div className='grid gap-1 text-small' role='group' aria-label='Fixed endpoint'>
-            Fixed endpoint
-            <Selector
-              label='Fixed endpoint'
-              compact
-              value={resizeFixed}
-              onChange={(value: string) => setResizeFixed(value === 'end' ? 'end' : 'start')}
-              options={[
-                { value: 'start', label: 'Start' },
-                { value: 'end', label: 'End' },
-              ]}
-            />
-          </div>
-          <Button
-            type='button'
-            size='xs'
-            variant='secondary'
-            onClick={() => {
-              const result = recordPatternImportDxfPhaseEDraftCadCanvasBoundaryPickV1({
-                session,
-                projection,
-                activePieceIndex,
-                activeTool,
-                baseKey: pendingDartBase.key,
-                sequence: sequence.current,
-                resize: { fixed: resizeFixed, lengthMm: Number(resizeLength) },
-              });
-              setInputError(result.blocker);
-              if (result.recorded) {
-                sequence.current = result.sequence;
-                setPendingDartBase(null);
-                onSessionChange(result.session);
-              }
+      {(activeTool === 'edge-length' || activeTool === 'allowance-offset') &&
+        pendingDartBase &&
+        interactionEnabled && (
+          <div
+            className='flex flex-wrap items-end gap-2'
+            onKeyDown={(event) => {
+              if (event.key !== 'Escape') return;
+              event.stopPropagation();
+              setPendingDartBase(null);
+              setInputError(null);
             }}
           >
-            Set edge length
-          </Button>
-        </div>
-      )}
+            <label className='grid gap-1 text-small'>
+              {activeTool === 'edge-length' ? 'Edge length (mm)' : 'Allowance offset (mm)'}
+              <Input
+                className='w-28'
+                type='number'
+                min={activeTool === 'edge-length' ? '0' : undefined}
+                step='any'
+                value={resizeLength}
+                onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                  setResizeLength(event.target.value)
+                }
+              />
+            </label>
+            {activeTool === 'edge-length' ? (
+              <div className='grid gap-1 text-small' role='group' aria-label='Fixed endpoint'>
+                Fixed endpoint
+                <Selector
+                  label='Fixed endpoint'
+                  compact
+                  value={resizeFixed}
+                  onChange={(value: string) => setResizeFixed(value === 'end' ? 'end' : 'start')}
+                  options={[
+                    { value: 'start', label: 'Start' },
+                    { value: 'end', label: 'End' },
+                  ]}
+                />
+              </div>
+            ) : (
+              <span className='text-small'>Positive extends the cut. Negative trims it.</span>
+            )}
+            <Button
+              type='button'
+              size='xs'
+              variant='secondary'
+              onClick={() => {
+                const result = recordPatternImportDxfPhaseEDraftCadCanvasBoundaryPickV1({
+                  session,
+                  projection,
+                  activePieceIndex,
+                  activeTool,
+                  baseKey: pendingDartBase.key,
+                  sequence: sequence.current,
+                  ...(activeTool === 'edge-length'
+                    ? { resize: { fixed: resizeFixed, lengthMm: Number(resizeLength) } }
+                    : { allowanceOffsetMm: Number(resizeLength) }),
+                });
+                setInputError(result.blocker);
+                if (result.recorded) {
+                  sequence.current = result.sequence;
+                  setPendingDartBase(null);
+                  onSessionChange(result.session);
+                }
+              }}
+            >
+              {activeTool === 'edge-length' ? 'Set edge length' : 'Offset allowance'}
+            </Button>
+          </div>
+        )}
       {preview.blockers.length > 0 && (
         <ul data-draft-cad-preview-blockers='' className='space-y-1 text-small text-warning'>
           {preview.blockers.map((blocker, index) => (

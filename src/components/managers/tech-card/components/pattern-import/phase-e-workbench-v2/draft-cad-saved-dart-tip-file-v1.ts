@@ -9,7 +9,8 @@ type SavedGeometryReviewLabel =
   | 'saved dart'
   | 'parallel opening'
   | 'saved French curve'
-  | 'saved corner';
+  | 'saved corner'
+  | 'saved allowance offset';
 const labels = new WeakMap<File, SavedGeometryReviewLabel>();
 export const savedReviewLabelV1 = (file: File) => labels.get(file) ?? 'saved geometry';
 export function registerSavedDartTipFileV1(

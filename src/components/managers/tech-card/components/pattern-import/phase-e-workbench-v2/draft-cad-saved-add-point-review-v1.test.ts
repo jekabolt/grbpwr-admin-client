@@ -27,6 +27,7 @@ import {
   digestFullAssemblyFixture,
 } from './saved-full-assembly-compile-session-v1.test-fixture';
 import { bboxOf, areaOf, signedArea } from 'lib/pattern-import/semantics/geom';
+import { transformSizeSpec } from 'lib/pattern-import/semantics/pairs';
 import { writeDxfDetailed } from 'lib/pattern-import/write';
 import { readProtectedLineSplit } from 'lib/pattern-import/write/read-protected-line-split';
 import { readManifest, embedManifest } from 'lib/pattern-import/manifest';
@@ -2220,6 +2221,7 @@ async function checkNativeOutlinePointEdit(
     | 'move-point'
     | 'delete-point'
     | 'sharpen-corner'
+    | 'allowance-offset'
     | 'dart-tip'
     | 'dart-intake'
     | 'fish-eye-move'
@@ -2229,18 +2231,24 @@ async function checkNativeOutlinePointEdit(
 ) {
   const savedIntake = tool === 'dart-intake';
   const savedDartEdit = tool === 'dart-tip' || savedIntake || tool === 'fish-eye-move';
+  const allowanceOffset = tool === 'allowance-offset';
+  const offsetMm = sourceDialect === 'r12' ? 4.123456 : -3.123457;
   vi.stubGlobal('Worker', InProcessTransport);
   const f = await fixture(
     true,
-    false,
+    allowanceOffset,
     fiveRanks,
     savedDartEdit,
     sourceDialect,
-    tool === 'parallel-spread' || tool === 'fish-eye-move' || savedIntake,
+    tool === 'parallel-spread' || tool === 'fish-eye-move' || savedIntake || allowanceOffset,
     undefined,
     tool === 'sharpen-corner',
   );
   const worker = new ImportWorkerClient();
+  let authoritativeAllowanceRow = f.current.row;
+  const allowanceRuntime = allowanceOffset
+    ? savedUiRuntime(f, () => authoritativeAllowanceRow)
+    : null;
   const reviewFiles: File[] = [];
   const unregister = registerPatternImportDxfPhaseEPatternsFieldCompiledReimportOwnerV1({
     techCardId: f.current.card.techCardId,
@@ -2272,7 +2280,7 @@ async function checkNativeOutlinePointEdit(
     const { entityToChain } = await import('lib/nesting/dxf/entities');
     const { projection } = f.compileInput;
     const pieceIndex =
-      tool === 'sharpen-corner'
+      tool === 'sharpen-corner' || allowanceOffset
         ? projection.pieces.findIndex(({ pieceId }) => pieceId === 'FP')
         : 0;
     const vertices = buildPatternImportDxfPhaseEDraftCadExactVertexOptionsV1(
@@ -2402,7 +2410,57 @@ async function checkNativeOutlinePointEdit(
       expect(redo.session.history).toEqual(sharp.session.history);
       sharpenedSession = redo.session;
     }
-    const shapeSession = spreadSession ?? sharpenedSession;
+    let offsetSession: typeof f.initial | null = null;
+    if (allowanceOffset) {
+      const edge = buildPatternImportDxfPhaseEDraftCadCanvasDartBasesV1(
+        f.initial,
+        projection,
+        pieceIndex,
+      ).find(
+        ({ anchor, fromMm, toMm }) =>
+          anchor.contourId === selected.contourId &&
+          fromMm.y === bounds.maxY &&
+          toMm.y === bounds.maxY,
+      );
+      if (!edge) throw Error('The top native cut edge is unavailable.');
+      const pick = { ...input, activeTool: 'allowance-offset' as const, baseKey: edge.key };
+      expect(
+        recordPatternImportDxfPhaseEDraftCadCanvasBoundaryPickV1({
+          ...pick,
+          allowanceOffsetMm: 0.0000001,
+        }).recorded,
+      ).toBe(false);
+      expect(
+        recordPatternImportDxfPhaseEDraftCadCanvasBoundaryPickV1({
+          ...pick,
+          baseKey: 'another-edge',
+          allowanceOffsetMm: offsetMm,
+        }).recorded,
+      ).toBe(false);
+      const edit = recordPatternImportDxfPhaseEDraftCadCanvasBoundaryPickV1({
+        ...pick,
+        allowanceOffsetMm: offsetMm,
+      });
+      if (!edit.recorded) throw Error(edit.blocker ?? 'The saved allowance offset did not record.');
+      expect(
+        await compileDraftForOrdinaryReviewV1({ ...f.compileInput, session: edit.session }),
+      ).toMatchObject({ ok: false, blockers: [{ code: 'paired-allowance-authority-required' }] });
+      const tooDeep = recordPatternImportDxfPhaseEDraftCadCanvasBoundaryPickV1({
+        ...pick,
+        allowanceOffsetMm: -15,
+      });
+      expect(tooDeep.recorded).toBe(true);
+      f.current.session = tooDeep.session;
+      expect(
+        await compileDraftForOrdinaryReviewV1(
+          { ...f.compileInput, session: tooDeep.session },
+          undefined,
+          () => allowanceRuntime!.prepareSavedPairedAllowance!(f.current.row, () => f.current),
+        ),
+      ).toMatchObject({ ok: false, blockers: [{ code: 'allowance-offset-geometry-blocked' }] });
+      offsetSession = edit.session;
+    }
+    const shapeSession = spreadSession ?? sharpenedSession ?? offsetSession;
     const edit = shapeSession
       ? { recorded: true, blocker: null, session: shapeSession }
       : savedDartEdit
@@ -2436,12 +2494,18 @@ async function checkNativeOutlinePointEdit(
     const compiled = await compileDraftForOrdinaryReviewV1(
       { ...f.compileInput, session: edit.session },
       undefined,
-      undefined,
+      allowanceRuntime
+        ? () => allowanceRuntime.prepareSavedPairedAllowance!(f.current.row, () => f.current)
+        : undefined,
       savedDartEdit || tool === 'parallel-spread' || tool === 'sharpen-corner'
         ? () => compileSavedDartTipReviewV1(f.request, verifyRow)
         : undefined,
     );
     if (!compiled.ok) throw Error(JSON.stringify(compiled.blockers));
+    if (allowanceOffset)
+      expect(compiled.artifact.compiledFeatures).toMatchObject([
+        { output: 'allowance-offset', sizeToken: 'M' },
+      ]);
     if (savedIntake)
       expect(compiled.artifact.compiledFeatures).toMatchObject([
         { output: 'adjusted-dart-intake' },
@@ -2475,14 +2539,19 @@ async function checkNativeOutlinePointEdit(
       worker,
       undefined,
       undefined,
-      tool === 'sharpen-corner' || savedIntake ? sourceDialect : 'r12',
+      tool === 'sharpen-corner' || savedIntake || allowanceOffset ? sourceDialect : 'r12',
     );
     const scope = reviewed.scopes[0]!;
-    if (tool === 'sharpen-corner')
+    if (tool === 'sharpen-corner' || allowanceOffset)
       expect(scope.dxfText).toContain(sourceDialect === 'r12' ? 'AC1009' : 'AC1015');
     expect(scope.manifest.gate?.passed).toBe(true);
     expect(upload).not.toHaveBeenCalled();
-    if (savedDartEdit || tool === 'parallel-spread' || tool === 'sharpen-corner') {
+    if (
+      savedDartEdit ||
+      tool === 'parallel-spread' ||
+      tool === 'sharpen-corner' ||
+      allowanceOffset
+    ) {
       const noWrite = vi.fn();
       await expect(
         applyDirectDxfReviewedDraftV1(reviewed, [file], 1, () => true, noWrite),
@@ -2505,7 +2574,9 @@ async function checkNativeOutlinePointEdit(
           ? 'original saved dart'
           : tool === 'sharpen-corner'
             ? 'original saved corner'
-            : 'original parallel opening',
+            : allowanceOffset
+              ? 'original saved allowance offset'
+              : 'original parallel opening',
       );
       const originalText = scope.dxfText;
       scope.dxfText += '\n';
@@ -2528,6 +2599,23 @@ async function checkNativeOutlinePointEdit(
         applyDirectDxfReviewedDraftV1(reviewed, [file], undefined, () => true, noWrite),
       ).rejects.toThrow('changed');
       f.current.row = before;
+      if (allowanceOffset) {
+        const { sizes } = scope.writerReplay!.job.pieces.find(
+          ({ identity }) => identity === targetPiece.pieceId,
+        )!;
+        const i = sizes.findIndex(({ sizeToken }) => sizeToken === 'XL');
+        const rank = sizes[i]!;
+        sizes[i] = transformSizeSpec(rank, { a: 1, b: 0, c: 0, d: 1, e: 1, f: 0 });
+        await expect(
+          applyDirectDxfReviewedDraftV1(reviewed, [file], undefined, () => true, noWrite, file),
+        ).rejects.toThrow('another size changed');
+        sizes[i] = rank;
+        authoritativeAllowanceRow = { ...before, revision: before.revision + 1 };
+        await expect(
+          applyDirectDxfReviewedDraftV1(reviewed, [file], undefined, () => true, noWrite, file),
+        ).rejects.toThrow('authority moved');
+        authoritativeAllowanceRow = before;
+      }
       expect(noWrite).not.toHaveBeenCalled();
     }
     const prior = f.current.row;
@@ -2607,6 +2695,58 @@ async function checkNativeOutlinePointEdit(
     const reopened = await createSavedThreePanelSourceV1({ ...f.seed, bytes, row, card }, true);
     try {
       expect(reopened.native.row).toEqual(row);
+      if (allowanceOffset) {
+        expect(reopened.native.nativeSewingReplay?.replayReady).toBe(true);
+        const before = f.source.native.draft.scopes[0]!,
+          after = reopened.native.draft.scopes[0]!;
+        expect(after.manifest.sizes).toEqual(before.manifest.sizes);
+        expect(after.manifest.pieces).toEqual(before.manifest.pieces);
+        const initialRaw = parseDxf(f.request.savedBytes, 'mm').dxf;
+        const savedRaw = parseDxf(bytes.buffer, 'mm').dxf;
+        const chains = (dxf: typeof initialRaw, block: string, layer: string) =>
+          dxf.blocks[block]!.entities.filter((entity) => entity.layer === layer)
+            .map((entity) => entityToChain(entity, 1, 0.001))
+            .filter((chain) => chain !== null);
+        for (const block of before.manifest.blocks) {
+          const move = block.identity === targetPiece.pieceId && block.sizeToken === 'M';
+          const originalCut = chains(initialRaw, block.block, '1');
+          expect(originalCut).toHaveLength(3);
+          const oldArea = areaOf(originalCut[0]!.pts);
+          if (move)
+            originalCut[0]!.pts = originalCut[0]!.pts.map((p) =>
+              p.y === bounds.maxY ? { ...p, y: Number((p.y + offsetMm).toFixed(6)) } : p,
+            );
+          expect(chains(savedRaw, block.block, '1')).toEqual(originalCut);
+          for (const layer of ['14', '8', '13', '7'])
+            expect(chains(savedRaw, block.block, layer)).toEqual(
+              chains(initialRaw, block.block, layer),
+            );
+          const priorSize = before
+            .writerReplay!.job.pieces.find(({ identity }) => identity === block.identity)!
+            .sizes.find(({ sizeToken }) => sizeToken === block.sizeToken)!;
+          const freshSize = after
+            .writerReplay!.job.pieces.find(({ identity }) => identity === block.identity)!
+            .sizes.find(({ sizeToken }) => sizeToken === block.sizeToken)!;
+          expect(freshSize.cut).toEqual(originalCut[0]!.pts);
+          expect(freshSize.seam).toEqual(priorSize.seam);
+          expect(freshSize.cutLoops).toEqual(priorSize.cutLoops);
+          expect(freshSize.pointMarks).toEqual(priorSize.pointMarks);
+          expect(freshSize.textMarks).toEqual(priorSize.textMarks);
+          if (move) {
+            expect(areaOf(freshSize.cut) - oldArea).toBeCloseTo(
+              offsetMm * (bounds.maxX - bounds.minX),
+              6,
+            );
+            expect(freshSize.bbox.minY).toBe(bounds.minY);
+            expect(freshSize.bbox.maxY).toBeCloseTo(bounds.maxY + offsetMm, 6);
+            expect(freshSize.bbox.maxY - bboxOf(freshSize.seam!).maxY).toBeCloseTo(
+              bounds.maxY - bboxOf(priorSize.seam!).maxY + offsetMm,
+              6,
+            );
+          }
+        }
+        return;
+      }
       if (tool === 'parallel-spread') {
         const before = f.source.native.draft.scopes[0]!,
           after = reopened.native.draft.scopes[0]!;
@@ -2865,6 +3005,7 @@ async function checkNativeOutlinePointEdit(
     unregister();
     upload.mockRestore();
     worker.dispose();
+    allowanceRuntime?.dispose();
     vi.unstubAllGlobals();
     f.source.dispose();
   }
@@ -2878,6 +3019,11 @@ it.each(['move-point', 'delete-point'] as const)(
 it.each(['r12', 'r2000'] as const)(
   'sharpens only the selected M native bevel from %s through ordinary Apply and independent cold replay',
   (dialect) => checkNativeOutlinePointEdit('sharpen-corner', true, dialect),
+);
+
+it.each(['r12', 'r2000'] as const)(
+  'offsets one M native allowance side through Review, %s Apply and fresh exact replay',
+  (dialect) => checkNativeOutlinePointEdit('allowance-offset', true, dialect),
 );
 
 it('refuses a native bevel when the saved cut and sewing allowance are separate', async () => {

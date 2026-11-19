@@ -65,6 +65,7 @@ export function registerPatternImportDxfPhaseEPatternsFieldCompiledReimportOwner
           output === 'moved-fish-eye' ||
           output === 'moved-french-curve' ||
           output === 'parallel-spread' ||
+          output === 'allowance-offset' ||
           output === 'sharpened-corner',
       );
       const manualApply =

@@ -711,6 +711,9 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
       onUndo={undo}
       onRedo={redo}
       canSharpenCorner={Boolean(prepareSavedGeometryReview && compiledReimportCapability.available)}
+      canOffsetAllowance={Boolean(
+        prepareSavedPairedAllowance && compiledReimportCapability.available,
+      )}
       canCompile={session.cursor > 0}
       compileState={compileState}
       onCompile={compileDraft}

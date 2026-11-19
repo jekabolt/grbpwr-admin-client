@@ -37,6 +37,7 @@ export type SavedDraftPairedAllowanceProofV1 = Readonly<{
   cut: readonly PtMm[];
   seam: readonly PtMm[];
   current: () => boolean;
+  verifyCurrentRow?: () => Promise<void>;
 }>;
 const owners = new WeakMap<
   SavedDraftPairedAllowanceAuthorityV1,
@@ -162,11 +163,16 @@ export async function prepareSavedDraftPairedAllowanceAuthorityV1(
       generation >= 0 &&
       session.cursor === 1 &&
       session.history[0]?.commands.length === 1 &&
-      command?.tool === 'edge-length' &&
+      (command?.tool === 'edge-length' || command?.tool === 'allowance-offset') &&
       command.payload.sizeToken === sizeToken,
-    'record one edge length edit on the current saved size',
+    'record one edge length or allowance offset on the current saved size',
   );
   const { pieceId, pieceLineKey } = command.target;
+  const verifyCurrentRow = input.verifyCurrentRow;
+  requirePair(
+    command.tool === 'edge-length' || verifyCurrentRow,
+    'an authoritative saved row recheck is required for the offset',
+  );
   const current = () => {
     const now = input.readCurrent();
     if (
@@ -305,12 +311,15 @@ export async function prepareSavedDraftPairedAllowanceAuthorityV1(
     'the same native read did not verify every directed line on both outlines',
   );
   const widthMm = piece.allowance.allowanceMm;
-  const expected = offsetContour(size.cut, -widthMm);
-  requirePair(
-    expected.report.ok && sameDraftAllowanceRingV1(size.seam, expected.pts, offsetGridPoint),
-    'the drawn sewing outline does not match the known constant allowance',
-  );
-  await input.verifyCurrentRow?.();
+  // Edge length reconstructs a constant inset. Offset edits use the independently drawn pair.
+  if (command.tool === 'edge-length') {
+    const expected = offsetContour(size.cut, -widthMm);
+    requirePair(
+      expected.report.ok && sameDraftAllowanceRingV1(size.seam, expected.pts, offsetGridPoint),
+      'the drawn sewing outline does not match the known constant allowance',
+    );
+  }
+  await verifyCurrentRow?.();
   requirePair(current(), 'the saved row or Draft changed during allowance review');
   const owner: SavedDraftPairedAllowanceAuthorityV1 = Object.freeze({
     kind: 'saved-draft-paired-allowance/1',
@@ -329,6 +338,7 @@ export async function prepareSavedDraftPairedAllowanceAuthorityV1(
       cut: points(size.cut),
       seam: points(size.seam),
       current,
+      verifyCurrentRow,
     }),
   );
   return owner;

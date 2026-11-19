@@ -41,6 +41,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_TOOL_GROUPS_V1 = Object.freeze
       'delete-point',
       'sharpen-corner',
       'edge-length',
+      'allowance-offset',
     ] as const),
   }),
   Object.freeze({
@@ -65,6 +66,7 @@ const TOOL_LABELS = Object.freeze({
   'delete-point': 'Delete point',
   'sharpen-corner': 'Sharpen corner',
   'edge-length': 'Edge length',
+  'allowance-offset': 'Offset allowance',
   'internal-line': 'Internal line',
   'french-curve': 'French curve',
   'draft-point': 'Draft point',
@@ -155,6 +157,7 @@ export type PatternImportDxfPhaseEDraftCadEditorShellPropsV1 = Readonly<{
   onUndo: () => void;
   onRedo: () => void;
   canSharpenCorner?: boolean;
+  canOffsetAllowance?: boolean;
   canCompile?: boolean;
   compileState?: PatternImportDxfPhaseEDraftCadCompileUiStateV1 | null;
   compiledReimportAction?: Readonly<{
@@ -190,6 +193,7 @@ export function PatternImportDxfPhaseEDraftCadEditorShellV1({
   onUndo,
   onRedo,
   canSharpenCorner = false,
+  canOffsetAllowance = false,
   canCompile = false,
   compileState = null,
   compiledReimportAction,
@@ -578,10 +582,15 @@ export function PatternImportDxfPhaseEDraftCadEditorShellV1({
                 </Text>
                 {openProductiveToolGroup.tools
                   .filter((tool) => tool !== 'sharpen-corner' || canSharpenCorner)
+                  .filter((tool) => tool !== 'allowance-offset' || canOffsetAllowance)
                   .map((tool) => (
                     <PatternImportDxfPhaseECadWorkbenchToolButtonV1
                       key={tool}
-                      icon={tool === 'edge-length' ? 'measure-edge' : tool}
+                      icon={
+                        tool === 'edge-length' || tool === 'allowance-offset'
+                          ? 'measure-edge'
+                          : tool
+                      }
                       label={TOOL_LABELS[tool]}
                       active={
                         !panActive && !arrangeActive && !activeTopologyTool && activeTool === tool

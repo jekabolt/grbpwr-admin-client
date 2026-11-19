@@ -16,6 +16,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_TOOLS_V1 = Object.freeze([
   'delete-point',
   'sharpen-corner',
   'edge-length',
+  'allowance-offset',
   'internal-line',
   'french-curve',
   'draft-point',
@@ -58,6 +59,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_PRODUCTIVE_TOOLS_V1 = Object.f
   'delete-point',
   'sharpen-corner',
   'edge-length',
+  'allowance-offset',
   'dart',
   'fish-eye',
   'cut',
@@ -222,6 +224,15 @@ export type PatternImportDxfPhaseEDraftCadCommandV1 =
         edge: PatternImportDxfPhaseEDraftCadBoundaryAnchorV1;
         fixed: 'start' | 'end';
         lengthMm: number;
+        sizeToken: string;
+      }
+    >
+  | Command<
+      'allowance-offset',
+      {
+        entityId: string;
+        edge: PatternImportDxfPhaseEDraftCadBoundaryAnchorV1;
+        offsetMm: number;
         sizeToken: string;
       }
     >
@@ -573,6 +584,13 @@ function validCommand(value: unknown): value is PatternImportDxfPhaseEDraftCadCo
         boundaryAnchor(payload.edge) &&
         (payload.fixed === 'start' || payload.fixed === 'end') &&
         finitePositive(payload.lengthMm) &&
+        stableId(payload.sizeToken)
+      );
+    case 'allowance-offset':
+      return (
+        boundaryAnchor(payload.edge) &&
+        typeof payload.offsetMm === 'number' &&
+        validParallelDisplacementV1(payload.offsetMm) &&
         stableId(payload.sizeToken)
       );
     case 'internal-line':

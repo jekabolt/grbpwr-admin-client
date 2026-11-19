@@ -520,9 +520,11 @@ export function createPatternImportDxfPhaseESavedRowRuntimeV1(
         !opening ||
         opening.session.cursor !== 1 ||
         opening.session.history[0]?.commands.length !== 1 ||
-        command?.tool !== 'edge-length'
+        (command?.tool !== 'edge-length' && command?.tool !== 'allowance-offset')
       )
-        throw new Error('The current saved Draft must contain one edge length edit.');
+        throw new Error(
+          'The current saved Draft must contain one edge length or allowance offset.',
+        );
       return withSavedDraftSource(
         row,
         command.target.pieceId,

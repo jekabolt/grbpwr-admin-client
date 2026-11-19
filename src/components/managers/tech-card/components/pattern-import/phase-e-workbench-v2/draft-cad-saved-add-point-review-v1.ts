@@ -379,7 +379,10 @@ export async function compileDraftForOrdinaryReviewV1(
         blockers: [
           {
             ...ordinary.blockers[0],
-            code: 'edge-length-geometry-blocked',
+            code:
+              ordinary.blockers[0].tool === 'allowance-offset'
+                ? 'allowance-offset-geometry-blocked'
+                : 'edge-length-geometry-blocked',
             detail:
               error instanceof Error
                 ? error.message

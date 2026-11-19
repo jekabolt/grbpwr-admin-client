@@ -1,4 +1,5 @@
 import { sameDraftAllowanceRingV1 } from './draft-cad-paired-allowance-authority-v1';
+import { bboxOf } from 'lib/pattern-import/semantics/geom';
 import { transformSizeSpec } from 'lib/pattern-import/semantics/pairs';
 import type { PtMm } from 'lib/pattern-import/types';
 import { consumeDxfProductSavedNativeCompilerSourceV1 } from 'lib/pattern-import/dxf-product-saved-native-reprocess-owner-v1';
@@ -13,6 +14,7 @@ import {
 import type { ConversionManifest, WriteJob } from 'lib/pattern-import/types';
 import { createPatternImportDxfPhaseEDraftCadCompileSourceV1 } from './draft-cad-compile-source-v1';
 import {
+  readCompiledPairedAllowanceReviewV1,
   type PatternImportDxfPhaseEDraftCadGeometryCompileInputV1 as CompileInput,
   type PatternImportDxfPhaseEDraftCadGeometryCompileArtifactV1 as Artifact,
 } from './draft-cad-geometry-compile-v1';
@@ -41,7 +43,12 @@ function requireSavedEdit(ok: unknown, detail: string): asserts ok {
 }
 const one = <T>(items: readonly T[]) => (items.length === 1 ? items[0] : undefined);
 type Review = {
-  kind: 'parallel opening' | 'saved dart' | 'saved French curve' | 'saved corner';
+  kind:
+    | 'parallel opening'
+    | 'saved dart'
+    | 'saved French curve'
+    | 'saved corner'
+    | 'saved allowance offset';
   current: () => boolean;
   verifyCurrentRow: () => Promise<void>;
   manifest: ConversionManifest;
@@ -84,7 +91,7 @@ function geometry(job: WriteJob) {
     ]),
   );
 }
-function openingGeometry(job: WriteJob) {
+function openingGeometry(job: WriteJob, frame: 'size' | 'grade' = 'size') {
   const ring = (points: PtMm[]) => {
     const start = points.reduce(
       (best, p, i) =>
@@ -98,13 +105,17 @@ function openingGeometry(job: WriteJob) {
     pieces: job.pieces.map((piece) => ({
       ...piece,
       sizes: piece.sizes.map((size) => {
+        // An allowance edit may move the whole piece on the writer sheet. All ranks must keep
+        // their position relative to the same unchanged sewing contour.
+        const first = piece.sizes[0]!;
+        const origin = frame === 'grade' ? bboxOf(first.seam ?? first.cut) : size.bbox;
         const z = transformSizeSpec(size, {
           a: 1,
           b: 0,
           c: 0,
           d: 1,
-          e: -size.bbox.minX,
-          f: -size.bbox.minY,
+          e: -origin.minX,
+          f: -origin.minY,
         });
         return {
           ...z,
@@ -587,8 +598,28 @@ export async function compileSavedDraftGeometryReviewV1(
 }
 
 export const compileSavedDartTipReviewV1 = compileSavedDraftGeometryReviewV1;
+
+function readOffsetReview(artifact: Artifact): Review | undefined {
+  if (
+    artifact.compiledFeatures.length !== 1 ||
+    artifact.compiledFeatures[0]?.output !== 'allowance-offset'
+  )
+    return undefined;
+  const proof = readCompiledPairedAllowanceReviewV1(artifact);
+  if (!proof?.verifyCurrentRow) return undefined;
+  return {
+    kind: 'saved allowance offset',
+    current: proof.current,
+    verifyCurrentRow: proof.verifyCurrentRow,
+    manifest: artifact.manifest,
+    geometry: openingGeometry(artifact.compiledJob, 'grade'),
+    cardId: artifact.scope.techCardId,
+    scopeKey: artifact.scope.scopeKey,
+  };
+}
+
 export function openSavedDraftGeometryFileV1(artifact: Artifact, name: string) {
-  const review = artifacts.get(artifact);
+  const review = artifacts.get(artifact) ?? readOffsetReview(artifact);
   requireSavedEdit(review && review.current(), 'Compile the current saved geometry again.');
   const file = new File([artifact.dxfText], name, { type: 'image/vnd.dxf' });
   registerSavedDartTipFileV1(
@@ -601,9 +632,11 @@ export function openSavedDraftGeometryFileV1(artifact: Artifact, name: string) {
           scope.manifest.gate?.passed &&
           markers(scope.manifest) === markers(review.manifest) &&
           scope.writerReplay &&
-          (review.kind === 'parallel opening' ? openingGeometry : geometry)(
-            scope.writerReplay.job,
-          ) === review.geometry,
+          (review.kind === 'saved allowance offset'
+            ? openingGeometry(scope.writerReplay.job, 'grade')
+            : review.kind === 'parallel opening'
+              ? openingGeometry(scope.writerReplay.job)
+              : geometry(scope.writerReplay.job)) === review.geometry,
         review.kind === 'saved dart'
           ? 'The reviewed native dart paths or size blocks changed.'
           : `The reviewed ${review.kind} or another size changed.`,

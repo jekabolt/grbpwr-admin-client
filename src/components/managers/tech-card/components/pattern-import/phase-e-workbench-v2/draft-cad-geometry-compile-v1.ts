@@ -38,6 +38,7 @@ import {
   editDraftCadSelectedSizeVertexV1,
   resizeDraftCadSelectedSizeEdgeV1,
 } from './draft-cad-edge-length-geometry-v1';
+import { offsetDraftCadSelectedSizeAllowanceV1 } from './draft-cad-allowance-offset-geometry-v1';
 import { executePatternImportDxfPhaseEDraftCadAddPointGeometryV1 } from './draft-cad-add-point-geometry-executor-v1';
 import { executePatternImportDxfPhaseEDraftCadCutGeometryV1 } from './draft-cad-cut-geometry-executor-v1';
 import {
@@ -73,6 +74,7 @@ export type PatternImportDxfPhaseEDraftCadGeometryCompileBlockerCodeV1 =
   | 'writer-size-unavailable'
   | 'preview-blocked'
   | 'edge-length-geometry-blocked'
+  | 'allowance-offset-geometry-blocked'
   | 'paired-allowance-authority-required'
   | 'move-point-geometry-blocked'
   | 'delete-point-geometry-blocked'
@@ -116,6 +118,7 @@ export type PatternImportDxfPhaseEDraftCadCompiledFeatureV1 = Readonly<{
     | 'deleted-vertex'
     | 'sharpened-corner'
     | 'edge-length'
+    | 'allowance-offset'
     | 'piece-create'
     | 'split'
     | 'slash-guide'
@@ -199,15 +202,21 @@ export type PatternImportDxfPhaseEDraftCadGeometryCompileInputV1 = Readonly<{
 
 const pairedAllowanceReviews = new WeakMap<
   PatternImportDxfPhaseEDraftCadGeometryCompileArtifactV1,
-  () => boolean
+  Pick<SavedDraftPairedAllowanceProofV1, 'current' | 'verifyCurrentRow'>
 >();
+
+export function readCompiledPairedAllowanceReviewV1(
+  artifact: PatternImportDxfPhaseEDraftCadGeometryCompileArtifactV1,
+) {
+  return pairedAllowanceReviews.get(artifact);
+}
 
 export function requiresCurrentPairedAllowanceReviewV1(
   artifact: PatternImportDxfPhaseEDraftCadGeometryCompileArtifactV1,
 ): boolean {
-  const current = pairedAllowanceReviews.get(artifact);
-  if (!current) return false;
-  if (!current())
+  const proof = pairedAllowanceReviews.get(artifact);
+  if (!proof) return false;
+  if (!proof.current())
     throw new Error('The saved allowance Draft changed. Compile the current edit again.');
   return true;
 }
@@ -285,6 +294,7 @@ function supported(command: PatternImportDxfPhaseEDraftCadCommandV1): boolean {
   if (command.tool === 'add-point') return Boolean(command.payload.edge);
   if (
     command.tool === 'edge-length' ||
+    command.tool === 'allowance-offset' ||
     command.tool === 'move-point' ||
     command.tool === 'delete-point' ||
     command.tool === 'sharpen-corner'
@@ -941,6 +951,7 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
 
     if (
       command.tool === 'edge-length' ||
+      command.tool === 'allowance-offset' ||
       command.tool === 'move-point' ||
       command.tool === 'delete-point' ||
       command.tool === 'sharpen-corner'
@@ -954,6 +965,17 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
           'Review one corner from the exact current saved cut and sewing outlines.',
           command,
         );
+      if (
+        command.tool === 'allowance-offset' &&
+        (commands.length !== 1 ||
+          (writerPieces[0]!.pairOf &&
+            !job.pieces.some(({ identity }) => identity === writerPieces[0]!.pairOf)))
+      )
+        return blocked(
+          'allowance-offset-geometry-blocked',
+          'Review one saved allowance offset without changing a derived mirror piece.',
+          command,
+        );
       const edited =
         command.tool === 'edge-length'
           ? resizeDraftCadSelectedSizeEdgeV1(
@@ -963,7 +985,9 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
               selection.phaseD,
               pairedAllowance,
             )
-          : editDraftCadSelectedSizeVertexV1(size, command, projection, selection.phaseD);
+          : command.tool === 'allowance-offset'
+            ? offsetDraftCadSelectedSizeAllowanceV1(size, command, projection, pairedAllowance)
+            : editDraftCadSelectedSizeVertexV1(size, command, projection, selection.phaseD);
       if (!edited.ok)
         return blocked(
           edited.requiresPairedAllowance
@@ -975,7 +999,7 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
       if (edited.pairedAllowance && edited.size.seam) {
         if (!pairedAllowance || writerPieces[0]!.allowance.allowanceMm !== pairedAllowance.widthMm)
           return blocked(
-            'edge-length-geometry-blocked',
+            `${command.tool}-geometry-blocked`,
             'The writer width differs from the verified native allowance.',
             command,
           );
@@ -994,8 +1018,8 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
         pieceId: command.target.pieceId,
         sizeToken: selected.sizeToken,
         output:
-          command.tool === 'edge-length'
-            ? 'edge-length'
+          command.tool === 'edge-length' || command.tool === 'allowance-offset'
+            ? command.tool
             : command.tool === 'move-point'
               ? 'moved-vertex'
               : command.tool === 'sharpen-corner'
@@ -1326,6 +1350,7 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
   for (const command of compileCommands) {
     if (
       command.tool !== 'edge-length' &&
+      command.tool !== 'allowance-offset' &&
       command.tool !== 'move-point' &&
       command.tool !== 'delete-point' &&
       command.tool !== 'sharpen-corner'
@@ -1343,7 +1368,7 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
         'The edited outline lost its exact writer block.',
         command,
       );
-    if (command.tool === 'edge-length') {
+    if (command.tool === 'edge-length' || command.tool === 'allowance-offset') {
       if (
         !pairedWrite ||
         !block.seam ||
@@ -1357,7 +1382,7 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
         )
       )
         return blocked(
-          'edge-length-geometry-blocked',
+          `${command.tool}-geometry-blocked`,
           'The DXF writer would change the verified cut or sewing outline.',
           command,
         );
@@ -1534,7 +1559,7 @@ export function compilePatternImportDxfPhaseEDraftCadGeometryV1(
     const result = compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(input, proof);
     if (proof && !proof.current())
       return blocked('source-binding-mismatch', 'The saved allowance changed while compiling.');
-    if (proof && result.ok) pairedAllowanceReviews.set(result.artifact, proof.current);
+    if (proof && result.ok) pairedAllowanceReviews.set(result.artifact, proof);
     return result;
   } catch {
     return blocked('invalid-input', 'Draft CAD compile input failed closed during validation.');
