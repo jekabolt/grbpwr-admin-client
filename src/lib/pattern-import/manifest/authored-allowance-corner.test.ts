@@ -2,6 +2,7 @@ import { expect, it } from 'vitest';
 import type { AuthoredAllowanceCorner, PieceSizeSpec, WriteJob } from '../types';
 import { readDxf } from '../adapters/dxf/extract';
 import { segmentDxf } from '../adapters/dxf/segment';
+import { areaOf, bboxOf } from '../semantics/geom';
 import { writeDxfDetailed } from '../write';
 import { embedManifest } from './index';
 import {
@@ -27,6 +28,23 @@ const sewing = [
 const baseline: AuthoredAllowanceCorner = {
   variant: 'auto',
   sewing: [sewing[3]!, sewing[0]!, sewing[1]!],
+  widthMm: 10,
+};
+const angledSewing = [
+  { x: 0, y: 0 },
+  { x: 60, y: 80 },
+  { x: -60, y: 80 },
+  { x: -60, y: 0 },
+];
+const angledCut = [
+  { x: 5, y: -10 },
+  { x: 80, y: 90 },
+  { x: -70, y: 90 },
+  { x: -70, y: -10 },
+];
+const angled: AuthoredAllowanceCorner = {
+  variant: 'auto',
+  sewing: [angledSewing[3]!, angledSewing[0]!, angledSewing[1]!],
   widthMm: 10,
 };
 
@@ -79,22 +97,57 @@ it('clips one corner at the sewing-to-cut intersections and can restore either p
   );
 });
 
+it('mirrors the adjacent support about the explicitly selected sewing edge', () => {
+  const before = { ...angled, variant: 'foldback-before' as const };
+  const after = { ...angled, variant: 'foldback-after' as const };
+  const incoming = editAuthoredAllowanceCorner(angledCut, angledSewing, angled, before.variant)!;
+  const outgoing = editAuthoredAllowanceCorner(angledCut, angledSewing, angled, after.variant)!;
+  expect(incoming).toEqual([{ x: 20, y: -10 }, { x: 12.5, y: 0 }, ...angledCut.slice(1)]);
+  expect(outgoing).toEqual([{ x: -7.5, y: -10 }, { x: -4, y: -22 }, ...angledCut.slice(1)]);
+  expect(matchesAuthoredAllowanceCorner(incoming, angledSewing, after)).toBe(false);
+  expect(matchesAuthoredAllowanceCorner(outgoing, angledSewing, before)).toBe(false);
+  const shiftedHinge = incoming.map((point, i) => (i === 1 ? { x: 12.500001, y: 0 } : point));
+  expect(matchesAuthoredAllowanceCorner(shiftedHinge, angledSewing, before)).toBe(false);
+  expect(editAuthoredAllowanceCorner(incoming, angledSewing, before, after.variant)).toEqual(
+    outgoing,
+  );
+  expect(editAuthoredAllowanceCorner(incoming, angledSewing, before, 'mitre')).toEqual(angledCut);
+});
+
+it('keeps the exact right-angle mitre and the chosen fold direction', () => {
+  for (const variant of ['foldback-before', 'foldback-after'] as const) {
+    const authored = { ...baseline, variant };
+    expect(editAuthoredAllowanceCorner(cut, sewing, baseline, variant)).toEqual(cut);
+    expect(parseAuthoredAllowanceCorner(authoredAllowanceCornerMarker(authored))?.variant).toBe(
+      variant,
+    );
+  }
+});
+
 it.each([
   ['r12', 'square'],
   ['r2000', 'square'],
   ['r12', 'clip'],
   ['r2000', 'clip'],
+  ['r12', 'foldback-before'],
+  ['r2000', 'foldback-before'],
+  ['r12', 'foldback-after'],
+  ['r2000', 'foldback-after'],
 ] as const)(
   'writes and independently reads one authored %s %s allowance corner',
   async (dialect, variant) => {
-    const corner = { ...baseline, variant };
-    const updated = editAuthoredAllowanceCorner(cut, sewing, baseline, variant)!;
+    const fold = variant.startsWith('foldback');
+    const src = fold ? angled : baseline;
+    const cutLine = fold ? angledCut : cut;
+    const sewingLine = fold ? angledSewing : sewing;
+    const corner = { ...src, variant };
+    const updated = editAuthoredAllowanceCorner(cutLine, sewingLine, src, variant)!;
     const size: PieceSizeSpec = {
       sizeId: 60,
       sizeToken: 'XL',
       rank: 0,
       cut: updated,
-      seam: sewing,
+      seam: sewingLine,
       grain: null,
       notches: [],
       drills: [],
@@ -103,8 +156,8 @@ it.each([
       fold: null,
       offset: null,
       walls: [],
-      bbox: { minX: 260.000076, minY: 0, maxX: 320.000137, maxY: 220 },
-      areaMm2: 13199.82,
+      bbox: bboxOf(updated),
+      areaMm2: areaOf(updated),
     };
     const job: WriteJob = {
       dialect,

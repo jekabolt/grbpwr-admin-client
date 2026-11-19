@@ -4,8 +4,8 @@ import type {
   ManifestAuthoredAllowanceCorner,
   PtMm,
 } from '../types';
-import { signedArea } from '../semantics/geom';
-import { offsetNativeOrthogonalAllowanceCornerV1 } from '../semantics/offset';
+import { pointInPolygon, signedArea } from '../semantics/geom';
+import { MITER_LIMIT, offsetNativeOrthogonalAllowanceCornerV1 } from '../semantics/offset';
 
 const units = 1_000_000;
 const grid = (value: number) => Math.round(Number(value.toFixed(6)) * units);
@@ -15,11 +15,22 @@ const closedWithoutRepeat = (points: readonly PtMm[]) =>
   points.length > 1 && same(points[0]!, points.at(-1)!) ? points.slice(0, -1) : points;
 const axis = (a: PtMm, b: PtMm) =>
   a.x === b.x && a.y !== b.y ? 'x' : a.y === b.y && a.x !== b.x ? 'y' : null;
+const subtract = (a: PtMm, b: PtMm) => ({ x: a.x - b.x, y: a.y - b.y });
+const cross = (a: PtMm, b: PtMm) => a.x * b.y - a.y * b.x;
+const isFoldback = (variant: AuthoredAllowanceCornerVariant) =>
+  variant === 'foldback-before' || variant === 'foldback-after';
 
 export function isAuthoredAllowanceCornerVariant(
   value: unknown,
 ): value is AuthoredAllowanceCornerVariant {
-  return value === 'auto' || value === 'mitre' || value === 'square' || value === 'clip';
+  return (
+    value === 'auto' ||
+    value === 'mitre' ||
+    value === 'square' ||
+    value === 'clip' ||
+    value === 'foldback-before' ||
+    value === 'foldback-after'
+  );
 }
 
 export function parseAuthoredAllowanceCorner(
@@ -39,9 +50,11 @@ export function parseAuthoredAllowanceCorner(
     return null;
   const marker: ManifestAuthoredAllowanceCorner = { variant, sewing: [...sewing], width };
   const [a, b, c] = decodeAuthoredAllowanceCorner(marker).sewing;
-  const incoming = axis(a, b),
-    outgoing = axis(b, c);
-  return incoming && outgoing && incoming !== outgoing ? marker : null;
+  const incoming = axis(a, b);
+  const outgoing = axis(b, c);
+  const orthogonal = incoming && outgoing && incoming !== outgoing;
+  if (variant === 'square' || variant === 'clip') return orthogonal ? marker : null;
+  return cross(subtract(b, a), subtract(c, b)) > 0 ? marker : null;
 }
 
 export function decodeAuthoredAllowanceCorner(
@@ -95,8 +108,94 @@ type Join = {
   cut: readonly PtMm[];
   start: number;
   points: PtMm[];
-  joins: Record<AuthoredAllowanceCornerVariant, PtMm[]>;
+  joins: Partial<Record<AuthoredAllowanceCornerVariant, PtMm[]>>;
 };
+
+type Support = { at: PtMm; along: PtMm };
+
+function allowanceSupport(vertex: PtMm, delta: PtMm, width: number): Support {
+  const length = Math.hypot(delta.x, delta.y);
+  const along = { x: delta.x / length, y: delta.y / length };
+  return { at: { x: vertex.x + width * along.y, y: vertex.y - width * along.x }, along };
+}
+
+function meet(a: Support, b: Support): PtMm | null {
+  const denominator = cross(a.along, b.along);
+  if (Math.abs(denominator) < 1e-8) return null;
+  const t = cross(subtract(b.at, a.at), b.along) / denominator;
+  return { x: a.at.x + t * a.along.x, y: a.at.y + t * a.along.y };
+}
+
+function foldback(
+  vertex: PtMm,
+  incoming: Support,
+  outgoing: Support,
+  widthMm: number,
+  useIncoming: boolean,
+): PtMm[] | undefined {
+  const [fold, other] = useIncoming ? [incoming, outgoing] : [outgoing, incoming];
+  const reflect = ({ x, y }: PtMm) => {
+    const doubledProjection = 2 * (x * fold.along.x + y * fold.along.y);
+    return {
+      x: doubledProjection * fold.along.x - x,
+      y: doubledProjection * fold.along.y - y,
+    };
+  };
+  const offset = reflect(subtract(other.at, vertex));
+  const reflected = {
+    at: { x: vertex.x + offset.x, y: vertex.y + offset.y },
+    along: reflect(other.along),
+  };
+  const tip = meet(fold, reflected);
+  const hinge = meet({ at: vertex, along: fold.along }, other);
+  if (
+    !tip ||
+    !hinge ||
+    [tip, hinge].some((p) => Math.hypot(p.x - vertex.x, p.y - vertex.y) > 2 * MITER_LIMIT * widthMm)
+  )
+    return;
+  return useIncoming ? [tip, hinge] : [hinge, tip];
+}
+
+// Foldback can produce one reflex vertex. Reject touching/crossing native segments as well
+// as crossing the sewing ring, using the same integer grid that is written to DXF.
+function enclosesSewing(cut: readonly PtMm[], sewing: readonly PtMm[]): boolean {
+  const ring = (points: readonly PtMm[]) =>
+    points.map(({ x, y }) => [BigInt(grid(x)), BigInt(grid(y))] as const);
+  type GridPoint = ReturnType<typeof ring>[number];
+  const sign = (a: GridPoint, b: GridPoint, p: GridPoint) => {
+    const value = (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]);
+    return value > 0n ? 1 : value < 0n ? -1 : 0;
+  };
+  const meets = (a: GridPoint, b: GridPoint, c: GridPoint, d: GridPoint) => {
+    if (sign(a, b, c) * sign(a, b, d) > 0 || sign(c, d, a) * sign(c, d, b) > 0) return false;
+    return ([0, 1] as const).every((i) => {
+      const [u, v] = a[i] < b[i] ? [a[i], b[i]] : [b[i], a[i]];
+      const [w, z] = c[i] < d[i] ? [c[i], d[i]] : [d[i], c[i]];
+      return u <= z && w <= v;
+    });
+  };
+  if (
+    !cut.every(({ x, y }) => exact(x) && exact(y)) ||
+    signedArea(cut) <= 0 ||
+    !sewing.every((point) => pointInPolygon(point, cut))
+  )
+    return false;
+  const boundary = ring(cut);
+  const inner = ring(sewing);
+  if (new Set(boundary.map((point) => point.join(','))).size !== boundary.length) return false;
+  return boundary.every((a, i) => {
+    const next = (i + 1) % boundary.length;
+    const b = boundary[next]!;
+    return (
+      boundary.every((c, j) => {
+        const after = (j + 1) % boundary.length;
+        if (next === j) return sign(a, b, boundary[after]!) !== 0;
+        return i === j || i === after || !meets(a, b, c, boundary[after]!);
+      }) && inner.every((c, j) => !meets(a, b, c, inner[(j + 1) % inner.length]!))
+    );
+  });
+}
 
 function inspect(
   inputCut: readonly PtMm[],
@@ -110,7 +209,7 @@ function inspect(
     sewing.length !== 4 ||
     (cut.length !== 4 && cut.length !== 5) ||
     !isStrictlyConvexRing(sewing) ||
-    !isStrictlyConvexRing(cut, sewing) ||
+    !(isFoldback(variant) ? enclosesSewing(cut, sewing) : isStrictlyConvexRing(cut, sewing)) ||
     !isAuthoredAllowanceCornerVariant(variant) ||
     !exact(widthMm) ||
     !triple.every(({ x, y }) => exact(x) && exact(y))
@@ -123,24 +222,43 @@ function inspect(
   if (matches.length !== 1) return null;
   const incoming = axis(a, p),
     outgoing = axis(p, b);
-  if (!incoming || !outgoing || incoming === outgoing) return null;
-  const join = (kind: Exclude<AuthoredAllowanceCornerVariant, 'auto'>) =>
-    offsetNativeOrthogonalAllowanceCornerV1(sewing, matches[0]!, widthMm, kind)?.map(
-      ({ x, y }) => ({ x: grid(x) / units, y: grid(y) / units }),
-    );
-  const mitre = join('mitre');
-  const square = join('square');
-  const clip = join('clip');
-  if (mitre?.length !== 1 || square?.length !== 2 || clip?.length !== 2) return null;
-  const [tip] = mitre;
-  const joins = { auto: mitre, mitre, square, clip };
+  const before = allowanceSupport(p, subtract(p, a), widthMm);
+  const after = allowanceSupport(p, subtract(b, p), widthMm);
+  const meetPoint = meet(before, after);
+  if (!meetPoint || Math.hypot(meetPoint.x - p.x, meetPoint.y - p.y) > MITER_LIMIT * widthMm)
+    return null;
+  const rounded = (ring: PtMm[]) =>
+    ring.map(({ x, y }) => ({ x: grid(x) / units, y: grid(y) / units }));
+  const mitre = rounded([meetPoint]);
+  const join = (kind: 'square' | 'clip') => {
+    const points = offsetNativeOrthogonalAllowanceCornerV1(sewing, matches[0]!, widthMm, kind);
+    return points && rounded(points);
+  };
+  const fold = (beforeEdge: boolean) => {
+    const points = foldback(p, before, after, widthMm, beforeEdge);
+    return points && rounded(points);
+  };
+  const axial = incoming && outgoing && incoming !== outgoing;
+  const perpendicular = before.along.x * after.along.x + before.along.y * after.along.y === 0;
+  const joins = {
+    auto: mitre,
+    mitre,
+    square: axial ? join('square') ?? undefined : undefined,
+    clip: axial ? join('clip') ?? undefined : undefined,
+    'foldback-before': perpendicular ? mitre : fold(true),
+    'foldback-after': perpendicular ? mitre : fold(false),
+  };
   const points = joins[variant];
-  if (cut.length !== 3 + points.length) return null;
+  if (!points || cut.length !== 3 + points.length) return null;
+  const onSupport = (point: PtMm, support: Support, constant: 'x' | 'y' | null) =>
+    constant
+      ? point[constant] === mitre[0]![constant]
+      : Math.abs(cross(subtract(point, support.at), support.along)) <= 1 / units;
   const starts = cut.flatMap((_, i) => {
     const prev = cut[(i + cut.length - 1) % cut.length]!;
     const next = cut[(i + points.length) % cut.length]!;
-    return prev[incoming] === tip![incoming] &&
-      next[outgoing] === tip![outgoing] &&
+    return onSupport(prev, before, incoming) &&
+      onSupport(next, after, outgoing) &&
       points.every((q, j) => same(q, cut[(i + j) % cut.length]!))
       ? [i]
       : [];
@@ -173,6 +291,7 @@ export function editAuthoredAllowanceCorner(
   if (!native) return null;
   const { cut: ring, start, points, joins } = native;
   const next = joins[variant];
+  if (!next) return null;
   const result =
     start + points.length <= ring.length
       ? [...ring.slice(0, start), ...next, ...ring.slice(start + points.length)]

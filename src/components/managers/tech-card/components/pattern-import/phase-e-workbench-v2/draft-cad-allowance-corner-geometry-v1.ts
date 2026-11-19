@@ -81,8 +81,8 @@ export function draftSavedAllowanceCornerOptionsV1(
   return selected.flatMap((triple) => {
     const previous = current ?? ({ variant: 'auto', sewing: triple, widthMm } as const);
     const variants = current
-      ? (['square', 'mitre', 'clip', 'auto'] as const)
-      : (['square', 'clip'] as const);
+      ? (['square', 'mitre', 'clip', 'foldback-before', 'foldback-after', 'auto'] as const)
+      : (['square', 'clip', 'foldback-before', 'foldback-after'] as const);
     const choices = variants.flatMap((variant) => {
       const marker = authoredAllowanceCornerMarker({ ...previous, variant });
       return marker && editAuthoredAllowanceCorner(first.cut, sewing, previous, variant)

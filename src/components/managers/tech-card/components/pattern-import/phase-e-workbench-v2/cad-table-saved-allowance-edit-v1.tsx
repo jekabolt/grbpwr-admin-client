@@ -1,4 +1,5 @@
-import type { AuthoredAllowanceCornerVariant } from 'lib/pattern-import/types';
+import { decodeAuthoredAllowanceCorner } from 'lib/pattern-import/manifest/authored-allowance-corner';
+import type { AuthoredAllowanceCornerVariant, PtMm } from 'lib/pattern-import/types';
 import {
   captureSavedFixedEndAuthorityV1,
   type SavedFixedEndAuthorityV1,
@@ -38,6 +39,8 @@ const cornerLabels: Record<AuthoredAllowanceCornerVariant, string> = {
   square: 'Square',
   mitre: 'Mitre',
   clip: 'Clip',
+  'foldback-before': 'Foldback along incoming edge',
+  'foldback-after': 'Foldback along outgoing edge',
   auto: 'Auto',
 };
 
@@ -137,6 +140,18 @@ export default function CadTableSavedAllowanceEditV1({
           (size) => size.sizeToken === sizeToken,
         )?.cut
       : undefined;
+  const activeCorner =
+    recorded?.tool === 'allowance-corner'
+      ? decodeAuthoredAllowanceCorner(recorded.payload.corner)
+      : choice?.variant === 'foldback-before' || choice?.variant === 'foldback-after'
+        ? decodeAuthoredAllowanceCorner(choice)
+        : corner?.current;
+  const foldAxis: readonly [PtMm, PtMm] | undefined =
+    activeCorner?.variant === 'foldback-before'
+      ? [activeCorner.sewing[0], activeCorner.sewing[1]]
+      : activeCorner?.variant === 'foldback-after'
+        ? [activeCorner.sewing[1], activeCorner.sewing[2]]
+        : undefined;
 
   const record = (next: PatternImportDxfPhaseEDraftCadSessionV1) => {
     const command = next.history[0]?.commands[0];
@@ -391,6 +406,7 @@ export default function CadTableSavedAllowanceEditV1({
         activeTool={activeTool}
         savedTurnAllowance={canOffset && !savedTurn}
         savedAllowanceCornerPreview={cornerPreview}
+        savedAllowanceFoldAxis={activeTool === 'allowance-corner' ? foldAxis : undefined}
         panActive={session.cursor === 1 || activeTool === 'allowance-corner'}
         topologySession={topology}
         activeTopologyTool={null}

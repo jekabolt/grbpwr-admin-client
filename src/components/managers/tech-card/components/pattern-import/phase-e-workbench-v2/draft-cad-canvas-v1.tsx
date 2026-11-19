@@ -143,6 +143,7 @@ export type PatternImportDxfPhaseEDraftCadCanvasPropsV1 = Readonly<{
   savedRoundCorner?: AuthoredQuadraticGrid;
   savedTurnAllowance?: boolean;
   savedAllowanceCornerPreview?: readonly PtMm[];
+  savedAllowanceFoldAxis?: readonly [PtMm, PtMm];
   savedFrenchCurve?: Readonly<{
     key: string;
     primitive: FrenchCurvePrimitive;
@@ -1941,6 +1942,7 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
   savedRoundCorner,
   savedTurnAllowance,
   savedAllowanceCornerPreview,
+  savedAllowanceFoldAxis,
   arrangeActive = false,
   panActive = false,
   crossScopeConnectActive = false,
@@ -2722,6 +2724,19 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
                       fill='none'
                       stroke={SHEET_INK.blue}
                       strokeWidth={1.35}
+                      vectorEffect='non-scaling-stroke'
+                      pointerEvents='none'
+                    />
+                  )}
+                  {savedAllowanceFoldAxis && (
+                    <polyline
+                      data-draft-cad-allowance-fold-axis=''
+                      aria-label='Selected fold edge'
+                      points={ptsAttr(savedAllowanceFoldAxis)}
+                      fill='none'
+                      stroke={SHEET_INK.blue}
+                      strokeWidth={1.35}
+                      strokeDasharray='4 3'
                       vectorEffect='non-scaling-stroke'
                       pointerEvents='none'
                     />
