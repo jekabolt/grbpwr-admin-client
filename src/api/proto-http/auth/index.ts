@@ -92,6 +92,23 @@ export type SignUpRequest = {
   // logo is an optional team logo, PNG or JPEG, at most 1 MB (JSON: base64); a bad image refuses
   // the whole request with bad_logo.
   logo: string | undefined;
+  // brand is optional brand data of the new team; empty = nothing is stored; a bad value refuses the
+  // whole request with the same keys as SetTeamBrand.
+  brand: admin_TeamBrand | undefined;
+};
+
+// TeamBrand is the calling team's brand data; only in teams mode.
+export type admin_TeamBrand = {
+  brandName: string | undefined;
+  legalEntity: string | undefined;
+  // legal_address is up to three address lines.
+  legalAddress: string[] | undefined;
+  contactEmail: string | undefined;
+  website: string | undefined;
+  // first_team is true for team #1: the house vector mark and the build's VAT id are this team's.
+  firstTeam: boolean | undefined;
+  // unavailable is true when the control plane could not be read: values are empty, nothing may print or save.
+  unavailable: boolean | undefined;
 };
 
 export type SignUpResponse = {
@@ -118,6 +135,9 @@ export type VerifyEmailResponse = {
   handoffCode: string | undefined;
   // awaiting_approval is true when the team waits for an operator's approval; handoff_code is empty then.
   awaitingApproval: boolean | undefined;
+  // root_token is a root token, valid for 30 days: the person is signed in on the root site after
+  // confirming the email; set also while the team awaits approval.
+  rootToken: string | undefined;
 };
 
 export type ResendVerificationRequest = {
@@ -225,6 +245,9 @@ export type CreateTeamRequest = {
   // logo is an optional team logo, PNG or JPEG, at most 1 MB (JSON: base64); a bad image refuses
   // the whole request with bad_logo.
   logo: string | undefined;
+  // brand is optional brand data of the new team; empty = nothing is stored; a bad value refuses the
+  // whole request with the same keys as SetTeamBrand.
+  brand: admin_TeamBrand | undefined;
 };
 
 export type CreateTeamResponse = {
