@@ -1201,31 +1201,72 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
     const cut = projection.pieces[pieceIndex]?.contours.filter(
       ({ role }) => role === 'cut-boundary',
     );
-    const pieces = nativeEditPrepared.draftCadCompileSource.scopes
-      .filter(({ target }) => target.scopeKey === scopeKey)
-      .flatMap(({ writerReplay }) => writerReplay?.job.pieces ?? []);
+    const scopes = nativeEditPrepared.draftCadCompileSource.scopes.filter(
+      ({ target }) => target.scopeKey === scopeKey,
+    );
+    const scope = scopes.length === 1 ? scopes[0] : undefined;
+    const pieces = scope?.writerReplay?.job.pieces ?? [];
     const own = pieces.filter(({ identity }) => identity === pickedPointPiece.pieceId);
     const [writer] = own;
     const block = sharedOutlineBlockForWriterPieceV1(writer, sizeToken);
-    const size = writer?.sizes[0];
     if (
       own.length !== 1 ||
       !writer ||
-      !block ||
       writer.pairOf ||
       pieces.some(({ pairOf }) => pairOf === writer.identity) ||
-      size?.sizeId !== authoringAuthority.selectedRank.sizeId ||
-      !size.seam ||
-      !sameDraftAllowanceRingV1(size.cut, size.seam) ||
       cut?.length !== 1 ||
-      !cut[0]?.closed ||
-      !sameDraftAllowanceRingV1(
-        cut[0].vertices.map(({ pointMm }) => pointMm),
-        size.cut,
-      )
+      !cut[0]?.closed
     )
       return null;
-    return { pieceIndex, block };
+    const matchesCut = (points: Parameters<typeof sameDraftAllowanceRingV1>[0]) =>
+      sameDraftAllowanceRingV1(
+        cut[0].vertices.map(({ pointMm }) => pointMm),
+        points,
+      );
+    if (block) {
+      const size = writer.sizes[0];
+      return size?.sizeId === authoringAuthority.selectedRank.sizeId &&
+        size.seam &&
+        sameDraftAllowanceRingV1(size.cut, size.seam) &&
+        matchesCut(size.cut)
+        ? { pieceIndex, block, rankedInset: false }
+        : null;
+    }
+    const ranked = writer.sizes.filter(
+      ({ sizeToken: token, sizeId }) =>
+        token === sizeToken && sizeId === authoringAuthority.selectedRank.sizeId,
+    );
+    const size = ranked[0];
+    const nativeBlocks =
+      scope?.manifest.blocks.filter(
+        (b) =>
+          b.identity === writer.identity && b.sizeToken === sizeToken && b.sizeId === size?.sizeId,
+      ) ?? [];
+    const [nativeBlock] = nativeBlocks;
+    const width = writer.allowance.allowanceMm;
+    return ranked.length === 1 &&
+      nativeBlocks.length === 1 &&
+      nativeBlock &&
+      !writer.ungraded &&
+      writer.allowance.origin !== 'default' &&
+      size?.seam &&
+      !size.fold &&
+      !size.cutLoops?.length &&
+      !size.authoredAllowanceCorner &&
+      !size.internal.some((line) => line.authoredTurnAllowance) &&
+      (size.authoredOutlineCorner
+        ? nativeBlock.authoredInsetOutlineCorner?.widthMm === width
+        : !nativeBlock.authoredInsetOutlineCorner) &&
+      matchesCut(size.cut) &&
+      hasDraftNativeStraightOutlineV1(
+        nativeEditPrepared.selection.phaseD,
+        writer.identity,
+        sizeToken,
+        cut[0],
+      ) &&
+      matchesSavedDraftConstantAllowanceV1(size.cut, size.seam, width)
+      ? { pieceIndex, block: nativeBlock.block, rankedInset: true }
+      : null;
   }, [nativeEditPrepared, pickedPointPiece]);
   const [frenchEdit, setFrenchEdit] = useState<Readonly<{
     candidate: NonNullable<typeof frenchCurve>;
@@ -1865,7 +1906,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
                     })
                   }
                 >
-                  Move points for all sizes
+                  {sharedOutline.rankedInset ? 'Round cut corner' : 'Move points for all sizes'}
                 </Button>
               )}
               {nativeEditPrepared && allowanceTarget && !editingSavedGeometry && (
@@ -1989,6 +2030,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
                 prepared={activeSharedOutlineEdit.prepared}
                 pieceIndex={activeSharedOutlineEdit.pieceIndex}
                 block={sharedOutline.block}
+                rankedInset={sharedOutline.rankedInset}
                 generation={activeSharedOutlineEdit.generation}
                 authority={savedAuthority}
                 onClose={() => setSharedOutlineEdit(null)}

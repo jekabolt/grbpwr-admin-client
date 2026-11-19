@@ -56,6 +56,7 @@ import {
 import type {
   DxfDialect,
   DxfGroup,
+  DxfAuthoredOutlineCornerMarker,
   DxfMeta,
   DxfPathProvenanceDetailedReadResultV1,
   DxfPathProvenanceReadArtifactV1,
@@ -1977,14 +1978,24 @@ async function readDxfInternal(
       // The native read follows the ordinary foreign-file rules if the manifest is invalid.
     }
   }
-  const authoredOutlineCornerByBlock = new Map(
-    (conversion?.blocks ?? []).flatMap(
-      ({ block, authoredOutlineCorner, authoredFixedEndOutlineCorner }) => {
-        const corner = authoredOutlineCorner ?? authoredFixedEndOutlineCorner;
-        return corner ? [[block, corner]] : [];
-      },
-    ),
-  );
+  const authoredOutlineCornerByBlock = new Map<string, DxfAuthoredOutlineCornerMarker>();
+  for (const {
+    block,
+    contour,
+    authoredOutlineCorner,
+    authoredFixedEndOutlineCorner,
+    authoredInsetOutlineCorner,
+  } of conversion?.blocks ?? []) {
+    const controls = authoredOutlineCorner ?? authoredFixedEndOutlineCorner;
+    if (controls) authoredOutlineCornerByBlock.set(block, { controls });
+    else if (authoredInsetOutlineCorner && contour) {
+      authoredOutlineCornerByBlock.set(block, {
+        controls: authoredInsetOutlineCorner.controls,
+        insetWidthMm: authoredInsetOutlineCorner.widthMm,
+        contour,
+      });
+    }
+  }
   const authoredAllowanceCornerByBlock = new Map(
     (conversion?.blocks ?? []).flatMap(({ block, authoredAllowanceCorner }) =>
       authoredAllowanceCorner ? [[block, authoredAllowanceCorner]] : [],

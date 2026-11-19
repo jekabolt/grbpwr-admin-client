@@ -386,7 +386,9 @@ function createSavedDraftSourceReaderV1(deps: SavedDraftSourceReaderDepsV1) {
         command?.tool === 'cut' ||
         command?.tool === 'sharpen-corner' ||
         command?.tool === 'allowance-corner' ||
-        (command?.tool === 'round-corner' && commands.length === 1 && opening.sharedOutlineBlock) ||
+        (command?.tool === 'round-corner' &&
+          commands.length === 1 &&
+          (opening.sharedOutlineBlock || opening.fixedEndAuthority)) ||
         ((commands.length > 1 || opening.sharedOutlineBlock) && draftOutlineMoveHistoryV1(commands))
       )
     )

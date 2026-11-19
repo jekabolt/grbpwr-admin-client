@@ -16,6 +16,7 @@ import {
   type SavedDraftPairedAllowanceProofV1,
 } from './draft-cad-paired-allowance-authority-v1';
 import {
+  deriveAuthoredInsetOutline,
   editFixedEndAuthoredOutlineCorner,
   readPairedAuthoredOutlineCorner,
   roundDraftConvexOrthogonalCornerV1,
@@ -178,8 +179,17 @@ export function editDraftCadSelectedSizeVertexV1(
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1,
   phaseD: SelectedSizePhaseD,
   previousMoves?: ReadonlyMap<string, PtMm>,
+  roundedInsetWidthMm?: number,
 ): Result {
-  return editExactOutlineVertex(source, command, projection, phaseD, null, previousMoves);
+  return editExactOutlineVertex(
+    source,
+    command,
+    projection,
+    phaseD,
+    null,
+    previousMoves,
+    roundedInsetWidthMm,
+  );
 }
 
 function editExactOutlineVertex(
@@ -189,6 +199,7 @@ function editExactOutlineVertex(
   phaseD: SelectedSizePhaseD,
   pairedAllowance?: SavedDraftPairedAllowanceProofV1 | null,
   previousMoves?: ReadonlyMap<string, PtMm>,
+  roundedInsetWidthMm?: number,
 ): Result {
   const { sizeToken } = command.payload;
   const hasEdge = command.tool === 'edge-length' || command.tool === 'sharpen-corner';
@@ -238,14 +249,16 @@ function editExactOutlineVertex(
           ? 'Sharpening needs matching saved cut and sewing outlines.'
           : 'Rounding needs matching saved cut and sewing outlines.',
     };
+  const roundedInset = command.tool === 'round-corner' ? roundedInsetWidthMm : undefined;
   if (
     command.tool === 'round-corner' &&
+    roundedInset === undefined &&
     seam &&
     (seam.length !== cut.length || cut.some(({ x, y }, i) => x !== seam[i]?.x || y !== seam[i]?.y))
   )
     return { ok: false, detail: 'Rounding needs exactly coincident cut and sewing outlines.' };
   let allowanceWidthMm: number | null = null;
-  if (separate) {
+  if (separate && roundedInset === undefined) {
     if (
       command.tool !== 'edge-length' ||
       contour.role !== 'cut-boundary' ||
@@ -365,7 +378,7 @@ function editExactOutlineVertex(
     seam &&
     savedCorner &&
     cornerGrid.every((coordinate, i) => coordinate === savedCorner[i]) &&
-    readPairedAuthoredOutlineCorner(vertices, seam, savedCorner);
+    readPairedAuthoredOutlineCorner(vertices, seam, savedCorner, roundedInset);
   if (
     command.tool === 'round-corner' &&
     (source.authoredOutlineCorner || savedCorner) &&
@@ -388,6 +401,7 @@ function editExactOutlineVertex(
           savedCorner,
           fixedEnd,
           command.payload.setbackMm,
+          roundedInset,
         )
       : roundDraftConvexOrthogonalCornerV1(originalOutline, index, command.payload.setbackMm));
   const requiresNativeMarks = Boolean(
@@ -516,6 +530,13 @@ function editExactOutlineVertex(
     return { ok: false, detail: 'The resized outline would cross or touch a retained cut hole.' };
 
   let nextSeam: readonly PtMm[] = nextRing;
+  if (roundedInset !== undefined) {
+    const inset = deriveAuthoredInsetOutline(nextRing, roundedInset);
+    if (!inset || !separate || !strictlyConvex(inset) || !ringStrictlyInside(inset, nextRing))
+      return { ok: false, detail: 'The rounded cut cannot keep its verified sewing allowance.' };
+    nextSeam =
+      Math.sign(signedArea(seam!)) === Math.sign(signedArea(inset)) ? inset : inset.reverse();
+  }
   if (allowanceWidthMm !== null) {
     const bounded = (value: number) =>
       Number.isSafeInteger(

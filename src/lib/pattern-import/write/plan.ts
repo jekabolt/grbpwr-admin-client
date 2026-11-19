@@ -1,3 +1,4 @@
+import { num } from './format';
 import {
   authoredAllowanceCornerMarker,
   decodeAuthoredAllowanceCorner,
@@ -47,6 +48,7 @@ import type {
   FoldFeature,
   GrainFeature,
   InternalFeature,
+  ManifestAuthoredInsetOutlineCorner,
   ManifestAuthoredTurnAllowance,
   ManifestProtectedLineSplit,
   NotchFeature,
@@ -106,6 +108,7 @@ export type PlannedGrain = { tail: PtMm; tip: PtMm; barb: PtMm; u: PtMm };
 
 export type PlannedBlock = {
   protectedLineSplit?: ManifestProtectedLineSplit;
+  authoredInsetOutlineCorner?: ManifestAuthoredInsetOutlineCorner;
   name: string;
   identity: string;
   /** Card token, or 'UNI' for an ungraded piece. */
@@ -475,9 +478,20 @@ export function planBlocks(
       const s = transformSize(s0, T);
       const name = blockNameOf(w.spec, s);
       const who = name;
-      // last defence: a zero-width out-and-back spike is never written (a needle on the line)
-      const cutS = stripSpikes(simplify(s.cut, true, WRITE_SIMPLIFY_MM));
-      const seamS = s.seam ? stripSpikes(simplify(s.seam, true, WRITE_SIMPLIFY_MM)) : null;
+      const insetWidth =
+        s.authoredOutlineCorner && !w.spec.ungraded && w.spec.allowance.allowanceMm > 0
+          ? w.spec.allowance.allowanceMm
+          : undefined;
+      const outline = (ring: readonly PtMm[]) =>
+        stripSpikes(
+          insetWidth === undefined
+            ? simplify(ring, true, WRITE_SIMPLIFY_MM)
+            : ring.map(({ x, y }) => ({ x: Number(num(x)), y: Number(num(y)) })),
+        );
+      // Preserve signed curve samples and the independently verified inset. A zero-width
+      // out-and-back spike is still never written.
+      const cutS = outline(s.cut);
+      const seamS = s.seam ? outline(s.seam) : null;
       const cut = ccw(cutS.ring);
       const cutLoops = (s.cutLoops ?? []).map((loop) =>
         preserveWinding(loop, stripSpikes(simplify(loop, true, WRITE_SIMPLIFY_MM)).ring),
@@ -506,27 +520,33 @@ export function planBlocks(
       }
       const corner = s.authoredOutlineCorner;
       let authoredOutlineCorner;
+      let authoredInsetOutlineCorner;
       if (corner) {
+        const allowance = w.spec.allowance.allowanceMm;
         const ordered = authoredQuadraticGrid(corner);
         const reverse = authoredQuadraticGrid([corner[2], corner[1], corner[0]]);
         const grid =
           seam &&
           [ordered, reverse].find(
-            (value) => value && readPairedAuthoredOutlineCorner(cut, seam, value),
+            (value) => value && readPairedAuthoredOutlineCorner(cut, seam, value, insetWidth),
           );
         if (
-          !w.spec.ungraded ||
-          w.sizes.length !== 1 ||
-          w.spec.allowance.allowanceMm !== 0 ||
+          (insetWidth === undefined
+            ? !w.spec.ungraded || w.sizes.length !== 1 || allowance !== 0
+            : s.fold ||
+              s.authoredAllowanceCorner ||
+              s.internal.some((p) => p.authoredTurnAllowance)) ||
           cutLoops.length ||
           w.spec.pairOf ||
           w.derivedFrom ||
           !grid
         )
           throw new Error(
-            `${who}: rounded corner no longer matches the exact shared cut and sewing outlines.`,
+            `${who}: rounded corner no longer matches the exact cut and sewing outlines.`,
           );
         authoredOutlineCorner = decodeAuthoredQuadratic(grid);
+        if (insetWidth !== undefined)
+          authoredInsetOutlineCorner = { controls: grid, widthMm: insetWidth };
       }
       // …and never silently dropped (Codex, r5a): what semantics did not already turn into a notch
       // and still goes in and out of the cut line ≥ notchMinMm is written as a notch there, warned
@@ -642,6 +662,7 @@ export function planBlocks(
       outSizes.push(size);
       blocks.push({
         name,
+        ...(authoredInsetOutlineCorner ? { authoredInsetOutlineCorner } : {}),
         identity: w.spec.identity,
         sizeToken: w.spec.ungraded ? UNI_TOKEN : s.sizeToken,
         labelSize: s.sizeToken,

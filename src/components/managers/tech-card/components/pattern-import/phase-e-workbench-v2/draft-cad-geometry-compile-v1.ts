@@ -3,6 +3,7 @@ import { applyDraftParallelSpreadV1 } from './draft-cad-parallel-spread-v1';
 import {
   hasSavedDraftGeometrySourceV1,
   readSavedSharedOutlineBlockV1,
+  readSavedRankedInsetCornerV1,
 } from './draft-cad-saved-dart-tip-review-v1';
 import { sameDartVertices } from './draft-cad-saved-dart-tip-v1';
 import { applyAffine, closestOnPolyline, pointInPolygon } from 'lib/pattern-import/semantics/geom';
@@ -632,6 +633,7 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
 
   const moveHistory = draftOutlineMoveHistoryV1(commands);
   const sharedOutlineBlock = readSavedSharedOutlineBlockV1(input);
+  const rankedInsetCorner = readSavedRankedInsetCornerV1(input);
   const orderedMoves =
     moveHistory && (moveHistory.length > 1 || sharedOutlineBlock) ? moveHistory : null;
   if (orderedMoves && !hasSavedDraftGeometrySourceV1(input))
@@ -714,7 +716,7 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
   let job = structuredClone(replay.job);
   const createdTopologyIds = new Set(sourceIds);
   const compiledFeatures: PatternImportDxfPhaseEDraftCadCompiledFeatureV1[] = [];
-  let editedCornerRing: readonly PtMm[] | null = null;
+  let editedCorner: Pick<PieceSizeSpec, 'cut' | 'seam'> | null = null;
   let pairedWrite: { commandId: string; cut: readonly PtMm[]; seam: readonly PtMm[] } | null = null;
   const createdPieceLineKeys = new Map<string, string>();
   for (const command of compileCommands) {
@@ -977,10 +979,13 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
       command.tool === 'sharpen-corner' ||
       command.tool === 'round-corner'
     ) {
-      if (command.tool === 'round-corner' && (!sharedOutlineBlock || commands.length !== 1))
+      if (
+        command.tool === 'round-corner' &&
+        ((!sharedOutlineBlock && !rankedInsetCorner) || commands.length !== 1)
+      )
         return blocked(
           'round-corner-geometry-blocked',
-          'Review one corner of the exact saved shared outline for all sizes.',
+          'Review one corner of the exact saved outline.',
           command,
         );
       if (command.tool === 'move-point' && writerPieces[0]!.ungraded && !sharedOutlineBlock)
@@ -1036,6 +1041,7 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
                 projection,
                 selection.phaseD,
                 previousMoves,
+                rankedInsetCorner?.widthMm,
               );
       if (!edited.ok)
         return blocked(
@@ -1059,7 +1065,7 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
         };
       }
       if (command.tool === 'sharpen-corner' || command.tool === 'round-corner')
-        editedCornerRing = edited.size.cut;
+        editedCorner = edited.size;
       Object.assign(size, edited.size);
       if (command.tool === 'move-point')
         previousMoves?.set(command.payload.vertexId, command.payload.pointMm);
@@ -1403,7 +1409,10 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
     );
   }
 
-  if (pairedAllowance?.fixedEndReplacement && compileCommands[0]?.tool === 'edge-length') {
+  if (
+    rankedInsetCorner ||
+    (pairedAllowance?.fixedEndReplacement && compileCommands[0]?.tool === 'edge-length')
+  ) {
     const absoluteOutlines = written.plan.blocks.every((block) => {
       const size = job.pieces
         .find(({ identity }) => identity === block.identity)
@@ -1418,7 +1427,7 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
     });
     if (!absoluteOutlines)
       return blocked(
-        'edge-length-geometry-blocked',
+        rankedInsetCorner ? 'round-corner-geometry-blocked' : 'edge-length-geometry-blocked',
         'The DXF layout would move an exact saved endpoint or another native outline.',
         compileCommands[0],
       );
@@ -1473,14 +1482,19 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
       continue;
     }
     if (command.tool === 'sharpen-corner' || command.tool === 'round-corner') {
-      const expected = editedCornerRing?.map((point) => applyAffine(block.transform, point));
+      const expectedCut = editedCorner?.cut.map((point) => applyAffine(block.transform, point));
+      const expectedSeam = editedCorner?.seam?.map((point) => applyAffine(block.transform, point));
       if (
-        !expected ||
+        !expectedCut ||
+        !expectedSeam ||
         !block.seam ||
         (command.tool === 'round-corner' &&
-          (block.name !== sharedOutlineBlock || block.sizeToken !== 'UNI')) ||
-        !sameDraftAllowanceRingV1(block.cut, expected) ||
-        !sameDraftAllowanceRingV1(block.seam, expected)
+          (rankedInsetCorner
+            ? block.name !== rankedInsetCorner.block ||
+              block.authoredInsetOutlineCorner?.widthMm !== rankedInsetCorner.widthMm
+            : block.name !== sharedOutlineBlock || block.sizeToken !== 'UNI')) ||
+        !sameDraftAllowanceRingV1(block.cut, expectedCut) ||
+        !sameDraftAllowanceRingV1(block.seam, expectedSeam)
       )
         return blocked(
           `${command.tool}-geometry-blocked`,

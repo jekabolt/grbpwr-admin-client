@@ -1,7 +1,10 @@
 import { writeDxfDetailed } from 'lib/pattern-import/write';
 import { applyDraftSavedAllowanceCornerV1 } from './draft-cad-allowance-corner-geometry-v1';
 import { draftCadCompiledArtifactV1 } from './draft-cad-geometry-compile-v1';
-import { sameDraftAllowanceRingV1 } from './draft-cad-paired-allowance-authority-v1';
+import {
+  matchesSavedDraftConstantAllowanceV1,
+  sameDraftAllowanceRingV1,
+} from './draft-cad-paired-allowance-authority-v1';
 import { bboxOf } from 'lib/pattern-import/semantics/geom';
 import { transformSizeSpec } from 'lib/pattern-import/semantics/pairs';
 import type { PtMm } from 'lib/pattern-import/types';
@@ -59,10 +62,18 @@ export type SavedGeometryCurrentV1 = SavedAddPointCurrentV1 &
     fixedEndAuthority?: SavedFixedEndAuthorityV1;
   }>;
 
-const prepared = new WeakMap<CompileInput, Readonly<{ sharedOutlineBlock?: string }>>();
+const prepared = new WeakMap<
+  CompileInput,
+  Readonly<{
+    sharedOutlineBlock?: string;
+    rankedInsetCorner?: Readonly<{ block: string; widthMm: number }>;
+  }>
+>();
 export const hasSavedDraftGeometrySourceV1 = (input: CompileInput) => prepared.has(input);
 export const readSavedSharedOutlineBlockV1 = (input: CompileInput) =>
   prepared.get(input)?.sharedOutlineBlock;
+export const readSavedRankedInsetCornerV1 = (input: CompileInput) =>
+  prepared.get(input)?.rankedInsetCorner;
 function requireSavedEdit(ok: unknown, detail: string): asserts ok {
   if (!ok) throw new Error(detail);
 }
@@ -98,6 +109,7 @@ function markers(manifest: ConversionManifest) {
         b.authoredInternal ?? [],
         b.authoredOutlineCorner ?? null,
         b.authoredFixedEndOutlineCorner ?? null,
+        b.authoredInsetOutlineCorner ?? null,
         b.authoredAllowanceCorner ?? null,
       ])
       .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
@@ -218,7 +230,8 @@ export async function compileSavedDraftGeometryReviewV1(
   const savedDart = savedTip ?? savedMove;
   const savedCurve = command?.tool === 'french-curve' ? command.payload.savedCurve : undefined;
   const sharpen = command?.tool === 'sharpen-corner';
-  const round = command?.tool === 'round-corner' && commands.length === 1 && sharedOutlineBlock;
+  const round = command?.tool === 'round-corner' && commands.length === 1;
+  const insetRound = round && !sharedOutlineBlock;
   const allowanceCorner = command?.tool === 'allowance-corner' && commands.length === 1;
   const orderedMoves =
     commands.length > 1 || sharedOutlineBlock ? draftOutlineMoveHistoryV1(commands) : null;
@@ -242,7 +255,7 @@ export async function compileSavedDraftGeometryReviewV1(
   );
   const { pieceId, pieceLineKey } = command.target;
   const fixedEnd = command.tool === 'round-corner' && command.payload.fixedEnd;
-  const guarded = Boolean(fixedEnd || allowanceCorner);
+  const guarded = Boolean(fixedEnd || insetRound || allowanceCorner);
   const fixedEndAuthority = guarded ? opening.fixedEndAuthority : undefined;
   if (guarded)
     requireSavedEdit(
@@ -254,6 +267,7 @@ export async function compileSavedDraftGeometryReviewV1(
     await verifyCurrentRow();
     await fixedEndAuthority?.verify(new AbortController().signal);
   };
+  let rankedInsetCorner: { block: string; widthMm: number } | undefined;
   let affectedBlockNames = [sharedOutlineBlock ?? pieceId + '_' + sizeToken];
   const current = () => {
     const now = readCurrent();
@@ -452,7 +466,7 @@ export async function compileSavedDraftGeometryReviewV1(
         read.meta.units.mmPerUnit === 1,
       'Editing requires the exact original saved cut and sewing block.',
     );
-    const { a, b, c, d } = group.transform;
+    const { a, b, c, d, e, f } = group.transform;
     const pathById = new Map(page.paths.map((p) => [p.id, p]));
     const closedLayer = (layer: string) =>
       group.paths
@@ -474,10 +488,48 @@ export async function compileSavedDraftGeometryReviewV1(
         cut &&
         seam &&
         cut.id !== seam.id &&
-        sameDraftAllowanceRingV1(cut.pts, selectedCut.pointsMm) &&
-        sameDraftAllowanceRingV1(cut.pts, seam.pts),
-      'Editing requires coincident original L1 and L14 polylines.',
+        closedLayer('1').length === 1 &&
+        sameDraftAllowanceRingV1(cut.pts, selectedCut.pointsMm),
+      'Editing requires exact original L1 and L14 polylines.',
     );
+    if (insetRound) {
+      const job = scope?.writerReplay?.job;
+      const piece = one(job?.pieces.filter(({ identity }) => identity === pieceId) ?? []);
+      const widthMm = piece?.allowance.allowanceMm;
+      const size = one(
+        piece?.sizes.filter((s) => s.sizeToken === sizeToken && s.sizeId === block.sizeId) ?? [],
+      );
+      // The cut editor's Phase D exposes L1. Pin L14 independently to the same native
+      // INSERT and persisted writer pair, then verify every raw edge below.
+      requireSavedEdit(
+        e === 0 &&
+          f === 0 &&
+          piece &&
+          !piece.ungraded &&
+          !piece.pairOf &&
+          !job?.pieces.some(({ pairOf }) => pairOf === pieceId) &&
+          piece.allowance.origin !== 'default' &&
+          widthMm !== undefined &&
+          size?.seam &&
+          !size.fold &&
+          !size.cutLoops?.length &&
+          !size.authoredAllowanceCorner &&
+          !size.internal.some((p) => p.authoredTurnAllowance) &&
+          (size.authoredOutlineCorner
+            ? block.authoredInsetOutlineCorner?.widthMm === widthMm
+            : !block.authoredInsetOutlineCorner) &&
+          sameDraftAllowanceRingV1(cut.pts, size.cut) &&
+          sameDraftAllowanceRingV1(seam.pts, size.seam) &&
+          matchesSavedDraftConstantAllowanceV1(cut.pts, seam.pts, widthMm),
+        'Rounding requires an exact ranked cut and sewing pair with a verified positive inset.',
+      );
+      rankedInsetCorner = { block: block.block, widthMm };
+    } else {
+      requireSavedEdit(
+        sameDraftAllowanceRingV1(cut.pts, seam.pts),
+        'Editing requires coincident original L1 and L14 polylines.',
+      );
+    }
     const edges = await projectDxfSourceNativeStraightEdgeSelectedPathsV1(nativeRead.owner, {
       schemaVersion: DXF_SOURCE_NATIVE_STRAIGHT_EDGE_SELECTED_PATHS_REQUEST_V1,
       sourceSha256: row.sha256,
@@ -762,7 +814,7 @@ export async function compileSavedDraftGeometryReviewV1(
     './draft-cad-geometry-compile-v1'
   );
   requireSavedEdit(current(), 'The saved geometry changed before compiling.');
-  prepared.set(compileInput, { sharedOutlineBlock });
+  prepared.set(compileInput, { sharedOutlineBlock, rankedInsetCorner });
   try {
     const result = compilePatternImportDxfPhaseEDraftCadGeometryV1(compileInput);
     if (result.ok)

@@ -125,11 +125,13 @@ export function manifestBlock(b: PlannedBlock, sigPts?: number): ManifestBlock {
     ...(b.protectedLineSplit ? { protectedLineSplit: b.protectedLineSplit } : {}),
     ...(authoredInternal.length ? { authoredInternal } : {}),
     ...(allowanceCorner ? { authoredAllowanceCorner: allowanceCorner } : {}),
-    ...(corner
-      ? parseAuthoredOutlineCorner(corner)
-        ? { authoredOutlineCorner: corner }
-        : { authoredFixedEndOutlineCorner: corner }
-      : {}),
+    ...(b.authoredInsetOutlineCorner
+      ? { authoredInsetOutlineCorner: b.authoredInsetOutlineCorner }
+      : corner
+        ? parseAuthoredOutlineCorner(corner)
+          ? { authoredOutlineCorner: corner }
+          : { authoredFixedEndOutlineCorner: corner }
+        : {}),
     ...(authoredText?.length ? { authoredText } : {}),
     ...(authoredNotches.length ? { authoredNotches } : {}),
     identity: b.identity,

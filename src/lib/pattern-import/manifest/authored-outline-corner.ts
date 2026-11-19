@@ -4,7 +4,9 @@ import {
   sampleAuthoredQuadratic,
   decodeAuthoredQuadratic,
 } from './authored-internal';
-import type { AuthoredQuadraticGrid, PtMm } from '../types';
+import type { AuthoredQuadraticGrid, ManifestAuthoredInsetOutlineCorner, PtMm } from '../types';
+import { pointInPolygon, selfIntersects } from '../semantics/geom';
+import { MITER_LIMIT, OFFSET_SCALE, offsetContour } from '../semantics/offset';
 
 export function validDraftCornerSetbackV1(value: number) {
   return Number.isFinite(value) && value >= 1 && Number(value.toFixed(6)) === value;
@@ -147,6 +149,44 @@ export function parseAuthoredFixedEndOutlineCorner(value: unknown): AuthoredQuad
   return control && control.startSetbackMm !== control.endSetbackMm ? control.grid : null;
 }
 
+function validInsetWidth(widthMm: unknown): widthMm is number {
+  return typeof widthMm === 'number' && widthMm > 0 && Number.isSafeInteger(widthMm * OFFSET_SCALE);
+}
+
+export function parseAuthoredInsetOutlineCorner(
+  value: unknown,
+): ManifestAuthoredInsetOutlineCorner | null {
+  if (!value || Array.isArray(value) || typeof value !== 'object') return null;
+  const marker = value as Record<string, unknown>;
+  const corner = orthogonalControls(marker.controls);
+  return Object.keys(marker).length === 2 && corner && validInsetWidth(marker.widthMm)
+    ? { controls: corner.grid, widthMm: marker.widthMm }
+    : null;
+}
+
+/** The offset owner owns the sewing vertices. A collapse to a simpler contour is unsupported. */
+export function deriveAuthoredInsetOutline(cut: readonly PtMm[], widthMm: number): PtMm[] | null {
+  if (
+    !validInsetWidth(widthMm) ||
+    cut.length < 3 ||
+    !cut.every(wirePoint) ||
+    cut.some(
+      ({ x, y }) =>
+        ![x, y].every((v) =>
+          Number.isSafeInteger(Math.round((Math.abs(v) + MITER_LIMIT * widthMm) * OFFSET_SCALE)),
+        ),
+    )
+  )
+    return null;
+  const offset = offsetContour(cut, -widthMm);
+  return offset.report.ok &&
+    offset.pts.length === cut.length &&
+    !selfIntersects(offset.pts) &&
+    offset.pts.every((point) => pointInPolygon(point, cut))
+    ? offset.pts
+    : null;
+}
+
 function readCorner(ring: readonly PtMm[], grid: AuthoredQuadraticGrid) {
   const control = orthogonalControls(grid);
   if (!control) return null;
@@ -196,12 +236,35 @@ function readPairedOutline(
   return c.every((value, i) => value === s[i]) ? readCorner(cut, grid) : null;
 }
 
+/** Exact native block verification with only winding/cyclic start normalization. */
+export function readNativeInsetAuthoredOutlineCorner(
+  cut: readonly PtMm[],
+  seam: readonly PtMm[],
+  grid: AuthoredQuadraticGrid,
+  widthMm: number,
+) {
+  const corner = readCorner(cut, grid);
+  const inset = corner && deriveAuthoredInsetOutline(cut, widthMm);
+  if (!inset || inset.length !== seam.length || !seam.every(wirePoint)) return null;
+  const equal = (a: PtMm, b: PtMm) => a.x === b.x && a.y === b.y;
+  const start = inset.findIndex((point) => equal(seam[0]!, point));
+  return start >= 0 &&
+    (seam.every((p, i) => equal(p, inset[(start + i) % inset.length]!)) ||
+      seam.every((p, i) => equal(p, inset[(start - i + inset.length) % inset.length]!)))
+    ? corner
+    : null;
+}
+
 export function readPairedAuthoredOutlineCorner(
   cut: readonly PtMm[],
   seam: readonly PtMm[],
   grid: AuthoredQuadraticGrid,
+  insetWidthMm?: number,
 ) {
-  const corner = readPairedOutline(cut, seam, grid);
+  const corner =
+    insetWidthMm === undefined
+      ? readPairedOutline(cut, seam, grid)
+      : readNativeInsetAuthoredOutlineCorner(cut, seam, grid, insetWidthMm);
   if (!corner) return null;
   const { start, sampleCount, startSetbackMm: setbackMm, originalOutline } = corner;
   return { start, sampleCount, setbackMm, originalOutline };
@@ -224,6 +287,7 @@ export function editFixedEndAuthoredOutlineCorner(
   grid: AuthoredQuadraticGrid,
   fixedEnd: 'start' | 'end',
   movingSetbackMm: number,
+  insetWidthMm?: number,
 ) {
   if (
     (fixedEnd !== 'start' && fixedEnd !== 'end') ||
@@ -231,7 +295,10 @@ export function editFixedEndAuthoredOutlineCorner(
     !seam.every(wirePoint)
   )
     return null;
-  const corner = readPairedOutline(cut, seam, grid);
+  const corner =
+    insetWidthMm === undefined
+      ? readPairedOutline(cut, seam, grid)
+      : readNativeInsetAuthoredOutlineCorner(cut, seam, grid, insetWidthMm);
   if (!corner) return null;
   const { start, startSetbackMm, endSetbackMm, originalOutline } = corner;
   if (movingSetbackMm === (fixedEnd === 'start' ? endSetbackMm : startSetbackMm)) return null;

@@ -19,7 +19,10 @@ import {
 import { AUTHORED_NOTCH_STROKES } from '../../manifest/authored-notches';
 import { AUTHORED_TEXT_LAYER } from '../../manifest/authored-text';
 import { isNativeStraightL8Polyline, nativeAuthoredOutlinePoints } from './extract';
-import { readNativePairedAuthoredOutlineCorner } from '../../manifest/authored-outline-corner';
+import {
+  readNativeInsetAuthoredOutlineCorner,
+  readNativePairedAuthoredOutlineCorner,
+} from '../../manifest/authored-outline-corner';
 import { readAuthoredTextMarks } from './authored-text';
 import { contourSigProblem } from '../../manifest/contour-sig';
 import type {
@@ -801,22 +804,39 @@ function blockPiece(
     const seamPath = authoredSeam && pathById.get(authoredSeam.paths[0]!);
     const nativeCut = cutPath && nativeAuthoredOutlinePoints(cutPath);
     const nativeSeam = seamPath && nativeAuthoredOutlinePoints(seamPath);
+    const exactPair =
+      nativeCut &&
+      nativeSeam &&
+      (rounded.insetWidthMm === undefined
+        ? explicitZeroAllowanceSeam &&
+          readNativePairedAuthoredOutlineCorner(nativeCut, nativeSeam, rounded.controls)
+        : e === 0 &&
+          f === 0 &&
+          cut?.layer === '1' &&
+          cut.paths.length === 1 &&
+          authoredSeam?.paths.length === 1 &&
+          seamPick.rest.length === 0 &&
+          rounded.contour &&
+          !contourSigProblem(rounded.contour, cut.pts) &&
+          readNativeInsetAuthoredOutlineCorner(
+            nativeCut,
+            nativeSeam,
+            rounded.controls,
+            rounded.insetWidthMm,
+          ));
     if (
       read.meta.units.mmPerUnit !== 1 ||
       a !== 1 ||
       b !== 0 ||
       c !== 0 ||
       d !== 1 ||
-      !explicitZeroAllowanceSeam ||
       cutLayerPaths.length !== 1 ||
-      !nativeCut ||
-      !nativeSeam ||
-      !readNativePairedAuthoredOutlineCorner(nativeCut, nativeSeam, rounded)
+      !exactPair
     )
       throw new Error(
         `The saved rounded corner in ${group.block} does not reproduce both native outlines.`,
       );
-    authoredOutlineCorner = decodeAuthoredQuadratic(rounded, { x: e, y: f });
+    authoredOutlineCorner = decodeAuthoredQuadratic(rounded.controls, { x: e, y: f });
   }
   const allowanceCorner = group.block && read.meta.authoredAllowanceCornerByBlock?.get(group.block);
   let authoredAllowanceCorner;

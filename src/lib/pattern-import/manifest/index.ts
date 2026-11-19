@@ -37,6 +37,7 @@ import { parseManifestAuthoredText } from './authored-text';
 import { parseManifestAuthoredInternal } from './authored-internal';
 import {
   parseAuthoredFixedEndOutlineCorner,
+  parseAuthoredInsetOutlineCorner,
   parseAuthoredOutlineCorner,
 } from './authored-outline-corner';
 import { parseManifestAuthoredNotches } from './authored-notches';
@@ -950,6 +951,7 @@ export function validateManifest(x: unknown): ConversionManifest {
         !b.contour ||
         b.authoredOutlineCorner !== undefined ||
         b.authoredFixedEndOutlineCorner !== undefined ||
+        b.authoredInsetOutlineCorner !== undefined ||
         authoredInternal?.some(({ turnAllowance }) => turnAllowance))
     )
       fail(
@@ -981,6 +983,25 @@ export function validateManifest(x: unknown): ConversionManifest {
           'invalid shared rounded outline metadata',
         );
     }
+    const authoredInsetOutlineCorner =
+      b.authoredInsetOutlineCorner === undefined
+        ? null
+        : parseAuthoredInsetOutlineCorner(b.authoredInsetOutlineCorner);
+    if (
+      b.authoredInsetOutlineCorner !== undefined &&
+      (!authoredInsetOutlineCorner ||
+        b.authoredOutlineCorner !== undefined ||
+        b.authoredFixedEndOutlineCorner !== undefined ||
+        piece.ungraded ||
+        piece.pairOf ||
+        piece.halfFold ||
+        b.sizeToken === 'UNI' ||
+        !b.hasSeam ||
+        !b.contour ||
+        authoredInsetOutlineCorner.widthMm !== piece.allowanceMm ||
+        authoredInternal?.some(({ turnAllowance }) => turnAllowance))
+    )
+      fail(`${p}.authoredInsetOutlineCorner`, 'invalid ranked rounded outline with derived inset');
     const authoredText =
       b.authoredText === undefined ? null : parseManifestAuthoredText(b.authoredText);
     if (b.authoredText !== undefined && !authoredText)
@@ -999,6 +1020,7 @@ export function validateManifest(x: unknown): ConversionManifest {
       ...(authoredAllowanceCorner ? { authoredAllowanceCorner } : {}),
       ...(authoredOutlineCorner ? { authoredOutlineCorner } : {}),
       ...(authoredFixedEndOutlineCorner ? { authoredFixedEndOutlineCorner } : {}),
+      ...(authoredInsetOutlineCorner ? { authoredInsetOutlineCorner } : {}),
       ...(authoredText ? { authoredText } : {}),
       ...(authoredNotches ? { authoredNotches } : {}),
       identity: b.identity,

@@ -96,6 +96,12 @@ export type DxfUnits = {
   evidence: string;
 };
 
+export type DxfAuthoredOutlineCornerMarker = Readonly<{
+  controls: NonNullable<ManifestBlock['authoredOutlineCorner']>;
+  insetWidthMm?: number;
+  contour?: NonNullable<ManifestBlock['contour']>;
+}>;
+
 export type DxfMeta = {
   version: string | null;
   dialect: DxfDialect;
@@ -117,10 +123,7 @@ export type DxfMeta = {
     string,
     NonNullable<ManifestBlock['authoredAllowanceCorner']>
   >;
-  authoredOutlineCornerByBlock?: ReadonlyMap<
-    string,
-    NonNullable<ManifestBlock['authoredOutlineCorner']>
-  >;
+  authoredOutlineCornerByBlock?: ReadonlyMap<string, DxfAuthoredOutlineCornerMarker>;
   authoredTextByBlock?: ReadonlyMap<string, readonly ManifestAuthoredTextMark[]>;
   authoredNotchesByBlock?: ReadonlyMap<string, readonly ManifestAuthoredNotchGroup[]>;
   /** Proven by the generator's DXF marker or the system-owned card-row flag. */

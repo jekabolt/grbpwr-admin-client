@@ -1731,7 +1731,7 @@ export type PieceSizeSpec = {
   internal: InternalFeature[];
   textMarks?: AuthoredTextMark[];
   pointMarks?: AuthoredPointMark[];
-  /** Exact shared rounded-corner controls in the current sheet coordinate frame. */
+  /** Exact authored rounded-corner controls in the current sheet coordinate frame. */
   authoredOutlineCorner?: AuthoredQuadraticControls;
   authoredAllowanceCorner?: AuthoredAllowanceCorner;
   fold: FoldFeature | null;
@@ -2747,6 +2747,11 @@ export type ManifestAuthoredNotchGroup = {
   vertices: number[];
 };
 
+export type ManifestAuthoredInsetOutlineCorner = {
+  controls: AuthoredQuadraticGrid;
+  widthMm: number;
+};
+
 export type ManifestBlock = {
   protectedLineSplit?: ManifestProtectedLineSplit;
   authoredInternal?: ManifestAuthoredInternalPath[];
@@ -2754,6 +2759,8 @@ export type ManifestBlock = {
   authoredOutlineCorner?: AuthoredQuadraticGrid;
   /** Unequal perpendicular setbacks on one verified paired L1/L14 corner. */
   authoredFixedEndOutlineCorner?: AuthoredQuadraticGrid;
+  /** A ranked L1 quadratic whose independent L14 has the declared native inset. */
+  authoredInsetOutlineCorner?: ManifestAuthoredInsetOutlineCorner;
   authoredAllowanceCorner?: ManifestAuthoredAllowanceCorner;
   authoredText?: ManifestAuthoredTextMark[];
   authoredNotches?: ManifestAuthoredNotchGroup[];

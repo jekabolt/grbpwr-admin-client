@@ -29,6 +29,7 @@ export default function CadTableSavedSharedOutlineEditV1({
   prepared,
   pieceIndex,
   block,
+  rankedInset = false,
   generation,
   authority,
   onClose,
@@ -39,6 +40,7 @@ export default function CadTableSavedSharedOutlineEditV1({
   >;
   pieceIndex: number;
   block: string;
+  rankedInset?: boolean;
   generation: number;
   authority: PatternImportDxfPhaseEZeroOperationSavedCardAuthorityRuntimeV1;
   onClose: () => void;
@@ -67,9 +69,15 @@ export default function CadTableSavedSharedOutlineEditV1({
     [catalog],
   );
   const [session, setSession] = useState(initial.session);
-  const outlineSize = prepared.draftCadCompileSource.scopes
+  const writerSizes = prepared.draftCadCompileSource.scopes
     .find(({ target }) => target.scopeKey === scopeKey)
-    ?.writerReplay?.job.pieces.find(({ identity }) => identity === piece?.pieceId)?.sizes[0];
+    ?.writerReplay?.job.pieces.find(({ identity }) => identity === piece?.pieceId)?.sizes;
+  const outlineSize = rankedInset
+    ? writerSizes?.find(
+        (size) =>
+          size.sizeToken === sizeToken && size.sizeId === authoringAuthority.selectedRank.sizeId,
+      )
+    : writerSizes?.[0];
   const savedRoundCorner = useMemo(() => {
     const authored = outlineSize?.authoredOutlineCorner;
     return authored ? authoredQuadraticGrid(authored) ?? undefined : undefined;
@@ -84,7 +92,7 @@ export default function CadTableSavedSharedOutlineEditV1({
     return points.some((_, index) => roundDraftConvexOrthogonalCornerV1(points, index, 1));
   }, [outlineSize, pieceIndex, projection]);
   const [tool, setTool] = useState<'move-point' | 'round-corner'>(
-    savedRoundCorner ? 'round-corner' : 'move-point',
+    savedRoundCorner || rankedInset ? 'round-corner' : 'move-point',
   );
   const sessionRef = useRef(session);
   const runtimeRef = useRef<ReturnType<typeof createSavedGeometryReviewRuntimeV1> | null>(null);
@@ -141,7 +149,7 @@ export default function CadTableSavedSharedOutlineEditV1({
             sizeToken,
             generation,
             session: captured,
-            sharedOutlineBlock: block,
+            sharedOutlineBlock: rankedInset ? undefined : block,
             fixedEndAuthority,
           }
         : null;
@@ -150,7 +158,7 @@ export default function CadTableSavedSharedOutlineEditV1({
     setError('');
     try {
       const [command] = activeDraftCadTransactionsV1(captured).flatMap(({ commands }) => commands);
-      if (command?.tool === 'round-corner' && command.payload.fixedEnd) {
+      if (command?.tool === 'round-corner' && (rankedInset || command.payload.fixedEnd)) {
         const controller = new AbortController();
         reviewCapture.current = controller;
         fixedEndAuthority = await captureSavedFixedEndAuthorityV1(
@@ -191,11 +199,13 @@ export default function CadTableSavedSharedOutlineEditV1({
     >
       <div className='space-y-1 border-b border-borderColor p-2'>
         <p className='text-small'>
-          This outline is shared by all sizes. Its authoring size is {sizeToken}.
+          {rankedInset
+            ? `Cut outline for ${sizeToken}. A fixed end holds its cut point. The sewing outline follows the saved allowance.`
+            : `This outline is shared by all sizes. Its authoring size is ${sizeToken}.`}
         </p>
         {session && piece ? (
           <div className='flex flex-wrap items-center gap-2'>
-            {canStartRounding && !savedRoundCorner && (
+            {canStartRounding && !savedRoundCorner && !rankedInset && (
               <Button
                 type='button'
                 size='xs'
@@ -213,7 +223,11 @@ export default function CadTableSavedSharedOutlineEditV1({
               disabled={!session.cursor || preparing}
               onClick={() => void review()}
             >
-              {preparing ? 'Checking saved outline…' : 'Review for all sizes'}
+              {preparing
+                ? 'Checking saved outline…'
+                : rankedInset
+                  ? 'Review cut outline'
+                  : 'Review for all sizes'}
             </Button>
             <Button
               type='button'
