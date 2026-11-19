@@ -1431,14 +1431,31 @@ function validateLegacyDocument(value: unknown): void {
     'legacy.persistence.receiptSealVersion',
   );
   sha(persistence.receiptSealSha256, 'legacy.persistence.receiptSealSha256');
+  const hasSavedLockBasis =
+    typeof persistence.card === 'object' &&
+    persistence.card !== null &&
+    Object.hasOwn(persistence.card, 'lockBasis');
   const card = record(
     persistence.card,
-    ['techCardId', 'previousLockVersion', 'observedLockVersion'],
+    [
+      'techCardId',
+      'observedLockVersion',
+      ...(hasSavedLockBasis ? ['lockBasis', 'capturedLockVersion'] : ['previousLockVersion']),
+    ],
     'legacy.persistence.card',
   );
   integer(card.techCardId, 'legacy.persistence.card.techCardId', 1);
-  integer(card.previousLockVersion, 'legacy.persistence.card.previousLockVersion');
   integer(card.observedLockVersion, 'legacy.persistence.card.observedLockVersion');
+  if (hasSavedLockBasis) {
+    literal(card.lockBasis, 'current-saved-row', 'legacy.persistence.card.lockBasis');
+    integer(card.capturedLockVersion, 'legacy.persistence.card.capturedLockVersion');
+    if (card.observedLockVersion !== card.capturedLockVersion)
+      fail(
+        'invalid-input',
+        'legacy.persistence.card',
+        'The already saved row must retain its exact card lock.',
+      );
+  } else integer(card.previousLockVersion, 'legacy.persistence.card.previousLockVersion');
   const pattern = record(
     persistence.pattern,
     ['lineKey', 'url', 'scopeKey', 'sizeId', 'version', 'sha256'],

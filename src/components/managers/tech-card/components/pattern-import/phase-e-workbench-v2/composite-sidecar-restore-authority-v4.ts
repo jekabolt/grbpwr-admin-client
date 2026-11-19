@@ -9,6 +9,14 @@ import {
   decodePatternImportDxfProductCompositeSidecarV5,
 } from './composite-sidecar-v5';
 import {
+  PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6,
+  decodePatternImportDxfProductCompositeSidecarV6,
+} from './composite-sidecar-v6';
+import {
+  PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7,
+  decodePatternImportDxfProductCompositeSidecarV7,
+} from './composite-sidecar-v7';
+import {
   PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_RECEIPT_V4,
   type PatternImportDxfProductCompositeSidecarStorageResultV4,
 } from './composite-sidecar-persistence-v4';
@@ -53,6 +61,7 @@ export const PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_DURABLE_RESTORE_CLAIMS
     independentlyRefreshedCurrentBindingsRequired: true,
     getterFreeImmutableInputSnapshotRequired: true,
     canonicalV4OrV5BytesDigestAndLengthVerified: true,
+    canonicalV4ToV7OuterBytesDigestAndLengthVerified: true,
     exactSavedRowAndCardLockMatched: true,
     exactServerAssemblyRevisionMatched: true,
     exactAssemblyTopologySha256Matched: true,
@@ -83,6 +92,7 @@ const BLOCKED_CLAIMS = Object.freeze({
 const DURABLE_BLOCKED_CLAIMS = Object.freeze({
   ...PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_DURABLE_RESTORE_CLAIMS_V4,
   canonicalV4OrV5BytesDigestAndLengthVerified: false as const,
+  canonicalV4ToV7OuterBytesDigestAndLengthVerified: false as const,
   exactSavedRowAndCardLockMatched: false as const,
   exactServerAssemblyRevisionMatched: false as const,
   exactAssemblyTopologySha256Matched: false as const,
@@ -119,7 +129,9 @@ export type PatternImportDxfProductCompositeSidecarDurableReadbackV4 = Readonly<
   source: 'fresh-current-sidecar-get';
   mediaType:
     | typeof PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V4
-    | typeof PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V5;
+    | typeof PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V5
+    | typeof PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6
+    | typeof PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7;
   sha256: string;
   byteLength: number;
   bytes: Uint8Array<ArrayBuffer>;
@@ -547,14 +559,16 @@ function captureDurableReadback(
     record.status !== 'present' ||
     record.source !== 'fresh-current-sidecar-get' ||
     (record.mediaType !== PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V4 &&
-      record.mediaType !== PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V5) ||
+      record.mediaType !== PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V5 &&
+      record.mediaType !== PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6 &&
+      record.mediaType !== PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7) ||
     typeof record.sha256 !== 'string' ||
     !SHA256.test(record.sha256) ||
     !Number.isSafeInteger(record.byteLength) ||
     (record.byteLength as number) < 1 ||
     (record.byteLength as number) > MAX_SIDECAR_BYTES
   )
-    fail('invalid-readback', 'readback', 'Fresh Composite V4/V5 readback metadata is invalid.');
+    fail('invalid-readback', 'readback', 'Fresh Composite V4–V7 readback metadata is invalid.');
   const bytes = copyBytes(record.bytes);
   if (bytes.byteLength !== record.byteLength)
     fail('invalid-readback', 'readback', 'Readback byte length differs from its metadata.');
@@ -696,7 +710,7 @@ export async function restorePatternImportDxfProductCompositeSidecarDurableV4(
       capturedRequest.schemaVersion !==
       PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_DURABLE_RESTORE_REQUEST_V4
     )
-      fail('invalid-request', 'input', 'Durable Composite V4/V5 restore request is invalid.');
+      fail('invalid-request', 'input', 'Durable Composite V4–V7 restore request is invalid.');
     const current = captureCurrentBindings(capturedRequest.current);
     const readback = captureDurableReadback(capturedRequest.readback);
     const digest = await sha256(readback.bytes, crypto);
@@ -711,7 +725,7 @@ export async function restorePatternImportDxfProductCompositeSidecarDurableV4(
       const decoded = await decodePatternImportDxfProductCompositeSidecarV4(readback.bytes, crypto);
       if (!decoded.ok) fail('sidecar-codec-failed', 'codec', decoded.blockers[0].detail);
       decodedV4 = decoded;
-    } else {
+    } else if (readback.mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V5) {
       const decoded = await decodePatternImportDxfProductCompositeSidecarV5(readback.bytes, crypto);
       if (!decoded.ok) fail('sidecar-codec-failed', 'codec', decoded.blockers[0].detail);
       if (
@@ -721,6 +735,31 @@ export async function restorePatternImportDxfProductCompositeSidecarDurableV4(
       )
         fail('assembly-binding-mismatch', 'authority', 'Composite V5 bindings are stale.');
       decodedV4 = decoded.nestedCompositeV4;
+    } else if (readback.mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6) {
+      const decoded = await decodePatternImportDxfProductCompositeSidecarV6(readback.bytes, crypto);
+      if (!decoded.ok) fail('sidecar-codec-failed', 'codec', decoded.blockers[0].detail);
+      if (
+        !sameRow(decoded.document.bindings.row, current.row) ||
+        decoded.document.bindings.serverAssemblyRevision !== current.serverAssemblyRevision ||
+        decoded.document.bindings.assemblyTopologySha256 !== current.assemblyTopologySha256
+      )
+        fail('assembly-binding-mismatch', 'authority', 'Composite V6 bindings are stale.');
+      decodedV4 = decoded.nestedCompositeV5.nestedCompositeV4;
+    } else {
+      const decoded = await decodePatternImportDxfProductCompositeSidecarV7(readback.bytes, crypto);
+      if (!decoded.ok) fail('sidecar-codec-failed', 'codec', decoded.blockers[0].detail);
+      // V7's outer topology SHA is only its transport anchor. Exact-N authority remains in the
+      // nested V4 carrier and is checked against `current` below.
+      if (
+        !sameRow(decoded.document.bindings.row, current.row) ||
+        decoded.document.bindings.serverAssemblyRevision !== current.serverAssemblyRevision
+      )
+        fail(
+          'assembly-binding-mismatch',
+          'authority',
+          'Composite V7 row/revision bindings are stale.',
+        );
+      decodedV4 = decoded.nestedCompositeV6.nestedCompositeV5.nestedCompositeV4;
     }
     const decodedBindings = decodedV4.exactNSeam.carrier.bindings;
     if (
@@ -751,7 +790,7 @@ export async function restorePatternImportDxfProductCompositeSidecarDurableV4(
       fail(
         'v1-two-seam-path-required',
         'authority',
-        'Composite V4/V5 durable restore accepts one or greater-than-two seams.',
+        'Composite V4–V7 durable restore accepts one or greater-than-two seams.',
       );
     const patch = Object.freeze({
       schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_EXACT_N_SEAM_RESTORE_PATCH_V2,

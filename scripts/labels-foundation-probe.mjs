@@ -50,6 +50,10 @@ const MUTANTS = {
     edits: [[`${C}/labels-schema.ts`, "    folding: l.folding?.trim() || '',", "    folding: '',"]],
     breaks: '2',
   },
+  dropsFold: {
+    edits: [[`${C}/labels-schema.ts`, "      fold: l.fold || '',", "      fold: '',"]],
+    breaks: '2',
+  },
   // (3) писатель больше не снимает строку, потерявшую последнее поле
   lastField: {
     edits: [[`${C}/form-writers.ts`, '  const next = lostLastFact\n', '  const next = false\n']],
@@ -167,6 +171,8 @@ const LABELS = [
     placement: 'centre back neck',
     attachment: 'sewn 4 sides',
     folding: 'centre fold',
+    fold: 'half',
+    pages: 2,
     size: '50 × 20 mm',
     qtyPerGarment: 2,
     bomItemId: 17,
@@ -178,6 +184,7 @@ const LABELS = [
     placement: 'left side seam',
     attachment: 'inserted into seam',
     folding: 'loop',
+    fold: 'loop',
     size: '',
     qtyPerGarment: 1,
     bomItemId: 0,
@@ -214,6 +221,14 @@ const CARE = {
       ],
     },
   ],
+  orientation: 'horizontal',
+};
+const OFF_PIECE_GEOMETRY = {
+  pieceWidthMm: { value: '0' },
+  pieceHeightMm: { value: '0' },
+  pieceSeamMm: { value: '0' },
+  labelXMm: { value: '0' },
+  labelYMm: { value: '0' },
 };
 const CARD = {
   id: 7,
@@ -259,7 +274,12 @@ async function run(m) {
     out['2 · garment labels round-trip unchanged (fields + order)'] = roundTrips(
       insert.garmentLabels,
       // the fixture card has no BOM: liveLabelBomLinks clears a link to a line that is not on the card
-      LABELS.map((label) => ({ ...label, bomItemId: 0 })),
+      LABELS.map((label) => ({
+        ...label,
+        bomItemId: 0,
+        pages: label.pages ?? 1,
+        ...OFF_PIECE_GEOMETRY,
+      })),
     );
     out['2 · packaging items round-trip unchanged'] = roundTrips(insert.packagingItems, ITEMS);
     out['2 · care label round-trips unchanged'] = deepEqual(insert.careLabel, CARE);
@@ -287,6 +307,37 @@ async function run(m) {
     out['3 · clearing one of several fields keeps the row'] = has('brand');
     m.removeGarmentLabel(g, s, 'BRAND');
     out['3 · remove takes the row by key (case-blind)'] = !has('brand') && labels().length === 1;
+    m.upsertGarmentLabel(g, s, 'size', { placement: 'side seam' }, { keepBare: true });
+    const keptLineKey = labels().find((l) => l.key === 'size')?.lineKey;
+    m.upsertGarmentLabel(g, s, 'size', { placement: '' }, { keepBare: true });
+    out['3 · a label editor clearing its last detail preserves the chosen row identity'] =
+      !!keptLineKey &&
+      labels().some((l) => l.key === 'size' && l.lineKey === keptLineKey && l.placement === '');
+    const reloaded = m.createFormControl({
+      defaultValues: m.mapTechCardToForm({
+        ...CARD,
+        techCard: {
+          ...CARD.techCard,
+          garmentLabels: [{
+            key: 'size',
+            lineKey: keptLineKey,
+            placement: 'side seam',
+            pages: 1,
+            qtyPerGarment: 1,
+            ...OFF_PIECE_GEOMETRY,
+          }],
+        },
+      }),
+    });
+    reloaded.control._state.mount = true;
+    m.upsertGarmentLabel(reloaded.getValues, reloaded.setValue, 'size', { placement: '' });
+    out['3 · a saved default page and cleared geometry do not count as label details'] =
+      reloaded.getValues('garmentLabels').length === 0;
+    m.upsertGarmentLabel(g, s, 'size', { placement: 'side seam', pages: 2 });
+    m.upsertGarmentLabel(g, s, 'size', { placement: '' });
+    out['3 · a real booklet page count survives clearing an unrelated label field'] =
+      labels().some((l) => l.key === 'size' && l.pages === 2 && l.placement === '');
+
     m.upsertPackagingItem(g, s, 'tissue', { packing: 'wrapped' });
     m.upsertPackagingItem(g, s, 'tissue', { packing: '' });
     out['3 · packaging item: last field cleared → row gone'] = !g('packagingItems').some((i) => i.key === 'tissue');

@@ -10,9 +10,10 @@ import {
   type PatternImportDxfProductPhaseEMultiseamProposalV2,
   type PatternImportDxfProductPhaseEMultiseamWorkbenchStateV2,
 } from 'lib/pattern-import/dxf-product-phase-e-multiseam-workbench-v2';
-import type { BoxMm } from 'lib/pattern-import/types';
+import type { BoxMm, PtMm } from 'lib/pattern-import/types';
 import {
   useEffect,
+  useId,
   useRef,
   useState,
   type ChangeEvent,
@@ -64,7 +65,8 @@ import {
 } from './cad-workbench-bom-visual-authority-v1';
 import { PatternImportDxfPhaseECadTableConnectToolControlV1 } from './cad-table-connect-tool-control-v1';
 import {
-  derivePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1,
+  visiblePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1,
+  type PatternImportDxfPhaseECadTableBoundaryVisibilityV1,
   type PatternImportDxfPhaseECadTableConnectEdgeSegmentV1,
 } from './cad-table-connect-edge-segments-v1';
 import { type PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1 } from './cad-table-zero-connect-authoring-handoff-v1';
@@ -78,15 +80,18 @@ import {
   startPatternImportDxfPhaseECadTableZeroConnectControllerV1,
 } from './cad-table-zero-connect-controller-v1';
 import {
+  cadTablePieceSvgTransformV1,
   compactPatternImportDxfPhaseECadTablePieceOffsetsV1,
   createPatternImportDxfPhaseECadTablePieceLayoutSessionV1,
   fitPatternImportDxfPhaseECadTablePieceBoundsV1,
+  nextPatternImportDxfPhaseECadTablePieceHitV1,
   patternImportDxfPhaseECadTablePieceKeyV1,
   reconcilePatternImportDxfPhaseECadTablePieceLayoutSessionV1,
   selectPatternImportDxfPhaseECadTablePiecesInBoxV1,
   selectPatternImportDxfPhaseECadTablePiecesV1,
   translateSelectedPatternImportDxfPhaseECadTablePiecesV1,
   type PatternImportDxfPhaseECadTablePieceLayoutSessionV1,
+  type PatternImportDxfPhaseECadTablePieceLayoutV1,
 } from './cad-table-piece-layout-session-v1';
 import {
   fitPatternImportDxfPhaseECadTableViewportAspectV1,
@@ -382,8 +387,7 @@ function ProjectedPiece({
   colorwayPreview,
   showProposals,
   showVertices,
-  showSewingBoundaries,
-  showCutBoundaries,
+  boundaryVisibility,
   showMeasurementLabels,
   showCalloutText,
   measurementUnit,
@@ -393,8 +397,8 @@ function ProjectedPiece({
   measurements,
   callouts,
   layoutKey,
-  sourceBounds,
-  displayOffset,
+  layout,
+  pieceSelectActive,
   unit,
   disabled,
   onSelect,
@@ -416,8 +420,7 @@ function ProjectedPiece({
   colorwayPreview: PatternImportDxfPhaseECadWorkbenchColorwayPreviewV1 | null;
   showProposals: boolean;
   showVertices: boolean;
-  showSewingBoundaries: boolean;
-  showCutBoundaries: boolean;
+  boundaryVisibility: PatternImportDxfPhaseECadTableBoundaryVisibilityV1;
   showMeasurementLabels: boolean;
   showCalloutText: boolean;
   measurementUnit: PatternImportDxfPhaseEMeasurementUnitV1;
@@ -427,11 +430,11 @@ function ProjectedPiece({
   measurements: readonly PatternImportDxfPhaseEMeasurementV1[];
   callouts: readonly PatternImportDxfPhaseECalloutV1[];
   layoutKey: string;
-  sourceBounds: Readonly<{ minX: number; minY: number; maxX: number; maxY: number }>;
-  displayOffset: Readonly<{ x: number; y: number }>;
+  layout: PatternImportDxfPhaseECadTablePieceLayoutV1;
+  pieceSelectActive: boolean;
   unit: number;
   disabled?: boolean;
-  onSelect: (toggle?: boolean) => void;
+  onSelect: () => void;
   onArrangePointerDown?: (event: ReactPointerEvent<SVGGElement>) => void;
   onArrangePointerMove?: (event: ReactPointerEvent<SVGGElement>) => void;
   onArrangePointerUp?: (event: ReactPointerEvent<SVGGElement>) => void;
@@ -440,6 +443,7 @@ function ProjectedPiece({
   onMeasurementVertex: (anchor: PatternImportDxfPhaseEVertexAnchorV1) => void;
   onStateChange: (state: WorkbenchState) => void;
 }) {
+  const { sourceBounds, sourceMaterialRings, offsetMm: displayOffset } = layout;
   const activeProposalSeam = proposal.seams[activeSeamIndex];
   const activeSideIndex = activeProposalSeam.sides.findIndex(
     ({ pieceId, pieceLineKey }) => pieceId === piece.pieceId && pieceLineKey === piece.pieceLineKey,
@@ -456,6 +460,14 @@ function ProjectedPiece({
   const measurementEnabled = !disabled && measurementTool !== null;
   const calloutEnabled = !disabled && calloutToolActive;
   const topologyToolEnabled = measurementEnabled || calloutEnabled;
+  const closedCut = boundaryVisibility['cut-boundary']
+    ? piece.contours.find(
+        ({ role, closed, vertices }) => role === 'cut-boundary' && closed && vertices.length >= 3,
+      )
+    : undefined;
+  const materialPreview = closedCut
+    ? resolvePatternImportDxfPhaseECadWorkbenchColorwayContourPreviewV1(colorwayPreview, closedCut)
+    : null;
 
   return (
     <g
@@ -468,13 +480,12 @@ function ProjectedPiece({
       data-v2-piece-layout-key={layoutKey}
       data-v2-piece-seam-authority={editableSideIndex === null ? 'read-only' : 'bounded-pair'}
       data-v2-piece-colorway-swatch={colorwayPreview?.swatchHex ?? undefined}
-      onClick={(event) => !disabled && onSelect(event.shiftKey)}
       onPointerDown={onArrangePointerDown}
       onPointerMove={onArrangePointerMove}
       onPointerUp={onArrangePointerUp}
       onPointerCancel={onArrangePointerCancel}
       className='cursor-pointer'
-      transform={`translate(${displayOffset.x} ${displayOffset.y})`}
+      transform={cadTablePieceSvgTransformV1(layout, 'source')}
     >
       <title>{`Piece ${piece.pieceId}; bounded proposal layers appear only when this piece participates in the active operation.`}</title>
       <rect
@@ -486,12 +497,22 @@ function ProjectedPiece({
         stroke={active ? 'var(--color-textColor)' : 'transparent'}
         strokeDasharray='6 4'
         vectorEffect='non-scaling-stroke'
-        pointerEvents='all'
-        data-v2-piece-hit-area=''
+        pointerEvents='none'
       />
+      {sourceMaterialRings.length ? (
+        <path
+          d={sourceMaterialRings
+            .map((ring) => `M ${ring.map(({ x, y }) => `${x},${y}`).join(' ')} Z`)
+            .join(' ')}
+          fillRule='evenodd'
+          fill={materialPreview?.fill ?? 'none'}
+          fillOpacity={materialPreview?.fillOpacity}
+          pointerEvents={pieceSelectActive ? 'fill' : 'none'}
+          data-v2-piece-hit-area=''
+        />
+      ) : null}
       {piece.contours.map((contour) => {
-        if (contour.role === 'sewing-boundary' && !showSewingBoundaries) return null;
-        if (contour.role === 'cut-boundary' && !showCutBoundaries) return null;
+        if (contour.role !== 'hole' && !boundaryVisibility[contour.role]) return null;
         const catalogContour = catalogPiece.contours.find(
           ({ contourId }) => contourId === contour.contourId,
         );
@@ -530,17 +551,14 @@ function ProjectedPiece({
           seam,
           side: seam.sides.find(({ pieceId }) => pieceId === piece.pieceId),
         }));
-        const colorwayContourPreview =
-          resolvePatternImportDxfPhaseECadWorkbenchColorwayContourPreviewV1(
-            colorwayPreview,
-            contour,
-          );
+        const strokeIsPieceSurface =
+          pieceSelectActive && !sourceMaterialRings.length && contour.role !== 'hole';
         return (
           <g key={contour.contourId} data-v2-contour-id={contour.contourId}>
             <polyline
               points={points}
-              fill={colorwayContourPreview.fill}
-              fillOpacity={colorwayContourPreview.fillOpacity}
+              fill='none'
+              pointerEvents={strokeIsPieceSurface ? 'stroke' : 'none'}
               stroke='currentColor'
               strokeWidth={exactContour ? 2 : 1}
               opacity={exactContour ? 1 : 0.4}
@@ -552,11 +570,12 @@ function ProjectedPiece({
               stroke='transparent'
               strokeWidth='12'
               vectorEffect='non-scaling-stroke'
-              pointerEvents='stroke'
+              pointerEvents={exactEnabled ? 'stroke' : 'none'}
               role='button'
               tabIndex={exactEnabled ? 0 : -1}
               aria-disabled={!exactEnabled}
               aria-label={`Select exact contour ${contour.contourId} for seam ${activeProposalSeam.id}`}
+              onPointerDown={(event) => event.stopPropagation()}
               onClick={(event) => {
                 event.stopPropagation();
                 selectContour();
@@ -590,6 +609,7 @@ function ProjectedPiece({
                         tabIndex={0}
                         aria-label={`Select seam ${seam.id}`}
                         data-v2-seam-select={seam.id}
+                        onPointerDown={(event) => event.stopPropagation()}
                         onClick={(event) => {
                           event.stopPropagation();
                           onSelectSeam(seamIndex as SeamIndex);
@@ -673,7 +693,7 @@ function ProjectedPiece({
                         r={resolvePatternImportDxfPhaseECadTableHandleHitRadiusV1(unit)}
                         fill='transparent'
                         stroke='transparent'
-                        pointerEvents='all'
+                        pointerEvents={exactEnabled || topologyToolEnabled ? 'all' : 'none'}
                         role='button'
                         tabIndex={exactEnabled || topologyToolEnabled ? 0 : -1}
                         aria-disabled={!exactEnabled && !topologyToolEnabled}
@@ -687,6 +707,7 @@ function ProjectedPiece({
                         data-v2-exact-vertex-id={vertexId}
                         data-v2-exact-vertex-selected={selected}
                         data-v2-exact-vertex-hit-radius-px='10'
+                        onPointerDown={(event) => event.stopPropagation()}
                         onClick={(event) => {
                           event.stopPropagation();
                           selectVertex();
@@ -1229,6 +1250,10 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
   const [measurementTool, setMeasurementTool] =
     useState<PatternImportDxfPhaseEMeasurementKindV1 | null>(null);
   const [measureMenuOpen, setMeasureMenuOpen] = useState(false);
+  const measureToolId = useId();
+  const measureMenuSummaryRef = useRef<HTMLElement | null>(null);
+  const measureFlyoutRef = useRef<HTMLDivElement | null>(null);
+  const keyboardOpenedMeasureRef = useRef(false);
   const [calloutToolActive, setCalloutToolActive] = useState(false);
   const [measurementDraft, setMeasurementDraft] = useState<
     readonly PatternImportDxfPhaseEVertexAnchorV1[]
@@ -1262,14 +1287,26 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
     y: number;
     originBounds: BoxMm;
   } | null>(null);
+
+  useEffect(() => {
+    if (!measureMenuOpen || !keyboardOpenedMeasureRef.current) return;
+    keyboardOpenedMeasureRef.current = false;
+    measureFlyoutRef.current?.querySelector<HTMLElement>('button:not(:disabled)')?.focus();
+  }, [measureMenuOpen]);
+
+  const closeMeasureFlyoutFromKeyboard = () => {
+    keyboardOpenedMeasureRef.current = false;
+    measureMenuSummaryRef.current?.focus();
+    setMeasureMenuOpen(false);
+  };
   const pieceArrangeGestureRef = useRef<{
     pieceKey: string;
     pointerId: number;
-    startMm: Readonly<{ x: number; y: number }>;
-    origin: PatternImportDxfPhaseECadTablePieceLayoutSessionV1;
+    startMm: PtMm;
+    dragLayout: PatternImportDxfPhaseECadTablePieceLayoutSessionV1;
+    toggle: boolean;
     moved: boolean;
   } | null>(null);
-  const suppressPieceSelectClickRef = useRef<string | null>(null);
   const selectionGestureRef = useRef<{
     pointerId: number;
     startX: number;
@@ -1367,9 +1404,14 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
   const activeAuditIssue =
     auditReport.issues.find(({ id }) => id === activeIssueId) ?? auditReport.issues[0] ?? null;
   const zeroConnectAuthority = { catalog, projection } as const;
-  const zeroConnectSegments = derivePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1(
+  const boundaryVisibility = {
+    'cut-boundary': showCutBoundaries,
+    'sewing-boundary': showSewingBoundaries,
+  };
+  const zeroConnectSegments = visiblePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1(
     projection,
-  ).filter(({ contourRole }) => contourRole !== 'hole');
+    boundaryVisibility,
+  );
   const cancelZeroConnect = () => {
     setZeroConnectController((current) =>
       cancelPatternImportDxfPhaseECadTableZeroConnectControllerV1(current),
@@ -1503,14 +1545,7 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
     !calloutToolActive &&
     !panToolActive &&
     !zeroConnectController.session;
-  const selectCanvasPiece = (pieceKey: string, toggle = false) => {
-    setPieceLayoutSession((current) =>
-      selectPatternImportDxfPhaseECadTablePiecesV1(
-        current,
-        [pieceKey],
-        toggle ? 'toggle' : 'replace',
-      ),
-    );
+  const focusCanvasPieceSide = (pieceKey: string) => {
     const identity = pieceLayoutSession.pieces.find(
       ({ identity }) => identity.key === pieceKey,
     )?.identity;
@@ -1521,6 +1556,16 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
         )
       : -1;
     if (sideIndex === 0 || sideIndex === 1) onActivePieceIndexChange(sideIndex);
+  };
+  const selectCanvasPiece = (pieceKey: string, toggle = false) => {
+    setPieceLayoutSession((current) =>
+      selectPatternImportDxfPhaseECadTablePiecesV1(
+        current,
+        [pieceKey],
+        toggle ? 'toggle' : 'replace',
+      ),
+    );
+    focusCanvasPieceSide(pieceKey);
   };
   const canvasPoint = (event: Readonly<{ clientX: number; clientY: number }>) => {
     const svg = canvasSvgRef.current;
@@ -1533,31 +1578,21 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
     return { x: transformed.x, y: transformed.y };
   };
   const beginPieceArrange = (pieceKey: string, event: ReactPointerEvent<SVGGElement>) => {
-    if (!canvasSelectActive) return;
+    if (!canvasSelectActive || event.button !== 0) return;
     const startMm = canvasPoint(event);
     if (!startMm) return;
     event.stopPropagation();
     const alreadySelected = pieceLayoutSession.selectedPieceKeys.includes(pieceKey);
-    const next = selectPatternImportDxfPhaseECadTablePiecesV1(
-      pieceLayoutSession,
-      [pieceKey],
-      event.shiftKey ? 'toggle' : alreadySelected ? 'add' : 'replace',
-    );
-    setPieceLayoutSession(next);
-    const identity = next.pieces.find(({ identity }) => identity.key === pieceKey)?.identity;
-    const sideIndex = identity
-      ? proposal.seams[activeSeamIndex].sides.findIndex(
-          (side) =>
-            side.pieceId === identity.pieceId && side.pieceLineKey === identity.pieceLineKey,
-        )
-      : -1;
-    if (sideIndex === 0 || sideIndex === 1) onActivePieceIndexChange(sideIndex);
-    if (!next.selectedPieceKeys.includes(pieceKey)) return;
     pieceArrangeGestureRef.current = {
       pieceKey,
       pointerId: event.pointerId,
       startMm,
-      origin: next,
+      dragLayout: selectPatternImportDxfPhaseECadTablePiecesV1(
+        pieceLayoutSession,
+        [pieceKey],
+        event.shiftKey ? 'toggle' : alreadySelected ? 'add' : 'replace',
+      ),
+      toggle: event.shiftKey,
       moved: false,
     };
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -1567,24 +1602,28 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
     const currentMm = canvasPoint(event);
     if (!gesture || gesture.pointerId !== event.pointerId || !currentMm) return;
     event.stopPropagation();
-    if (Math.abs(currentMm.x - gesture.startMm.x) + Math.abs(currentMm.y - gesture.startMm.y) > 0.5)
-      gesture.moved = true;
-    setPieceLayoutSession(
-      translateSelectedPatternImportDxfPhaseECadTablePiecesV1(gesture.origin, {
-        x: currentMm.x - gesture.startMm.x,
-        y: currentMm.y - gesture.startMm.y,
-      }),
-    );
+    const delta = { x: currentMm.x - gesture.startMm.x, y: currentMm.y - gesture.startMm.y };
+    if (!gesture.moved && Math.abs(delta.x) + Math.abs(delta.y) <= 0.5) return;
+    const canDrag = gesture.dragLayout.selectedPieceKeys.includes(gesture.pieceKey);
+    if (!gesture.moved && canDrag) focusCanvasPieceSide(gesture.pieceKey);
+    gesture.moved = true;
+    if (canDrag)
+      setPieceLayoutSession(
+        translateSelectedPatternImportDxfPhaseECadTablePiecesV1(gesture.dragLayout, delta),
+      );
   };
   const endPieceArrange = (event: ReactPointerEvent<SVGGElement>) => {
     const gesture = pieceArrangeGestureRef.current;
     if (gesture?.pointerId !== event.pointerId) return;
-    if (gesture.moved) {
-      suppressPieceSelectClickRef.current = gesture.pieceKey;
-      window.setTimeout(() => {
-        if (suppressPieceSelectClickRef.current === gesture.pieceKey)
-          suppressPieceSelectClickRef.current = null;
-      }, 0);
+    if (!gesture.moved && event.type === 'pointerup') {
+      const pieceKey = gesture.toggle
+        ? gesture.pieceKey
+        : nextPatternImportDxfPhaseECadTablePieceHitV1(
+            pieceLayoutSession,
+            gesture.pieceKey,
+            gesture.startMm,
+          );
+      selectCanvasPiece(pieceKey, gesture.toggle);
     }
     pieceArrangeGestureRef.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId))
@@ -1632,7 +1671,7 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
       className='flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-pageBg'
     >
       <div className='min-h-0 flex-1'>
-        <div className='grid h-full min-h-0 gap-0 lg:grid-cols-[auto_3rem_minmax(0,1fr)]'>
+        <div className='grid h-full min-h-0 grid-cols-[auto_minmax(0,1fr)] gap-0'>
           <PatternImportDxfPhaseECadWorkbenchObjectSidebarV1
             pieces={catalog.pieces.map((piece) => ({
               objectKey: patternImportDxfPhaseECadTablePieceKeyV1(
@@ -1659,94 +1698,126 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
                 onActiveSeamIndexChange(nextIndex as SeamIndex);
             }}
           />
-          <nav
-            className='flex gap-1 overflow-x-auto border-r border-borderColor bg-bgColor p-1 lg:flex-col lg:overflow-visible'
-            aria-label='Assembly tools'
-          >
-            <PatternImportDxfPhaseECadWorkbenchToolButtonV1
-              icon='select'
-              label='Select'
-              active={measurementTool === null && !calloutToolActive && !panToolActive}
-              pressed={measurementTool === null && !calloutToolActive && !panToolActive}
-              onClick={() => selectMeasurementTool(null)}
-            />
-            <PatternImportDxfPhaseECadWorkbenchToolButtonV1
-              icon='hand'
-              label='Hand'
-              active={panToolActive}
-              pressed={panToolActive}
-              onClick={selectPanTool}
-            />
-            <PatternImportDxfPhaseECadTableConnectToolControlV1
-              phase={zeroConnectToolPhase}
-              disabled={disabled || !projectionReady}
-              onStart={startZeroConnect}
-              onCancel={cancelZeroConnect}
-            />
-            <details
-              className='group relative border-t border-hairline pt-1'
-              open={measureMenuOpen}
-              data-draft-cad-tool-group='measure'
-              data-tool-group-open={measureMenuOpen}
-              onToggle={(event) => setMeasureMenuOpen(event.currentTarget.open)}
+          <div className='relative flex h-full min-h-0 min-w-0 flex-col'>
+            <div
+              className='absolute right-2 top-1/2 z-30 flex h-[calc(100%-1rem)] w-12 -translate-y-1/2 items-center overflow-visible'
+              data-cad-assembly-tool-rail-wrapper=''
             >
-              <summary
-                className={`flex h-10 w-10 cursor-pointer list-none items-center justify-center marker:hidden ${
-                  measurementTool
-                    ? 'bg-textColor text-bgColor'
-                    : 'bg-transparent text-textColor hover:bg-pageBg'
-                }`}
-                aria-label='Measure tools'
-                title='Measure tools'
+              <nav
+                className='flex max-h-full w-12 flex-col gap-0.5 overflow-y-auto border border-borderColor bg-bgColor/95 p-0.5'
+                aria-label='Assembly tools'
+                data-cad-assembly-tool-rail=''
               >
-                <RulerSquareIcon aria-hidden width='16' height='16' />
-              </summary>
-              <div className='absolute top-0 left-[calc(100%+0.5rem)] z-30 grid w-40 grid-cols-3 gap-1 border border-borderColor bg-bgColor p-1.5'>
-                <Text component='p' size='micro' className='col-span-3 px-1 font-bold'>
-                  Measure
-                </Text>
-                {(['point', 'line', 'edge'] as const).map((tool) => (
-                  <PatternImportDxfPhaseECadWorkbenchToolButtonV1
-                    key={tool}
-                    icon={`measure-${tool}`}
-                    label={`Measure ${tool}`}
-                    active={measurementTool === tool}
-                    pressed={measurementTool === tool}
-                    onClick={() => {
-                      selectMeasurementTool(tool);
-                      setMeasureMenuOpen(false);
+                <PatternImportDxfPhaseECadWorkbenchToolButtonV1
+                  icon='select'
+                  label='Select'
+                  active={measurementTool === null && !calloutToolActive && !panToolActive}
+                  pressed={measurementTool === null && !calloutToolActive && !panToolActive}
+                  onClick={() => selectMeasurementTool(null)}
+                />
+                <PatternImportDxfPhaseECadWorkbenchToolButtonV1
+                  icon='hand'
+                  label='Hand'
+                  active={panToolActive}
+                  pressed={panToolActive}
+                  onClick={selectPanTool}
+                />
+                <PatternImportDxfPhaseECadTableConnectToolControlV1
+                  phase={zeroConnectToolPhase}
+                  disabled={disabled || !projectionReady}
+                  onStart={startZeroConnect}
+                  onCancel={cancelZeroConnect}
+                />
+                <details
+                  className='group relative border-t border-hairline pt-1'
+                  open={measureMenuOpen}
+                  data-draft-cad-tool-group='measure'
+                  data-tool-group-open={measureMenuOpen}
+                  onToggle={(event) => setMeasureMenuOpen(event.currentTarget.open)}
+                >
+                  <summary
+                    id={`${measureToolId}-summary`}
+                    ref={measureMenuSummaryRef}
+                    className={`flex h-10 w-10 cursor-pointer list-none items-center justify-center marker:hidden ${
+                      measurementTool
+                        ? 'bg-textColor text-bgColor'
+                        : 'bg-transparent text-textColor hover:bg-pageBg'
+                    }`}
+                    aria-label='Measure tools'
+                    aria-controls={`${measureToolId}-flyout`}
+                    aria-expanded={measureMenuOpen}
+                    title='Measure tools'
+                    onPointerDown={() => {
+                      keyboardOpenedMeasureRef.current = false;
                     }}
+                    onKeyDown={(event) => {
+                      if ((event.key === 'Enter' || event.key === ' ') && !measureMenuOpen)
+                        keyboardOpenedMeasureRef.current = true;
+                    }}
+                  >
+                    <RulerSquareIcon aria-hidden width='16' height='16' />
+                  </summary>
+                </details>
+                <PatternImportDxfPhaseECadWorkbenchToolButtonV1
+                  icon='callout'
+                  label='Callout'
+                  active={calloutToolActive}
+                  pressed={calloutToolActive}
+                  onClick={selectCalloutTool}
+                />
+                <div className='flex flex-col gap-1 border-t border-hairline pt-1'>
+                  <PatternImportDxfPhaseECadWorkbenchToolButtonV1
+                    icon='view-options'
+                    label='View options'
+                    active={viewOptionsOpen}
+                    expanded={viewOptionsOpen}
+                    onClick={() => setViewOptionsOpen((value) => !value)}
                   />
-                ))}
-              </div>
-            </details>
-            <PatternImportDxfPhaseECadWorkbenchToolButtonV1
-              icon='callout'
-              label='Callout'
-              active={calloutToolActive}
-              pressed={calloutToolActive}
-              onClick={selectCalloutTool}
-            />
-            <div className='flex gap-1 border-l border-hairline pl-1 lg:flex-col lg:border-t lg:border-l-0 lg:pt-1 lg:pl-0'>
-              <PatternImportDxfPhaseECadWorkbenchToolButtonV1
-                icon='view-options'
-                label='View options'
-                active={viewOptionsOpen}
-                expanded={viewOptionsOpen}
-                onClick={() => setViewOptionsOpen((value) => !value)}
-              />
+                </div>
+                {workspaceContextControl ? (
+                  <div
+                    className='flex flex-col gap-1 border-t border-hairline pt-1'
+                    data-cad-2d-tool-context-slot=''
+                  >
+                    {workspaceContextControl}
+                  </div>
+                ) : null}
+              </nav>
+              {measureMenuOpen ? (
+                <div
+                  id={`${measureToolId}-flyout`}
+                  ref={measureFlyoutRef}
+                  className='absolute top-1/2 right-[calc(100%+0.5rem)] z-30 grid w-40 -translate-y-1/2 grid-cols-3 gap-1 border border-borderColor bg-bgColor p-1.5'
+                  data-cad-tool-flyout='measure'
+                  role='group'
+                  aria-labelledby={`${measureToolId}-summary`}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape') {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      closeMeasureFlyoutFromKeyboard();
+                    }
+                  }}
+                >
+                  <Text component='p' size='micro' className='col-span-3 px-1 font-bold'>
+                    Measure
+                  </Text>
+                  {(['point', 'line', 'edge'] as const).map((tool) => (
+                    <PatternImportDxfPhaseECadWorkbenchToolButtonV1
+                      key={tool}
+                      icon={`measure-${tool}`}
+                      label={`Measure ${tool}`}
+                      active={measurementTool === tool}
+                      pressed={measurementTool === tool}
+                      onClick={() => {
+                        selectMeasurementTool(tool);
+                        setMeasureMenuOpen(false);
+                      }}
+                    />
+                  ))}
+                </div>
+              ) : null}
             </div>
-            {workspaceContextControl ? (
-              <div
-                className='flex gap-1 border-l border-hairline pl-1 lg:flex-col lg:border-t lg:border-l-0 lg:pt-1 lg:pl-0'
-                data-cad-2d-tool-context-slot=''
-              >
-                {workspaceContextControl}
-              </div>
-            ) : null}
-          </nav>
-
-          <div className='flex h-full min-h-0 min-w-0 flex-col'>
             {!ready ? (
               <div
                 ref={validationActionRef}
@@ -1978,8 +2049,7 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
                             colorwayPreview={activeColorwayPreview}
                             showProposals={proposalBound && showProposals}
                             showVertices={proposalBound && showVertices}
-                            showSewingBoundaries={showSewingBoundaries}
-                            showCutBoundaries={showCutBoundaries}
+                            boundaryVisibility={boundaryVisibility}
                             showMeasurementLabels={proposalBound && showMeasurementLabels}
                             showCalloutText={proposalBound && showCalloutText}
                             measurementUnit={measurementUnit}
@@ -1989,17 +2059,11 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
                             measurements={proposalBound ? measurements : []}
                             callouts={proposalBound ? callouts : []}
                             layoutKey={layout.identity.key}
-                            sourceBounds={layout.sourceBounds}
-                            displayOffset={layout.offsetMm}
+                            layout={layout}
+                            pieceSelectActive={canvasSelectActive}
                             unit={canvasMmPerPixel}
                             disabled={disabled || panToolActive}
-                            onSelect={(toggle) => {
-                              if (suppressPieceSelectClickRef.current === layout.identity.key) {
-                                suppressPieceSelectClickRef.current = null;
-                                return;
-                              }
-                              selectCanvasPiece(layout.identity.key, toggle);
-                            }}
+                            onSelect={() => selectCanvasPiece(layout.identity.key)}
                             onArrangePointerDown={(event) =>
                               beginPieceArrange(layout.identity.key, event)
                             }
@@ -2029,7 +2093,7 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
                             return (
                               <g
                                 key={segment.viewKey}
-                                transform={`translate(${layout.offsetMm.x} ${layout.offsetMm.y})`}
+                                transform={cadTablePieceSvgTransformV1(layout, 'source')}
                                 data-cad-zero-connect-edge={segment.viewKey}
                                 data-cad-zero-connect-piece={segment.pieceId}
                                 data-cad-zero-connect-contour={segment.contourId}
@@ -2065,10 +2129,11 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
                                   aria-label={`Choose ${segment.pieceLineKey} edge ${segment.boundaryVertexIds.join(' → ')}; hold Shift for reverse`}
                                   onClick={(event) => {
                                     event.stopPropagation();
+                                    if (!canSelect) return;
                                     select(event.shiftKey);
                                   }}
                                   onKeyDown={(event) => {
-                                    if (event.key === 'Enter' || event.key === ' ') {
+                                    if (canSelect && (event.key === 'Enter' || event.key === ' ')) {
                                       event.preventDefault();
                                       event.stopPropagation();
                                       select(event.shiftKey);

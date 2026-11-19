@@ -194,6 +194,7 @@ describe('topology annotation application transaction V5', () => {
       source as never,
       { measurements: [measurement] as never, callouts: [] },
       new AbortController().signal,
+      hash('4'),
     );
 
     expect(result).toMatchObject({
@@ -206,6 +207,33 @@ describe('topology annotation application transaction V5', () => {
     expect(test.GetTechCardPatternSemanticSidecar).toHaveBeenCalledTimes(2);
     expect(mocks.resolveVertex).toHaveBeenCalledWith(source.projection, measurement.anchors[0]);
     expect(mocks.restoreAnnotations).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses a changed edit baseline before building or writing a V5 replacement', async () => {
+    const test = rig(
+      stored(PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V5, v5Bytes, hash('5')),
+    );
+
+    const result = await test.transaction.save(
+      session as never,
+      source as never,
+      { measurements: [], callouts: [] },
+      new AbortController().signal,
+      hash('4'),
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      blockers: [
+        {
+          code: 'annotation-save-blocked',
+          detail: 'Saved annotations changed. Reload them before saving your edits.',
+        },
+      ],
+    });
+    expect(test.GetTechCardPatternSemanticSidecar).toHaveBeenCalledOnce();
+    expect(mocks.buildV5).not.toHaveBeenCalled();
+    expect(test.persist).not.toHaveBeenCalled();
   });
 
   it('rejects stale reconstructed source before reading or writing', async () => {

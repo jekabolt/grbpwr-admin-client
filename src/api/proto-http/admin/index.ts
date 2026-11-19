@@ -192,6 +192,10 @@ export type ProductionRunCoverageSource =
   // and the two share an article. Silently picking one of the two sources would lie in the very
   // signature the field exists to carry. A CONTRIBUTION is never MIXED — a contribution is one slot.
   | "PRODUCTION_RUN_COVERAGE_SOURCE_MIXED";
+export type TechCardSavedAssemblySnapshotProfile =
+  | "TECH_CARD_SAVED_ASSEMBLY_SNAPSHOT_PROFILE_UNKNOWN"
+  | "TECH_CARD_SAVED_ASSEMBLY_SNAPSHOT_PROFILE_COMPLETE_SOURCE_V1"
+  | "TECH_CARD_SAVED_ASSEMBLY_SNAPSHOT_PROFILE_COMPLETE_SOURCE_WITH_AUTHORED_FOLDS_V1";
 // AccessLevel is the level of access an account has to a section. WRITE implies READ.
 export type AccessLevel =
   | "ACCESS_LEVEL_UNSPECIFIED"
@@ -10286,6 +10290,7 @@ export type common_TechCardSeamAnchor = {
   // Which way THIS anchor's piece lies against the other side's pieces in the step that sews the
   // row (the owner's under/over switch). UNKNOWN = unset: the client's own rule, as before.
   layer: common_TechCardSeamLayer | undefined;
+  pointClosure?: common_TechCardSeamPointClosureAnchor;
 };
 
 // TechCardSeamSample is one point of an edge's shape, in the piece's own bbox-normalised frame
@@ -10310,6 +10315,32 @@ export type common_TechCardSeamLayer =
   | "TECH_CARD_SEAM_LAYER_UNKNOWN"
   | "TECH_CARD_SEAM_LAYER_UNDER"
   | "TECH_CARD_SEAM_LAYER_OVER";
+// The exact original L8 mark of one piece in one saved size. The point is derived from the signed
+// DXF after reading. A decoded PathId by itself is not a durable entity identity.
+export type common_TechCardSeamPointClosureAnchor = {
+  patternLineKey: string | undefined;
+  savedRowRevision: number | undefined;
+  dxfSha256: string | undefined;
+  sizeId: number | undefined;
+  aliasBlockName: string | undefined;
+  nativeBlockName: string | undefined;
+  sourceInstancePath: string[] | undefined;
+  sourceEntityOp?: number;
+  role: common_TechCardSeamPointClosureRole | undefined;
+  // The buttonhole side holds the owner's choice, independent of physical closure in a frame.
+  intent: common_TechCardSeamPointClosureIntent | undefined;
+  buttonholeOperationNumber: number | undefined;
+  buttonOperationNumber: number | undefined;
+};
+
+export type common_TechCardSeamPointClosureRole =
+  | "TECH_CARD_SEAM_POINT_CLOSURE_ROLE_UNKNOWN"
+  | "TECH_CARD_SEAM_POINT_CLOSURE_ROLE_BUTTONHOLE_MIDPOINT"
+  | "TECH_CARD_SEAM_POINT_CLOSURE_ROLE_BUTTON_MARK_CENTER";
+export type common_TechCardSeamPointClosureIntent =
+  | "TECH_CARD_SEAM_POINT_CLOSURE_INTENT_UNKNOWN"
+  | "TECH_CARD_SEAM_POINT_CLOSURE_INTENT_OPEN"
+  | "TECH_CARD_SEAM_POINT_CLOSURE_INTENT_CLOSED";
 // One size of a measured topstitch line.
 export type common_TechCardTopstitchLineSize = {
   sizeId: number | undefined;
@@ -11971,7 +12002,8 @@ export type common_TechCardSeamKind =
   | "TECH_CARD_SEAM_KIND_COMPOSITE"
   | "TECH_CARD_SEAM_KIND_SURFACE"
   | "TECH_CARD_SEAM_KIND_CLOSURE"
-  | "TECH_CARD_SEAM_KIND_POSE";
+  | "TECH_CARD_SEAM_KIND_POSE"
+  | "TECH_CARD_SEAM_KIND_POINT_CLOSURE";
 // TechCardSeamDirection is how the two sides walk against each other. REVERSED is the normal seam
 // (face-up pieces walk a shared seam oppositely); SAME when one side is a flipped instance. UNKNOWN
 // is legal on write: the reader then picks the pairing itself.
@@ -12076,6 +12108,77 @@ export type UpdateTechCardRequest = {
   // UUID minted when the edit screen opens. Non-empty ordinary saves coalesce their pre-images into
   // one autosave snapshot per server-side five-minute bucket; absent keeps legacy save behaviour.
   saveSessionId: string | undefined;
+  // Name-only Workbench edit. Send without tech_card. Linked cards require the three
+  // additional authority fields inside this message; older servers still refuse linked cards.
+  guardedPieceRename: GuardedZeroOperationPieceRename | undefined;
+  guardedPieceJoin: GuardedNativePieceJoin | undefined;
+  // Pattern edit bound to the same Assembly state used by Review. Send the document inside
+  // the guard, without tech_card, so an older handler cannot save it without the precondition.
+  guardedAssemblyPatternUpdate: GuardedAssemblyPatternUpdate | undefined;
+};
+
+// Pins a display name edit to a saved DXF row. With no attached authority fields,
+// a card must have zero operations and no protected attachments.
+export type GuardedZeroOperationPieceRename = {
+  pieceLineKey: string | undefined;
+  expectedName: string | undefined;
+  nextName: string | undefined;
+  scopeKey: string | undefined;
+  patternLineKey: string | undefined;
+  expectedSavedRowRevision: number | undefined;
+  expectedDxfSha256: string | undefined;
+  // All three fields opt into an attached-card rename. The exact current V10 is
+  // retained as historical placement; the rename advances the card and Assembly clocks.
+  expectedServerAssemblyRevision?: string;
+  expectedCompleteSourceSha256?: string;
+  expectedCurrentSidecarSha256?: string;
+};
+
+// Explicit, single-size saved native boundary Join. The server constructs the document delta.
+export type GuardedNativePieceJoin = {
+  expectedRow: TechCardSavedPatternRowIdentity | undefined;
+  expectedAssemblyRevision: string | undefined;
+  expectedCompleteSourceSha256: string | undefined;
+  fixed: GuardedNativePieceJoin_Boundary | undefined;
+  moving: GuardedNativePieceJoin_Boundary | undefined;
+  resultLineKey: string | undefined;
+  resultIdentity: string | undefined;
+  fabricPurpose: string | undefined;
+  bomLineKey: string | undefined;
+  sizeId: number | undefined;
+  sizeToken: string | undefined;
+  translateXMillionthsMm: number | undefined;
+  translateYMillionthsMm: number | undefined;
+  reviewedUrl: string | undefined;
+  reviewedSizeBytes: number | undefined;
+  reviewedSha256: string | undefined;
+  reviewedFilename: string | undefined;
+};
+
+export type TechCardSavedPatternRowIdentity = {
+  techCardId: number | undefined;
+  scopeKey: string | undefined;
+  patternLineKey: string | undefined;
+  savedRowRevision: number | undefined;
+  cardLockVersion: number | undefined;
+  url: string | undefined;
+  sizeBytes: number | undefined;
+  sha256: string | undefined;
+  patternVersion: number | undefined;
+  downloadUrl: string | undefined;
+};
+
+export type GuardedNativePieceJoin_Boundary = {
+  pieceLineKey: string | undefined;
+  pieceIdentity: string | undefined;
+  curveId: string | undefined;
+  startVertexId: string | undefined;
+  endVertexId: string | undefined;
+};
+
+export type GuardedAssemblyPatternUpdate = {
+  techCard: common_TechCardInsert | undefined;
+  expectedServerAssemblyRevision: string | undefined;
 };
 
 export type UpdateTechCardResponse = {
@@ -14913,19 +15016,6 @@ export type GetTechCardPatternSemanticSidecarResponse = {
   semanticSidecar: TechCardPatternSemanticSidecar | undefined;
 };
 
-export type TechCardSavedPatternRowIdentity = {
-  techCardId: number | undefined;
-  scopeKey: string | undefined;
-  patternLineKey: string | undefined;
-  savedRowRevision: number | undefined;
-  cardLockVersion: number | undefined;
-  url: string | undefined;
-  sizeBytes: number | undefined;
-  sha256: string | undefined;
-  patternVersion: number | undefined;
-  downloadUrl: string | undefined;
-};
-
 export type GetTechCardSavedAssemblySnapshotRequest = {
   techCardId: number | undefined;
   patternLineKey: string | undefined;
@@ -14938,6 +15028,71 @@ export type GetTechCardSavedAssemblySnapshotRequest = {
   selectedOperationNumber: number | undefined;
   expectedServerAssemblyRevision?: string;
   expectedAssemblyTopologySha256?: string;
+  profile?: TechCardSavedAssemblySnapshotProfile;
+  expectedCompleteSourceSha256?: string;
+  // Required for the authored-fold profile. A current card size ID from the size dictionary.
+  selectedSizeId?: number;
+  expectedAuthoredFoldSourceSha256?: string;
+  // Complete source only. Do not read or admit a stored placement or review carrier.
+  sourceOnly?: boolean;
+};
+
+export type TechCardSavedAssemblySourceAliasV1 = {
+  scopeKey: string | undefined;
+  blockName: string | undefined;
+  pieceLineKey: string | undefined;
+};
+
+// Exact saved source data. Confirmed status, samples, POSE transforms, and missing anchor sizes
+// are persisted facts, not native DXF edge bindings or physical admission.
+export type TechCardSavedAssemblyCompleteSourceV1 = {
+  // Sorted by canonical scope and stable pattern line key. Download URLs are minted separately.
+  rows: TechCardSavedPatternRowIdentity[] | undefined;
+  // Same order as the top-level operations' seam_keys concatenated in operation order.
+  ownedSeams: common_TechCardSeam[] | undefined;
+  // Sorted by scope and stored block name. A scope can have several sheets.
+  aliases: TechCardSavedAssemblySourceAliasV1[] | undefined;
+  // SHA-256("tech-card-saved-assembly-complete-source/1" + NUL + canonical_json).
+  sourceSha256: string | undefined;
+  // Sorted-key JSON of serverAssemblyRevision, rows (without downloadUrl), full AO operations,
+  // ownedSeams, aliases and garmentLabels in their response order. The wire lists use lowerCamelCase and
+  // the same EmitUnpopulated protobuf JSON projection as the production gateway.
+  canonicalJson: string | undefined;
+  // Card-owned generated sources referenced by AO label keys or owned anchors, sorted by line key.
+  // The existing label wire preserves saved dimensions and fold/stitch settings. An unset dimension
+  // stays unknown here, and no label acquires DXF edge authority.
+  garmentLabels: common_TechCardGarmentLabel[] | undefined;
+  // Cut-to-length trim referenced by owned seam anchors. The canonical JSON includes these only
+  // when present; old strip-free sources keep exactly the same seal.
+  cutStrips: TechCardSavedAssemblyCutStripSourceV1[] | undefined;
+};
+
+export type TechCardSavedAssemblyCutStripSourceV1 = {
+  strip: common_TechCardCutStrip | undefined;
+  bomSection: string | undefined;
+  bomUnit: string | undefined;
+  bomMaterialId?: number;
+};
+
+export type TechCardSavedAssemblyAuthoredFoldV1 = {
+  operationNumber: number | undefined;
+  operationOrder: number | undefined;
+  fold: common_TechCardPieceFold | undefined;
+  sourceFingerprint: string | undefined;
+};
+
+// Authored source witnesses for the selected rank. The fold coordinates and anchored_size
+// remain as stored. Native per-rank geometry resolution belongs to the compiler.
+export type TechCardSavedAssemblyAuthoredFoldSourceV1 = {
+  completeSourceSha256: string | undefined;
+  selectedSizeId: number | undefined;
+  selectedSizeToken: string | undefined;
+  // In persisted operation order, then in each operation's fold_keys order.
+  folds: TechCardSavedAssemblyAuthoredFoldV1[] | undefined;
+  // SHA-256("tech-card-saved-assembly-authored-fold-source/1" + NUL + canonical_json).
+  sourceSha256: string | undefined;
+  // Sorted-key protobuf JSON of the first four fields with EmitUnpopulated enabled.
+  canonicalJson: string | undefined;
 };
 
 export type GetTechCardSavedAssemblySnapshotResponse = {
@@ -14948,7 +15103,12 @@ export type GetTechCardSavedAssemblySnapshotResponse = {
   serverAssemblyRevision: string | undefined;
   assemblyTopologySha256: string | undefined;
   topologyCanonicalJson: string | undefined;
+  // Existing anchor carrier read in the same database snapshot. Its own CAS governs carrier bytes.
   semanticSidecar?: TechCardPatternSemanticSidecar;
+  // Present for both complete-source profiles, which leave selected-operation fields unset.
+  completeSourceV1?: TechCardSavedAssemblyCompleteSourceV1;
+  // Present only for COMPLETE_SOURCE_WITH_AUTHORED_FOLDS_V1, even when no folds are linked.
+  authoredFoldSourceV1?: TechCardSavedAssemblyAuthoredFoldSourceV1;
 };
 
 export type UpsertTechCardSeamsRequest = {
@@ -15003,6 +15163,8 @@ export type ChangeTechCardSeamsRequest = {
   link: SeamLink[] | undefined;
   // Links to remove; keys may name rows of this request's upsert by their sent key.
   detach: SeamLink[] | undefined;
+  // Required for changes to a POINT_CLOSURE, including its operation link or intent.
+  expectedServerAssemblyRevision?: string;
 };
 
 export type ChangeTechCardSeamsResponse = {

@@ -1,3 +1,4 @@
+import { savedWorkbenchScopeKeyV1 } from './saved-workbench-scope-v1';
 import type { common_TechCard } from 'api/proto-http/admin';
 import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 
@@ -180,7 +181,7 @@ function aliasesFor(
       const piece = allPieces.find(({ name }) => name === pieceName);
       if (!piece) throw new Error(`Saved-card fixture piece ${pieceName} is unavailable.`);
       return Object.freeze({
-        scopeKey,
+        scopeKey: savedWorkbenchScopeKeyV1({ key: scopeKey, byPurpose: true }),
         fabricPurpose: scopeKey,
         bomLineKey,
         blockName,
@@ -237,7 +238,7 @@ function buildFixture(
     input.scopes.map((scope, index) => {
       const row = Object.freeze({
         techCardId: input.techCardId,
-        scopeKey: scope.purpose,
+        scopeKey: savedWorkbenchScopeKeyV1({ key: scope.purpose, byPurpose: true }),
         patternLineKey: scope.patternLineKey,
         revision: index + 1,
         cardLockVersion: input.cardLockVersion,
@@ -247,7 +248,7 @@ function buildFixture(
       });
       return Object.freeze({
         purpose: scope.purpose,
-        scopeKey: scope.purpose,
+        scopeKey: savedWorkbenchScopeKeyV1({ key: scope.purpose, byPurpose: true }),
         bomLineKey: scope.bomLineKey,
         patternLineKey: scope.patternLineKey,
         corpusFilePrefix: scope.corpusFilePrefix,

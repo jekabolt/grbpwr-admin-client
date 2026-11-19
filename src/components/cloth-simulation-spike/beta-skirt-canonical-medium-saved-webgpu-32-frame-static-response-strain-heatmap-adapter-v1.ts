@@ -1,4 +1,8 @@
 import * as THREE from 'three';
+import {
+  mapTriangleStrainToRenderOrderV1,
+  type TriangleStrainRenderOrderReceiptV1,
+} from './triangle-strain-render-order-v1';
 
 import {
   buildBetaSkirtCanonicalMediumStrainHeatmapGeometryV1,
@@ -102,6 +106,7 @@ export type BetaSkirtCanonicalMediumSavedWebgpu32FrameStaticResponseStrainHeatma
       strainColorLutSha256: string;
       renderedNonIndexedPositionsFloat32LeSha256: string;
       renderedVertexColorsFloat32LeSha256: string;
+      renderTriangleOrder: TriangleStrainRenderOrderReceiptV1;
     }>;
     counts: Readonly<{
       sourceFrameCount: 32;
@@ -709,11 +714,39 @@ export async function createBetaSkirtCanonicalMediumSavedWebgpu32FrameStaticResp
     const witness = projectLiveInputs(runtimeOwner, responseOwner, strainOwner);
     validateStructuralReports(runtimeOwner, responseOwner, strainOwner, witness);
     validateDimensionsAndTopology(witness);
+    const renderOrder = await mapTriangleStrainToRenderOrderV1({
+      normalizedTopology: witness.response.normalizedTriangles,
+      continuumTriangleIndices:
+        witness.runtime.normalizedV5.simulation.constraints.continuumStrain.triangleIndices,
+      triangleValues: witness.strain.triangleValues,
+      validityFlags: witness.strain.validityFlags,
+    });
+    assertInputsStillMatch(
+      runtimeOwner,
+      responseOwner,
+      strainOwner,
+      witness,
+      'during render triangle ordering',
+    );
+    if (
+      renderOrder.receipt.continuumTriangleIndicesSha256 !==
+        strainOwner.report.bindings.port.triangleIndicesSha256 ||
+      renderOrder.receipt.normalizedTopologySha256 !==
+        strainOwner.report.bindings.port.normalizedTopologySha256 ||
+      renderOrder.receipt.rawTriangleValuesSha256 !==
+        strainOwner.report.bindings.outputValuesFloat32LeSha256 ||
+      renderOrder.receipt.rawValidityFlagsSha256 !==
+        strainOwner.report.bindings.outputValidityFlagsUint32LeSha256
+    )
+      fail(
+        'binding-mismatch',
+        'Render triangle permutation differs from the sealed strain source.',
+      );
     const heatmap = buildBetaSkirtCanonicalMediumStrainHeatmapGeometryV1({
       positions: witness.response.candidateCurrentPositions3M,
       topology: witness.response.normalizedTriangles,
-      triangleValues: witness.strain.triangleValues,
-      validityFlags: witness.strain.validityFlags,
+      triangleValues: renderOrder.orderedTriangleValues,
+      validityFlags: renderOrder.orderedValidityFlags,
     });
     assertInputsStillMatch(
       runtimeOwner,
@@ -830,6 +863,7 @@ export async function createBetaSkirtCanonicalMediumSavedWebgpu32FrameStaticResp
       strainColorLutSha256: strainReport.bindings.frozenV1ColorLutSha256,
       renderedNonIndexedPositionsFloat32LeSha256: renderedPositionsSha,
       renderedVertexColorsFloat32LeSha256: renderedColorsSha,
+      renderTriangleOrder: renderOrder.receipt,
     });
     const counts = objectFreeze({
       sourceFrameCount: 32 as const,

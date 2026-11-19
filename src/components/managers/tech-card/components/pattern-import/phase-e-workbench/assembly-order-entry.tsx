@@ -1,6 +1,13 @@
 import { useSavedClothPhysicalHostV1 } from '../phase-e-workbench-v2/use-saved-cloth-physical-host-v1';
-import { SavedClothPhysicalControlsV1 } from 'components/cloth-simulation-spike/saved-cloth-physical-controls-v1';
+import { CadWorkbenchPhysicalHostProductionMountV1 } from '../phase-e-workbench-v2/cad-workbench-physical-host-production-mount-v1';
 import type { CadWorkbenchPhysicalHostV1 } from '../phase-e-workbench-v2/cad-workbench-physical-host-v1';
+import type { SavedCrossMaterialReviewForPreviewV8 } from '../phase-e-workbench-v2/saved-complete-assembly-native-review-action-v8';
+import type { PrepareSavedWholeAssemblyPreviewV1 } from '../phase-e-workbench-v2/saved-whole-assembly-staged-preview-v1';
+import {
+  readSavedCadMannequinArrangementV1,
+  readSavedCadMannequinModelIdV1,
+  saveSavedCadMannequinArrangementV1,
+} from '../phase-e-workbench-v2/saved-cad-mannequin-arrangement-production-v1';
 import type { TechCardFormData } from 'components/managers/tech-card/components/schema';
 import {
   useSizeNames,
@@ -8,12 +15,20 @@ import {
 } from 'components/managers/model/components/use-size-systems';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import {
+  posesOf,
   rowsOf,
   useSeamsStore,
 } from 'components/managers/tech-card/components/assembly-seams/seams-store';
 import type { StoredSeam } from 'lib/seams';
+import {
+  pieceRefKey,
+  rollGoodsScopes,
+} from 'components/managers/tech-card/components/piece-block-refs';
+import { bindingScopes } from 'components/managers/tech-card/components/bom-purpose';
+import { savedWorkbenchBindingScopeKeyV1 } from '../phase-e-workbench-v2/saved-workbench-scope-v1';
 import type { PatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import type { PatternImportDxfProductPhaseEAuthoringChoicesV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-producer-v1';
+import type { PatternImportDxfProductVerifiedSavedReplayV1 } from 'lib/cloth/domain/pattern-import-dxf-product-commit-replay-v1';
 import {
   PATTERN_IMPORT_DXF_PRODUCT_WRITER_REPLAY_CARRIER_V1,
   type AssemblyContext,
@@ -21,6 +36,8 @@ import {
 } from 'lib/pattern-import/types';
 import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -69,18 +86,30 @@ import type { PatternImportDxfPhaseECadCommandAuthoringHandoffOwnerV1 } from '..
 import type { PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1 } from '../phase-e-workbench-v2/cad-table-zero-connect-authoring-handoff-v1';
 import type { PatternImportDxfPhaseECadTableCrossScopeAuthoringHandoffOwnerV1 } from '../phase-e-workbench-v2/cad-table-cross-scope-authoring-handoff-v1';
 import type { PatternImportDxfPhaseECadTablePressAuthoringOwnerV1 } from '../phase-e-workbench-v2/cad-table-press-authoring-v1';
-import type { PatternImportDxfPhaseECadOperationNavigationV1 } from '../phase-e-workbench-v2/cad-operation-navigation-v1';
+import {
+  countPatternImportDxfPhaseECadSelectedOperationWarningsV1,
+  type PatternImportDxfPhaseECadOperationNavigationV1,
+} from '../phase-e-workbench-v2/cad-operation-navigation-v1';
 import type { PatternImportDxfPhaseECadWorkbenchStitchEditorFieldV1 } from '../phase-e-workbench-v2/cad-workbench-stitch-editor-handoff-v1';
 import type { PatternImportDxfPhaseECadWorkbenchStitchEditCapabilitiesV1 } from '../phase-e-workbench-v2/cad-workbench-stitch-route-intent-v1';
-import type { PatternImportDxfPhaseEExactNAssemblyOrderSessionV2 } from '../phase-e-workbench-v2/exact-n-seam-production-mount-v2';
+import type {
+  PatternImportDxfPhaseEExactNAssemblyOrderSessionV2,
+  PatternImportDxfProductExactNDesktopGeometryV2,
+} from '../phase-e-workbench-v2/exact-n-seam-production-mount-v2';
+import { bindPatternImportDxfPhaseECadMannequinAnnotationSourceV1 } from '../phase-e-workbench-v2/cad-mannequin-exact-n-production-staging-v1';
+import { createPatternImportDxfPhaseERestoredTopologyAnnotationReaderV1 } from '../phase-e-workbench-v2/restored-topology-annotation-reader-v1';
+import { projectCadTablePieceFeatures } from '../phase-e-workbench-v2/cad-table-piece-features-v1';
 import { clearPatternImportDxfProductExactNSeamProductionSessionV2 } from '../phase-e-workbench-v2/exact-n-seam-production-session-v2';
 import type { PatternImportDxfProductCompositeSidecarApplicationTransactionV4 } from '../phase-e-workbench-v2/composite-sidecar-production-transaction-v4';
 import {
   PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_DURABLE_RESTORE_REQUEST_V1,
   createPatternImportDxfPhaseEZeroConnectProductionDurableBridgeV1,
+  type PatternImportDxfPhaseESavedNativeExactNConfirmV1,
 } from '../phase-e-workbench-v2/zero-connect-durable-composite-v4';
 import { projectPatternImportDxfPhaseECadWorkbenchColorwaysV1 } from '../phase-e-workbench-v2/cad-workbench-bom-visual-authority-v1';
 import { PatternImportDxfPhaseECadTableZeroOperationProductionMountV1 } from '../phase-e-workbench-v2/cad-table-zero-operation-production-mount-v1';
+import { POINT_CLOSURE_KIND } from '../phase-e-workbench-v2/saved-point-closure-authoring-v1';
+import { resolvePatternImportDxfPhaseEZeroConnectExistingLinkedN1TargetV1 } from '../phase-e-workbench-v2/cad-table-zero-connect-existing-linked-operation-rebind-v1';
 import { preparePatternImportDxfPhaseECadMannequinSavedAllScopeStagingV1 } from '../phase-e-workbench-v2/cad-mannequin-saved-all-scope-staging-v1';
 import {
   PATTERN_IMPORT_DXF_PHASE_E_CAD_SAVED_MATERIAL_SCOPE_EDITOR_PREPARATION_CLAIMS_V1,
@@ -106,7 +135,11 @@ import {
   matchesPatternImportDxfProductExactNSessionSavedBindingV1,
   patternImportDxfProductExactNSessionValidationKeyV1,
 } from '../phase-e-workbench-v2/durable-exact-session-current-v1';
-import { preparePatternImportDxfPhaseECadTableZeroOperationSavedV1 } from '../phase-e-workbench-v2/cad-table-zero-operation-saved-preparation-v1';
+import {
+  preparePatternImportDxfPhaseECadTableZeroOperationSavedV1,
+  type PatternImportDxfPhaseECadTableZeroOperationSavedPreparationResultV1,
+} from '../phase-e-workbench-v2/cad-table-zero-operation-saved-preparation-v1';
+import { readPatternImportDxfPhaseEZeroConnectSavedSceneProjectionV1 } from '../phase-e-workbench-v2/cad-table-zero-connect-phase-e-authority-v1';
 import { createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1 } from '../phase-e-workbench-v2/zero-operation-saved-card-authority-v1';
 import { PatternImportDxfPhaseECadTableDraftOperationsPanelV1 } from '../phase-e-workbench-v2/cad-table-draft-operations-panel-v1';
 import type { PatternImportDxfPhaseECadTableDraftOperationSessionBridgeResultV1 } from '../phase-e-workbench-v2/cad-table-draft-operation-session-bridge-v1';
@@ -118,6 +151,17 @@ import {
 } from './workbench';
 
 type FormOperation = NonNullable<TechCardFormData['operations']>[number];
+type SavedNativeExactNPreparation = Extract<
+  PatternImportDxfPhaseECadTableZeroOperationSavedPreparationResultV1,
+  { ok: true }
+>;
+type SavedNativeExactNReview = Readonly<{
+  key: string;
+  confirmation: PatternImportDxfPhaseESavedNativeExactNConfirmV1;
+  prepared: SavedNativeExactNPreparation;
+  status: 'ready' | 'saving' | 'blocked';
+  detail?: string;
+}>;
 
 export function routePatternImportDxfPhaseEAssemblyOrderEntryV2(
   seamKeys: readonly string[],
@@ -146,6 +190,9 @@ export function shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
   selectedSeamKeys,
   savedOrderedSeamKeys,
   exactSavedEmptyOperation,
+  exactSavedLinkedN1Target = false,
+  exactSavedStaleOperation = false,
+  exactSavedCompoundOperation = false,
 }: Readonly<{
   workbenchOpen: boolean;
   exactNSessionAvailable: boolean;
@@ -153,6 +200,9 @@ export function shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
   selectedSeamKeys: readonly string[];
   savedOrderedSeamKeys: readonly string[] | null;
   exactSavedEmptyOperation: boolean;
+  exactSavedLinkedN1Target?: boolean;
+  exactSavedStaleOperation?: boolean;
+  exactSavedCompoundOperation?: boolean;
 }>): boolean {
   const exactSavedLegacyN1 =
     savedProjectionBlockerCode === null &&
@@ -164,8 +214,18 @@ export function shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
     exactSavedEmptyOperation &&
     selectedSeamKeys.length === 0 &&
     savedOrderedSeamKeys === null;
+  const exactSavedSpanFallback =
+    savedProjectionBlockerCode === 'saved-seam-not-exact' &&
+    (exactSavedStaleOperation || exactSavedCompoundOperation) &&
+    selectedSeamKeys.length > 0 &&
+    savedOrderedSeamKeys === null;
   return (
-    workbenchOpen && !exactNSessionAvailable && (exactSavedLegacyN1 || exactSavedEmptyFallback)
+    workbenchOpen &&
+    !exactNSessionAvailable &&
+    (exactSavedLinkedN1Target ||
+      exactSavedLegacyN1 ||
+      exactSavedEmptyFallback ||
+      exactSavedSpanFallback)
   );
 }
 
@@ -186,6 +246,62 @@ export function isPatternImportDxfPhaseEExactSavedEmptyOperationV1({
   );
   return (
     matches.length === 1 && liveSeamKeys.length === 0 && (matches[0].seamKeys ?? []).length === 0
+  );
+}
+
+type SavedOperationSeam = Readonly<{
+  seamKey?: string;
+  status?: string;
+  stale?: boolean;
+  kind?: string;
+}>;
+
+type SavedOperationSeams = Readonly<{
+  liveOperationNumber: number;
+  liveSeamKeys: readonly string[];
+  savedOperations: readonly Readonly<{ operationNumber?: number; seamKeys?: readonly string[] }>[];
+  savedSeams: readonly SavedOperationSeam[];
+}>;
+
+function exactSelectedOperationSeams({
+  liveOperationNumber,
+  liveSeamKeys,
+  savedOperations,
+  savedSeams,
+}: SavedOperationSeams) {
+  const owners = savedOperations.filter(
+    ({ operationNumber }) => operationNumber === liveOperationNumber,
+  );
+  const savedKeys = owners[0]?.seamKeys;
+  if (
+    owners.length !== 1 ||
+    !liveSeamKeys.length ||
+    new Set(liveSeamKeys).size !== liveSeamKeys.length ||
+    savedKeys?.length !== liveSeamKeys.length
+  )
+    return null;
+
+  const seams: SavedOperationSeam[] = [];
+  for (const [index, key] of liveSeamKeys.entries()) {
+    if (!key || key !== key.trim() || key !== savedKeys[index]) return null;
+    const matches = savedSeams.filter(({ seamKey }) => seamKey === key);
+    const seam = matches[0];
+    if (matches.length !== 1 || seam?.status !== 'TECH_CARD_SEAM_STATUS_CONFIRMED') return null;
+    seams.push(seam);
+  }
+  return seams;
+}
+
+export function isPatternImportDxfPhaseEExactSavedStaleOperationV1(input: SavedOperationSeams) {
+  return exactSelectedOperationSeams(input)?.every(({ stale }) => stale === true) ?? false;
+}
+
+export function isPatternImportDxfPhaseEExactSavedCompoundOperationV1(input: SavedOperationSeams) {
+  const seams = exactSelectedOperationSeams(input);
+  return (
+    seams !== null &&
+    seams.every(({ stale }) => stale !== true) &&
+    seams.some(({ kind }) => kind === 'TECH_CARD_SEAM_KIND_COMPOSITE')
   );
 }
 
@@ -229,11 +345,11 @@ export const PATTERN_IMPORT_DXF_PHASE_E_ASSEMBLY_ORDER_ENTRY_CONTRACT_V1 = Objec
   stitchThreadRequiresUniqueBomLineIdentity: true,
   exactNCompositeV4OptionalBoundaryForwarded: true,
   exactNFixtureOrFallbackOwnerCreated: false,
-  savedGarmentMeshDownstreamProductionInjected: true,
-  savedGarmentCompileSessionLazyLoadedAfterVerifiedPersistence: true,
-  savedGarmentCompilerReadyBeforeOneShotSourceHandoff: true,
-  savedGarmentCompileSessionKeyedToSavedRowAndOperation: true,
-  previewLoadsOrConsumesSavedCompilerSource: false,
+  savedGarmentMeshDownstreamProductionInjected: false,
+  savedFullAssemblyPhysicalSnapshotRequired: true,
+  savedFullAssemblyNativeSourcePreparedAfterVerification: true,
+  durablePhysicalHostKeyedToSavedRowOperationAndBody: true,
+  clothPreviewMountedInsideMannequinViewport: true,
 } as const);
 
 // Match the qualified canonical local-frame/actual-body discretization (244 boundary vertices).
@@ -470,6 +586,7 @@ export type PatternImportDxfPhaseEAssemblyOrderFreshSessionV1 = Readonly<{
   submitChoices: (
     catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1,
     choices: PatternImportDxfProductPhaseEAuthoringChoicesV1,
+    firstAttachment?: Readonly<{ savedRowRevision: number; isCurrent: () => boolean }>,
   ) => Promise<PatternImportDxfPhaseEAssemblyOrderSubmitResultV1>;
 }>;
 
@@ -505,6 +622,7 @@ export type PatternImportDxfPhaseEAssemblyOrderSubmitResultV1 =
         'not-attempted'
       >;
       blockers: readonly PatternImportDxfPhaseEAssemblyOrderSubmitBlockerV1[];
+      verifiedAttachment?: Readonly<{ cardLockVersion: number; sidecarSha256: string }>;
     }>;
 
 export type PatternImportDxfPhaseEAssemblyOrderAsyncTicketV1 = Readonly<{
@@ -706,7 +824,12 @@ export type PatternImportDxfPhaseEAssemblyOrderPreparationV1 =
       blocker: PatternImportDxfPhaseEAssemblyOrderEntryBlockerV1;
     }>;
 
-function operationNumber(operation: FormOperation | undefined): number {
+type AssemblyOrderOperation = Pick<
+  FormOperation,
+  'operationNumber' | 'work' | 'inputKeys' | 'outputUnitKey' | 'outputUnitName' | 'seamKeys'
+>;
+
+function operationNumber(operation: AssemblyOrderOperation | undefined): number {
   const value = Number(operation?.operationNumber ?? 0);
   return Number.isSafeInteger(value) && value > 0 ? value : 0;
 }
@@ -736,7 +859,7 @@ function exactSeamContext(seam: StoredSeam): AssemblyContext['seams'][number] {
 }
 
 export function buildPatternImportDxfPhaseEAssemblyOrderSourceV1(
-  operations: readonly FormOperation[],
+  operations: readonly AssemblyOrderOperation[],
   seams: readonly StoredSeam[],
   selectedIndex: number,
 ): PatternImportDxfPhaseEAssemblyOrderSourceV1 | null {
@@ -905,6 +1028,10 @@ export function projectPatternImportDxfPhaseEAssemblyOrderAttachmentResultV1(
       authorityStatus: 'accepted' as const,
       attachmentStatus: 'verified' as const,
       blockers: Object.freeze([]),
+      verifiedAttachment: Object.freeze({
+        cardLockVersion: result.attempt.evidence.cardLockVersion,
+        sidecarSha256: result.attempt.evidence.sidecarSha256,
+      }),
     });
 
   const runtimeBlockers = result.attempt.ok ? [] : result.attempt.blockers;
@@ -953,7 +1080,7 @@ export function projectPatternImportDxfPhaseEAssemblyOrderAttachmentResultV1(
 }
 
 async function verifyPatternImportDxfPhaseEAssemblyOrderDocumentBindingV1(
-  cardSession: PatternImportDxfPhaseECardSessionV1,
+  cardSession: Pick<PatternImportDxfPhaseECardSessionV1, 'loadDocumentEvidence'>,
   scopeKey: string,
   catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1,
   choices: PatternImportDxfProductPhaseEAuthoringChoicesV1,
@@ -1009,9 +1136,17 @@ async function verifyPatternImportDxfPhaseEAssemblyOrderDocumentBindingV1(
   }
 }
 
+export type PatternImportDxfPhaseECurrentSavedAssemblyOrderSessionV1 = Readonly<
+  Omit<PatternImportDxfPhaseECardSessionV1, 'confirmedApply'> & {
+    savedReplay: PatternImportDxfProductVerifiedSavedReplayV1;
+  }
+>;
+
 export function resolvePatternImportDxfPhaseEAssemblyOrderSessionV1(
   source: PatternImportDxfPhaseEAssemblyOrderSourceV1,
-  cardSession: PatternImportDxfPhaseECardSessionV1,
+  cardSession:
+    | PatternImportDxfPhaseECardSessionV1
+    | PatternImportDxfPhaseECurrentSavedAssemblyOrderSessionV1,
 ): PatternImportDxfPhaseEAssemblyOrderSessionResolutionV1 {
   const seam = source.assembly.seams.find(
     (candidate) => 'seamKey' in candidate && candidate.seamKey === source.selectedSeamKey,
@@ -1060,7 +1195,11 @@ export function resolvePatternImportDxfPhaseEAssemblyOrderSessionV1(
     loadMaterialOptions: loadPatternImportDxfPhaseEWorkbenchBetaMaterialPresetsV1,
     preparePhaseEWorkbench: (draft, request) =>
       cardSession.controller.preparePhaseEWorkbench(draft, request),
-    submitChoices: async (catalog, choices) => {
+    submitChoices: async (catalog, choices, firstAttachment) => {
+      const superseded = Object.freeze({
+        code: 'semantic-attachment-superseded',
+        detail: 'The current exact connection or imported pattern changed during authoring.',
+      });
       const beforeAuthor = await verifyPatternImportDxfPhaseEAssemblyOrderDocumentBindingV1(
         cardSession,
         scopeKeys[0],
@@ -1072,6 +1211,12 @@ export function resolvePatternImportDxfPhaseEAssemblyOrderSessionV1(
           authorityStatus: 'refused' as const,
           attachmentStatus: 'not-attempted' as const,
           blockers: Object.freeze([beforeAuthor.blocker]),
+        });
+      if (firstAttachment && !firstAttachment.isCurrent())
+        return Object.freeze({
+          authorityStatus: 'refused' as const,
+          attachmentStatus: 'not-attempted' as const,
+          blockers: Object.freeze([superseded]),
         });
       const authored = await cardSession.controller.authorChoices(
         cardSession.draft,
@@ -1107,6 +1252,97 @@ export function resolvePatternImportDxfPhaseEAssemblyOrderSessionV1(
           attachmentStatus: 'blocked' as const,
           blockers: Object.freeze([beforeAttachment.blocker]),
         });
+      if (firstAttachment && !firstAttachment.isCurrent())
+        return Object.freeze({
+          authorityStatus: 'accepted' as const,
+          attachmentStatus: 'blocked' as const,
+          blockers: Object.freeze([superseded]),
+        });
+      if ('savedReplay' in cardSession) {
+        const unavailable = (blocker: PatternImportDxfPhaseEAssemblyOrderSubmitBlockerV1) => ({
+          authorityStatus: 'accepted' as const,
+          attachmentStatus: 'blocked' as const,
+          blockers: [blocker],
+        });
+        if (!firstAttachment)
+          return unavailable({
+            code: 'current-saved-first-attachment-required',
+            detail:
+              'Metadata recovery requires the exact current saved row and its first attachment CAS.',
+          });
+        try {
+          const [
+            { adminService },
+            { composePatternImportDxfProductSemanticSidecarPersistenceV1 },
+            mapping,
+            { selectPatternImportDxfProductDraftPhaseDSizeV1 },
+            { createPatternImportNativeSewingAuthoringViewV1 },
+          ] = await Promise.all([
+            import('api/api'),
+            import(
+              'lib/cloth/domain/pattern-import-dxf-product-semantic-sidecar-live-composition-v1'
+            ),
+            import('lib/cloth/domain/pattern-import-dxf-product-mapping-composition-v1'),
+            import('lib/cloth/domain/pattern-import-dxf-product-draft-phase-d-selection-v1'),
+            import('../native-sewing-authoring-view-v1'),
+          ]);
+          const nativeDraft = createPatternImportNativeSewingAuthoringViewV1(
+            cardSession.draft,
+            cardSession.draft.dxfNativeSewingReplay,
+            beforeAttachment.evidence.dxfSha256,
+          );
+          const selection = await selectPatternImportDxfProductDraftPhaseDSizeV1(
+            nativeDraft,
+            freshSession.scopeKey,
+            freshSession.sizeToken,
+          );
+          if (!selection.ok) return unavailable(selection.blockers[0]);
+          if (!firstAttachment.isCurrent()) return unavailable(superseded);
+          const result = await composePatternImportDxfProductSemanticSidecarPersistenceV1(
+            {
+              GetTechCard: (request) => adminService.GetTechCard(request),
+              GetTechCardPatternSemanticSidecar: (request) =>
+                adminService.GetTechCardPatternSemanticSidecar(request),
+              PutTechCardPatternSemanticSidecar: (request) => {
+                if (!firstAttachment.isCurrent()) throw new DOMException('Aborted', 'AbortError');
+                return adminService.PutTechCardPatternSemanticSidecar(request);
+              },
+            },
+            {
+              schemaVersion: mapping.PATTERN_IMPORT_DXF_PRODUCT_MAPPING_COMPOSITION_V1,
+              scopeKey: freshSession.scopeKey,
+              draft: nativeDraft,
+              savedReplay: cardSession.savedReplay,
+              selection: selection.selection,
+              intent: authored.compile.intent,
+              expectedSavedRow: {
+                ...beforeAttachment.evidence,
+                firstAttachmentSavedRowRevision: firstAttachment.savedRowRevision,
+              },
+            },
+          );
+          if (!firstAttachment.isCurrent()) return unavailable(superseded);
+          return result.ok
+            ? {
+                authorityStatus: 'accepted' as const,
+                attachmentStatus: 'verified' as const,
+                blockers: [],
+                verifiedAttachment: {
+                  cardLockVersion: result.evidence.cardLockVersion,
+                  sidecarSha256: result.evidence.sidecarSha256,
+                },
+              }
+            : unavailable(result.blockers[0]);
+        } catch (error) {
+          return unavailable({
+            code: 'current-saved-attachment-failed',
+            detail:
+              error instanceof Error
+                ? error.message
+                : 'The exact saved pattern metadata could not be attached.',
+          });
+        }
+      }
       const binding = cardSession.controller.bindAuthoredAuthorityToConfirmedCommit(
         cardSession.draft,
         cardSession.confirmedApply,
@@ -1128,7 +1364,12 @@ export function resolvePatternImportDxfPhaseEAssemblyOrderSessionV1(
         const attachment = await cardSession.controller.afterConfirmedSave(
           cardSession.draft,
           cardSession.confirmedApply,
-          beforeAttachment.evidence,
+          firstAttachment
+            ? {
+                ...beforeAttachment.evidence,
+                firstAttachmentSavedRowRevision: firstAttachment.savedRowRevision,
+              }
+            : beforeAttachment.evidence,
         );
         return projectPatternImportDxfPhaseEAssemblyOrderAttachmentResultV1(attachment);
       } catch (error) {
@@ -1415,6 +1656,17 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryV1({
   );
 }
 
+const SavedCompleteAssemblyNativeReviewActionV8 = lazy(
+  () => import('../phase-e-workbench-v2/saved-complete-assembly-native-review-action-v8'),
+);
+
+const SavedCompleteAssemblyNativePreviewControlsV8 = lazy(
+  () => import('../phase-e-workbench-v2/saved-complete-assembly-native-preview-controls-v8'),
+);
+const CadWorkbenchPressOpenDiagnosticV1 = lazy(
+  () => import('../phase-e-workbench-v2/cad-workbench-press-open-diagnostic-v1'),
+);
+
 /** Real Assembly Order mount. No fresh session is invented after a saved-card reload. */
 export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
   techCardId,
@@ -1424,12 +1676,14 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
   onSelectOperation,
   cadCommandAuthoringHandoff,
   zeroConnectAuthoringHandoff,
+  emptyOperationConnectionPending = false,
   crossScopeAuthoringHandoff,
   pressAuthoringHandoff,
   stitchEditCapabilities,
   onEditStitchField,
   exactNSession = null,
   exactNApplicationOwner,
+  prepareWholeAssemblyPreview,
   workbenchOpen = false,
   autoOpen = false,
   onOpenChange,
@@ -1442,6 +1696,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
   onSelectOperation?: (index: number) => void;
   cadCommandAuthoringHandoff?: PatternImportDxfPhaseECadCommandAuthoringHandoffOwnerV1;
   zeroConnectAuthoringHandoff?: PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1;
+  emptyOperationConnectionPending?: boolean;
   crossScopeAuthoringHandoff?: PatternImportDxfPhaseECadTableCrossScopeAuthoringHandoffOwnerV1;
   pressAuthoringHandoff?: PatternImportDxfPhaseECadTablePressAuthoringOwnerV1;
   /** Exact targets currently exposed by the one selected OperationsField editor. */
@@ -1452,6 +1707,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
   exactNSession?: PatternImportDxfPhaseEExactNAssemblyOrderSessionV2 | null;
   /** Existing Composite V4 application transaction; never recreated by the workbench. */
   exactNApplicationOwner?: PatternImportDxfProductCompositeSidecarApplicationTransactionV4;
+  prepareWholeAssemblyPreview?: PrepareSavedWholeAssemblyPreviewV1;
   workbenchOpen?: boolean;
   /** Visible production tab opens the one CAD owner immediately; no intermediate door is needed. */
   autoOpen?: boolean;
@@ -1459,6 +1715,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
   frozen?: boolean;
 }) {
   const savedCard = useTechCard(techCardId);
+  const [emptyOperationSewingSourceKey, setEmptyOperationSewingSourceKey] = useState('');
   const sizeNameById = useSizeNames();
   const orderSizeIds = useSizeOrdering();
   const savedAllScopeAuthority = useMemo(
@@ -1479,7 +1736,12 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
   }) ?? '') as string;
   const server = useSeamsStore((value) => value.server);
   const pending = useSeamsStore((value) => value.pending);
+  const poses = useSeamsStore((value) => value.poses);
+  const posePending = useSeamsStore((value) => value.posePending);
+  const seamWriterCardId = useSeamsStore((value) => value.cardId);
+  const seamWriterLockVersion = useSeamsStore((value) => value.serverVersion);
   const seams = useMemo(() => rowsOf({ server, pending }), [pending, server]);
+  const placementRows = useMemo(() => posesOf({ poses, posePending }), [posePending, poses]);
   const source = useMemo(
     () => buildPatternImportDxfPhaseEAssemblyOrderSourceV1(operations, seams, selectedIndex),
     [operations, seams, selectedIndex],
@@ -1507,6 +1769,80 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
       savedOperations: currentSavedCard.techCard?.operations ?? [],
     });
   }, [savedCard.data, selected, techCardId]);
+  const exactSavedLinkedN1Target = useMemo(
+    () =>
+      resolvePatternImportDxfPhaseEZeroConnectExistingLinkedN1TargetV1({
+        techCardId,
+        selectedIndex,
+        liveOperations: operations,
+        savedCard: savedCard.data,
+        currentRows: [...seams, ...placementRows],
+        seamWriterCardId: seamWriterCardId ?? undefined,
+        seamWriterLockVersion,
+      }),
+    [
+      operations,
+      placementRows,
+      savedCard.data,
+      seamWriterCardId,
+      seamWriterLockVersion,
+      seams,
+      selectedIndex,
+      techCardId,
+    ],
+  );
+  const n1Target = exactSavedLinkedN1Target.target;
+  const pendingPartial = selectedSeamKeys.length === 1 && pending[selectedSeamKeys[0]!];
+  const subrangeTarget = useMemo(
+    () =>
+      pendingPartial
+        ? resolvePatternImportDxfPhaseEZeroConnectExistingLinkedN1TargetV1({
+            techCardId,
+            selectedIndex,
+            liveOperations: operations,
+            savedCard: savedCard.data,
+            currentRows: [...server, ...poses],
+            seamWriterCardId: seamWriterCardId ?? undefined,
+            seamWriterLockVersion,
+          }).target
+        : n1Target,
+    [
+      n1Target,
+      operations,
+      pendingPartial,
+      poses,
+      savedCard.data,
+      seamWriterCardId,
+      seamWriterLockVersion,
+      selectedIndex,
+      server,
+      techCardId,
+    ],
+  );
+  const savedPartial =
+    subrangeTarget?.originalSeamKind === 'partial' && subrangeTarget.orderedRowKeys.length === 1
+      ? server.find(({ seamKey }) => seamKey === subrangeTarget.seamKey)
+      : undefined;
+  const partialAnchors = savedPartial ? [...savedPartial.sideA, ...savedPartial.sideB] : [];
+  const savedSeamSubrangeTarget =
+    subrangeTarget &&
+    savedPartial?.status === 'confirmed' &&
+    savedPartial.source === 'manual' &&
+    savedPartial.direction !== 'unknown' &&
+    !savedPartial.stale &&
+    savedPartial.anchoredSize &&
+    savedPartial.sideA.length === 1 &&
+    savedPartial.sideB.length === 1 &&
+    partialAnchors.every(({ edgeHint, piece }) => edgeHint?.startsWith(`${piece}#dxf:`)) &&
+    partialAnchors.some(({ range: [from, to] }) => from !== 0 || to !== 1)
+      ? {
+          operationNumber: subrangeTarget.operationNumber,
+          seamKey: savedPartial.seamKey,
+          cardLockVersion: subrangeTarget.capturedCardLockVersion,
+          sizeToken: savedPartial.anchoredSize,
+        }
+      : undefined;
+  const inspectSavedSubrange = savedSeamSubrangeTarget !== undefined;
   const stitchVisual = useMemo(
     () =>
       selected
@@ -1668,8 +2004,12 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
       ? savedBindingExactNSession
       : null;
   const durableReloadBinding = useMemo(() => {
+    const nativeExactN = selectedSeamKeys.length > 2;
     if (
-      selectedSeamKeys.length !== 1 ||
+      (selectedSeamKeys.length !== 1 && !nativeExactN) ||
+      inspectSavedSubrange ||
+      (nativeExactN &&
+        !resolvePatternImportDxfPhaseEWorkbenchRequestedV1(workbenchOpen, autoOpen)) ||
       !savedOperationSeamsMatch ||
       !savedProjection.ok ||
       !savedCard.data ||
@@ -1689,17 +2029,94 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
       savedProjection.row.revision,
       savedProjection.row.cardLockVersion,
       savedProjection.selectedOperationNumber,
-      seamKey,
+      nativeExactN ? JSON.stringify(selectedSeamKeys) : seamKey,
     ].join(':');
-    return Object.freeze({ key, seamKey, sizeToken });
+    return Object.freeze({ key, sizeToken, nativeExactN });
   }, [
+    autoOpen,
     exactNApplicationOwner,
     exactPersistenceCapabilities,
     savedCard.data,
     savedOperationSeamsMatch,
+    inspectSavedSubrange,
     savedProjection,
     selectedSeamKeys,
+    workbenchOpen,
   ]);
+  const [savedNativeReview, setSavedNativeReview] = useState<SavedNativeExactNReview | null>(null);
+  const currentNativeReview =
+    savedNativeReview?.key === durableReloadBinding?.key ? savedNativeReview : null;
+  const nativeWriteAttempt = useRef<AbortController | null>(null);
+  const durableBindingKeyRef = useRef(durableReloadBinding?.key);
+  durableBindingKeyRef.current = durableReloadBinding?.key;
+  useEffect(() => {
+    const key = durableReloadBinding?.key;
+    setSavedNativeReview((review) => (review?.key === key ? review : null));
+    return () => {
+      nativeWriteAttempt.current?.abort();
+      nativeWriteAttempt.current = null;
+    };
+  }, [durableReloadBinding?.key]);
+  const [durableDesktop, setDurableDesktop] = useState<Readonly<{
+    key: string;
+    geometry: PatternImportDxfProductExactNDesktopGeometryV2;
+  }> | null>(null);
+  const currentDurableDesktop =
+    durableDesktop &&
+    durableDesktop.key === durableReloadBinding?.key &&
+    durableDesktop.geometry.catalog.canonicalSha256 ===
+      exactNBoundarySession?.current.catalogCanonicalSha256
+      ? durableDesktop.geometry
+      : null;
+  const publishDurableDesktop = useCallback(
+    (
+      key: string,
+      prepared: SavedNativeExactNPreparation,
+      session: PatternImportDxfPhaseEExactNAssemblyOrderSessionV2,
+    ) => {
+      const restoredValidationKey = patternImportDxfProductExactNSessionValidationKeyV1(session);
+      const savedSceneProjection =
+        session.current.selectedOperation.seamIds.length === 1 &&
+        prepared.choices.length === 1 &&
+        prepared.choices[0]?.scopeKey === prepared.scopeKey
+          ? readPatternImportDxfPhaseEZeroConnectSavedSceneProjectionV1(prepared.authoringAuthority)
+          : null;
+      const projection = savedSceneProjection ?? prepared.projection;
+      setDurableDesktop({
+        key,
+        geometry: {
+          catalog: prepared.catalog,
+          projection,
+          ...(savedSceneProjection && { savedSceneAuthority: prepared.authoringAuthority }),
+          annotationSource: bindPatternImportDxfPhaseECadMannequinAnnotationSourceV1(
+            prepared.selection,
+            prepared.catalog,
+            projection,
+            session.current.row.revision,
+          ),
+          pieceFeatures: projectCadTablePieceFeatures(
+            prepared.catalog,
+            projection,
+            prepared.draftCadCompileSource.scopes,
+            prepared.choices.find(({ scopeKey }) => scopeKey === prepared.scopeKey)?.label,
+          ),
+        },
+      });
+      durableRestoredValidationKeyRef.current = restoredValidationKey;
+      setValidatedExactNSessionKey(restoredValidationKey);
+    },
+    [],
+  );
+  const readSavedTopologyAnnotations = useMemo(
+    () =>
+      exactPersistenceCapabilities && exactNApplicationOwner
+        ? createPatternImportDxfPhaseERestoredTopologyAnnotationReaderV1(
+            exactPersistenceCapabilities.authorityAdapter,
+            exactNApplicationOwner.topologyAnnotations,
+          )
+        : undefined,
+    [exactNApplicationOwner, exactPersistenceCapabilities],
+  );
   const [durableReloadRetry, setDurableReloadRetry] =
     useState<PatternImportDxfPhaseEDurableReloadRetryStateV1 | null>(null);
   const durableReloadRetryRef = useRef(durableReloadRetry);
@@ -1708,7 +2125,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
   useEffect(() => {
     const current = durableReloadRetryRef.current;
     const next =
-      !durableReloadBinding || exactNBoundarySession
+      !durableReloadBinding || currentDurableDesktop
         ? null
         : current?.key === durableReloadBinding.key
           ? current
@@ -1718,10 +2135,10 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
             );
     durableReloadRetryRef.current = next;
     setDurableReloadRetry(next);
-  }, [durableReloadBinding, exactNBoundarySession]);
+  }, [currentDurableDesktop, durableReloadBinding]);
   useEffect(() => {
     if (
-      exactNBoundarySession ||
+      currentDurableDesktop ||
       !durableReloadBinding ||
       !durableReloadRetry ||
       durableReloadRetry.key !== durableReloadBinding.key ||
@@ -1748,7 +2165,10 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
     if (!ticket) return;
     const controller = ticket.controller;
     const generationOwner = createPatternImportDxfPhaseECadTableZeroOperationGenerationOwnerV1();
-    const generation = generationOwner.beginSaved(`durable-n1-restore:${attemptKey}`);
+    const restoreScope = durableReloadBinding.nativeExactN
+      ? 'durable-saved-native-exact-n-restore'
+      : 'durable-n1-restore';
+    const generation = generationOwner.beginSaved(`${restoreScope}:${attemptKey}`);
     const publishBlocker = (blocker: PatternImportDxfPhaseEDurableReloadBlockerV1) => {
       const current = durableReloadRetryRef.current;
       const next = blockPatternImportDxfPhaseEDurableReloadRetryV1(
@@ -1770,20 +2190,68 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
         ticket,
       );
     };
-    void preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
-      {
-        techCard: savedCard.data,
-        orderSizeIds,
-        sizeNameById,
-        scopeKey: savedProjection.row.scopeKey,
-        sizeToken: durableReloadBinding.sizeToken,
-        authority: savedAllScopeAuthority,
-        generation,
-      },
-      controller.signal,
-    )
-      .then(async (prepared) => {
-        if (controller.signal.aborted) return;
+    const prepare = (sourceSurface?: 'explicit-native-drawn-sewing') =>
+      preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
+        {
+          techCard: savedCard.data,
+          orderSizeIds,
+          sizeNameById,
+          scopeKey: savedProjection.row.scopeKey,
+          sizeToken: durableReloadBinding.sizeToken,
+          authority: savedAllScopeAuthority,
+          generation,
+          ...(sourceSurface ? { sourceSurface } : {}),
+        },
+        controller.signal,
+      );
+    const durable = createPatternImportDxfPhaseEZeroConnectProductionDurableBridgeV1(
+      savedProjection.selectedOperationNumber,
+      exactNApplicationOwner,
+      exactPersistenceCapabilities.authorityAdapter,
+    );
+    const reload = async () => {
+      if (durableReloadBinding.nativeExactN) {
+        const prepared = await prepare('explicit-native-drawn-sewing');
+        if (!prepared.ok || !prepared.verifiedNativeReplay)
+          return { prepared, restored: null, nativeReview: null };
+        const request = {
+          row: savedProjection.row,
+          selectedOperationNumber: savedProjection.selectedOperationNumber,
+          sizeToken: durableReloadBinding.sizeToken,
+          replay: prepared.verifiedNativeReplay,
+        };
+        const restored = await durable.restoreSavedNativeExactN(request, controller.signal);
+        const nativeReview =
+          !restored.ok && restored.blocker.code === 'durable-restore-sidecar-missing'
+            ? await durable.prepareSavedNativeExactN(request, controller.signal)
+            : null;
+        return { prepared, restored, nativeReview };
+      }
+      let prepared = await prepare();
+      const restore = (catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1) =>
+        durable.restore(
+          {
+            schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_DURABLE_RESTORE_REQUEST_V1,
+            row: savedProjection.row,
+            selectedOperationNumber: savedProjection.selectedOperationNumber,
+            catalog,
+          },
+          controller.signal,
+        );
+      let restored = prepared.ok ? await restore(prepared.catalog) : null;
+      // Saved V4–V7 select the exact catalog by digest. Legacy cut catalogs retain priority;
+      // only a verified container's catalog mismatch can select the native sewing surface.
+      if (restored?.blocker?.code === 'durable-restore-catalog-mismatch') {
+        prepared = await prepare('explicit-native-drawn-sewing');
+        restored = prepared.ok ? await restore(prepared.catalog) : null;
+      }
+      if (controller.signal.aborted) return;
+      return { prepared, restored, nativeReview: null };
+    };
+    void reload()
+      .then((result) => {
+        if (!result || controller.signal.aborted) return;
+        const { prepared, restored, nativeReview } = result;
         if (!prepared.ok) {
           publishBlocker({
             code: 'durable-restore-prepare-blocked',
@@ -1792,36 +2260,48 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
           });
           return;
         }
-        const durable = createPatternImportDxfPhaseEZeroConnectProductionDurableBridgeV1(
-          savedProjection.selectedOperationNumber,
-          exactNApplicationOwner,
-          exactPersistenceCapabilities.authorityAdapter,
-        );
-        const restored = await durable.restore(
-          {
-            schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_DURABLE_RESTORE_REQUEST_V1,
-            row: savedProjection.row,
-            selectedOperationNumber: savedProjection.selectedOperationNumber,
-            catalog: prepared.catalog,
-          },
-          controller.signal,
-        );
-        if (restored.ok) {
-          const restoredValidationKey = patternImportDxfProductExactNSessionValidationKeyV1(
-            restored.session,
-          );
-          durableRestoredValidationKeyRef.current = restoredValidationKey;
-          setValidatedExactNSessionKey(restoredValidationKey);
+        if (durableReloadBinding.nativeExactN && !prepared.verifiedNativeReplay) {
+          publishBlocker({
+            code: 'durable-native-replay-required',
+            detail: 'A current pattern with exact native sewing boundaries is required.',
+            retryable: false,
+          });
+          return;
+        }
+        if (nativeReview) {
+          if (nativeReview.ok) {
+            setSavedNativeReview({
+              key: durableReloadBinding.key,
+              confirmation: nativeReview.confirmation,
+              prepared,
+              status: 'ready',
+            });
+            publishBlocker({
+              code: 'durable-native-confirm-required',
+              detail: 'Confirm the saved exact seams to open the Workbench.',
+              retryable: true,
+            });
+          } else {
+            publishBlocker({
+              code: nativeReview.blocker.code,
+              detail: nativeReview.blocker.detail,
+              retryable: nativeReview.blocker.code === 'durable-prepare-failed',
+            });
+          }
+          return;
+        }
+        if (restored?.ok) {
+          publishDurableDesktop(durableReloadBinding.key, prepared, restored.session);
           completePatternImportDxfPhaseEDurableRestoreAttemptV1(
             durableRestoreAttemptRef.current,
             ticket,
           );
-        } else
+        } else if (restored)
           publishBlocker({
             code: restored.blocker.code,
             detail:
               restored.blocker.code === 'durable-restore-sidecar-missing'
-                ? 'No durable exact connection is saved yet. Direct Connect cannot modify this existing legacy one-seam operation safely; remove it and rebuild it from the 2D table.'
+                ? 'No exact connection metadata is saved for this operation.'
                 : restored.blocker.detail,
             retryable: restored.blocker.code === 'durable-restore-failed',
           });
@@ -1847,12 +2327,13 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
       );
     };
   }, [
+    currentDurableDesktop,
     exactNApplicationOwner,
-    exactNBoundarySession,
     exactPersistenceCapabilities,
     durableReloadBinding,
     durableReloadRetry,
     orderSizeIds,
+    publishDurableDesktop,
     savedAllScopeAuthority,
     savedCard.data,
     savedProjection,
@@ -1866,6 +2347,48 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
       return next;
     });
   }, []);
+  const confirmSavedNativeExactN = async () => {
+    if (
+      frozen ||
+      currentNativeReview?.status !== 'ready' ||
+      !exactNApplicationOwner ||
+      !exactPersistenceCapabilities ||
+      nativeWriteAttempt.current
+    )
+      return;
+    const controller = new AbortController();
+    nativeWriteAttempt.current = controller;
+    setSavedNativeReview({ ...currentNativeReview, status: 'saving' });
+    const durable = createPatternImportDxfPhaseEZeroConnectProductionDurableBridgeV1(
+      currentNativeReview.confirmation.selectedOperationNumber,
+      exactNApplicationOwner,
+      exactPersistenceCapabilities.authorityAdapter,
+    );
+    try {
+      const result = await durable.persistSavedNativeExactN(
+        currentNativeReview.confirmation,
+        controller.signal,
+      );
+      if (controller.signal.aborted || durableBindingKeyRef.current !== currentNativeReview.key)
+        return;
+      if (result.ok) {
+        publishDurableDesktop(
+          currentNativeReview.key,
+          currentNativeReview.prepared,
+          result.session,
+        );
+        setSavedNativeReview(null);
+      } else {
+        setSavedNativeReview({
+          ...currentNativeReview,
+          status: 'blocked',
+          detail: result.blocker.detail,
+        });
+      }
+    } finally {
+      if (nativeWriteAttempt.current === controller) nativeWriteAttempt.current = null;
+    }
+  };
   const savedConfirm = useMemo<PatternImportDxfPhaseEMultiseamSavedConfirmV2 | undefined>(
     () =>
       savedProjection.ok && exactPersistenceCapabilities
@@ -1878,6 +2401,13 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
                 catalog: prepared.catalog,
                 proposal: prepared.proposal,
                 choices,
+                ...('semanticV1Sha256' in prepared && {
+                  initialAuthority: {
+                    serverAssemblyRevision: prepared.serverAssemblyRevision,
+                    assemblyTopologySha256: prepared.assemblyTopologySha256,
+                    semanticV1Sha256: prepared.semanticV1Sha256,
+                  },
+                }),
               },
               signal,
             )
@@ -1902,21 +2432,203 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
         : undefined,
     [exactPersistenceCapabilities, savedProjection],
   );
-  const physicalRow =
-    savedProjection.ok && selectedSeamKeys.length === 2 ? savedProjection.row : null;
+  const physicalRow = savedProjection.ok ? savedProjection.row : null;
+  const readSavedMannequinModelId = useCallback(
+    (signal: AbortSignal) =>
+      savedProjection.ok
+        ? readSavedCadMannequinModelIdV1(
+            {
+              row: savedProjection.row,
+              seedOperationNumber: savedProjection.selectedOperationNumber,
+            },
+            signal,
+          )
+        : Promise.resolve(null),
+    [savedProjection],
+  );
   const savedClothPhysicalHost = useSavedClothPhysicalHostV1({
     row: physicalRow,
     selectedOperationNumber: savedProjection.ok ? savedProjection.selectedOperationNumber : 0,
-    createCanonicalOwner: createPatternImportDxfPhaseESavedGarmentMeshProductionOwnerV1,
+    cardProjection: savedProjection.ok ? savedProjection.projection : null,
   });
-  const savedPhysicalDownstream = savedClothPhysicalHost.selected?.owner.downstream;
+  const { savedDocumentRetired } = savedClothPhysicalHost;
+  const arrangementSaveRef = useRef<AbortController | null>(null);
+  useEffect(() => {
+    return () => {
+      arrangementSaveRef.current?.abort();
+      arrangementSaveRef.current = null;
+    };
+  }, [physicalRow, savedDocumentRetired]);
+  const saveMannequinArrangement = useCallback<
+    NonNullable<CadWorkbenchPhysicalHostV1['onSaveMannequinArrangement']>
+  >(
+    async (input, signal) => {
+      if (frozen || savedDocumentRetired || !savedProjection.ok)
+        throw new Error('Save the Assembly Order before saving placement.');
+      const row = savedProjection.row;
+      if (input.scopeKey !== row.scopeKey)
+        throw new Error('Select the current material pattern set before saving placement.');
+      if (arrangementSaveRef.current) throw new Error('Placement is already being saved.');
+      const controller = new AbortController();
+      const cancel = () => controller.abort();
+      signal.addEventListener('abort', cancel, { once: true });
+      if (signal.aborted) controller.abort();
+      arrangementSaveRef.current = controller;
+      try {
+        await saveSavedCadMannequinArrangementV1(
+          {
+            row,
+            seedOperationNumber: savedProjection.selectedOperationNumber,
+            source: input.annotationSource,
+            arrangement: {
+              bindings: {
+                card: { techCardId: row.techCardId, cardLockVersion: row.cardLockVersion },
+                scope: {
+                  scopeKey: row.scopeKey,
+                  patternLineKey: row.patternLineKey,
+                  sizeToken: input.projection.sizeToken,
+                },
+                savedRow: { revision: row.revision, dxfSha256: row.sha256 },
+                source: {
+                  catalogCanonicalSha256: input.projection.expectedCatalogCanonicalSha256,
+                  sizeSelectionCanonicalSha256: input.projection.sizeSelectionCanonicalSha256,
+                },
+                mannequin: input.mannequin,
+              },
+              pieces: input.pieces,
+            },
+          },
+          controller.signal,
+        );
+        if (!controller.signal.aborted) savedClothPhysicalHost.retry();
+      } finally {
+        signal.removeEventListener('abort', cancel);
+        if (arrangementSaveRef.current === controller) arrangementSaveRef.current = null;
+      }
+    },
+    [frozen, savedDocumentRetired, savedProjection, savedClothPhysicalHost.retry],
+  );
+  const [crossMaterialReview, setCrossMaterialReview] =
+    useState<SavedCrossMaterialReviewForPreviewV8 | null>(null);
+  const [displayedBodyInput, setDisplayedBodyInput] =
+    useState<Parameters<CadWorkbenchPhysicalHostV1['onDisplayedBodyInputV1']>[0]>(null);
+  const [acceptedCloth, setAcceptedCloth] = useState<CadWorkbenchPhysicalHostV1['acceptedCloth']>();
+  const [registeredCutCloth, setRegisteredCutCloth] =
+    useState<CadWorkbenchPhysicalHostV1['acceptedCloth']>();
+  const [pressOpenCloth, setPressOpenCloth] =
+    useState<CadWorkbenchPhysicalHostV1['acceptedCloth']>();
+  const onDisplayedBodyInputV1 = useCallback<CadWorkbenchPhysicalHostV1['onDisplayedBodyInputV1']>(
+    (body) => {
+      setDisplayedBodyInput(body);
+      savedClothPhysicalHost.onDisplayedBodyInputV1(body);
+    },
+    [savedClothPhysicalHost.onDisplayedBodyInputV1],
+  );
+  const activeCrossMaterialReview =
+    crossMaterialReview?.cardId === techCardId &&
+    crossMaterialReview?.lockVersion === savedCard.data?.lockVersion &&
+    crossMaterialReview?.operationNumber === selectedOperationNumber
+      ? crossMaterialReview
+      : null;
+  const savedCrossMaterialModelId =
+    activeCrossMaterialReview?.wholeAssembly?.saved?.body.modelId ??
+    activeCrossMaterialReview?.placement?.body.modelId;
+  const readActiveMannequinModelId = useCallback(
+    (signal: AbortSignal) =>
+      savedCrossMaterialModelId === undefined
+        ? readSavedMannequinModelId(signal)
+        : Promise.resolve(savedCrossMaterialModelId),
+    [readSavedMannequinModelId, savedCrossMaterialModelId],
+  );
+  const crossMaterialPreviewControls = activeCrossMaterialReview
+    ? (tableSizeMatches: boolean) => (
+        <>
+          {!tableSizeMatches && !frozen && (
+            <Text component='p' size='micro' role='status' className='px-2 py-1'>
+              Choose {activeCrossMaterialReview.patternSize.sizeToken} in Pattern set to preview
+              this saved review.
+            </Text>
+          )}
+          <Suspense fallback={null}>
+            <SavedCompleteAssemblyNativePreviewControlsV8
+              key={activeCrossMaterialReview.sha256}
+              review={activeCrossMaterialReview}
+              body={displayedBodyInput}
+              disabled={frozen || !tableSizeMatches}
+              onAcceptedCloth={setAcceptedCloth}
+              onReturnToFlat={() => setCrossMaterialReview(null)}
+            />
+          </Suspense>
+        </>
+      )
+    : undefined;
+  const savedPressOpen =
+    !frozen &&
+    savedCard.data?.techCard?.operations?.some(
+      (operation) =>
+        operation.operationNumber === selectedOperationNumber &&
+        operation.operationType === 'TECH_CARD_OPERATION_TYPE_PRESS_OPEN' &&
+        operation.work === 'press_open',
+    );
+  const pressOpenControls: CadWorkbenchPhysicalHostV1['panel'] = savedPressOpen
+    ? (_, currentPattern) => (
+        <Suspense fallback={null}>
+          <CadWorkbenchPressOpenDiagnosticV1
+            key={selectedOperationNumber}
+            operationNumber={selectedOperationNumber}
+            pattern={currentPattern}
+            authority={savedAllScopeAuthority}
+            orderSizeIds={orderSizeIds}
+            sizeNameById={sizeNameById}
+            body={displayedBodyInput}
+            disabled={frozen}
+            onAcceptedCloth={setPressOpenCloth}
+          />
+        </Suspense>
+      )
+    : undefined;
   const physicalHost: CadWorkbenchPhysicalHostV1 = {
-    onDisplayedBodyInputV1: savedClothPhysicalHost.onDisplayedBodyInputV1,
-    panel: (
-      <SavedClothPhysicalControlsV1
-        host={savedClothPhysicalHost}
-        row={physicalRow}
+    onDisplayedBodyInputV1,
+    acceptedCloth:
+      activeCrossMaterialReview && acceptedCloth?.isCurrent()
+        ? acceptedCloth
+        : savedPressOpen && pressOpenCloth?.isCurrent()
+          ? pressOpenCloth
+          : !savedDocumentRetired && registeredCutCloth?.isCurrent()
+            ? registeredCutCloth
+            : undefined,
+    savedReviewSize: activeCrossMaterialReview?.patternSize,
+    panel: pressOpenControls ?? crossMaterialPreviewControls,
+    arrangementSourceKey: JSON.stringify([
+      savedDocumentRetired ? null : physicalRow,
+      savedProjection.ok ? savedProjection.selectedOperationNumber : null,
+      savedCrossMaterialModelId === undefined ? null : activeCrossMaterialReview?.sha256,
+    ]),
+    onReadSavedMannequinModelId: readActiveMannequinModelId,
+    onSaveMannequinArrangement: savedDocumentRetired ? undefined : saveMannequinArrangement,
+    onReadMannequinArrangement: async (input, signal) => {
+      if (
+        savedDocumentRetired ||
+        !savedProjection.ok ||
+        input.scopeKey !== savedProjection.row.scopeKey
+      )
+        return null;
+      return readSavedCadMannequinArrangementV1(
+        {
+          row: savedProjection.row,
+          seedOperationNumber: savedProjection.selectedOperationNumber,
+          expected: input,
+        },
+        signal,
+      );
+    },
+    viewport: (interaction) => (
+      <CadWorkbenchPhysicalHostProductionMountV1
+        state={savedClothPhysicalHost}
         disabled={frozen}
+        interaction={interaction}
+        displayedInput={displayedBodyInput}
+        onAcceptedRegisteredCloth={setRegisteredCutCloth}
       />
     ),
   };
@@ -2029,7 +2741,6 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
             selectedOperationNumber: savedProjection.selectedOperationNumber,
             prepareAllMaterialScopeStaging: prepareSavedAllMaterialScopeStaging,
             prepareAllMaterialScopeEditors: prepareSavedAllMaterialScopeEditors,
-            ...(savedPhysicalDownstream ? { downstream: savedPhysicalDownstream } : {}),
             ...(savedConfirm ? { onConfirm: savedConfirm } : {}),
           })
         : null,
@@ -2037,7 +2748,6 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
       prepareSavedAllMaterialScopeStaging,
       prepareSavedAllMaterialScopeEditors,
       savedConfirm,
-      savedPhysicalDownstream,
       savedProjection,
       savedRuntimeResolution.runtime,
     ],
@@ -2049,12 +2759,34 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
     workbenchOpen,
     autoOpen,
   );
+  const selectedSavedSeams =
+    !savedProjection.ok &&
+    savedProjection.blockers[0]?.code === 'saved-seam-not-exact' &&
+    savedCard.data &&
+    savedCard.data.id === techCardId &&
+    selected
+      ? {
+          liveOperationNumber: selectedOperationNumber,
+          liveSeamKeys: selected.seamKeys ?? [],
+          savedOperations: savedCard.data.techCard?.operations ?? [],
+          savedSeams: savedCard.data.seams ?? [],
+        }
+      : null;
+  const exactSavedStaleOperation =
+    selectedSavedSeams !== null &&
+    isPatternImportDxfPhaseEExactSavedStaleOperationV1(selectedSavedSeams);
+  const exactSavedCompoundOperation =
+    selectedSavedSeams !== null &&
+    isPatternImportDxfPhaseEExactSavedCompoundOperationV1(selectedSavedSeams);
   const savedBrowseFallback = shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
     workbenchOpen: workbenchRequested,
     exactNSessionAvailable: exactNBoundarySession !== null,
     selectedSeamKeys,
     savedOrderedSeamKeys: savedProjection.ok ? savedProjection.orderedSeamKeys : null,
     exactSavedEmptyOperation,
+    exactSavedStaleOperation,
+    exactSavedCompoundOperation,
+    exactSavedLinkedN1Target: exactSavedLinkedN1Target.ok,
     savedProjectionBlockerCode: savedProjection.ok
       ? null
       : savedProjection.blockers[0]?.code ?? null,
@@ -2065,6 +2797,52 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
     durableReloadRetry.status === 'blocked'
       ? durableReloadRetry.blocker
       : null;
+  const savedNativeExactNActions =
+    durableReloadBinding?.nativeExactN && !exactNBoundarySession ? (
+      <CalloutBox
+        tone={
+          currentNativeReview?.status === 'blocked' ||
+          (durableReloadBlocker && !currentNativeReview)
+            ? 'error'
+            : 'note'
+        }
+        data-saved-native-exact-n-review={
+          currentNativeReview?.status ?? (durableReloadBlocker ? 'blocked' : 'loading')
+        }
+      >
+        <div className='flex flex-wrap items-center justify-between gap-2'>
+          <Text component='p' size='micro' className='min-w-0 flex-1' role='status'>
+            {currentNativeReview
+              ? currentNativeReview.detail ??
+                `Save ${selectedSeamKeys.length} linked seams with Equal mapping to open the exact Workbench.`
+              : durableReloadBlocker?.detail ?? 'Checking the saved exact seams…'}
+          </Text>
+          {currentNativeReview && currentNativeReview.status !== 'blocked' ? (
+            <Button
+              type='button'
+              variant='main'
+              size='xs'
+              disabled={frozen || currentNativeReview.status === 'saving'}
+              onClick={() => void confirmSavedNativeExactN()}
+            >
+              {currentNativeReview.status === 'saving' ? 'Saving…' : 'Save equal seams'}
+            </Button>
+          ) : currentNativeReview || durableReloadBlocker?.retryable ? (
+            <Button
+              type='button'
+              variant='secondary'
+              size='xs'
+              onClick={() => {
+                setSavedNativeReview(null);
+                retryDurableReload();
+              }}
+            >
+              Reload saved seams
+            </Button>
+          ) : null}
+        </div>
+      </CalloutBox>
+    ) : null;
   const sessionResolution = useMemo(
     () =>
       source && cardSession && selectedSeamKeys.length === 1
@@ -2082,38 +2860,172 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
     if (entryRoute !== 'v2' && !workbenchRequested) onOpenChange?.(false);
   }, [entryRoute, onOpenChange, workbenchRequested]);
   if (!source || !selected) return null;
-  if (savedBrowseFallback) {
+  const persisted = savedCard.data;
+  // The ordinary card form separates placements from the physical seam keys.
+  const crossMaterialKeys = [
+    ...selectedSeamKeys,
+    ...(selected.poseKeys ?? []).map((key) => key.trim()).filter(Boolean),
+  ];
+  const [physicalKey, poseKey] = crossMaterialKeys;
+  const physical = server.find((seam) => seam.seamKey === physicalKey);
+  const recordedPose = poses.find((pose) => pose.seamKey === poseKey);
+  const storedOperation = persisted?.techCard?.operations?.find(
+    (operation) => operation.operationNumber === selectedOperationNumber,
+  );
+  const pointClosureTarget =
+    workbenchRequested &&
+    persisted &&
+    persisted.id === techCardId &&
+    storedOperation?.work === 'button_attach' &&
+    selected.work === storedOperation.work &&
+    selected.historyKey &&
+    (storedOperation.seamKeys ?? []).every((key) =>
+      persisted.seams?.some(({ seamKey, kind }) => seamKey === key && kind === POINT_CLOSURE_KIND),
+    )
+      ? { operationNumber: selectedOperationNumber, historyKey: selected.historyKey }
+      : undefined;
+  let savedCrossMaterialActions: ReactNode = null;
+  if (
+    workbenchRequested &&
+    persisted?.techCard &&
+    persisted.id === techCardId &&
+    seamWriterCardId === techCardId &&
+    seamWriterLockVersion === persisted.lockVersion &&
+    selectedSeamKeys.length === 1 &&
+    crossMaterialKeys.length <= 2 &&
+    storedOperation?.seamKeys?.length === crossMaterialKeys.length &&
+    storedOperation.seamKeys.every((key, index) => key === crossMaterialKeys[index]) &&
+    physicalKey &&
+    physical?.kind === 'edge' &&
+    physical.status === 'confirmed' &&
+    physical.direction !== 'unknown' &&
+    !physical.stale &&
+    (!poseKey || (recordedPose?.status === 'confirmed' && !recordedPose.stale)) &&
+    physical.sideA.length === 1 &&
+    physical.sideB.length === 1
+  ) {
+    const aliases = persisted.techCard.pieceDxfAliases?.items ?? [];
+    const bindings = bindingScopes(rollGoodsScopes(persisted.techCard.bomItems ?? []), aliases);
+    const hasAlias = (piece: string, scope: string) =>
+      aliases.some(
+        (alias) =>
+          Boolean(alias.blockName?.trim()) &&
+          pieceRefKey(alias.pieceLineKey ?? '') === pieceRefKey(piece) &&
+          savedWorkbenchBindingScopeKeyV1(alias.fabricPurpose, alias.bomLineKey, bindings) ===
+            scope,
+      );
+    if (
+      hasAlias(physical.sideA[0]!.piece, 'main') &&
+      hasAlias(physical.sideB[0]!.piece, 'pocketing')
+    )
+      savedCrossMaterialActions = (
+        <Suspense fallback={null}>
+          <SavedCompleteAssemblyNativeReviewActionV8
+            key={[
+              persisted.id,
+              persisted.lockVersion,
+              selectedOperationNumber,
+              physicalKey,
+              poseKey,
+            ].join(':')}
+            techCard={persisted}
+            operationNumber={selectedOperationNumber}
+            seamKeys={crossMaterialKeys}
+            onVerifiedReview={setCrossMaterialReview}
+            prepareWholeAssemblyPreview={prepareWholeAssemblyPreview}
+            authority={savedAllScopeAuthority}
+            orderSizeIds={orderSizeIds}
+            sizeNameById={sizeNameById}
+            disabled={frozen || Boolean(pending[physicalKey] || (poseKey && posePending[poseKey]))}
+          />
+        </Suspense>
+      );
+  }
+  // Confirmed cross-material rows have review authority but no selected-row V3/V4 prepared scene.
+  // Use the existing saved-pattern table and its real mannequin stage for that operation.
+  if (savedBrowseFallback || savedCrossMaterialActions || pointClosureTarget) {
     const savedEmptyOperation =
+      !pointClosureTarget &&
       exactSavedEmptyOperation &&
       !savedProjection.ok &&
       savedProjection.blockers[0]?.code === 'saved-operation-not-two-seam';
-    const fallbackResult: PatternImportDxfPhaseECadTableDraftOperationSessionBridgeResultV1 = {
-      ok: false,
-      plan: null,
-      blocker: {
-        code: 'exact-connection-incomplete',
-        detail: savedEmptyOperation
-          ? 'Choose two exact edges on the table, then confirm their seam direction to link this saved operation.'
-          : 'This legacy one-seam operation is available for inspection only. Remove it and rebuild it from the 2D table before using Direct Connect.',
-        operationNumber: source.selectedOperationNumber,
-        processKind: 'connect',
-      },
-    };
+    const savedLinkedN1 =
+      !pointClosureTarget && exactSavedLinkedN1Target.ok && !inspectSavedSubrange;
+    const emptyOperationKey = `${techCardId}:${savedCard.data?.lockVersion}:${selectedOperationNumber}`;
+    const emptyOperationSewingSource =
+      savedEmptyOperation && emptyOperationSewingSourceKey === emptyOperationKey;
+    const useSavedSewingEdges = savedLinkedN1 || emptyOperationSewingSource || inspectSavedSubrange;
+    const savedDraftSourceOnly = exactSavedStaleOperation || exactSavedCompoundOperation;
+    const fallbackResult: PatternImportDxfPhaseECadTableDraftOperationSessionBridgeResultV1 | null =
+      inspectSavedSubrange
+        ? null
+        : {
+            ok: false,
+            plan: null,
+            blocker: {
+              code: 'exact-connection-incomplete',
+              detail: savedEmptyOperation
+                ? 'Choose two exact edges on the table, then confirm their seam direction to link this saved operation.'
+                : savedLinkedN1
+                  ? 'Choose two exact edges and confirm their direction to update this seam. Its placement and Assembly Order stay unchanged.'
+                  : exactSavedStaleOperation
+                    ? 'The saved pattern changed. This operation needs current seam anchors before physical assembly can resume.'
+                    : exactSavedCompoundOperation
+                      ? 'Open the saved seam in the operation editor to inspect its individual spans.'
+                      : 'This legacy one-seam operation is available for inspection only. Remove it and rebuild it from the 2D table before using Direct Connect.',
+              operationNumber: source.selectedOperationNumber,
+              processKind: 'connect',
+            },
+          };
     return (
       <PatternImportDxfPhaseECadTableZeroOperationProductionMountV1
         techCardId={techCardId}
-        physicalHost={physicalHost}
+        physicalHost={exactSavedCompoundOperation ? undefined : physicalHost}
+        pressAuthoringHandoff={savedDraftSourceOnly ? undefined : pressAuthoringHandoff}
+        savedDraftSourceOnly={savedDraftSourceOnly}
+        sourceSurface={useSavedSewingEdges ? 'explicit-native-drawn-sewing' : undefined}
         zeroConnectAuthoringHandoff={
-          savedEmptyOperation && zeroConnectAuthoringHandoff
+          (savedEmptyOperation || savedLinkedN1) && zeroConnectAuthoringHandoff
             ? zeroConnectAuthoringHandoff
             : EXISTING_OPERATION_REBUILD_ONLY_HANDOFF
         }
         disabled={frozen}
         selection={{ operationNumber: source.selectedOperationNumber }}
+        operationIssueCount={countPatternImportDxfPhaseECadSelectedOperationWarningsV1(
+          operationNavigation,
+          source.selectedOperationNumber,
+        )}
         defaultOperationsMode='docked'
+        pointClosureTarget={pointClosureTarget}
+        savedSeamSubrangeTarget={savedSeamSubrangeTarget}
+        linkedPieceRename={activeCrossMaterialReview?.linkedPieceRename}
         operationsPanel={
           <>
-            {!savedEmptyOperation ? (
+            {savedCrossMaterialActions}
+            {savedEmptyOperation &&
+            !frozen &&
+            zeroConnectAuthoringHandoff?.status === 'available' ? (
+              <Button
+                type='button'
+                size='xs'
+                variant='secondary'
+                disabled={emptyOperationConnectionPending}
+                aria-pressed={emptyOperationSewingSource}
+                onClick={() =>
+                  setEmptyOperationSewingSourceKey(
+                    emptyOperationSewingSource ? '' : emptyOperationKey,
+                  )
+                }
+              >
+                Use saved sewing edges
+              </Button>
+            ) : null}
+            {!pointClosureTarget &&
+            !savedCrossMaterialActions &&
+            !savedEmptyOperation &&
+            !savedLinkedN1 &&
+            !savedSeamSubrangeTarget &&
+            !savedDraftSourceOnly ? (
               <CalloutBox
                 tone='note'
                 className='mb-2'
@@ -2126,14 +3038,16 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
                 </Text>
               </CalloutBox>
             ) : null}
-            {durableReloadBlocker ? (
-              <CalloutBox
-                tone={durableReloadBlocker.retryable ? 'error' : 'note'}
-                className='mb-2'
-                data-durable-reload-blocker={durableReloadBlocker.code}
-              >
+            {!pointClosureTarget && !savedCrossMaterialActions && durableReloadBlocker ? (
+              <CalloutBox tone={durableReloadBlocker.retryable ? 'error' : 'note'} className='mb-2'>
                 <div className='flex flex-wrap items-center justify-between gap-2'>
-                  <Text component='p' size='micro' className='min-w-0 flex-1'>
+                  <Text
+                    component='p'
+                    size='micro'
+                    role={durableReloadBlocker.retryable ? 'alert' : 'status'}
+                    className='min-w-0 flex-1'
+                    data-durable-reload-blocker={durableReloadBlocker.code}
+                  >
                     {durableReloadBlocker.detail}
                   </Text>
                   {durableReloadBlocker.retryable ? (
@@ -2151,7 +3065,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
             ) : null}
             <PatternImportDxfPhaseECadTableDraftOperationsPanelV1
               editor={operationsPanel}
-              result={fallbackResult}
+              result={savedCrossMaterialActions || pointClosureTarget ? null : fallbackResult}
               operationNumber={source.selectedOperationNumber}
               navigation={operationNavigation}
               stitchVisual={stitchVisual}
@@ -2190,7 +3104,10 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
         stitchEditCapabilities={stitchEditCapabilities}
         onEditStitchField={onEditStitchField}
         exactNSession={exactNBoundarySession}
+        exactNDesktop={currentDurableDesktop}
+        readSavedTopologyAnnotations={readSavedTopologyAnnotations}
         exactNApplicationOwner={exactNApplicationOwner}
+        savedNativeExactNActions={savedNativeExactNActions}
         operationRouteBlocker={
           selectedSeamKeys.length > 2 && !exactNBoundarySession
             ? {

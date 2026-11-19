@@ -123,6 +123,63 @@ export const XPBD_EMBEDDED_SCALAR_BEND_WGSL_V2 = source;
 export const XPBD_EMBEDDED_SCALAR_BEND_SOURCE_SHA256_V2 =
   '4e349e703819ed1bc5715cd7792955974379a0d9c6689dc5ea0836308ff423ad' as const;
 
+export const XPBD_EMBEDDED_CUT_BEND_ENTRY_POINT_V1 = 'solveXpbdEmbeddedCutBendColorV1';
+export const XPBD_EMBEDDED_CUT_BEND_REST_STRIDE_BYTES_V1 = 8;
+
+/** Rest angle and covered-edge fraction in the existing color order and binding slot. */
+export function packXpbdEmbeddedCutBendRestV1(
+  restAnglesRad: Float32Array,
+  coveredEdgeFractions: Float64Array,
+): ArrayBuffer {
+  if (restAnglesRad.length !== coveredEdgeFractions.length)
+    throw new RangeError('Cut bend coverage must match the rest angle order.');
+  const packet = new ArrayBuffer(
+    restAnglesRad.length * XPBD_EMBEDDED_CUT_BEND_REST_STRIDE_BYTES_V1,
+  );
+  const view = new DataView(packet);
+  for (const [i, angle] of restAnglesRad.entries()) {
+    const coverage = coveredEdgeFractions[i];
+    const packedCoverage = Math.fround(coverage);
+    if (
+      !Number.isFinite(angle) ||
+      Math.abs(angle) >= 1e30 ||
+      !(coverage >= 0 && coverage <= 1) ||
+      (coverage > 0 && packedCoverage === 0)
+    )
+      throw new RangeError(
+        'Cut bend rest angle or coverage is outside the supported numeric range.',
+      );
+    const offset = i * XPBD_EMBEDDED_CUT_BEND_REST_STRIDE_BYTES_V1;
+    view.setFloat32(offset, angle, true);
+    view.setFloat32(offset + 4, packedCoverage, true);
+  }
+  return packet;
+}
+
+const cutRestAnchor = '@group(0) @binding(2) var<storage,read> restAngles:array<f32>;';
+const cutSetupAnchor = 'let edgeA=positions[quad.x];let edgeB=positions[quad.y];';
+export const XPBD_EMBEDDED_CUT_BEND_WGSL_V1 = [
+  [XPBD_EMBEDDED_SCALAR_BEND_ENTRY_POINT_V2, XPBD_EMBEDDED_CUT_BEND_ENTRY_POINT_V1],
+  [
+    cutRestAnchor,
+    'struct CutBendRest{angleRad:f32,coverage:f32,};\n@group(0) @binding(2) var<storage,read> restAngles:array<CutBendRest>;',
+  ],
+  [
+    cutSetupAnchor,
+    `let rest = restAngles[constraintIndex];
+  if(!finiteScalar(rest.angleRad)||!finiteScalar(rest.coverage)||rest.coverage<0.0||rest.coverage>1.0){rejectConstraint();return;}
+  if(rest.coverage==0.0){if(lambdas[constraintIndex]!=0.0){rejectConstraint();}return;}
+  ${cutSetupAnchor}`,
+  ],
+  ['let restAngle=restAngles[constraintIndex];', 'let restAngle=rest.angleRad;'],
+  [
+    'let alpha=params.complianceInvNm/(params.dtS*params.dtS);',
+    'let alpha=(params.complianceInvNm/rest.coverage)/(params.dtS*params.dtS);',
+  ],
+].reduce((shader, [before, after]) => replaceOnce(shader, before, after), source);
+export const XPBD_EMBEDDED_CUT_BEND_SOURCE_SHA256_V1 =
+  'a84c355e825be107836ef9881196b07e5e6dbdc26c302a3025dc37838742e45d';
+
 export function validateXpbdEmbeddedScalarBendBufferContractV2(
   resources: Parameters<typeof validateXpbdEmbeddedScalarBendBufferContractV1>[0],
   counts: Parameters<typeof validateXpbdEmbeddedScalarBendBufferContractV1>[1],

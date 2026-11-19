@@ -15,6 +15,7 @@ import {
   HandIcon,
   LayersIcon,
   MagicWandIcon,
+  MinusIcon,
   Pencil1Icon,
   PlusIcon,
   RulerHorizontalIcon,
@@ -43,6 +44,9 @@ export type PatternImportDxfPhaseECadWorkbenchIconV1 =
   | 'circle'
   | 'ellipse'
   | 'add-point'
+  | 'move-point'
+  | 'delete-point'
+  | 'sharpen-corner'
   | 'internal-line'
   | 'french-curve'
   | 'draft-point'
@@ -77,6 +81,9 @@ const ICONS: Readonly<Record<PatternImportDxfPhaseECadWorkbenchIconV1, ElementTy
     circle: CircleIcon,
     ellipse: CircleIcon,
     'add-point': PlusIcon,
+    'move-point': Crosshair2Icon,
+    'delete-point': MinusIcon,
+    'sharpen-corner': RulerSquareIcon,
     'internal-line': RulerHorizontalIcon,
     'french-curve': MagicWandIcon,
     'draft-point': Crosshair2Icon,

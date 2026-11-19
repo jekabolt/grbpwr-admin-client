@@ -43,6 +43,15 @@ export function leftOut(
     seen.add(b.seed);
     pieces.push({ what: nameOf(b.seed), why: `blocked: ${b.detail}`, to: 'meaning' });
   }
+  for (const p of session.semantics?.pieces ?? []) {
+    if (!session.fabrics?.dxfOmissions?.seeds.includes(p.seed) || seen.has(p.seed)) continue;
+    seen.add(p.seed);
+    pieces.push({
+      what: p.displayName || p.identity,
+      why: 'omitted from this import',
+      to: 'fabrics',
+    });
+  }
   // a built piece that no fabric file carries (no fabric proposed, or fused only)
   const inFiles = new Set(session.draft?.scopes.flatMap((s) => s.identities) ?? []);
   if (session.draft)

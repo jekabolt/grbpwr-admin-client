@@ -980,8 +980,9 @@ function continuumRestFrameValidationError(
   return undefined;
 }
 
-function compileContinuumStrainPackageV1(
-  base: SimulationPackageV4,
+export function compileContinuumStrainPackageV1(
+  material: CompiledMaterialPackageV1,
+  source: CompiledTriangleStrainScheduleV1,
   inputs: readonly ContinuumStrainMaterialInputV1[],
 ): CompiledContinuumStrainPackageV1 {
   const byKey = new Map<string, ContinuumStrainMaterialInputV1>();
@@ -1007,17 +1008,16 @@ function compileContinuumStrainPackageV1(
     byKey.set(key, input);
   }
   if (
-    byKey.size !== base.material.materialKeys.length ||
-    base.material.materialKeys.some((key) => !byKey.has(key))
+    byKey.size !== material.materialKeys.length ||
+    material.materialKeys.some((key) => !byKey.has(key))
   ) {
     throw new RangeError(
       'Continuum strain materials must cover the compiled material key table exactly.',
     );
   }
 
-  const source = base.constraints.strain;
   const constraintCount = source.constraintCount;
-  const materialCount = base.material.manifest.materialCount;
+  const materialCount = material.manifest.materialCount;
   const triangleIndices = source.triangleIndices.slice(0);
   const triangleRestFrames = source.triangleRestFrames.slice(0);
   const constraintRecords = new ArrayBuffer(
@@ -1072,7 +1072,7 @@ function compileContinuumStrainPackageV1(
     materialCount * CONTINUUM_STRAIN_MATERIAL_GPU_V1.strideBytes,
   );
   const materialView = new DataView(materialRecords);
-  base.material.materialKeys.forEach((key, index) => {
+  material.materialKeys.forEach((key, index) => {
     const input = byKey.get(key);
     if (input === undefined) throw new Error('Continuum material lookup invariant failed.');
     const recordBase = index * CONTINUUM_STRAIN_MATERIAL_GPU_V1.strideBytes;
@@ -1104,8 +1104,8 @@ function compileContinuumStrainPackageV1(
     constraintCount,
     colorCount: source.colorCount,
     materialCount,
-    materialKeys: [...base.material.materialKeys],
-    materialProvenance: base.material.materialKeys.map((key) => {
+    materialKeys: [...material.materialKeys],
+    materialProvenance: material.materialKeys.map((key) => {
       const input = byKey.get(key);
       if (input === undefined) throw new Error('Continuum material lookup invariant failed.');
       return { ...input.provenance };
@@ -1150,7 +1150,11 @@ export function compileSimulationPackageV5(
     'maxContinuumBufferBytes',
   );
   const base = compileSimulationPackageV4(mesh, options);
-  const continuumStrain = compileContinuumStrainPackageV1(base, options.continuumMaterials);
+  const continuumStrain = compileContinuumStrainPackageV1(
+    base.material,
+    base.constraints.strain,
+    options.continuumMaterials,
+  );
   if (continuumStrain.constraintCount > maxContinuumConstraints) {
     throw new RangeError('Simulation package continuum constraint budget exceeded.');
   }

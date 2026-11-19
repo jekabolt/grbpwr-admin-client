@@ -18,6 +18,7 @@ type SavedPrepared = Extract<
 
 export type PatternImportDxfPhaseECadTableZeroOperationAuthorityRebindExpectationV1 = Readonly<{
   source: 'fresh-card-session' | 'saved-row-preparation';
+  savedRank?: SavedPrepared['authoringAuthority']['selectedRank'];
   techCardId: number;
   scopeKey: string;
   sizeToken: string;
@@ -65,6 +66,13 @@ function stableSavedBindingMatches(
     saved.techCardId === expected.techCardId &&
     saved.scopeKey === expected.scopeKey &&
     saved.sizeToken === expected.sizeToken &&
+    (!expected.savedRank ||
+      (expected.savedRank.sizeId === saved.authoringAuthority.selectedRank.sizeId &&
+        expected.savedRank.spellings.length ===
+          saved.authoringAuthority.selectedRank.spellings.length &&
+        expected.savedRank.spellings.every(
+          (spelling, index) => spelling === saved.authoringAuthority.selectedRank.spellings[index],
+        ))) &&
     saved.catalog.canonicalSha256 === expected.catalogCanonicalSha256 &&
     saved.catalog.sizeSelectionCanonicalSha256 === expected.sizeSelectionCanonicalSha256 &&
     saved.catalog.sourceFileId === expected.sourceFileId &&
@@ -121,6 +129,7 @@ export function capturePatternImportDxfPhaseECadTableZeroOperationSavedRebindExp
 ): PatternImportDxfPhaseECadTableZeroOperationAuthorityRebindExpectationV1 {
   return Object.freeze({
     source: 'saved-row-preparation' as const,
+    savedRank: saved.authoringAuthority.selectedRank,
     techCardId: saved.techCardId,
     scopeKey: saved.scopeKey,
     sizeToken: saved.sizeToken,

@@ -1,3 +1,4 @@
+import { blockedDxfNativeSewingReplayV1 } from 'lib/pattern-import/dxf-native-sewing-replay-v1';
 // The STUB behind the three seams in client.ts. Returns the fixture (fixture.ts) with believable
 // latency and progress so the shell can be driven end to end; writes nothing anywhere.
 //
@@ -63,6 +64,7 @@ const LATENCY: Record<StageName, number> = {
   semantics: 600,
   'dxf-provenance': 50,
   'dxf-phase-d-replay': 50,
+  'dxf-native-sewing-replay': 50,
   fabrics: 300,
   'render-som': 500,
   'render-pages': 400,
@@ -222,6 +224,15 @@ export function createStubClient(): ImportClient {
                 },
               ],
             };
+          case 'dxf-native-sewing-replay':
+            return blockedDxfNativeSewingReplayV1([
+              {
+                code: 'not-opted-in',
+                identity: null,
+                sizeToken: null,
+                detail: 'The fixture importer has no original DXF native sewing authority.',
+              },
+            ]);
           case 'dxf-phase-d-replay':
             return {
               schemaVersion: 'dxf-product-phase-d-replay/1',

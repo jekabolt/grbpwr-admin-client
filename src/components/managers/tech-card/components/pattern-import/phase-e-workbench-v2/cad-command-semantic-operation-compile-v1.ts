@@ -374,7 +374,7 @@ function mappingFor(tool: PatternImportDxfPhaseEDraftCadToolV1): SemanticMapping
       expectedOperationType: 'TECH_CARD_OPERATION_TYPE_OTHER',
       expectedOutput: 'boundary-point',
     };
-  if (tool === 'rectangle' || tool === 'circle' || tool === 'ellipse')
+  if (tool === 'pen' || tool === 'rectangle' || tool === 'circle' || tool === 'ellipse')
     return {
       workToken: 'hand_work',
       expectedOperationType: 'TECH_CARD_OPERATION_TYPE_HANDWORK',

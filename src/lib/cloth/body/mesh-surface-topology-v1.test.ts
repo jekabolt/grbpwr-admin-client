@@ -10,6 +10,7 @@ import {
   type MakeHumanOpenReferenceBasisKindV1,
 } from './measurement-open-reference-display-v1';
 import {
+  createMeshSurfaceAdjacencyV1,
   createMeshSurfaceTopologyV1,
   meshSurfaceTopologyMatchesIndicesV1,
 } from './mesh-surface-topology-v1';
@@ -102,6 +103,37 @@ describe('mesh surface topology v1', () => {
     expect(runs[2].ok && runs[2].cached).toBe(true);
   });
 
+  it('matches signed zero exactly across reflected and midline vertices', () => {
+    const result = createMeshSurfaceTopologyV1({
+      positionsM: Float32Array.of(-1, 0, -0, 1, -0, 0, -0, 1, 0),
+      triangleIndices: Uint16Array.of(0, 1, 2),
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      topology: {
+        mirrorVertexMap: Uint32Array.of(1, 0, 2),
+        midlineVertexOrder: [Uint32Array.of(2)],
+      },
+    });
+  });
+
+  it('rejects duplicate vertices on the midline and after a reflected pair is complete', () => {
+    for (const positionsM of [
+      Float32Array.of(0, 1, -0, -0, 1, 0, 2, 0, 0),
+      Float32Array.of(1, 0, 0, -1, 0, 0, -1, -0, -0),
+    ]) {
+      const result = createMeshSurfaceTopologyV1({
+        positionsM,
+        triangleIndices: Uint16Array.of(0, 1, 2),
+      });
+      expect(result).toMatchObject({
+        ok: false,
+        code: 'symmetry-mismatch',
+        errors: ['Mirror construction requires unique exact vertex coordinates.'],
+      });
+    }
+  });
+
   it('rejects an index buffer that is not the topology it cached', () => {
     const { basis, positionsM } = fixture('base');
     const result = createMeshSurfaceTopologyV1({ positionsM, triangleIndices: basis.indices });
@@ -110,5 +142,22 @@ describe('mesh surface topology v1', () => {
     const changed = basis.indices.slice();
     [changed[0], changed[1]] = [changed[1], changed[0]];
     expect(meshSurfaceTopologyMatchesIndicesV1(result.topology, changed)).toBe(false);
+  });
+
+  it('builds deformed Float64 adjacency without reading or warming the body topology cache', () => {
+    const positionsM = Float32Array.of(-1, 0, 0, 1, 0, 0, -1, 1, 0, 1, 1, 0);
+    const triangleIndices = Uint16Array.of(0, 1, 2, 2, 1, 3);
+    const deformed = Float64Array.from(positionsM);
+    deformed[0] += 0.0001;
+    const clothInput = { positionsM: deformed, triangleIndices };
+    const bodyInput = { positionsM, triangleIndices };
+
+    expect(createMeshSurfaceAdjacencyV1(clothInput)).toMatchObject({ ok: true, cached: false });
+    expect(createMeshSurfaceTopologyV1(bodyInput)).toMatchObject({ ok: true, cached: false });
+    expect(createMeshSurfaceAdjacencyV1(clothInput)).toMatchObject({ ok: true, cached: false });
+    expect(createMeshSurfaceTopologyV1(bodyInput)).toMatchObject({ ok: true, cached: true });
+    expect(
+      createMeshSurfaceTopologyV1({ positionsM: Float32Array.from(deformed), triangleIndices }),
+    ).toMatchObject({ ok: false, code: 'symmetry-mismatch' });
   });
 });

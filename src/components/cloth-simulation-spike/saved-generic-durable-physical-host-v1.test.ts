@@ -1,0 +1,3784 @@
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Buffer } from 'node:buffer';
+import {
+  act,
+  Children,
+  createElement,
+  isValidElement,
+  type ComponentProps,
+  type ReactElement,
+  type ReactNode,
+  type RefObject,
+  type PointerEvent,
+} from 'react';
+import { createRoot } from 'react-dom/client';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { abortableAdminService } from 'api/api';
+import type {
+  GetTechCardSavedAssemblySnapshotRequest,
+  PutTechCardPatternSemanticSidecarRequest,
+  TechCardPatternSemanticSidecar,
+} from 'api/proto-http/admin';
+import {
+  createXpbdDeviceSession,
+  inspectOwnedActiveXpbdDeviceLeaseV1,
+  type CreateXpbdDeviceSessionOptions,
+  type XpbdDeviceLease,
+} from 'lib/cloth/runtime/webgpu/xpbd-device-session';
+import { createSavedModelDisplayedTriangleBodySessionV2 } from 'components/managers/models/components/saved-model-displayed-triangle-body-session-v2';
+import * as bodyApi from 'components/managers/models/components/saved-model-displayed-triangle-body-session-v2';
+import {
+  sessionFixture,
+  deferredSessionValue,
+} from 'components/managers/models/components/saved-model-displayed-triangle-body-session-v2.test-fixture';
+import {
+  createSavedThreePanelFixtureV1,
+  createSavedThreePanelSourceV1,
+  savedThreePanelCompileRequestV1,
+  fullAssemblyFixtureWireV1,
+  type SavedThreePanelFixtureV1,
+} from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-full-assembly-compile-session-v1.test-fixture';
+import * as snapshotApi from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-full-assembly-snapshot-production-v1';
+import * as physicalReader from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-full-assembly-physical-snapshot-production-v1';
+import * as V3 from 'lib/cloth/domain/pattern-import-dxf-product-composite-sidecar-v3';
+import * as V4 from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/composite-sidecar-v4';
+import * as V5 from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/composite-sidecar-v5';
+import * as V6 from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/composite-sidecar-v6';
+import * as V7 from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/composite-sidecar-v7';
+import * as component from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-full-assembly-physical-component-v1';
+import * as arrangement from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/cad-mannequin-arrangement-document-v1';
+import { buildPatternImportDxfPhaseEExactNSeamConsistencyCarrierV2 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/exact-n-seam-consistency-carrier-v2';
+import {
+  bytesOf,
+  semanticDocument,
+  candidate,
+} from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/composite-placement-read-v1.test-fixture';
+import {
+  DXF_GARMENT_PHYSICAL_INITIALIZATION_V1,
+  DXF_GARMENT_PHYSICAL_INITIALIZATION_CONVENTION_V1,
+  encodeDxfGarmentPhysicalInitializationV1,
+  type DxfGarmentPhysicalInitializationV1,
+} from 'lib/cloth/domain/dxf-garment-physical-initialization-v1';
+import {
+  createSavedGenericObservedPhysicalHostV1,
+  projectSavedGenericObservedPhysicalHostPersistenceContextV1,
+} from './saved-generic-observed-physical-host-v1';
+import {
+  createSavedGenericDurablePhysicalHostV1,
+  SavedV7PlacementPersistenceErrorV1,
+} from './saved-generic-durable-physical-host-v1';
+import {
+  buildDxfGarmentObservedUnsewnEdgesV1,
+  type DxfGarmentObservedBoundaryEdgeV1,
+} from './dxf-garment-observed-unsewn-edges-v1';
+import type { DxfGarmentObservedWebgpuReplayRequestV1 } from './dxf-garment-observed-webgpu-replay-v1';
+import type {
+  DxfGarmentObservedPreviewHitV1,
+  DxfGarmentObservedPreviewSeamSideV1,
+  DxfGarmentObservedPreviewSurfacePointV1,
+} from './dxf-garment-observed-strain-heatmap-preview-v1';
+import * as workbenchShell from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/cad-workbench-split-shell-v1';
+import type { PatternImportDxfPhaseEMeasurementUnitV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/measurement-units-v1';
+import { bindCadWorkbenchPhysicalPreviewSelectionV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/cad-workbench-physical-host-v1';
+import { CadWorkbenchPhysicalHostControlsV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/cad-workbench-physical-host-controls-v1';
+import {
+  CadWorkbenchFirstPhysicalAuthoringV1,
+  CadWorkbenchSavedPlacementEditorV1,
+} from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/cad-workbench-first-physical-authoring-v1';
+import {
+  bindSavedFullAssemblyGenericFirstAuthoringV1,
+  type SavedFullAssemblyTablePiecePlacementV1,
+} from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-full-assembly-generic-first-authoring-v1';
+import { persistCurrentSavedGenericObservedPhysicalHostV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-full-assembly-physical-document-production-v1';
+import {
+  PATTERN_IMPORT_DXF_PRODUCT_PHASE_E_AUTHORING_CATALOG_V1,
+  buildPatternImportDxfProductPhaseEAuthoringCatalogV1,
+  computePatternImportDxfProductPhaseEAuthoringCatalogSha256V1,
+  type PatternImportDxfProductPhaseEAuthoringCatalogV1,
+} from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
+import {
+  PATTERN_IMPORT_DXF_PRODUCT_PHASE_E_ASSEMBLY_PROJECTION_V1,
+  projectPatternImportDxfProductPhaseEAssemblyV1,
+} from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
+import { selectPatternImportDxfProductDraftPhaseDSizeV1 } from 'lib/cloth/domain/pattern-import-dxf-product-draft-phase-d-selection-v1';
+import {
+  PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_DURABLE_RESTORE_REQUEST_V4,
+  restorePatternImportDxfProductCompositeSidecarDurableV4,
+} from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/composite-sidecar-restore-authority-v4';
+import {
+  PATTERN_IMPORT_DXF_PRODUCT_EXACT_N_SEAM_PREPARED_PROPOSAL_V3,
+  PATTERN_IMPORT_DXF_PRODUCT_EXACT_N_SEAM_SAVED_CARD_PROJECTION_REQUEST_V2,
+  projectPatternImportDxfProductExactNSeamSavedCardV2,
+} from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/exact-n-seam-saved-card-projection-v2';
+import {
+  PATTERN_IMPORT_DXF_PRODUCT_EXACT_N_SEAM_UI_SELECTION_REQUEST_V2,
+  applyPatternImportDxfProductExactNSeamUiSelectionV2,
+  createPatternImportDxfProductExactNSeamInitialUiStateV2,
+} from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/exact-n-seam-atomic-ui-selection-v2';
+import {
+  createPatternImportDxfPhaseETopologyAnnotationApplicationTransactionV5,
+  type PatternImportDxfPhaseETopologyAnnotationSourceV5,
+} from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/topology-annotation-application-transaction-v5';
+import { PATTERN_IMPORT_DXF_PHASE_E_CALLOUT_SESSION_V1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/callout-session-v1';
+import {
+  PatternImportDxfProductExactNSeamProductionMountV2,
+  type PatternImportDxfProductExactNDesktopGeometryV2,
+  type PatternImportDxfProductExactNSeamProductionMannequinContextV2,
+} from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/exact-n-seam-production-mount-v2';
+import type { PatternImportDxfPhaseECadWorkbenchSplitShellPropsV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/cad-workbench-split-shell-v1';
+import {
+  PatternImportDxfPhaseECadTableZeroConnectCanvasV1,
+  type PatternImportDxfPhaseECadTableZeroConnectCanvasPropsV1,
+} from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/cad-table-zero-connect-canvas-v1';
+import { createPatternImportDxfPhaseERestoredTopologyAnnotationReaderV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/restored-topology-annotation-reader-v1';
+import { createPatternImportDxfPhaseESavedAssemblySnapshotProductionRpcV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-assembly-snapshot-production-rpc-v1';
+
+import { createPatternImportDxfProductCompositeSidecarApplicationTransactionV4 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/composite-sidecar-production-transaction-v4';
+import { PatternImportDxfPhaseESavedTopologyAnnotationEditControlV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-topology-annotation-edit-control-v1';
+import { PatternImportDxfPhaseEExactNTopologyAnnotationEditorV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/exact-n-topology-annotation-editor-v1';
+
+// Real native DXF/worker/compiler, V3→V7 encoders, fixed fresh reader and genuine body session.
+// HTTP storage, declared synthetic observed triangle geometry, and GPU/preview lifecycle ports are fixtures.
+// Native/compiler/body ownership and durable verification are real; this is not GPU/V11/fit acceptance.
+vi.mock('api/api', () => ({ abortableAdminService: vi.fn() }));
+const previewMetricBinding = vi.hoisted(() => ({
+  frameReportSha256: '2'.repeat(64),
+  sourceBindingSha256: '3'.repeat(64),
+  finalStateSha256: '4'.repeat(64),
+  strainRenderMappingSha256: '5'.repeat(64),
+}));
+const ports = vi.hoisted(() => ({
+  calls: [] as Array<{ frame: number; request: Record<string, unknown>; prior: unknown }>,
+  live: new Map<object, AbortController>(),
+  pause: null as Promise<void> | null,
+  after: null as (() => void) | null,
+  previewDisposed: 0,
+  previewEvents: [] as string[],
+  previewSignals: [] as AbortSignal[],
+  finalValidationFrame: null as 16 | 32 | null,
+  previewPick: null as
+    | ((
+        x: number,
+        y: number,
+        runtimeSeamId?: string,
+        measureSurface?: boolean,
+      ) => DxfGarmentObservedPreviewHitV1 | null)
+    | null,
+  previewTape: null as
+    | ((
+        first: DxfGarmentObservedPreviewSurfacePointV1,
+        second: DxfGarmentObservedPreviewSurfacePointV1,
+      ) => Promise<number | null>)
+    | null,
+  previewSelect: null as
+    | ((
+        pieceId: string | null,
+        side?: DxfGarmentObservedPreviewSeamSideV1,
+        edge?: DxfGarmentObservedBoundaryEdgeV1,
+      ) => boolean)
+    | null,
+}));
+vi.mock('./dxf-garment-observed-webgpu-replay-v1', () => {
+  const run = async (
+    request: Record<string, unknown>,
+    frame: number,
+    prior: unknown,
+    lease: XpbdDeviceLease,
+    signal: AbortSignal,
+  ) => {
+    const controller = new AbortController(),
+      owner = Object.freeze({ syntheticNumericFrame: frame });
+    const cancel = () => controller.abort();
+    const inspection = inspectOwnedActiveXpbdDeviceLeaseV1(lease);
+    if (inspection.ok) void inspection.lost.then(cancel, cancel);
+    signal.addEventListener('abort', cancel, { once: true });
+    controller.signal.addEventListener('abort', () => signal.removeEventListener('abort', cancel), {
+      once: true,
+    });
+    if (signal.aborted) controller.abort();
+    ports.live.set(owner, controller);
+    ports.calls.push({ frame, request, prior });
+    ports.after?.();
+    if (ports.pause) await ports.pause;
+    const { placementRequest } = request as unknown as DxfGarmentObservedWebgpuReplayRequestV1;
+    const { constraints, manifest } = placementRequest.sourceArtifact.compiledSimulation;
+    return {
+      ok: true,
+      owner,
+      report: {
+        status: 'diagnostic-completed',
+        frameCount: frame,
+        reportSha256: frame === 32 ? previewMetricBinding.frameReportSha256 : '1'.repeat(64),
+        bodyBinding: structuredClone(request.bodyBinding),
+        sourceBindingSha256: previewMetricBinding.sourceBindingSha256,
+        finalStateSha256: previewMetricBinding.finalStateSha256,
+        layout: { counts: { seam: constraints.seam.vertexPairs.length / 2 } },
+        finalValidation:
+          frame !== 32 || ports.finalValidationFrame === null
+            ? null
+            : {
+                ok: true,
+                evaluated: true,
+                report: {
+                  frame: ports.finalValidationFrame,
+                  parity: { currentMaximumSeamGapM: 0.000625 },
+                  collision: {
+                    status: 'signed-clearance-measured',
+                    clearance: { penetratingVertexCount: 0 },
+                    claims: { signedClassificationDefensible: true },
+                  },
+                  orientation: {
+                    comparedTriangleCount: manifest.triangleCount,
+                    normalReversalCount: 0,
+                  },
+                },
+              },
+        strain: { renderMappingSha256: previewMetricBinding.strainRenderMappingSha256 },
+        checkpoint16Matched: frame === 32,
+        claims: { numericReplayOnly: true, runtimeAuthority: false, productAuthority: false },
+      },
+      blockers: [],
+    };
+  };
+  return {
+    DXF_GARMENT_OBSERVED_WEBGPU_REPLAY_V1: 'dxf-garment-observed-webgpu-replay/1',
+    DXF_GARMENT_OBSERVED_WEBGPU_REPLAY_PROFILE_V1: 'garment-material-contact-replay/1',
+    runDxfGarmentObservedWebgpu16ReplayV1: (
+      r: Record<string, unknown>,
+      lease: XpbdDeviceLease,
+      s: AbortSignal,
+    ) => run(r, 16, null, lease, s),
+    runDxfGarmentObservedWebgpu32ReplayV1: (
+      r: Record<string, unknown>,
+      p: unknown,
+      lease: XpbdDeviceLease,
+      s: AbortSignal,
+    ) => run(r, 32, p, lease, s),
+    getDxfGarmentObservedWebgpuReplayLifetimeV1: (o: object) =>
+      ports.live.get(o)?.signal.aborted === false ? ports.live.get(o)!.signal : null,
+    disposeDxfGarmentObservedWebgpuReplayV1: (o: object) => {
+      ports.live.get(o)?.abort();
+      return true;
+    },
+    projectDxfGarmentObservedWebgpuRenderV1: async (o: object) =>
+      ports.live.get(o)?.signal.aborted === false ? { declaredSyntheticRender: true } : null,
+  };
+});
+vi.mock('./dxf-garment-observed-strain-heatmap-preview-v1', () => ({
+  createDxfGarmentObservedStrainHeatmapPreviewV1: async (
+    _canvas: unknown,
+    _owner: unknown,
+    signal: AbortSignal,
+  ) => {
+    ports.previewSignals.push(signal);
+    ports.previewEvents.push('create');
+    const controller = new AbortController();
+    let disposed = false;
+    const dispose = () => {
+      if (disposed) return;
+      disposed = true;
+      ports.previewDisposed++;
+      ports.previewEvents.push('dispose');
+      controller.abort();
+      signal.removeEventListener('abort', dispose);
+    };
+    signal.addEventListener('abort', dispose, { once: true });
+    if (signal.aborted) dispose();
+    return {
+      receipt: {
+        ...previewMetricBinding,
+        frames: 32,
+        quantity: 'normalized-green-strain-utilization',
+        units: 'dimensionless',
+        minimumUtilization: 0.125,
+        maximumUtilization: 2.75,
+        triangleCountAtOrAboveDisplayClamp: 3,
+        displayClampMaximum: 2,
+        visibleHeatmapRendered: true,
+        stressPaComputed: false,
+        numericReplayOnly: true,
+        productAuthority: false,
+        fitAuthority: false,
+      },
+      lifetime: controller.signal,
+      pick: (x: number, y: number, runtimeSeamId?: string, measureSurface?: boolean) =>
+        (measureSurface
+          ? ports.previewPick?.(x, y, runtimeSeamId, true)
+          : ports.previewPick?.(x, y, runtimeSeamId)) ?? null,
+      measureTape: async (
+        first: DxfGarmentObservedPreviewSurfacePointV1,
+        second: DxfGarmentObservedPreviewSurfacePointV1,
+      ) => (await ports.previewTape?.(first, second)) ?? null,
+      setSelectedPiece: (
+        pieceId: string | null,
+        side?: DxfGarmentObservedPreviewSeamSideV1,
+        edge?: DxfGarmentObservedBoundaryEdgeV1,
+      ) => ports.previewSelect?.(pieceId, side, edge) ?? true,
+      dispose,
+    };
+  },
+}));
+
+let seed: SavedThreePanelFixtureV1;
+let outer: TechCardPatternSemanticSidecar | undefined;
+let readCount = 0;
+let beforeWireRead: (() => void | Promise<void>) | null = null;
+let editWire: ((wire: Awaited<ReturnType<typeof fullAssemblyFixtureWireV1>>) => void) | null = null;
+const cleanup: Array<() => unknown> = [];
+beforeAll(async () => {
+  seed = await createSavedThreePanelFixtureV1();
+});
+beforeEach(() => {
+  outer = undefined;
+  readCount = 0;
+  beforeWireRead = null;
+  editWire = null;
+  ports.calls.length = 0;
+  ports.live.clear();
+  ports.pause = null;
+  ports.after = null;
+  ports.previewDisposed = 0;
+  ports.previewEvents.length = 0;
+  ports.previewSignals.length = 0;
+  ports.finalValidationFrame = null;
+  ports.previewPick = null;
+  ports.previewTape = null;
+  ports.previewSelect = null;
+  vi.mocked(abortableAdminService).mockImplementation(
+    () =>
+      ({
+        GetTechCardSavedAssemblySnapshot: async (r: GetTechCardSavedAssemblySnapshotRequest) => {
+          readCount++;
+          await beforeWireRead?.();
+          const wire = await fullAssemblyFixtureWireV1(seed, r.selectedOperationNumber!);
+          editWire?.(wire);
+          return { ...wire, semanticSidecar: outer ? structuredClone(outer) : undefined };
+        },
+      }) as unknown as ReturnType<typeof abortableAdminService>,
+  );
+});
+afterEach(async () => {
+  beforeWireRead = null;
+  editWire = null;
+  vi.restoreAllMocks();
+  for (const dispose of cleanup.splice(0).reverse()) await dispose();
+});
+function requireOk<T extends { ok: boolean }>(v: T): Extract<T, { ok: true }> {
+  if (!v.ok) throw new Error(JSON.stringify(v));
+  return v as Extract<T, { ok: true }>;
+}
+/** Nested legacy metadata is only a declared storage transport anchor, never graph/body authority. */
+async function encodedStorage(
+  context: Extract<
+    Awaited<ReturnType<typeof projectSavedGenericObservedPhysicalHostPersistenceContextV1>>,
+    { ok: true }
+  >['context'],
+  withAnnotations: boolean,
+  nativeDraft?: Parameters<typeof buildPatternImportDxfProductPhaseEAuthoringCatalogV1>[0],
+) {
+  const fullReceipt = await snapshotApi.readSavedFullAssemblySnapshotV1({
+    row: seed.row,
+    seedOperationNumber: 10,
+  });
+  let full;
+  try {
+    full = snapshotApi.projectSavedFullAssemblySnapshotV1(fullReceipt);
+  } finally {
+    snapshotApi.disposeSavedFullAssemblySnapshotV1(fullReceipt);
+  }
+  const selectedOperationNumber = withAnnotations ? 20 : 10;
+  const bindings = {
+    row: seed.row,
+    serverAssemblyRevision: full.serverAssemblyRevision,
+    assemblyTopologySha256: full.selectedTopologyReceipts.find(
+      (x) => x.sourceOperationNumber === selectedOperationNumber,
+    )!.sha256,
+  };
+  const v3 = requireOk(
+    await V3.buildPatternImportDxfProductCompositeSidecarV3({
+      schemaVersion: V3.PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V3,
+      bindings,
+      expectedPreviousSidecarSha256: null,
+      semanticProductV1Bytes: bytesOf(semanticDocument(seed.row)),
+      placementV2Bytes: null,
+      exactTopologyBytes: null,
+    }),
+  );
+  const e3 = requireOk(V3.encodePatternImportDxfProductCompositeSidecarV3(v3.owner));
+  const exactCandidate = candidate(1);
+  const graphOperation = context.graph.operations.find(
+    ({ sourceOperationNumber }) => sourceOperationNumber === selectedOperationNumber,
+  )!;
+  const graphSeam = context.graph.seams.find(({ id }) => id === graphOperation.seamIds[0])!;
+  const exactSides = nativeDraft
+    ? graphSeam.sides.map(({ anchors, ...side }, index) => ({
+        ...side,
+        seamId: graphSeam.sourceSeamKey,
+        sideIndex: index as 0 | 1,
+        boundaryVertexIds: anchors,
+      }))
+    : exactCandidate.sides;
+  const unsignedCatalog = {
+    schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_PHASE_E_AUTHORING_CATALOG_V1,
+    techCardId: seed.row.techCardId,
+    scopeKey: seed.row.scopeKey,
+    sizeToken: 'M',
+    sourceFileId: 'saved-source',
+    sizeSelectionCanonicalSha256: 'e'.repeat(64),
+    pieces: exactCandidate.sides.map((side) => ({
+      pieceId: side.pieceId,
+      pieceLineKey: side.pieceLineKey,
+      contours: [
+        {
+          contourId: side.contourId,
+          role: 'sewing-boundary',
+          geometry: { kind: 'seam' },
+          closed: true,
+          boundaryVertices: [...side.boundaryVertexIds, `${side.pieceId}:third-vertex`].map(
+            (vertexId, ordinal) => ({
+              ordinal,
+              vertexId,
+              normalizedArc: ordinal / 3,
+            }),
+          ),
+        },
+      ],
+    })),
+    requiredExplicitFields: [
+      'documentId-and-revision',
+      'physical-surface',
+      'two-seam-sides-and-anchor-ranges',
+      'side-directions',
+      'mapping-and-length-ratio',
+      'operation-stage-and-order',
+      'immutable-material-revisions',
+      'tolerances',
+    ],
+    geometryCoordinatesExposed: false,
+    rawDxfExposed: false,
+    assemblyInferred: false,
+    productionReady: false,
+  } satisfies Omit<PatternImportDxfProductPhaseEAuthoringCatalogV1, 'canonicalSha256'>;
+  const canonicalSha256 = await computePatternImportDxfProductPhaseEAuthoringCatalogSha256V1(
+    unsignedCatalog,
+    globalThis.crypto,
+  );
+  if (!canonicalSha256) throw new Error('Could not bind the storage fixture catalog');
+  const catalog = nativeDraft
+    ? requireOk(
+        await buildPatternImportDxfProductPhaseEAuthoringCatalogV1(
+          nativeDraft,
+          seed.row.scopeKey,
+          context.graph.source.sizeToken,
+        ),
+      ).catalog
+    : { ...unsignedCatalog, canonicalSha256 };
+  const nativeProjection = nativeDraft
+    ? requireOk(
+        projectPatternImportDxfProductPhaseEAssemblyV1(
+          catalog,
+          requireOk(
+            await selectPatternImportDxfProductDraftPhaseDSizeV1(
+              nativeDraft,
+              seed.row.scopeKey,
+              context.graph.source.sizeToken,
+            ),
+          ).selection,
+        ),
+      ).projection
+    : null;
+  const exact = requireOk(
+    await buildPatternImportDxfPhaseEExactNSeamConsistencyCarrierV2({
+      ...exactCandidate,
+      ...bindings,
+      catalogCanonicalSha256: catalog.canonicalSha256,
+      selectedOperation: {
+        ...exactCandidate.selectedOperation,
+        sourceOperationNumber: selectedOperationNumber,
+        seamIds: seed.operations.find(
+          ({ operationNumber }) => operationNumber === selectedOperationNumber,
+        )!.seamKeys,
+      },
+      sides: exactSides.map((side) => ({
+        ...side,
+        seamId: seed.operations.find(
+          ({ operationNumber }) => operationNumber === selectedOperationNumber,
+        )!.seamKeys[0],
+      })),
+    }),
+  );
+  const eExact = requireOk(
+    await V4.encodePatternImportDxfProductExactNSeamComponentV4({
+      carrier: exact.carrier,
+      seal: exact.seal,
+    }),
+  );
+  const v4 = requireOk(
+    await V4.buildPatternImportDxfProductCompositeSidecarV4({
+      schemaVersion: V4.PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V4,
+      bindings,
+      expectedPreviousSidecarSha256: e3.canonicalSha256,
+      compositeV3Bytes: e3.bytes,
+      exactNSeamConsistencyBytes: eExact.bytes,
+    }),
+  );
+  const e4 = requireOk(V4.encodePatternImportDxfProductCompositeSidecarV4(v4.owner));
+  const source: PatternImportDxfPhaseETopologyAnnotationSourceV5 = {
+    identity: 'declared-storage-anchor',
+    revision: String(seed.row.revision),
+    sha256: seed.row.sha256,
+    projection: nativeProjection ?? {
+      schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_PHASE_E_ASSEMBLY_PROJECTION_V1,
+      expectedCatalogCanonicalSha256: catalog.canonicalSha256,
+      sourceFileId: catalog.sourceFileId,
+      sizeSelectionCanonicalSha256: catalog.sizeSelectionCanonicalSha256,
+      sizeToken: catalog.sizeToken,
+      joinMode: 'catalog-ordinal-to-phase-d-point',
+      geometryPlacementApplied: false,
+      pieces: catalog.pieces.map((piece) => ({
+        pieceId: piece.pieceId,
+        pieceLineKey: piece.pieceLineKey,
+        cameraMm: { minX: 0, minY: 0, maxX: 20, maxY: 20, padding: 1 },
+        contours: piece.contours.map((contour) => ({
+          contourId: contour.contourId,
+          closed: contour.closed,
+          role: contour.role,
+          vertices: contour.boundaryVertices.map((vertex) => ({
+            ...vertex,
+            pointMm: { x: 10 * vertex.ordinal, y: 10 * (vertex.ordinal % 2) },
+          })),
+        })),
+      })),
+    },
+  };
+  const [side] = exactCandidate.sides;
+  const anchor = {
+    pieceId: side.pieceId,
+    pieceLineKey: side.pieceLineKey,
+    contourId: side.contourId,
+    vertexId: side.boundaryVertexIds[0],
+    pointMm: { x: 0, y: 0 },
+  };
+  const annotation = requireOk(
+    await V5.encodePatternImportDxfPhaseETopologyAnnotationsV1({
+      schemaVersion: V5.PATTERN_IMPORT_DXF_PHASE_E_TOPOLOGY_ANNOTATIONS_REQUEST_V1,
+      bindings: V5.derivePatternImportDxfPhaseETopologyAnnotationsBindingsV1(bindings, {
+        identity: source.identity,
+        revision: source.revision,
+        sha256: source.sha256,
+      }),
+      measurements: withAnnotations
+        ? [{ id: 'measurement:1', kind: 'point', anchors: [anchor], valueMm: null, label: 'Point' }]
+        : [],
+      callouts: withAnnotations
+        ? [
+            {
+              schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_CALLOUT_SESSION_V1,
+              id: 'callout:1',
+              anchor,
+              text: 'Controllo cucitura',
+            },
+          ]
+        : [],
+    }),
+  );
+  const v5 = requireOk(
+    await V5.buildPatternImportDxfProductCompositeSidecarV5({
+      schemaVersion: V5.PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V5,
+      bindings,
+      expectedPreviousSidecarSha256: e4.canonicalSha256,
+      compositeV4Bytes: e4.bytes,
+      topologyAnnotationsBytes: annotation.bytes,
+    }),
+  );
+  const e5 = requireOk(V5.encodePatternImportDxfProductCompositeSidecarV5(v5.owner));
+  const target = context.physicalInitialization.document.observedTarget.target;
+  const arrangementDoc = arrangement.createCadMannequinArrangementDocumentV1({
+    bindings: {
+      card: { techCardId: seed.row.techCardId, cardLockVersion: seed.row.cardLockVersion },
+      scope: {
+        scopeKey: seed.row.scopeKey,
+        patternLineKey: seed.row.patternLineKey,
+        sizeToken: context.graph.source.sizeToken,
+      },
+      savedRow: { revision: seed.row.revision, dxfSha256: seed.row.sha256 },
+      source: {
+        catalogCanonicalSha256: context.graphCanonicalSha256,
+        sizeSelectionCanonicalSha256: context.compileInputSha256,
+      },
+      mannequin: {
+        baseModelId: target.persistedModel.id,
+        modelFormRevisionKeyV1: target.displayedModel.modelContentRevision,
+        poseBinding: { canonicalKey: JSON.stringify(target.pose.document) },
+      },
+    },
+    pieces: context.graph.pieces.map((p) => ({
+      pieceKey: `fixture:${p.pieceId}`,
+      scopeKey: seed.row.scopeKey,
+      pieceId: p.pieceId,
+      pieceLineKey: p.pieceLineKey,
+      transform: withAnnotations
+        ? { offsetM: [0.125, -0.0625, 0.25], rotationRad: 0.5 }
+        : { offsetM: [0, 0, 0], rotationRad: 0 },
+    })),
+  });
+  const v6 = requireOk(
+    await V6.buildPatternImportDxfProductCompositeSidecarV6({
+      schemaVersion: V6.PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V6,
+      expectedPreviousSidecarSha256: e5.canonicalSha256,
+      compositeV5Bytes: e5.bytes,
+      mannequinArrangementBytes: new TextEncoder().encode(
+        arrangement.encodeCadMannequinArrangementDocumentV1(arrangementDoc),
+      ),
+    }),
+  );
+  const e6 = requireOk(V6.encodePatternImportDxfProductCompositeSidecarV6(v6.owner));
+  const physical = await encodeDxfGarmentPhysicalInitializationV1({
+    document: context.physicalInitialization.document,
+    graph: context.graph,
+    assemblySnapshot: context.assemblySnapshot,
+  });
+  const part = requireOk(
+    await component.buildSavedFullAssemblyPhysicalComponentV1({
+      bindings: { row: seed.row, serverAssemblyRevision: full.serverAssemblyRevision },
+      graph: context.graph,
+      graphCanonicalSha256: context.graphCanonicalSha256,
+      compileInputSha256: context.compileInputSha256,
+      physicalInitializationBytes: physical.bytes,
+      assemblySnapshot: full,
+    }),
+  );
+  const encodedPart = requireOk(component.encodeSavedFullAssemblyPhysicalComponentV1(part.owner));
+  const v7 = requireOk(
+    await V7.buildPatternImportDxfProductCompositeSidecarV7({
+      schemaVersion: V7.PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V7,
+      expectedPreviousSidecarSha256: e6.canonicalSha256,
+      bindings: {
+        ...bindings,
+        assemblyTopologySha256: full.selectedTopologyReceipts.find(
+          (receipt) => receipt.sourceOperationNumber === 10,
+        )!.sha256,
+      },
+      compositeV6Bytes: e6.bytes,
+      fullAssemblyPhysicalBytes: encodedPart.bytes,
+    }),
+  );
+  const e7 = requireOk(V7.encodePatternImportDxfProductCompositeSidecarV7(v7.owner));
+  const stored = (
+    mediaType: string,
+    encoded: Readonly<{ canonicalSha256: string; bytes: Uint8Array }>,
+  ): TechCardPatternSemanticSidecar => ({
+    techCardId: seed.row.techCardId,
+    patternLineKey: seed.row.patternLineKey,
+    dxfSha256: seed.row.sha256,
+    patternVersion: 4,
+    cardLockVersion: seed.row.cardLockVersion,
+    savedRowRevision: seed.row.revision,
+    sidecarSha256: encoded.canonicalSha256,
+    mediaType,
+    byteLength: encoded.bytes.length,
+    sidecarBytes: Buffer.from(encoded.bytes).toString('base64'),
+    postSaveReceiptSha256: undefined,
+    createdAt: undefined,
+    createdBy: undefined,
+  });
+  return {
+    v6: stored(V6.PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6, e6),
+    v7: stored(V7.PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7, e7),
+    v7TopologySha256: v7.document.bindings.assemblyTopologySha256,
+    catalog,
+    exactSides,
+    source,
+    current: exact.carrier.bindings,
+  };
+}
+async function compiledObservedFixture(
+  body: ReturnType<typeof createSavedModelDisplayedTriangleBodySessionV2>,
+) {
+  const native = await createSavedThreePanelSourceV1(seed);
+  cleanup.push(native.dispose);
+  const pre = createSavedGenericObservedPhysicalHostV1({ row: seed.row, bodySession: body });
+  cleanup.push(() => pre.dispose());
+  const raw = await savedThreePanelCompileRequestV1(seed, native);
+  // Explicitly authored isotropic materials; no conversion or fallback from anisotropic source.
+  const materialIds = new Map(
+    raw.intent.compile.materials.map((m) => [m.id, `explicit-durable-fixture-isotropic-${m.id}`]),
+  );
+  const intent = {
+    ...structuredClone(raw.intent),
+    pieces: raw.intent.pieces.map((p) => ({ ...p, materialId: materialIds.get(p.materialId)! })),
+    compile: {
+      ...structuredClone(raw.intent.compile),
+      materials: raw.intent.compile.materials.map((m, i) => ({
+        ...m,
+        id: materialIds.get(m.id)!,
+        label: 'Explicit isotropic durable-host lifecycle fixture',
+        bendComplianceInvNm: { warp: i ? 0.0011 : 0.0006, weft: i ? 0.0011 : 0.0006 },
+      })),
+      continuumMaterials: raw.intent.compile.continuumMaterials.map((m) => ({
+        ...m,
+        materialId: materialIds.get(m.materialId)!,
+      })),
+    },
+  };
+  requireOk(await pre.consume({ ...raw, intent }));
+  const author = requireOk(await pre.projectAuthoringContext(1));
+  return { pre, author, native, intent };
+}
+async function fixture(
+  withAnnotations = false,
+  options?: {
+    nativeExactDesktop?: boolean;
+    initialRotation?: DxfGarmentPhysicalInitializationV1['placements'][number]['rotationRowMajor'];
+    hingeRotation?: DxfGarmentPhysicalInitializationV1['placements'][number]['rotationRowMajor'];
+  },
+) {
+  const observed = await sessionFixture();
+  cleanup.push(() => observed.input.dispose());
+  const body = createSavedModelDisplayedTriangleBodySessionV2(async () =>
+    structuredClone(observed.state.model),
+  );
+  await body.observe(observed.input);
+  cleanup.push(() => body.dispose());
+  const { pre, author, native, intent } = await compiledObservedFixture(body);
+  const frontSeam = intent.seams[0]!.sides[0];
+  const hinge = author.sourceGeometry.pieces
+    .find((piece) => piece.pieceId === frontSeam.pieceId)
+    ?.contours.find((contour) => contour.contourId === frontSeam.contourId)
+    ?.vertices.find((vertex) => vertex.vertexId === frontSeam.anchors[0])?.positionM;
+  if (options?.hingeRotation && !hinge)
+    throw new Error('Fixture is missing its exact native hinge.');
+  const doc: DxfGarmentPhysicalInitializationV1 = {
+    schemaVersion: DXF_GARMENT_PHYSICAL_INITIALIZATION_V1,
+    graphCanonicalSha256: author.graphCanonicalSha256,
+    compileInputSha256: author.compileInputSha256,
+    convention: DXF_GARMENT_PHYSICAL_INITIALIZATION_CONVENTION_V1,
+    placements: ['FRONT', 'BACK', 'SIDE'].map((pieceId, i) => {
+      const originalOrigin = [i * 0.15, 0, 0] as const;
+      const originalPosition = [1 + i * 0.1, 0.5, 0] as const;
+      const rotation = options?.hingeRotation;
+      if (!rotation)
+        return {
+          pieceId,
+          sourceOriginM: originalOrigin,
+          rotationRowMajor: options?.initialRotation ?? [1, 0, 0, 0, 1, 0, 0, 0, 1],
+          translationM: originalPosition,
+        };
+      const origin = pieceId === frontSeam.pieceId ? hinge! : originalOrigin;
+      const [x, y, z] = [
+        originalPosition[0] - 1 + origin[0] - originalOrigin[0],
+        origin[1] - originalOrigin[1],
+        origin[2] - originalOrigin[2],
+      ];
+      return {
+        pieceId,
+        sourceOriginM: origin,
+        rotationRowMajor: rotation,
+        // A common rigid turn of the whole known coherent prior aligns the hinge with a world axis.
+        translationM: [
+          1 + rotation[0] * x! + rotation[1] * y! + rotation[2] * z!,
+          0.5 + rotation[3] * x! + rotation[4] * y! + rotation[5] * z!,
+          rotation[6] * x! + rotation[7] * y! + rotation[8] * z!,
+        ],
+      };
+    }),
+    observedTarget: author.observedTarget,
+    support: 'none',
+    replayProfile: 'garment-material-contact-replay/1',
+  };
+  requireOk(await pre.bindInitialization(doc, 1));
+  const context = requireOk(
+    await projectSavedGenericObservedPhysicalHostPersistenceContextV1(pre, 1),
+  ).context;
+  const storage = await encodedStorage(
+    context,
+    withAnnotations,
+    options?.nativeExactDesktop ? native.native.draft : undefined,
+  );
+  outer = storage.v7;
+  // Real persisted outer changes the full snapshot; old source is correctly no longer usable.
+  expect((await pre.projectAuthoringContext(1)).ok).toBe(false);
+  await pre.dispose();
+  return { ...(await freshPhysicalFixtureHost(body)), body, observed, context, storage };
+}
+async function freshPhysicalFixtureHost(
+  body: ReturnType<typeof createSavedModelDisplayedTriangleBodySessionV2>,
+) {
+  const nextNative = await createSavedThreePanelSourceV1(seed);
+  cleanup.push(nextNative.dispose);
+  const next = await savedThreePanelCompileRequestV1(seed, nextNative);
+  const reader = await physicalReader.readSavedFullAssemblyPhysicalSnapshotV1(
+    { row: seed.row, seedOperationNumber: 10 },
+    new AbortController().signal,
+  );
+  cleanup.push(() => physicalReader.disposeSavedFullAssemblyPhysicalSnapshotV1(reader));
+  const host = createSavedGenericDurablePhysicalHostV1({ row: seed.row, bodySession: body });
+  cleanup.push(() => host.dispose());
+  return {
+    host,
+    native: nextNative,
+    reader,
+    request: {
+      verifiedReceipt: reader,
+      sourceOwner: next.sourceOwner,
+      sourceRequest: next.sourceRequest,
+    },
+  };
+}
+type DeviceLoss = Parameters<NonNullable<CreateXpbdDeviceSessionOptions['onDeviceLost']>>[0];
+function fixtureDevice(lost = new Promise<DeviceLoss>(() => {})) {
+  return Object.assign(new EventTarget(), {
+    limits: {
+      maxBufferSize: 268435456,
+      maxStorageBufferBindingSize: 134217728,
+      maxUniformBufferBindingSize: 65536,
+      maxComputeWorkgroupsPerDimension: 65535,
+      maxComputeInvocationsPerWorkgroup: 256,
+      maxComputeWorkgroupSizeX: 256,
+      maxBindingsPerBindGroup: 8,
+      maxStorageBuffersPerShaderStage: 8,
+      maxUniformBuffersPerShaderStage: 4,
+      maxBindGroups: 4,
+    },
+    lost,
+    queue: { onSubmittedWorkDone: vi.fn(async () => {}) },
+    destroy: vi.fn(),
+  });
+}
+async function borrowedLease() {
+  const device = fixtureDevice();
+  const session = await createXpbdDeviceSession(
+    { getContext: () => ({ configure() {}, unconfigure() {} }) } as unknown as HTMLCanvasElement,
+    {
+      gpu: {
+        getPreferredCanvasFormat: () => 'bgra8unorm',
+        requestAdapter: async () => ({ requestDevice: async () => device }),
+      } as never,
+    },
+  );
+  cleanup.push(() => session.dispose().then(() => {}));
+  const lease = session.acquireExclusive();
+  cleanup.push(() => lease.release());
+  return { lease, device };
+}
+
+async function openExactAnnotationFixture(
+  storage: Awaited<ReturnType<typeof encodedStorage>>,
+  version: 'v6' | 'v7',
+  row = storage[version],
+) {
+  const { catalog, current } = storage;
+  const restored = requireOk(
+    await restorePatternImportDxfProductCompositeSidecarDurableV4({
+      schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_DURABLE_RESTORE_REQUEST_V4,
+      current,
+      readback: {
+        status: 'present',
+        source: 'fresh-current-sidecar-get',
+        mediaType:
+          version === 'v6'
+            ? V6.PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6
+            : V7.PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7,
+        sha256: row.sidecarSha256!,
+        byteLength: row.byteLength!,
+        bytes: new Uint8Array(Buffer.from(row.sidecarBytes!, 'base64')),
+      },
+    }),
+  );
+  const projection = requireOk(
+    await projectPatternImportDxfProductExactNSeamSavedCardV2({
+      schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_EXACT_N_SEAM_SAVED_CARD_PROJECTION_REQUEST_V2,
+      restoreOwner: restored.owner,
+      catalog,
+      preparedProposal: {
+        schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_EXACT_N_SEAM_PREPARED_PROPOSAL_V3,
+        status: 'current-saved-card-proposal',
+        expectedCatalogCanonicalSha256: catalog.canonicalSha256,
+        phaseEAggregatePlanSha256: current.phaseEAggregatePlanSha256,
+        operation: current.selectedOperation,
+        seams: [
+          {
+            seamId: current.selectedOperation.seamIds[0],
+            sides: storage.exactSides.map(({ pieceId, pieceLineKey, direction }) => ({
+              pieceId,
+              pieceLineKey,
+              requiredDirection: direction,
+            })) as unknown as readonly [
+              {
+                pieceId: string;
+                pieceLineKey: string;
+                requiredDirection: 'forward' | 'reverse';
+              },
+              {
+                pieceId: string;
+                pieceLineKey: string;
+                requiredDirection: 'forward' | 'reverse';
+              },
+            ],
+          },
+        ],
+      },
+    }),
+  );
+  const selected = requireOk(
+    applyPatternImportDxfProductExactNSeamUiSelectionV2({
+      schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_EXACT_N_SEAM_UI_SELECTION_REQUEST_V2,
+      projectionOwner: projection.owner,
+      current,
+      currentState: createPatternImportDxfProductExactNSeamInitialUiStateV2(projection.owner)!,
+    }),
+  );
+  return { selectionOwner: selected.owner, current };
+}
+
+function visitMountedTree(
+  tree: ReactNode,
+  predicate: (props: Record<string, unknown>) => boolean,
+): Record<string, unknown> | null {
+  if (Array.isArray(tree)) {
+    for (const item of tree) {
+      const result = visitMountedTree(item, predicate);
+      if (result) return result;
+    }
+  } else if (isValidElement<Record<string, unknown>>(tree)) {
+    if (predicate(tree.props)) return tree.props;
+    return visitMountedTree(tree.props.children as ReactNode, predicate);
+  }
+  return null;
+}
+
+function reactMountContainer() {
+  const listeners = { addEventListener: () => undefined, removeEventListener: () => undefined };
+  class HTMLIFrameElement {}
+  return {
+    nodeType: 1,
+    nodeName: 'DIV',
+    tagName: 'DIV',
+    namespaceURI: 'http://www.w3.org/1999/xhtml',
+    ownerDocument: {
+      nodeType: 9,
+      defaultView: { document: { activeElement: null }, HTMLIFrameElement },
+      ...listeners,
+    },
+    ...listeners,
+  };
+}
+
+function mountAnnotationFixtureView<Props>(View: (props: Props) => ReactNode) {
+  const root = createRoot(reactMountContainer() as never);
+  let props: Props;
+  let output: ReactNode;
+  let mounted = true;
+  function Harness() {
+    output = View(props);
+    return null;
+  }
+  const unmount = async () => {
+    if (!mounted) return;
+    mounted = false;
+    await act(async () => root.unmount());
+  };
+  cleanup.push(unmount);
+  return {
+    async render(next: Props) {
+      props = next;
+      await act(async () => root.render(createElement(Harness)));
+    },
+    output: () => output,
+    unmount,
+  };
+}
+
+async function wrappedAnnotationSaveFixture(version: 'v6' | 'v7') {
+  const { storage } = await fixture(true);
+  const session = await openExactAnnotationFixture(storage, version);
+  const current = {
+    ...storage[version],
+    postSaveReceiptSha256: semanticDocument(seed.row).persistence.receiptSealSha256,
+  };
+  outer = current;
+  const get = vi.fn(async (): Promise<{ semanticSidecar: TechCardPatternSemanticSidecar }> => {
+    return { semanticSidecar: structuredClone(outer!) };
+  });
+  const put = vi.fn(async (request: PutTechCardPatternSemanticSidecarRequest) => {
+    expect(request).toMatchObject({
+      techCardId: current.techCardId,
+      patternLineKey: current.patternLineKey,
+      expectedCardLockVersion: current.cardLockVersion,
+      expectedSavedRowRevision: current.savedRowRevision,
+      expectedDxfSha256: current.dxfSha256,
+      expectedPreviousSidecarSha256: outer!.sidecarSha256,
+      expectedServerAssemblyRevision: session.current.serverAssemblyRevision,
+      expectedAssemblyTopologySha256:
+        version === 'v6' ? session.current.assemblyTopologySha256 : storage.v7TopologySha256,
+      selectedOperationNumber: version === 'v6' ? 20 : 10,
+      mediaType: current.mediaType,
+    });
+    outer = {
+      ...current,
+      sidecarBytes: request.sidecarBytes,
+      sidecarSha256: request.sidecarSha256,
+      byteLength: Buffer.from(request.sidecarBytes!, 'base64').length,
+    };
+    return { semanticSidecar: structuredClone(outer) };
+  });
+  const application = createPatternImportDxfProductCompositeSidecarApplicationTransactionV4({
+    createClient: () => ({
+      GetTechCardPatternSemanticSidecar: get,
+      PutTechCardPatternSemanticSidecar: put,
+    }),
+  });
+  const anchor = {
+    pieceId: 'piece:0:front',
+    pieceLineKey: 'line:0:front',
+    contourId: 'contour:0:front',
+    vertexId: 'vertex:0:front:0',
+  };
+  const input = {
+    session,
+    geometry: {
+      catalog: storage.catalog,
+      projection: storage.source.projection,
+      annotationSource: storage.source,
+    },
+    expectedPreviousSidecarSha256: current.sidecarSha256!,
+    draft: {
+      measurements: [
+        {
+          id: 'measurement:1',
+          kind: 'point' as const,
+          anchors: [anchor],
+          valueMm: null,
+          label: 'Point',
+        },
+      ],
+      callouts: [
+        {
+          schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_CALLOUT_SESSION_V1,
+          id: 'callout:1',
+          anchor,
+          text: 'Misura aggiornata',
+        },
+      ],
+    },
+  };
+  const signal = new AbortController().signal;
+  return {
+    current,
+    get,
+    input,
+    put,
+    signal,
+    storage,
+    application,
+    save: application.saveWrappedTopologyAnnotations,
+  };
+}
+
+async function unwrapAnnotationSaveFixture(
+  version: 'v6' | 'v7',
+  row: TechCardPatternSemanticSidecar,
+) {
+  const bytes = new Uint8Array(Buffer.from(row.sidecarBytes!, 'base64'));
+  const v7 =
+    version === 'v7'
+      ? requireOk(await V7.decodePatternImportDxfProductCompositeSidecarV7(bytes))
+      : null;
+  const v6 =
+    v7?.nestedCompositeV6 ??
+    requireOk(await V6.decodePatternImportDxfProductCompositeSidecarV6(bytes));
+  return {
+    v5: v6.nestedCompositeV5,
+    v6,
+    v7,
+    exactV4: V5.readPatternImportDxfProductCompositeComponentBytesV5(
+      v6.nestedCompositeV5.owner,
+      'composite-v4',
+    ),
+    arrangement: V6.readPatternImportDxfProductCompositeComponentBytesV6(
+      v6.owner,
+      'cad-mannequin-arrangement-v1',
+    ),
+    physical:
+      v7 &&
+      V7.readPatternImportDxfProductCompositeComponentBytesV7(
+        v7.owner,
+        component.SAVED_FULL_ASSEMBLY_PHYSICAL_COMPONENT_KIND_V1,
+      ),
+  };
+}
+
+function advanceAssemblyRevision(wire: Awaited<ReturnType<typeof fullAssemblyFixtureWireV1>>) {
+  wire.serverAssemblyRevision += ':advanced';
+}
+function advanceSavedRowRevision(wire: Awaited<ReturnType<typeof fullAssemblyFixtureWireV1>>) {
+  wire.row.savedRowRevision += 1;
+}
+
+describe('same-row wrapped annotation CAS', () => {
+  it.each(['v6', 'v7'] as const)(
+    'updates only the annotation chain through the existing CAS for %s',
+    async (version) => {
+      const { current, input, put, save, signal } = await wrappedAnnotationSaveFixture(version);
+      const before = await unwrapAnnotationSaveFixture(version, current);
+      const saved = requireOk(await save(input, signal));
+      expect(saved.readback.callouts[0].text).toBe('Misura aggiornata');
+      expect(saved.sidecarSha256).not.toBe(current.sidecarSha256);
+      expect(put).toHaveBeenCalledTimes(1);
+      const after = await unwrapAnnotationSaveFixture(version, outer!);
+      expect(after.exactV4).toEqual(before.exactV4);
+      expect(after.arrangement).toEqual(before.arrangement);
+      expect(after.v6.mannequinArrangement.pieces[0].transform).toEqual({
+        offsetM: [0.125, -0.0625, 0.25],
+        rotationRad: 0.5,
+      });
+      expect(after.v5.document.writeCas.expectedPreviousSidecarSha256).toBe(
+        before.v5.seal.canonicalSha256,
+      );
+      expect(after.v6.document.writeCas.expectedPreviousSidecarSha256).toBe(
+        before.v6.seal.canonicalSha256,
+      );
+      expect(after.v5.seal.canonicalSha256).not.toBe(before.v5.seal.canonicalSha256);
+      expect(after.v6.seal.canonicalSha256).not.toBe(before.v6.seal.canonicalSha256);
+      expect(after.v5.topologyAnnotations.bindings).toEqual(before.v5.topologyAnnotations.bindings);
+      expect(after.physical).toEqual(before.physical);
+      if (version === 'v7') {
+        expect(after.v7!.fullAssemblyPhysicalEnvelope.document.physicalInitialization).toEqual(
+          before.v7!.fullAssemblyPhysicalEnvelope.document.physicalInitialization,
+        );
+        expect(after.v7!.fullAssemblyPhysicalEnvelope.document.bindings.aoContentSha256).toBe(
+          before.v7!.fullAssemblyPhysicalEnvelope.document.bindings.aoContentSha256,
+        );
+        expect(after.v7!.document.writeCas.expectedPreviousSidecarSha256).toBe(
+          before.v7!.seal.canonicalSha256,
+        );
+      }
+    },
+  );
+
+  it.each(['v6', 'v7'] as const)(
+    'refuses a stale baseline or an invalidation during %s pre-PUT planning',
+    async (version) => {
+      const { current, get, input, put, save, signal } =
+        await wrappedAnnotationSaveFixture(version);
+      expect(
+        await save({ ...input, expectedPreviousSidecarSha256: '9'.repeat(64) }, signal),
+      ).toMatchObject({
+        ok: false,
+        writeOutcome: 'not-attempted',
+        detail: expect.stringContaining('envelope changed'),
+      });
+      for (const invalidate of [advanceAssemblyRevision, advanceSavedRowRevision]) {
+        get.mockImplementationOnce(async () => {
+          editWire = invalidate;
+          return { semanticSidecar: current };
+        });
+        expect(await save(input, signal)).toMatchObject({
+          ok: false,
+          writeOutcome: 'not-attempted',
+          detail: expect.stringContaining('pre-PUT currentness check failed'),
+        });
+        editWire = null;
+      }
+      expect(put).not.toHaveBeenCalled();
+      expect(outer!.sidecarSha256).toBe(current.sidecarSha256);
+    },
+  );
+
+  it.each([
+    ['v6', 'row', advanceSavedRowRevision],
+    ['v6', 'operation', advanceAssemblyRevision],
+    ['v7', 'row', advanceSavedRowRevision],
+    ['v7', 'operation', advanceAssemblyRevision],
+  ] as const)(
+    'withholds verified readback after %s %s drift without retrying PUT',
+    async (version, _authority, invalidate) => {
+      const { current, get, input, put, save, signal } =
+        await wrappedAnnotationSaveFixture(version);
+      get.mockImplementationOnce(async () => ({ semanticSidecar: current }));
+      get.mockImplementationOnce(async () => {
+        editWire = invalidate;
+        return { semanticSidecar: structuredClone(outer!) };
+      });
+      expect(await save(input, signal)).toMatchObject({
+        ok: false,
+        writeOutcome: 'acknowledged-unverified',
+      });
+      expect(put).toHaveBeenCalledTimes(1);
+    },
+  );
+});
+
+describe('mounted exact annotation Save and remount', () => {
+  async function mountedFixture(version: 'v6' | 'v7') {
+    const saved = await wrappedAnnotationSaveFixture(version);
+    const read = vi.fn(
+      createPatternImportDxfPhaseERestoredTopologyAnnotationReaderV1(
+        createPatternImportDxfPhaseESavedAssemblySnapshotProductionRpcV1(
+          saved.input.session.current.selectedOperation.sourceOperationNumber,
+        ).authorityAdapter,
+        saved.application.topologyAnnotations,
+      ),
+    );
+    const save = vi.fn(saved.save);
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    vi.stubGlobal('window', { event: undefined });
+    cleanup.push(() => vi.unstubAllGlobals());
+    const routeProps = {
+      session: saved.input.session,
+      desktopGeometry: saved.input.geometry,
+      activeSeamIndex: 0,
+      onActiveSeamIndexChange: () => {},
+      mannequin: null,
+      operationsPanel: null,
+      readSavedTopologyAnnotations: read,
+      saveWrappedTopologyAnnotations: save,
+    };
+    const route = mountAnnotationFixtureView(PatternImportDxfProductExactNSeamProductionMountV2);
+    const control = mountAnnotationFixtureView(
+      PatternImportDxfPhaseESavedTopologyAnnotationEditControlV1,
+    );
+    const editor = mountAnnotationFixtureView(
+      PatternImportDxfPhaseEExactNTopologyAnnotationEditorV1,
+    );
+    function desktopOf(view: ReactNode) {
+      expect(
+        isValidElement<{
+          desktop: ReactElement<PatternImportDxfPhaseECadTableZeroConnectCanvasPropsV1>;
+        }>(view),
+      ).toBe(true);
+      return (
+        view as ReactElement<{
+          desktop: ReactElement<PatternImportDxfPhaseECadTableZeroConnectCanvasPropsV1>;
+        }>
+      ).props.desktop;
+    }
+    function button(label: string) {
+      const button = visitMountedTree(control.output(), (props) => props.children === label);
+      expect(button).toBeTruthy();
+      return button!;
+    }
+    async function renderEditor() {
+      const props = visitMountedTree(
+        control.output(),
+        (props) => !!props.source && !!props.onDraftChange,
+      );
+      await editor.render(
+        props as Parameters<typeof PatternImportDxfPhaseEExactNTopologyAnnotationEditorV1>[0],
+      );
+    }
+    async function pickAnnotationVertex(vertexId: string) {
+      const viewport = visitMountedTree(editor.output(), (props) => !!props.onPick);
+      expect(viewport).toBeTruthy();
+      const geometry = (viewport!.children as (props: { unit: number }) => ReactNode)({
+        unit: 1,
+      });
+      const vertex = visitMountedTree(
+        geometry,
+        (props) => props['data-exact-n-topology-vertex'] === vertexId,
+      );
+      expect(vertex).toBeTruthy();
+      await act(async () =>
+        (viewport!.onPick as (key: string) => void)(vertex!['data-key'] as string),
+      );
+    }
+    async function addLineMeasurement() {
+      await renderEditor();
+      const tool = visitMountedTree(editor.output(), (props) => props.children === 'Line');
+      expect(tool).toBeTruthy();
+      await act(async () => (tool!.onClick as () => void)());
+      await pickAnnotationVertex('vertex:0:front:0');
+      await pickAnnotationVertex('vertex:0:front:1');
+    }
+    async function startReanchor(kind: 'measurement' | 'callout', ordinal: number) {
+      await renderEditor();
+      const button = visitMountedTree(
+        editor.output(),
+        (props) => props['aria-label'] === `Re-anchor annotation ${kind} ${ordinal}`,
+      );
+      expect(button).toBeTruthy();
+      await act(async () => (button!.onClick as () => void)());
+    }
+    async function typeCallout(text: string) {
+      await renderEditor();
+      const input = visitMountedTree(
+        editor.output(),
+        (props) => props['aria-label'] === 'Annotation callout 1 text',
+      );
+      expect(input).toBeTruthy();
+      await act(async () =>
+        (input!.onChange as (event: { target: { value: string } }) => void)({
+          target: { value: text },
+        }),
+      );
+    }
+    async function deleteAnnotation(kind: 'measurement' | 'callout') {
+      await renderEditor();
+      const button = visitMountedTree(
+        editor.output(),
+        (props) => props['aria-label'] === `Delete annotation ${kind} 1`,
+      );
+      expect(button).toBeTruthy();
+      await act(async () => (button!.onClick as () => void)());
+    }
+    await route.render(routeProps);
+    await act(async () => {
+      await read.mock.results[0].value;
+    });
+    const desktop = desktopOf(route.output());
+    expect(desktop.type).toBe(PatternImportDxfPhaseECadTableZeroConnectCanvasV1);
+    const controlElement = desktop.props.savedAnnotationEditControl as ReactElement<
+      Parameters<typeof PatternImportDxfPhaseESavedTopologyAnnotationEditControlV1>[0]
+    >;
+    expect(controlElement.type).toBe(PatternImportDxfPhaseESavedTopologyAnnotationEditControlV1);
+    await control.render(controlElement.props);
+    expect(renderToStaticMarkup(control.output())).toContain('aria-label="Edit annotations"');
+    const dialog = control.output() as ReactElement<{ onOpenChange(open: boolean): void }>;
+    await act(async () => dialog.props.onOpenChange(true));
+
+    return {
+      ...saved,
+      read,
+      save,
+      routeProps,
+      route,
+      control,
+      editor,
+      desktopOf,
+      button,
+      addLineMeasurement,
+      startReanchor,
+      pickAnnotationVertex,
+      deleteAnnotation,
+      typeCallout,
+    };
+  }
+
+  it.each(['v6', 'v7'] as const)(
+    'saves %s measurements and callouts explicitly and restores them under a freshly rebuilt exact owner',
+    async (version) => {
+      const view = await mountedFixture(version);
+      expect(view.button('Save annotations').disabled).toBe(true);
+      await view.typeCallout('Filo di controllo');
+      await view.addLineMeasurement();
+      expect(view.button('Save annotations').disabled).toBe(false);
+      expect(view.put).not.toHaveBeenCalled();
+      const click = view.button('Save annotations').onClick as () => void;
+      await act(async () => {
+        click();
+        click();
+        await view.save.mock.results[0].value;
+      });
+      expect(view.save).toHaveBeenCalledTimes(1);
+      expect(view.put).toHaveBeenCalledTimes(1);
+      expect(view.save.mock.calls[0][0].expectedPreviousSidecarSha256).toBe(
+        view.current.sidecarSha256,
+      );
+      expect(
+        visitMountedTree(
+          view.control.output(),
+          (props) => props.children === 'Saved and verified by fresh readback.',
+        ),
+      ).toBeTruthy();
+      expect(view.button('Save annotations').disabled).toBe(true);
+      expect(view.desktopOf(view.route.output()).props.savedAnnotations?.callouts[0].text).toBe(
+        'Filo di controllo',
+      );
+      expect(view.get.mock.calls.length).toBeGreaterThanOrEqual(3);
+
+      const savedRow = outer!;
+      expect(savedRow.sidecarSha256).not.toBe(view.current.sidecarSha256);
+      const before = await unwrapAnnotationSaveFixture(version, view.current);
+      const after = await unwrapAnnotationSaveFixture(version, savedRow);
+      expect(after.exactV4).toEqual(before.exactV4);
+      expect(after.arrangement).toEqual(before.arrangement);
+      expect(after.physical).toEqual(before.physical);
+
+      await view.editor.unmount();
+      await view.control.unmount();
+      await view.route.unmount();
+      const session = await openExactAnnotationFixture(view.storage, version, savedRow);
+      expect(session.selectionOwner).not.toBe(view.routeProps.session.selectionOwner);
+      const fresh = mountAnnotationFixtureView(PatternImportDxfProductExactNSeamProductionMountV2);
+      await fresh.render({ ...view.routeProps, session });
+      await act(async () => {
+        await view.read.mock.results.at(-1)!.value;
+      });
+      const desktop = view.desktopOf(fresh.output());
+      const markup = renderToStaticMarkup(desktop);
+      expect(markup).toContain('Filo di controllo');
+      expect(markup).toContain('data-draft-cad-measurement="point"');
+      expect(markup).toContain('data-draft-cad-measurement="line"');
+      expect(markup).toContain('14.1 mm');
+      expect(markup).toContain('aria-label="Show callouts" aria-pressed="true"');
+      expect(view.put).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('cancels an incomplete replacement and saves exact re-anchors through V7 and remount', async () => {
+    const view = await mountedFixture('v7');
+    const starting = view.desktopOf(view.route.output()).props.savedAnnotations!;
+    await view.addLineMeasurement();
+    await view.startReanchor('measurement', 2);
+    await view.pickAnnotationVertex('vertex:0:front:1');
+    expect(view.button('Save annotations').disabled).toBe(true);
+    const dialogContent = visitMountedTree(
+      view.control.output(),
+      (props) => !!props.onEscapeKeyDown,
+    );
+    const preventDefault = vi.fn();
+    await act(async () =>
+      (dialogContent!.onEscapeKeyDown as (event: { preventDefault(): void }) => void)({
+        preventDefault,
+      }),
+    );
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(view.button('Save annotations').disabled).toBe(false);
+    expect(view.put).not.toHaveBeenCalled();
+    const draftAfterCancel = visitMountedTree(
+      view.control.output(),
+      (props) => !!props.draft,
+    )?.draft;
+    expect(draftAfterCancel).toMatchObject({
+      measurements: [
+        { id: 'measurement:1', anchors: [{ vertexId: 'vertex:0:front:0' }] },
+        { anchors: [{ vertexId: 'vertex:0:front:0' }, { vertexId: 'vertex:0:front:1' }] },
+      ],
+      callouts: starting.callouts,
+    });
+
+    await view.startReanchor('callout', 1);
+    await view.pickAnnotationVertex('vertex:0:front:1');
+    await view.startReanchor('measurement', 1);
+    await view.pickAnnotationVertex('vertex:0:front:1');
+    expect(view.desktopOf(view.route.output()).props.savedAnnotations).toBe(starting);
+    expect(view.put).not.toHaveBeenCalled();
+
+    const click = view.button('Save annotations').onClick as () => void;
+    await act(async () => {
+      click();
+      await view.save.mock.results[0].value;
+    });
+    expect(view.put).toHaveBeenCalledTimes(1);
+    const stored = outer!;
+    const before = await unwrapAnnotationSaveFixture('v7', view.current);
+    const after = await unwrapAnnotationSaveFixture('v7', stored);
+    expect(after.exactV4).toEqual(before.exactV4);
+    expect(after.arrangement).toEqual(before.arrangement);
+    expect(after.physical).toEqual(before.physical);
+    await view.editor.unmount();
+    await view.control.unmount();
+    await view.route.unmount();
+    const session = await openExactAnnotationFixture(view.storage, 'v7', stored);
+    const fresh = mountAnnotationFixtureView(PatternImportDxfProductExactNSeamProductionMountV2);
+    await fresh.render({ ...view.routeProps, session });
+    await act(async () => {
+      await view.read.mock.results.at(-1)!.value;
+    });
+    const restored = view.desktopOf(fresh.output()).props.savedAnnotations;
+    expect(restored).toMatchObject({
+      measurements: [
+        {
+          id: 'measurement:1',
+          anchors: [{ vertexId: 'vertex:0:front:1' }],
+          label: 'x 10.0 · y 10.0 mm',
+        },
+        { anchors: [{ vertexId: 'vertex:0:front:0' }, { vertexId: 'vertex:0:front:1' }] },
+      ],
+      callouts: [
+        { id: 'callout:1', anchor: { vertexId: 'vertex:0:front:1' }, text: 'Controllo cucitura' },
+      ],
+    });
+    expect(view.put).toHaveBeenCalledTimes(1);
+  });
+
+  it('deletes both saved annotations from V7 through Save and a fresh exact remount', async () => {
+    const view = await mountedFixture('v7');
+    await view.deleteAnnotation('measurement');
+    await view.deleteAnnotation('callout');
+    expect(view.put).not.toHaveBeenCalled();
+    expect(view.desktopOf(view.route.output()).props.savedAnnotations).toMatchObject({
+      measurements: [{ id: 'measurement:1' }],
+      callouts: [{ id: 'callout:1' }],
+    });
+    const click = view.button('Save annotations').onClick as () => void;
+    await act(async () => {
+      click();
+      await view.save.mock.results[0].value;
+    });
+    expect(view.put).toHaveBeenCalledTimes(1);
+    expect(view.desktopOf(view.route.output()).props.savedAnnotations).toEqual({
+      measurements: [],
+      callouts: [],
+    });
+    const stored = outer!;
+    const before = await unwrapAnnotationSaveFixture('v7', view.current);
+    const after = await unwrapAnnotationSaveFixture('v7', stored);
+    expect(after.exactV4).toEqual(before.exactV4);
+    expect(after.arrangement).toEqual(before.arrangement);
+    expect(after.physical).toEqual(before.physical);
+    await view.editor.unmount();
+    await view.control.unmount();
+    await view.route.unmount();
+    const session = await openExactAnnotationFixture(view.storage, 'v7', stored);
+    const fresh = mountAnnotationFixtureView(PatternImportDxfProductExactNSeamProductionMountV2);
+    await fresh.render({ ...view.routeProps, session });
+    await act(async () => {
+      await view.read.mock.results.at(-1)!.value;
+    });
+    const markup = renderToStaticMarkup(view.desktopOf(fresh.output()));
+    expect(markup).toContain('aria-label="Edit annotations"');
+    expect(markup).not.toContain('aria-label="Show callouts"');
+    expect(markup).not.toContain('aria-label="Show measurements"');
+    expect(view.put).toHaveBeenCalledTimes(1);
+  }, 120000);
+
+  it('retains the local draft on a stale captured digest and reloads the concurrent V7 edit without a second PUT', async () => {
+    const view = await mountedFixture('v7');
+    await view.typeCallout('Local draft');
+    const concurrent = requireOk(
+      await view.application.saveWrappedTopologyAnnotations(view.input, view.signal),
+    );
+    expect(concurrent.readback.callouts[0].text).toBe('Misura aggiornata');
+    const click = view.button('Save annotations').onClick as () => void;
+    await act(async () => {
+      click();
+      await view.save.mock.results[0].value;
+    });
+    expect(view.put).toHaveBeenCalledTimes(1);
+    expect(view.save.mock.calls[0][0].expectedPreviousSidecarSha256).toBe(
+      view.current.sidecarSha256,
+    );
+    expect(view.button('Save annotations').disabled).toBe(true);
+    expect(visitMountedTree(view.control.output(), (props) => !!props.draft)?.draft).toMatchObject({
+      callouts: [{ text: 'Local draft' }],
+    });
+    expect(
+      visitMountedTree(
+        view.control.output(),
+        (props) =>
+          typeof props.children === 'string' && props.children.includes('envelope changed'),
+      ),
+    ).toBeTruthy();
+
+    const reload = view.button('Reload saved annotations').onClick as () => void;
+    await act(async () => reload());
+    await act(async () => {
+      await view.read.mock.results.at(-1)!.value;
+    });
+    expect(view.desktopOf(view.route.output()).props.savedAnnotations?.callouts[0].text).toBe(
+      'Misura aggiornata',
+    );
+    expect(view.put).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels a mounted V7 annotation save when the route closes during final currentness approval', async () => {
+    const view = await mountedFixture('v7');
+    await view.typeCallout('Edit from the dismissed route');
+    const approvalStarted = deferredSessionValue<void>();
+    const finishApproval = deferredSessionValue<void>();
+    cleanup.push(() => finishApproval.resolve());
+    // The existing CAS writer has read the sealed current carrier. Hold its independent final
+    // Assembly approval response to simulate an already in-flight transport during teardown.
+    view.get.mockImplementationOnce(async () => {
+      beforeWireRead = async () => {
+        approvalStarted.resolve();
+        await finishApproval.promise;
+      };
+      return { semanticSidecar: view.current };
+    });
+    const click = view.button('Save annotations').onClick as () => void;
+    await act(async () => click());
+    await approvalStarted.promise;
+    expect(view.put).not.toHaveBeenCalled();
+
+    await view.editor.unmount();
+    await view.control.unmount();
+    await view.route.unmount();
+    expect(view.save.mock.calls[0][1].aborted).toBe(true);
+    beforeWireRead = null;
+    finishApproval.resolve();
+    expect(await view.save.mock.results[0].value).toMatchObject({
+      ok: false,
+      writeOutcome: 'not-attempted',
+    });
+    expect(view.put).not.toHaveBeenCalled();
+    expect(outer?.sidecarSha256).toBe(view.current.sidecarSha256);
+
+    const session = await openExactAnnotationFixture(view.storage, 'v7', outer);
+    const fresh = mountAnnotationFixtureView(PatternImportDxfProductExactNSeamProductionMountV2);
+    await fresh.render({ ...view.routeProps, session });
+    await act(async () => {
+      await view.read.mock.results.at(-1)!.value;
+    });
+    expect(view.desktopOf(fresh.output()).props.savedAnnotations?.callouts[0].text).toBe(
+      'Controllo cucitura',
+    );
+    expect(view.put).not.toHaveBeenCalled();
+  });
+
+  it('keeps saved annotation dialog shortcuts from changing the shared Table selection', async () => {
+    const view = await mountedFixture('v7');
+    const dialog = visitMountedTree(view.control.output(), (props) => !!props.onEscapeKeyDown);
+    const table = visitMountedTree(view.route.output(), (props) => !!props.onContentKeyDown);
+    expect(dialog && table).toBeTruthy();
+    const selectedPieceKeys = () =>
+      view.desktopOf(view.route.output()).props.tableSessionOwner!.session.layout.selectedPieceKeys;
+    class ButtonTarget {
+      closest() {
+        return null;
+      }
+    }
+    vi.stubGlobal('Element', ButtonTarget);
+    const shortcut = {
+      key: 'a',
+      ctrlKey: true,
+      target: new ButtonTarget(),
+      defaultPrevented: false,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+    const before = selectedPieceKeys();
+    await act(async () => {
+      (dialog!.onKeyDown as ((event: typeof shortcut) => void) | undefined)?.(shortcut);
+      if (!shortcut.stopPropagation.mock.calls.length)
+        (table!.onContentKeyDown as (event: typeof shortcut) => void)(shortcut);
+    });
+    expect(selectedPieceKeys()).toEqual(before);
+    expect(shortcut.stopPropagation).toHaveBeenCalledOnce();
+    await act(async () => (table!.onContentKeyDown as (event: typeof shortcut) => void)(shortcut));
+    expect(selectedPieceKeys()).toHaveLength(2);
+    expect(view.put).not.toHaveBeenCalled();
+  });
+});
+
+describe('exact saved annotations in durable Composite envelopes', () => {
+  it('renders genuine saved V6 annotations on the restored exact desktop and keeps visibility local', async () => {
+    const { storage } = await fixture(true);
+    const session = await openExactAnnotationFixture(storage, 'v6');
+    outer = storage.v6;
+    const { catalog, source } = storage;
+    const originalGeometry = { catalog, projection: source.projection, annotationSource: source };
+    let geometry: PatternImportDxfProductExactNDesktopGeometryV2 = originalGeometry;
+    const persist = vi.fn();
+    const get = vi.fn().mockResolvedValue({ semanticSidecar: storage.v6 });
+    const transaction = createPatternImportDxfPhaseETopologyAnnotationApplicationTransactionV5({
+      createClient: () => ({ GetTechCardPatternSemanticSidecar: get }),
+      persistence: { adapter: { persist } } as never,
+    });
+    const read = vi.fn(
+      createPatternImportDxfPhaseERestoredTopologyAnnotationReaderV1(
+        createPatternImportDxfPhaseESavedAssemblySnapshotProductionRpcV1(
+          session.current.selectedOperation.sourceOperationNumber,
+        ).authorityAdapter,
+        transaction,
+      ),
+    );
+
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    vi.stubGlobal('window', { event: undefined });
+    let route = createRoot(reactMountContainer() as never);
+    const canvas = createRoot(reactMountContainer() as never);
+    let desktop: ReactElement<PatternImportDxfPhaseECadTableZeroConnectCanvasPropsV1> | undefined;
+    let mountedCanvas: ReactNode;
+    cleanup.push(async () => {
+      await act(async () => {
+        canvas.unmount();
+        route.unmount();
+      });
+      vi.unstubAllGlobals();
+    });
+
+    function Route() {
+      const view = PatternImportDxfProductExactNSeamProductionMountV2({
+        session,
+        desktopGeometry: geometry,
+        activeSeamIndex: 0,
+        onActiveSeamIndexChange: () => {},
+        mannequin: null,
+        operationsPanel: null,
+        readSavedTopologyAnnotations: read,
+      });
+      if (!isValidElement<{ desktop: typeof desktop }>(view))
+        throw new Error('Exact view is absent');
+      desktop = view.props.desktop;
+      return null;
+    }
+    function Canvas() {
+      // Mount the actual canvas hooks and inspect the resulting JSX. No actual DOM or WebGPU.
+      const child = PatternImportDxfPhaseECadTableZeroConnectCanvasV1(desktop!.props);
+      const Present = child.type as (props: typeof child.props) => ReactNode;
+      mountedCanvas = Present(child.props);
+      return null;
+    }
+    async function renderRoute() {
+      await act(async () => route.render(createElement(Route)));
+      await act(async () => {
+        await read.mock.results.at(-1)?.value.catch(() => {});
+      });
+      expect(desktop?.type).toBe(PatternImportDxfPhaseECadTableZeroConnectCanvasV1);
+      await act(async () => canvas.render(createElement(Canvas)));
+    }
+    async function toggle(label: string) {
+      const tool = visitMountedTree(mountedCanvas, (props) => props.label === label);
+      expect(tool).not.toBeNull();
+      await act(async () => (tool!.onClick as () => void)());
+    }
+    function markup() {
+      return renderToStaticMarkup(mountedCanvas);
+    }
+
+    await renderRoute();
+    expect(markup()).toContain('data-draft-cad-measurement="point"');
+    expect(markup()).toContain('Controllo cucitura');
+    expect(markup()).toContain('aria-label="Show measurements" aria-pressed="true"');
+    await toggle('Show measurements');
+    expect(markup()).not.toContain('data-draft-cad-measurement="point"');
+    expect(markup()).toContain('Controllo cucitura');
+    await toggle('Show callouts');
+    expect(markup()).not.toContain('Controllo cucitura');
+    expect(markup()).toContain('aria-label="Show callouts" aria-pressed="false"');
+    await toggle('Show measurements');
+    await toggle('Show callouts');
+    expect(markup()).toContain('data-draft-cad-measurement="point"');
+    expect(markup()).toContain('Controllo cucitura');
+    expect(get).toHaveBeenCalledTimes(1);
+
+    const oldGeometry = geometry;
+    geometry = {
+      ...oldGeometry,
+      projection: {
+        ...oldGeometry.projection,
+        pieces: oldGeometry.projection.pieces.map((piece) => ({
+          ...piece,
+          contours: piece.contours.map((contour) => ({
+            ...contour,
+            vertices: contour.vertices.filter(({ vertexId }) => vertexId !== 'vertex:0:front:0'),
+          })),
+        })),
+      },
+    };
+    await renderRoute();
+    expect(markup()).not.toContain('Controllo cucitura');
+    expect(markup()).toContain('no longer present in the exact Phase-D projection');
+
+    geometry = originalGeometry;
+    editWire = (wire) => {
+      wire.serverAssemblyRevision += ':advanced';
+    };
+    await renderRoute();
+    expect(markup()).not.toContain('Controllo cucitura');
+    expect(markup()).toContain('Assembly Order changed while reading saved annotations');
+
+    editWire = null;
+    const pending = deferredSessionValue<{ semanticSidecar: TechCardPatternSemanticSidecar }>();
+    get.mockImplementationOnce(() => pending.promise);
+    geometry = { ...originalGeometry };
+    await act(async () => route.render(createElement(Route)));
+    const held = read.mock.lastCall![2];
+    await act(async () => route.unmount());
+    route = createRoot(reactMountContainer() as never);
+    expect(held.aborted).toBe(true);
+    await act(async () => {
+      pending.resolve({ semanticSidecar: storage.v6 });
+      await read.mock.results.at(-1)!.value.catch(() => {});
+    });
+
+    await renderRoute();
+    expect(markup()).toContain('data-draft-cad-measurement="point"');
+    expect(markup()).toContain('Controllo cucitura');
+    expect(persist).not.toHaveBeenCalled();
+  });
+
+  it('hydrates saved exact annotations from genuine V6 and V7 without writing', async () => {
+    const { storage, context } = await fixture(true);
+    const otherOperation = await encodedStorage(context, false);
+    const { current, source } = storage;
+    expect(storage.v7TopologySha256).not.toBe(current.assemblyTopologySha256);
+    const persist = vi.fn();
+    const get = vi.fn();
+    const transaction = createPatternImportDxfPhaseETopologyAnnotationApplicationTransactionV5({
+      createClient: () => ({ GetTechCardPatternSemanticSidecar: get }),
+      persistence: { adapter: { persist } } as never,
+    });
+    const signal = new AbortController().signal;
+
+    for (const [version, row] of [
+      ['v6', storage.v6],
+      ['v7', storage.v7],
+    ] as const) {
+      const session = await openExactAnnotationFixture(storage, version);
+      get.mockResolvedValue({ semanticSidecar: row });
+
+      expect(requireOk(await transaction.load(session, source, signal))).toMatchObject({
+        mediaType: row.mediaType,
+        readback: {
+          sidecarSha256: row.sidecarSha256,
+          measurements: [
+            { id: 'measurement:1', label: 'Point', anchors: [{ vertexId: 'vertex:0:front:0' }] },
+          ],
+          callouts: [
+            {
+              id: 'callout:1',
+              text: 'Controllo cucitura',
+              anchor: { vertexId: 'vertex:0:front:0' },
+            },
+          ],
+        },
+      });
+      for (const stale of [
+        { ...source, revision: '999' },
+        { ...source, identity: 'foreign-import-session' },
+        { ...source, sha256: 'f'.repeat(64) },
+      ]) {
+        expect(await transaction.load(session, stale, signal)).toMatchObject({
+          ok: false,
+          readback: null,
+          blockers: [{ detail: expect.stringContaining('source revision or SHA') }],
+        });
+      }
+      expect(
+        await transaction.save(session, source, { measurements: [], callouts: [] }, signal),
+      ).toMatchObject({ ok: false, readback: null });
+      get.mockResolvedValue({
+        semanticSidecar: { ...row, savedRowRevision: seed.row.revision + 1 },
+      });
+      expect(await transaction.load(session, source, signal)).toMatchObject({
+        ok: false,
+        readback: null,
+        blockers: [{ detail: expect.stringContaining('differs from exact authority') }],
+      });
+      get.mockResolvedValue({ semanticSidecar: otherOperation[version] });
+      expect(await transaction.load(session, source, signal)).toMatchObject({
+        ok: false,
+        readback: null,
+        blockers: [{ detail: expect.stringContaining('readback is invalid') }],
+      });
+    }
+    expect(persist).not.toHaveBeenCalled();
+  });
+});
+
+describe('durable facade refusal before any stored V7 authority exists', () => {
+  it('rejects arbitrary receipt DTOs, proxies and getters before source work or RPC', async () => {
+    const host = createSavedGenericDurablePhysicalHostV1({ row: seed.row, bodySession: {} });
+    cleanup.push(() => host.dispose());
+    const getter = vi.fn();
+    const receipts = [
+      {
+        version: 'saved-full-assembly-physical-snapshot/1',
+        opaque: 'module-private-full-assembly-physical-read-receipt',
+      },
+      new Proxy({}, { get: getter }),
+      Object.defineProperty({}, 'version', { get: getter }),
+    ];
+    for (const verifiedReceipt of receipts) {
+      expect(
+        (
+          await host.restore({
+            verifiedReceipt,
+            sourceOwner: {} as never,
+            sourceRequest: {
+              schemaVersion: 'dxf-product-saved-native-compiler-source-request/1',
+              sourceFileId: 'fixture',
+              sourceSha256: seed.row.sha256,
+              techCardId: seed.row.techCardId,
+              scopeKey: seed.row.scopeKey,
+              patternLineKey: seed.row.patternLineKey,
+              cardLockVersion: seed.row.cardLockVersion,
+              draft: {},
+            } as never,
+          })
+        ).ok,
+      ).toBe(false);
+    }
+    expect(getter).not.toHaveBeenCalled();
+    expect(readCount).toBe(0);
+    expect(host.getSnapshot()).toMatchObject({ status: 'idle', binding: null });
+  });
+  it('pre-abort refuses without reading a request accessor or consuming source', async () => {
+    const host = createSavedGenericDurablePhysicalHostV1({ row: seed.row, bodySession: {} });
+    cleanup.push(() => host.dispose());
+    const getter = vi.fn(),
+      request = Object.defineProperty({}, 'verifiedReceipt', { get: getter }),
+      caller = new AbortController();
+    caller.abort();
+    expect((await host.restore(request as never, caller.signal)).ok).toBe(false);
+    expect(getter).not.toHaveBeenCalled();
+    expect(readCount).toBe(0);
+    expect(host.getSnapshot()).toMatchObject({ status: 'idle', binding: null });
+  });
+  it('never dispatches numeric or render work before a genuine restore, including structural leases', async () => {
+    const host = createSavedGenericDurablePhysicalHostV1({ row: seed.row, bodySession: {} });
+    cleanup.push(() => host.dispose());
+    expect((await host.run16({} as never)).ok).toBe(false);
+    expect((await host.run32({} as never)).ok).toBe(false);
+    expect((await host.mountPreview({} as HTMLCanvasElement)).ok).toBe(false);
+    expect((await host.projectLatestRender()).ok).toBe(false);
+    expect(ports.calls).toHaveLength(0);
+    expect(readCount).toBe(0);
+    expect(host.getSnapshot().binding).toBeNull();
+  });
+});
+
+describe('fixed durable generic host, real encoded V7 and genuine fresh receipts', () => {
+  it.each([
+    'save',
+    'conflict',
+    'lost-after-write',
+    'rotate',
+    'rotate-conflict',
+    'rotate-x',
+    'flip-face',
+  ] as const)(
+    'recovers exact mounted placement values and V7 bytes for %s',
+    async (outcome) => {
+      const assemblyTurn = {
+        rotate: {
+          label: 'Rotate assembly +90° about world Y',
+          change: { kind: 'quarter-turn-world-y' },
+          rotation: [0, 1, 0, 0, 0, -1, -1, 0, 0],
+        },
+        'rotate-x': {
+          label: 'Rotate assembly +90° about world X',
+          change: { kind: 'rotate-assembly-world', axis: 'X', degrees: 90 },
+          rotation: [1, 0, 0, 0, -1, 0, 0, 0, -1],
+        },
+        'flip-face': {
+          label: 'Flip assembly front to back',
+          change: { kind: 'rotate-assembly-world', axis: 'Y', degrees: 180 },
+          rotation: [-1, 0, 0, 0, 0, -1, 0, -1, 0],
+        },
+      } as const;
+      const turn =
+        outcome === 'rotate-conflict'
+          ? assemblyTurn.rotate
+          : outcome === 'rotate' || outcome === 'rotate-x' || outcome === 'flip-face'
+            ? assemblyTurn[outcome]
+            : null;
+      const rotates = turn !== null;
+      const conflicts = outcome === 'conflict' || outcome === 'rotate-conflict';
+      const losesReply = outcome === 'lost-after-write';
+      // A common +90° X frame preserves seam positions and does not commute with +90° Y.
+      const priorRotation = [1, 0, 0, 0, 0, -1, 0, 1, 0] as const;
+      const f = await fixture(false, { initialRotation: rotates ? priorRotation : undefined });
+      const beforeDxf = seed.bytes.slice();
+      const beforePhysical = physicalReader.projectSavedFullAssemblyPhysicalSnapshotV1(f.reader)!;
+      const prior = {
+        ...f.storage.v7,
+        postSaveReceiptSha256: semanticDocument(seed.row).persistence.receiptSealSha256,
+      };
+      outer = prior;
+      const baseClient = vi.mocked(abortableAdminService).getMockImplementation()!;
+      let readbackAvailable = true;
+      let casAttempt = 0;
+      const put = vi.fn(async (request: PutTechCardPatternSemanticSidecarRequest) => {
+        casAttempt += 1;
+        expect(request.expectedPreviousSidecarSha256).toBe(prior.sidecarSha256);
+        expect(request.expectedCardLockVersion).toBe(seed.row.cardLockVersion);
+        expect(request.expectedSavedRowRevision).toBe(seed.row.revision);
+        if (conflicts && casAttempt === 1) throw new Error('Saved placement CAS conflict.');
+        outer = {
+          ...prior,
+          sidecarBytes: request.sidecarBytes,
+          sidecarSha256: request.sidecarSha256,
+          mediaType: request.mediaType,
+          byteLength: Buffer.from(request.sidecarBytes!, 'base64').length,
+        };
+        if (losesReply) {
+          readbackAvailable = false;
+          throw new Error('The upload reply was lost.');
+        }
+        return { semanticSidecar: structuredClone(outer) };
+      });
+      vi.mocked(abortableAdminService).mockImplementation((signal) => ({
+        ...baseClient(signal),
+        GetTechCardPatternSemanticSidecar: async () => {
+          if (!readbackAvailable) throw new Error('Readback unavailable.');
+          return { semanticSidecar: structuredClone(outer) };
+        },
+        GetTechCardSavedAssemblySnapshot: async (request) => {
+          if (!readbackAvailable) throw new Error('Assembly snapshot unavailable.');
+          return baseClient(signal).GetTechCardSavedAssemblySnapshot(request);
+        },
+        PutTechCardPatternSemanticSidecar: put,
+      }));
+      // The displayed V7 stays independent from the edit actor and its one-shot bind.
+      requireOk(await f.host.restore(f.request));
+      const actor = await freshPhysicalFixtureHost(f.body);
+      requireOk(await actor.host.restore(actor.request));
+      const edit = await actor.host.preparePlacementEdit();
+      const old = f.context.physicalInitialization.document;
+      expect(edit.pieces.map(({ translationM }) => translationM)).toEqual(
+        old.placements.map(({ translationM }) => translationM),
+      );
+      await expect(
+        actor.host.savePlacementEdit({ ...edit }, { kind: 'translate', pieces: edit.pieces }),
+      ).rejects.toThrow('The saved placement edit expired.');
+      expect(put).not.toHaveBeenCalled();
+      type State = ComponentProps<typeof CadWorkbenchSavedPlacementEditorV1>['state'];
+      const save = vi.fn(
+        (
+          draft: Parameters<State['saveSavedPlacementEdit']>[0],
+          pieces: Parameters<State['saveSavedPlacementEdit']>[1],
+        ) => actor.host.savePlacementEdit(draft, pieces).then(() => undefined),
+      );
+      const state = {
+        placementEditor: { status: 'editing', draft: edit, error: null },
+        saveSavedPlacementEdit: save,
+        cancelSavedPlacementEdit: vi.fn(),
+      } as unknown as State;
+      vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+      vi.stubGlobal('window', { event: undefined, location: { origin: 'http://fixture.local' } });
+      cleanup.push(() => vi.unstubAllGlobals());
+      const view = mountAnnotationFixtureView(
+        ({ current, disabled }: { current: State; disabled: boolean }) => {
+          const root = CadWorkbenchSavedPlacementEditorV1({ state: current, disabled });
+          const fields = Children.toArray(root?.props.children).find(
+            (item) =>
+              isValidElement(item) &&
+              typeof item.type === 'function' &&
+              item.type.name === 'SavedPlacementFields',
+          ) as ReactElement | undefined;
+          if (!fields || typeof fields.type !== 'function')
+            throw new Error('Saved placement fields are absent.');
+          return (fields.type as (props: unknown) => ReactNode)(fields.props);
+        },
+      );
+      const render = (current = state, disabled = false) => view.render({ current, disabled });
+      await render();
+      const find = (name: string) =>
+        visitMountedTree(view.output(), (props) => props.name === name);
+      const submit = (label = 'Save placement') =>
+        visitMountedTree(view.output(), (props) => props.children === label);
+      expect(submit()?.disabled).toBe(true);
+      const requestedTranslations = edit.pieces.map(({ translationM, ...piece }) => ({
+        ...piece,
+        translationM: [translationM[0] + 0.125, translationM[1], translationM[2]] as const,
+      }));
+      const goal: Parameters<State['saveSavedPlacementEdit']>[1] = turn?.change ?? {
+        kind: 'translate',
+        pieces: requestedTranslations,
+      };
+      const displayedTranslations = rotates ? edit.pieces : requestedTranslations;
+      const rotateAssembly = () =>
+        visitMountedTree(
+          view.output(),
+          (props) => props.children === (turn?.label ?? assemblyTurn.rotate.label),
+        );
+      if (rotates) {
+        await render(state, true);
+        expect(rotateAssembly()).toMatchObject({ disabled: true, 'aria-pressed': false });
+        await act(async () => (rotateAssembly()?.onClick as () => void)());
+        await render();
+        expect(rotateAssembly()).toMatchObject({ disabled: false, 'aria-pressed': false });
+        await act(async () => (rotateAssembly()?.onClick as () => void)());
+        expect(rotateAssembly()?.['aria-pressed']).toBe(true);
+        expect(submit()?.disabled).toBe(false);
+        await act(async () => (rotateAssembly()?.onClick as () => void)());
+        expect(rotateAssembly()?.['aria-pressed']).toBe(false);
+        expect(submit()?.disabled).toBe(true);
+        expect(put).not.toHaveBeenCalled();
+        await act(async () => (rotateAssembly()?.onClick as () => void)());
+      } else {
+        for (const [index, piece] of edit.pieces.entries()) {
+          const name = `saved-placement-${piece.pieceId}-X`;
+          expect(find(name)?.value).toBe(String(piece.translationM[0]));
+          await act(async () =>
+            (find(name)?.onChange as (s: string) => void)(
+              String(displayedTranslations[index]!.translationM[0]),
+            ),
+          );
+        }
+      }
+      expect(submit()?.disabled).toBe(false);
+      let apply: Promise<void> | undefined;
+      await act(async () => {
+        (submit()?.onClick as () => void)();
+        apply = save.mock.results[0]!.value;
+        // The production hook catches persistence refusal and keeps the old displayed binding.
+        await apply?.catch(() => {});
+      });
+      expect(save).toHaveBeenCalledExactlyOnceWith(edit, goal);
+      expect(put).toHaveBeenCalledTimes(1);
+      const decodeOuter = (value: TechCardPatternSemanticSidecar) =>
+        V7.decodePatternImportDxfProductCompositeSidecarV7(
+          new Uint8Array(Buffer.from(value.sidecarBytes!, 'base64')),
+        );
+      const [before, after] = await Promise.all([decodeOuter(prior), decodeOuter(outer!)]);
+      expect(
+        V7.readPatternImportDxfProductCompositeComponentBytesV7(
+          requireOk(after).owner,
+          'composite-v6',
+        ),
+      ).toEqual(
+        V7.readPatternImportDxfProductCompositeComponentBytesV7(
+          requireOk(before).owner,
+          'composite-v6',
+        ),
+      );
+      if (conflicts || losesReply) {
+        await expect(apply).rejects.toBeInstanceOf(SavedV7PlacementPersistenceErrorV1);
+        await expect(apply).rejects.toMatchObject({
+          result: {
+            writeOutcome: 'unknown',
+            intendedOuterSha256: put.mock.calls[0]![0].sidecarSha256,
+          },
+        });
+        await render({
+          ...state,
+          placementEditor: { status: 'blocked', draft: edit, error: 'Readback unavailable.' },
+        });
+        expect(submit()).toBeNull();
+        expect(rotateAssembly()).toMatchObject({ disabled: true, 'aria-pressed': rotates });
+        for (const [index, piece] of edit.pieces.entries()) {
+          expect(find(`saved-placement-${piece.pieceId}-X`)).toMatchObject({
+            value: String(displayedTranslations[index]!.translationM[0]),
+            readOnly: true,
+          });
+        }
+        if (conflicts) {
+          await expect(apply).rejects.toThrow(/fresh saved Composite V7 differs/i);
+          expect(outer).toEqual(prior);
+          const previous = await freshPhysicalFixtureHost(f.body);
+          requireOk(await previous.host.restore(previous.request));
+          const retryDraft = await previous.host.preparePlacementEdit();
+          expect(retryDraft.binding.outerSha256).toBe(prior.sidecarSha256);
+          expect(
+            physicalReader.projectSavedFullAssemblyPhysicalSnapshotV1(previous.reader)!
+              .physicalInitialization,
+          ).toEqual(old);
+          const retrySave = vi.fn<State['saveSavedPlacementEdit']>(async (draft, pieces) => {
+            requireOk(await previous.host.savePlacementEdit(draft, pieces));
+          });
+          await render({
+            ...state,
+            saveSavedPlacementEdit: retrySave,
+            placementEditor: { status: 'save-retry', draft: retryDraft, error: 'Retry required.' },
+          });
+          expect(submit('Retry save placement')?.disabled).toBe(false);
+          expect(rotateAssembly()).toMatchObject({ disabled: true, 'aria-pressed': rotates });
+          for (const [index, piece] of edit.pieces.entries()) {
+            expect(find(`saved-placement-${piece.pieceId}-X`)).toMatchObject({
+              value: String(displayedTranslations[index]!.translationM[0]),
+              readOnly: true,
+            });
+          }
+          expect(put).toHaveBeenCalledTimes(1);
+          await act(async () => {
+            (submit('Retry save placement')?.onClick as () => void)();
+            await retrySave.mock.results[0]!.value;
+          });
+          expect(retrySave).toHaveBeenCalledExactlyOnceWith(retryDraft, goal);
+          expect(put).toHaveBeenCalledTimes(2);
+          expect(put.mock.calls[1]![0].sidecarSha256).toBe(put.mock.calls[0]![0].sidecarSha256);
+        } else {
+          expect(outer!.sidecarSha256).toBe(put.mock.calls[0]![0].sidecarSha256);
+        }
+      } else {
+        await expect(apply).resolves.toBeUndefined();
+        expect(outer!.sidecarSha256).not.toBe(prior.sidecarSha256);
+      }
+      expect(f.host.getSnapshot().binding?.outerSha256).toBe(prior.sidecarSha256);
+      readbackAvailable = true;
+      const cold = await freshPhysicalFixtureHost(f.body);
+      requireOk(await cold.host.restore(cold.request));
+      const saved = physicalReader.projectSavedFullAssemblyPhysicalSnapshotV1(cold.reader)!;
+      expect(saved.physicalInitialization).toEqual({
+        ...old,
+        placements: old.placements.map((piece, index) => {
+          const [x, y, z] = piece.translationM;
+          const translations = {
+            'Rotate assembly +90° about world Y': [1 + z, y, 0 - (x - 1)],
+            'Rotate assembly +90° about world X': [x, 0.5 - z, y - 0.5],
+            'Flip assembly front to back': [1 - (x - 1), y, -z || 0],
+          };
+          return {
+            ...piece,
+            rotationRowMajor: turn?.rotation ?? piece.rotationRowMajor,
+            translationM: turn
+              ? translations[turn.label]
+              : requestedTranslations[index]!.translationM,
+          };
+        }),
+      });
+      expect(put).toHaveBeenCalledTimes(conflicts ? 2 : 1);
+      if (rotates) {
+        expect(old.placements.find((piece) => piece.pieceId === 'BACK')).toMatchObject({
+          rotationRowMajor: priorRotation,
+          sourceOriginM: [0.15, 0, 0],
+          translationM: [1.1, 0.5, 0],
+        });
+        expect(saved.physicalInitialization.placements[0]!.translationM).toEqual(
+          old.placements[0]!.translationM,
+        );
+        expect(saved.graphCanonicalSha256).toBe(beforePhysical.graphCanonicalSha256);
+        expect(saved.compileInputSha256).toBe(beforePhysical.compileInputSha256);
+        const [originalNative, reloadedNative] = await Promise.all(
+          [f, cold].map(({ native }) =>
+            selectPatternImportDxfProductDraftPhaseDSizeV1(
+              native.native.draft,
+              seed.row.scopeKey,
+              saved.graph.source.sizeToken,
+            ),
+          ),
+        );
+        expect(
+          Buffer.from(JSON.stringify(requireOk(reloadedNative!).selection.phaseD.contours)),
+        ).toEqual(
+          Buffer.from(JSON.stringify(requireOk(originalNative!).selection.phaseD.contours)),
+        );
+        expect(seed.bytes).toEqual(beforeDxf);
+      }
+      expect(ports.calls).toEqual([]);
+    },
+    120000,
+  );
+  it.each(['X', 'Y', 'Z'] as const)(
+    'saves one mounted numeric world-%s turn about the exact saved hinge',
+    async (axis) => {
+      type State = ComponentProps<typeof CadWorkbenchSavedPlacementEditorV1>['state'];
+      type Rotation = DxfGarmentPhysicalInitializationV1['placements'][number]['rotationRowMajor'];
+      const priorByAxis = {
+        X: [0, -1, 0, 1, 0, 0, 0, 0, 1],
+        Y: [1, 0, 0, 0, -1, 0, 0, 0, -1],
+        Z: [1, 0, 0, 0, 0, -1, 0, 1, 0],
+      } as const satisfies Record<typeof axis, Rotation>;
+      const f = await fixture(false, { hingeRotation: priorByAxis[axis] });
+      const prior = {
+        ...f.storage.v7,
+        postSaveReceiptSha256: semanticDocument(seed.row).persistence.receiptSealSha256,
+      };
+      outer = prior;
+      const baseClient = vi.mocked(abortableAdminService).getMockImplementation()!;
+      const put = vi.fn(async (request: PutTechCardPatternSemanticSidecarRequest) => {
+        expect(request.expectedPreviousSidecarSha256).toBe(prior.sidecarSha256);
+        expect(request.expectedCardLockVersion).toBe(seed.row.cardLockVersion);
+        expect(request.expectedSavedRowRevision).toBe(seed.row.revision);
+        outer = {
+          ...prior,
+          sidecarBytes: request.sidecarBytes,
+          sidecarSha256: request.sidecarSha256,
+          mediaType: request.mediaType,
+          byteLength: Buffer.from(request.sidecarBytes!, 'base64').length,
+        };
+        return { semanticSidecar: structuredClone(outer) };
+      });
+      vi.mocked(abortableAdminService).mockImplementation((signal) => ({
+        ...baseClient(signal),
+        GetTechCardPatternSemanticSidecar: async () => ({
+          semanticSidecar: structuredClone(outer),
+        }),
+        PutTechCardPatternSemanticSidecar: put,
+      }));
+      requireOk(await f.host.restore(f.request));
+      const staleEdit = axis === 'Y' ? await f.host.preparePlacementEdit() : null;
+      const actor = await freshPhysicalFixtureHost(f.body);
+      requireOk(await actor.host.restore(actor.request));
+      const edit = await actor.host.preparePlacementEdit();
+      const before = f.context.physicalInitialization.document;
+      const front = edit.pieces.find((entry) => entry.pieceId === 'FRONT')!;
+      const goal = {
+        kind: 'rotate-piece-world',
+        pieceId: front.pieceId,
+        pieceLineKey: front.pieceLineKey,
+        axis,
+        degrees: -37.5,
+      } as const;
+      await expect(
+        actor.host.savePlacementEdit(edit, { ...goal, pieceLineKey: 'another-line' }),
+      ).rejects.toThrow('Select a current saved piece');
+      await expect(
+        actor.host.savePlacementEdit(await actor.host.preparePlacementEdit(), {
+          ...goal,
+          axis: axis === 'X' ? 'Y' : 'X',
+        }),
+      ).rejects.toThrow(/incoherent-rest-pair/);
+      expect(outer).toEqual(prior);
+      expect(put).not.toHaveBeenCalled();
+      const editActor = await freshPhysicalFixtureHost(f.body);
+      requireOk(await editActor.host.restore(editActor.request));
+      const readyEdit = await editActor.host.preparePlacementEdit();
+      const save = vi.fn<State['saveSavedPlacementEdit']>(async (draft, change) => {
+        requireOk(await editActor.host.savePlacementEdit(draft, change));
+      });
+      const state = {
+        placementEditor: { status: 'editing', draft: readyEdit, error: null },
+        saveSavedPlacementEdit: save,
+        cancelSavedPlacementEdit: vi.fn(),
+      } as unknown as State;
+      vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+      vi.stubGlobal('window', { event: undefined, location: { origin: 'http://fixture.local' } });
+      cleanup.push(() => vi.unstubAllGlobals());
+      const view = mountAnnotationFixtureView(({ disabled }: { disabled: boolean }) => {
+        const root = CadWorkbenchSavedPlacementEditorV1({ state, disabled });
+        const fields = Children.toArray(root?.props.children).find(
+          (item) =>
+            isValidElement(item) &&
+            typeof item.type === 'function' &&
+            item.type.name === 'SavedPlacementFields',
+        ) as ReactElement;
+        return (fields.type as (props: unknown) => ReactNode)(fields.props);
+      });
+      const field = (name: string) =>
+        visitMountedTree(view.output(), (props) => props.name === name);
+      const button = () =>
+        visitMountedTree(view.output(), (props) => props.children === 'Save placement');
+      const select = (name: string, value: string) =>
+        act(async () => (field(name)?.onValueChange as (s: string) => void)(value));
+      const angleName = 'saved-placement-rotate-degrees';
+      const setAngle = (value: string) =>
+        act(async () => (field(angleName)?.onChange as (s: string) => void)(value));
+      await view.render({ disabled: true });
+      expect(field(angleName)?.readOnly).toBe(true);
+      await setAngle('-37.5');
+      await view.render({ disabled: false });
+      expect(field(angleName)?.value).toBe('');
+      expect(button()?.disabled).toBe(true);
+      await select('saved-placement-rotate-piece', front.pieceId);
+      await select('saved-placement-rotate-axis', axis);
+      await setAngle('360');
+      expect(button()?.disabled).toBe(true);
+      await setAngle('-37.5');
+      expect(button()?.disabled).toBe(false);
+      expect(field('saved-placement-FRONT-X')?.readOnly).toBe(true);
+      expect(put).not.toHaveBeenCalled();
+      await act(async () => {
+        (button()?.onClick as () => void)();
+        await save.mock.results[0]!.value;
+      });
+      expect(save).toHaveBeenCalledExactlyOnceWith(readyEdit, goal);
+      expect(put).toHaveBeenCalledTimes(1);
+      const cold = await freshPhysicalFixtureHost(f.body);
+      requireOk(await cold.host.restore(cold.request));
+      const restored = physicalReader.projectSavedFullAssemblyPhysicalSnapshotV1(cold.reader)!;
+      const r = before.placements.find((entry) => entry.pieceId === front.pieceId)!;
+      const radians = (goal.degrees * Math.PI) / 180;
+      const c = Math.cos(radians);
+      const s = Math.sin(radians);
+      const q = {
+        X: [
+          [1, 0, 0],
+          [0, c, -s],
+          [0, s, c],
+        ],
+        Y: [
+          [c, 0, s],
+          [0, 1, 0],
+          [-s, 0, c],
+        ],
+        Z: [
+          [c, -s, 0],
+          [s, c, 0],
+          [0, 0, 1],
+        ],
+      }[axis];
+      const expected = q.flatMap((row) =>
+        [0, 1, 2].map((column) =>
+          row.reduce((sum, value, k) => sum + value * r.rotationRowMajor[k * 3 + column]!, 0),
+        ),
+      );
+      expect(restored.physicalInitialization).toEqual({
+        ...before,
+        placements: before.placements.map((entry) =>
+          entry.pieceId === r.pieceId ? { ...r, rotationRowMajor: expected } : entry,
+        ),
+      });
+      expect(restored.graphCanonicalSha256).toBe(f.context.graphCanonicalSha256);
+      expect(restored.compileInputSha256).toBe(f.context.compileInputSha256);
+      if (staleEdit) {
+        const verifiedOuter = structuredClone(outer);
+        await expect(f.host.savePlacementEdit(staleEdit, goal)).rejects.toThrow(
+          /saved full graph\/physical outer changed/,
+        );
+        const obsoleteBodyEdit = await cold.host.preparePlacementEdit();
+        await f.body.observe(null);
+        await expect(cold.host.savePlacementEdit(obsoleteBodyEdit, goal)).rejects.toThrow();
+        expect(put).toHaveBeenCalledTimes(1);
+        expect(outer).toEqual(verifiedOuter);
+      }
+      expect(ports.calls).toEqual([]);
+    },
+    120000,
+  );
+  it('restores exact complete intent through a fresh one-shot native owner and genuine reader', async () => {
+    const f = await fixture();
+    const result = await f.host.restore(f.request);
+    expect(result).toMatchObject({
+      ok: true,
+      binding: {
+        sourceGeneration: 1,
+        graphCanonicalSha256: f.context.graphCanonicalSha256,
+        compileInputSha256: f.context.compileInputSha256,
+        physicalInitializationCanonicalSha256: f.context.physicalInitialization.canonicalSha256,
+        outerSha256: outer!.sidecarSha256,
+      },
+    });
+    expect(f.host.getSnapshot()).toMatchObject({
+      status: 'ready',
+      claims: {
+        numericSnapshotIsCurrentAdmission: false,
+        fitQualified: false,
+        continuationQualified: false,
+      },
+    });
+    expect(
+      physicalReader.projectSavedFullAssemblyPhysicalSnapshotV1(f.reader).compileInputSha256,
+    ).toBe(f.context.compileInputSha256);
+    expect(Object.keys(f.host)).not.toContain('sourceOwner');
+    expect(Object.keys(f.host)).not.toContain('bodyOwner');
+    expect((await f.body.projectCurrentBody()).status).toBe('projected');
+  }, 120000);
+
+  it('rejects copied and proxy receipts without invoking getters, without consuming the native source', async () => {
+    const f = await fixture(),
+      getter = vi.fn();
+    for (const receipt of [
+      { ...f.reader },
+      new Proxy(f.reader, { get: getter }),
+      Object.defineProperty({}, 'version', { get: getter }),
+    ]) {
+      expect((await f.host.restore({ ...f.request, verifiedReceipt: receipt })).ok).toBe(false);
+    }
+    expect(getter).not.toHaveBeenCalled();
+    expect((await f.host.restore(f.request)).ok).toBe(true);
+  }, 120000);
+
+  it('keeps actual numeric ownership private, runs fixed16/fresh32 and mounts only after fresh durable checks', async () => {
+    const f = await fixture();
+    requireOk(await f.host.restore(f.request));
+    const { lease, device } = await borrowedLease();
+    const count = readCount;
+    expect((await f.host.run16(lease)).ok).toBe(true);
+    expect((await f.host.run32(lease)).ok).toBe(true);
+    expect((await f.host.mountPreview({} as HTMLCanvasElement)).ok).toBe(true);
+    expect((await f.host.projectLatestRender()).ok).toBe(true);
+    expect(readCount).toBeGreaterThan(count + 20);
+    expect(ports.calls.map((x) => x.frame)).toEqual([16, 32]);
+    expect(f.host.getSnapshot().status).toBe('preview-ready');
+    await f.host.stopPreview();
+    expect(f.host.getSnapshot()).toMatchObject({
+      status: 'ready',
+      binding: { sourceGeneration: 1 },
+      numeric: { previewReceipt: null },
+    });
+    expect(device.destroy).not.toHaveBeenCalled();
+    expect((await f.body.projectCurrentBody()).status).toBe('projected');
+  }, 120000);
+
+  async function verifyFirstPlacement(mode: 'manual rotation' | 'flat orientation') {
+    const f = await fixture();
+    const prior = {
+      ...f.storage.v6,
+      postSaveReceiptSha256: semanticDocument(seed.row).persistence.receiptSealSha256,
+    };
+    outer = prior;
+    const baseClient = vi.mocked(abortableAdminService).getMockImplementation()!;
+    const put = vi.fn(async (request: PutTechCardPatternSemanticSidecarRequest) => {
+      expect(request.expectedPreviousSidecarSha256).toBe(prior.sidecarSha256);
+      expect(request.expectedCardLockVersion).toBe(seed.row.cardLockVersion);
+      expect(request.expectedSavedRowRevision).toBe(seed.row.revision);
+      outer = {
+        ...prior,
+        sidecarBytes: request.sidecarBytes,
+        sidecarSha256: request.sidecarSha256,
+        mediaType: request.mediaType,
+        byteLength: Buffer.from(request.sidecarBytes!, 'base64').length,
+      };
+      return { semanticSidecar: structuredClone(outer) };
+    });
+    vi.mocked(abortableAdminService).mockImplementation((signal) => ({
+      ...baseClient(signal),
+      GetTechCardPatternSemanticSidecar: async () => ({ semanticSidecar: structuredClone(outer) }),
+      PutTechCardPatternSemanticSidecar: put,
+    }));
+    const actor = await compiledObservedFixture(f.body);
+    const generation = actor.author.sourceGeneration;
+    const save = vi
+      .fn<(placements: readonly SavedFullAssemblyTablePiecePlacementV1[]) => Promise<void>>()
+      .mockResolvedValue(undefined);
+    type AuthoringProps = ComponentProps<typeof CadWorkbenchFirstPhysicalAuthoringV1>;
+    type State = AuthoringProps['state'];
+    const state: State = {
+      profile: '',
+      setProfile: () => undefined,
+      selected: null,
+      bodySession: f.body,
+      onDisplayedBodyInputV1: f.body.onDisplayedBodyInputV1,
+      host: null,
+      durableSnapshot: null,
+      savedDocumentRetired: false,
+      sourceStatus: 'placement-required',
+      sourceError: null,
+      retry: vi.fn(),
+      firstAuthoring: {
+        status: 'placement-required',
+        bootstrap: {} as NonNullable<State['firstAuthoring']['bootstrap']>,
+        sourceGeometry: actor.author.sourceGeometry,
+        error: null,
+      },
+      startFirstAuthoring: async () => {},
+      compileFirstAuthoring: async () => {},
+      saveFirstAuthoring: save,
+      retryFirstPlacementSave: async () => {},
+      placementEditor: { status: 'idle', draft: null, error: null },
+      canEditSavedPlacement: false,
+      isEditingSavedPlacement: () => false,
+      startSavedPlacementEdit: async () => {},
+      saveSavedPlacementEdit: async () => {},
+      cancelSavedPlacementEdit: () => {},
+    };
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    vi.stubGlobal('window', { event: undefined, location: { origin: 'http://fixture.local' } });
+    cleanup.push(() => vi.unstubAllGlobals());
+    const view = mountAnnotationFixtureView((current: State) => {
+      const root = CadWorkbenchFirstPhysicalAuthoringV1({ state: current });
+      const fields = Children.toArray(root?.props.children).find(
+        (item): item is ReactElement<AuthoringProps> =>
+          isValidElement(item) &&
+          typeof item.type === 'function' &&
+          item.type.name === 'PlacementAuthoring',
+      );
+      if (!fields || typeof fields.type !== 'function')
+        throw new Error('The mounted physical placement form is absent.');
+      return (fields.type as (props: AuthoringProps) => ReactNode)(fields.props);
+    });
+    await view.render(state);
+    const field = (name: string) => visitMountedTree(view.output(), (item) => item.name === name);
+    const enter = (name: string, key: 'onChange' | 'onValueChange', value: string) =>
+      act(async () => {
+        const handler = field(name)?.[key] as ((entry: string) => void) | undefined;
+        if (!handler) throw new Error(`Mounted placement field is absent: ${name}`);
+        handler(value);
+      });
+    const pieces = actor.author.sourceGeometry.pieces;
+    const oldPlacements = f.context.physicalInitialization.document.placements;
+    // Rotate the seam-coherent fixture as a whole while choosing new exact source pivots.
+    const positionAtPivot = (pieceId: string, pivot: readonly [number, number, number]) => {
+      const old = oldPlacements.find((placement) => placement.pieceId === pieceId)!;
+      return pivot.map(
+        (coordinate, axis) => coordinate - old.sourceOriginM[axis]! + old.translationM[axis]!,
+      );
+    };
+    const firstPivot = pieces[0]!.contours[0]!.vertices[0]!.positionM;
+    const [firstWorldX, firstWorldY] = positionAtPivot(pieces[0]!.pieceId, firstPivot);
+    const isFlat = mode === 'flat orientation';
+    for (const [index, piece] of pieces.entries()) {
+      const flatControl = () =>
+        visitMountedTree(
+          view.output(),
+          (item) => item['aria-label'] === `Flat orientation for ${piece.pieceId}`,
+        );
+      expect(flatControl()?.disabled).toBe(true);
+      const contour = piece.contours[0]!;
+      await enter(`placement-contour-${piece.pieceId}`, 'onValueChange', contour.contourId);
+      await enter(
+        `placement-vertex-${piece.pieceId}`,
+        'onValueChange',
+        contour.vertices[0]!.vertexId,
+      );
+      const [x, y, z] = positionAtPivot(piece.pieceId, contour.vertices[0]!.positionM);
+      const tx = String(isFlat ? x! + 1 : z! + 1);
+      const ty = String(isFlat ? z! + 1 : y);
+      const tz = index === 0 ? '-0' : String(isFlat ? firstWorldY! - y! : firstWorldX! - x!);
+      for (const [axis, value] of [
+        ['rx', isFlat ? '21' : '0'],
+        ['ry', isFlat ? '16' : '90'],
+        ['rz', isFlat ? '-32' : '0'],
+        ['x', tx],
+        ['y', ty],
+        ['z', tz],
+      ])
+        await enter(`placement-${axis}-${piece.pieceId}`, 'onChange', value!);
+      if (isFlat) {
+        expect(flatControl()?.disabled).toBe(false);
+        await act(async () => (flatControl()?.onClick as () => void)());
+        expect(field(`placement-contour-${piece.pieceId}`)?.value).toBe(contour.contourId);
+        expect(field(`placement-vertex-${piece.pieceId}`)?.value).toBe(
+          contour.vertices[0]!.vertexId,
+        );
+        expect(field(`placement-x-${piece.pieceId}`)?.value).toBe(tx);
+        expect(field(`placement-y-${piece.pieceId}`)?.value).toBe(ty);
+        expect(field(`placement-z-${piece.pieceId}`)?.value).toBe(tz);
+      }
+    }
+    const submit = visitMountedTree(view.output(), (item) => item.children === 'Save placement')
+      ?.onClick as (() => void) | undefined;
+    await act(async () => submit?.());
+    expect(
+      visitMountedTree(view.output(), (item) => item.variant === 'errorLabel')?.children,
+    ).toBeUndefined();
+    expect(save).toHaveBeenCalledTimes(1);
+    const placements = save.mock.calls[0]![0];
+    expect(placements[0]?.translationM[2]).toBe(0);
+    const expectedRotation = isFlat ? [1, 0, 0, 0, 0, 1, 0, -1, 0] : [0, 0, 1, 0, 1, 0, -1, 0, 0];
+    expect(placements).toHaveLength(pieces.length);
+    for (const { rotationRowMajor } of placements)
+      expect(rotationRowMajor).toEqual(expectedRotation);
+    const request = { placements, expectedGeneration: generation };
+    expect(
+      await bindSavedFullAssemblyGenericFirstAuthoringV1(actor.pre, {
+        ...request,
+        expectedGeneration: generation + 1,
+      }),
+    ).toMatchObject({ ok: false });
+    expect(
+      await bindSavedFullAssemblyGenericFirstAuthoringV1(actor.pre, {
+        ...request,
+        placements: [
+          { ...placements[0]!, pivot: { ...placements[0]!.pivot, positionM: [1, 1, 1] } },
+          ...placements.slice(1),
+        ],
+      }),
+    ).toMatchObject({ ok: false, detail: expect.stringMatching(/pivot identity or exact source/) });
+    const unsupportedSideAndLayer = { ...placements[0]!, side: 'front', layer: 1 };
+    expect(
+      await bindSavedFullAssemblyGenericFirstAuthoringV1(actor.pre, {
+        ...request,
+        placements: [unsupportedSideAndLayer, ...placements.slice(1)],
+      }),
+    ).toMatchObject({ ok: false, detail: expect.stringMatching(/additional fields/) });
+    const bound = requireOk(await bindSavedFullAssemblyGenericFirstAuthoringV1(actor.pre, request));
+    expect(bound.document.observedTarget).toEqual(actor.author.observedTarget);
+    for (const [host, expectedGeneration] of [
+      [actor.pre, generation + 1],
+      [{ ...actor.pre }, generation],
+    ] as const)
+      expect(
+        await persistCurrentSavedGenericObservedPhysicalHostV1(host, expectedGeneration),
+      ).toMatchObject({
+        ok: false,
+        writeOutcome: 'not-attempted',
+      });
+    const changedPose = await sessionFixture(731, 10);
+    cleanup.push(() => changedPose.input.dispose());
+    await f.body.observe(changedPose.input);
+    const changedTarget = requireOk(
+      await bodyApi.projectCurrentSavedModelGenericObservedTargetV1(f.body),
+    );
+    expect(changedTarget.canonicalSha256).not.toBe(actor.author.observedTarget.canonicalSha256);
+    expect(
+      await persistCurrentSavedGenericObservedPhysicalHostV1(actor.pre, generation),
+    ).toMatchObject({
+      ok: false,
+      writeOutcome: 'not-attempted',
+    });
+    expect(put).not.toHaveBeenCalled();
+    expect(outer).toEqual(prior);
+
+    await f.body.observe(f.observed.input);
+    const replacement = await compiledObservedFixture(f.body);
+    const expected = requireOk(
+      await bindSavedFullAssemblyGenericFirstAuthoringV1(replacement.pre, {
+        placements,
+        expectedGeneration: replacement.author.sourceGeneration,
+      }),
+    );
+    const persisted = requireOk(
+      await persistCurrentSavedGenericObservedPhysicalHostV1(
+        replacement.pre,
+        replacement.author.sourceGeneration,
+      ),
+    );
+    expect(persisted.writeOutcome).toBe('verified');
+    expect(put).toHaveBeenCalledTimes(1);
+    const restored = await freshPhysicalFixtureHost(f.body);
+    requireOk(await restored.host.restore(restored.request));
+    const reopened = physicalReader.projectSavedFullAssemblyPhysicalSnapshotV1(restored.reader);
+    expect(reopened.physicalInitialization).toEqual(expected.document);
+    expect(reopened.physicalInitialization.observedTarget).toEqual(
+      replacement.author.observedTarget,
+    );
+    expect(reopened.physicalInitializationCanonicalSha256).toBe(expected.initializationSha256);
+    expect(Object.keys(reopened.physicalInitialization.placements[0]!).sort()).toEqual([
+      'pieceId',
+      'rotationRowMajor',
+      'sourceOriginM',
+      'translationM',
+    ]);
+  }
+
+  it(
+    'mounts explicit physical placement and reloads the exact observed target and rigid transforms through V7',
+    () => verifyFirstPlacement('manual rotation'),
+    120000,
+  );
+
+  it(
+    'saves a mounted face-up flat orientation with the exact pivot and entered world position',
+    () => verifyFirstPlacement('flat orientation'),
+    120000,
+  );
+
+  it('renders adapter and retained-frame device failure, then restores and cleans up the same saved arrangement', async () => {
+    const f = await fixture(true);
+    requireOk(await f.host.restore(f.request));
+    const savedOuter = structuredClone(outer);
+    const lost = deferredSessionValue<DeviceLoss>();
+    const lostDevice = fixtureDevice(lost.promise);
+    const retryDevice = fixtureDevice();
+    const requestDevice = vi
+      .fn()
+      .mockResolvedValueOnce(lostDevice)
+      .mockResolvedValueOnce(retryDevice);
+    const requestAdapter = vi.fn().mockResolvedValue({ requestDevice }).mockResolvedValueOnce(null);
+    const computeContext = { configure: vi.fn(), unconfigure: vi.fn() };
+    const computeCanvas = {
+      getContext: vi.fn(() => computeContext),
+    } as unknown as HTMLCanvasElement;
+    const previewCanvas = {} as HTMLCanvasElement;
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    vi.stubGlobal('window', { event: undefined, location: { origin: 'http://fixture.local' } });
+    vi.stubGlobal('navigator', {
+      gpu: { requestAdapter, getPreferredCanvasFormat: () => 'bgra8unorm' },
+    });
+    cleanup.push(() => vi.unstubAllGlobals());
+
+    type Host = typeof f.host;
+    const retry = vi.fn();
+    const view = mountAnnotationFixtureView(({ host }: { host: Host | null }) => {
+      const state: ComponentProps<typeof CadWorkbenchPhysicalHostControlsV1>['state'] = {
+        profile: '',
+        setProfile: () => undefined,
+        selected: null,
+        onDisplayedBodyInputV1: f.body.onDisplayedBodyInputV1,
+        host,
+        bodySession: f.body,
+        sourceStatus: host ? 'ready' : 'awaiting-mannequin',
+        sourceError: null,
+        durableSnapshot: host?.getSnapshot() ?? null,
+        savedDocumentRetired: false,
+        retry,
+        firstAuthoring: { status: 'idle', bootstrap: null, sourceGeometry: null, error: null },
+        startFirstAuthoring: async () => {},
+        compileFirstAuthoring: async () => {},
+        saveFirstAuthoring: async () => {},
+        retryFirstPlacementSave: async () => {},
+        placementEditor: { status: 'idle', draft: null, error: null },
+        canEditSavedPlacement: false,
+        isEditingSavedPlacement: () => false,
+        startSavedPlacementEdit: async () => {},
+        saveSavedPlacementEdit: async () => {},
+        cancelSavedPlacementEdit: () => {},
+      };
+      const controls = CadWorkbenchPhysicalHostControlsV1({ state });
+      for (const [canvas, identify] of [
+        [computeCanvas, (item: Record<string, unknown>) => item.hidden === true],
+        [
+          previewCanvas,
+          (item: Record<string, unknown>) =>
+            item['aria-label'] === 'Cloth simulation on the selected mannequin',
+        ],
+      ] as const) {
+        const node = visitMountedTree(controls, identify);
+        const ref = node?.ref as RefObject<HTMLCanvasElement | null> | undefined;
+        if (ref) ref.current = canvas;
+      }
+      return controls;
+    });
+    const labeled = (label: string) =>
+      visitMountedTree(view.output(), (item) => item['aria-label'] === label);
+    const text = (value: string) =>
+      visitMountedTree(view.output(), (item) => item.children === value);
+    const click = (label: string) => {
+      const action = text(label)?.onClick as (() => void) | undefined;
+      if (!action) throw new Error(`Mounted action unavailable: ${label}`);
+      action();
+    };
+    const expectNoPreview = () => {
+      expect(labeled('Cloth simulation on the selected mannequin')?.className).toContain('hidden');
+      expect(labeled('Strain utilization legend')).toBeNull();
+      expect(labeled('Current frame measurements')).toBeNull();
+    };
+
+    await view.render({ host: f.host });
+    await act(async () => {
+      click('Preview');
+      await vi.waitFor(() => expect(requestAdapter).toHaveBeenCalledTimes(1));
+    });
+    expect(text('The browser did not provide a WebGPU adapter.')?.role).toBe('alert');
+    expect(text('Preview')?.disabled).toBe(false);
+    expectNoPreview();
+    expect(requestDevice).not.toHaveBeenCalled();
+    expect(ports.calls).toHaveLength(0);
+
+    const frame32Started = deferredSessionValue<void>();
+    const frame32Paused = deferredSessionValue<void>();
+    ports.after = () => {
+      if (ports.calls.at(-1)?.frame !== 32) return;
+      ports.pause = frame32Paused.promise;
+      frame32Started.resolve();
+    };
+    await act(async () => {
+      click('Preview');
+      await frame32Started.promise;
+    });
+    expect(f.host.getSnapshot().numeric.frame16Report?.frameCount).toBe(16);
+    expect(f.host.getSnapshot().numeric.status).toBe('running32');
+    expect(requestDevice).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      lost.resolve({
+        __brand: 'GPUDeviceLostInfo',
+        message: 'Retained checkpoint device was lost',
+        reason: 'unknown',
+      });
+      frame32Paused.resolve();
+      await vi.waitFor(() => expect(lostDevice.destroy).toHaveBeenCalledTimes(1));
+    });
+    ports.after = null;
+    ports.pause = null;
+    expect(text('WebGPU device lost: Retained checkpoint device was lost')?.role).toBe('alert');
+    expectNoPreview();
+    expect(f.host.getSnapshot()).toMatchObject({ status: 'blocked', binding: null });
+    expect(ports.previewEvents).toEqual([]);
+    expect(computeContext.unconfigure).toHaveBeenCalledTimes(1);
+    expect(text('Retry')?.disabled).toBe(false);
+    expect(text('Preview')).toBeNull();
+    await act(async () => click('Retry'));
+    expect(retry).toHaveBeenCalledTimes(1);
+
+    const next = await freshPhysicalFixtureHost(f.body);
+    requireOk(await next.host.restore(next.request));
+    ports.finalValidationFrame = 32;
+    await view.render({ host: next.host });
+    await act(async () => {
+      click('Preview');
+      await vi.waitFor(() => expect(next.host.getSnapshot().status).toBe('preview-ready'), {
+        timeout: 10_000,
+      });
+    });
+    expect(ports.calls.map(({ frame }) => frame)).toEqual([16, 32, 16, 32]);
+    expect(requestDevice).toHaveBeenCalledTimes(2);
+    expect(ports.previewEvents).toEqual(['create']);
+    expect(labeled('Strain utilization legend')).not.toBeNull();
+    expect(labeled('Current frame measurements')).not.toBeNull();
+
+    await f.body.observe(null);
+    await view.render({ host: null });
+    await vi.waitFor(() => expect(retryDevice.destroy).toHaveBeenCalledTimes(1));
+    expect(text('Select a mannequin.')).not.toBeNull();
+    expect(text('Preview')).toBeNull();
+    expectNoPreview();
+    expect(ports.previewEvents).toEqual(['create', 'dispose']);
+    await view.unmount();
+    expect(lostDevice.destroy).toHaveBeenCalledTimes(1);
+    expect(retryDevice.destroy).toHaveBeenCalledTimes(1);
+    expect(computeContext.configure).toHaveBeenCalledTimes(2);
+    expect(computeContext.unconfigure).toHaveBeenCalledTimes(2);
+    expect(outer).toEqual(savedOuter);
+    const reopened = requireOk(
+      await V7.decodePatternImportDxfProductCompositeSidecarV7(
+        new Uint8Array(Buffer.from(outer!.sidecarBytes!, 'base64')),
+      ),
+    );
+    expect(reopened.nestedCompositeV6.mannequinArrangement?.pieces[0]?.transform).toEqual({
+      offsetM: [0.125, -0.0625, 0.25],
+      rotationRad: 0.5,
+    });
+  }, 120000);
+
+  it('preserves current binding and borrowed body when an explicit Stop cancels a held fresh read', async () => {
+    const f = await fixture();
+    requireOk(await f.host.restore(f.request));
+    const { lease } = await borrowedLease();
+    requireOk(await f.host.run16(lease));
+    const gate = deferredSessionValue<void>(),
+      started = deferredSessionValue<void>();
+    beforeWireRead = () => {
+      started.resolve();
+      return gate.promise;
+    };
+    const reading = f.host.projectLatestRender();
+    await started.promise;
+    expect((await f.host.projectLatestRender()).ok).toBe(false); // busy must not revoke current state
+    await f.host.stopPreview();
+    expect((await reading).ok).toBe(false);
+    expect(f.host.getSnapshot()).toMatchObject({
+      status: 'ready',
+      binding: { sourceGeneration: 1 },
+    });
+    beforeWireRead = null;
+    gate.resolve();
+    await Promise.resolve();
+    expect((await f.host.run16(lease)).ok).toBe(true);
+    expect((await f.body.projectCurrentBody()).status).toBe('projected');
+  }, 120000);
+
+  it('local read cancellation preserves current admission and frames; preabort has no effect', async () => {
+    const f = await fixture();
+    requireOk(await f.host.restore(f.request));
+    const { lease } = await borrowedLease();
+    requireOk(await f.host.run16(lease));
+    const caller = new AbortController(),
+      gate = deferredSessionValue<void>(),
+      started = deferredSessionValue<void>();
+    beforeWireRead = () => {
+      started.resolve();
+      return gate.promise;
+    };
+    const reading = f.host.projectLatestRender(caller.signal);
+    await started.promise;
+    caller.abort();
+    expect((await reading).ok).toBe(false);
+    expect(f.host.getSnapshot().binding).not.toBeNull();
+    beforeWireRead = null;
+    gate.resolve();
+    expect((await f.host.run16(lease, caller.signal)).ok).toBe(false);
+    expect(f.host.getSnapshot().binding).not.toBeNull();
+    expect((await f.host.projectLatestRender()).ok).toBe(true);
+  }, 120000);
+
+  it('revokes frames and durable binding when the persisted complete outer changes', async () => {
+    const f = await fixture();
+    requireOk(await f.host.restore(f.request));
+    const { lease } = await borrowedLease();
+    requireOk(await f.host.run16(lease));
+    outer = undefined;
+    expect((await f.host.run32(lease)).ok).toBe(false);
+    expect(f.host.getSnapshot()).toMatchObject({
+      status: 'blocked',
+      binding: null,
+      numeric: { previewReceipt: null },
+    });
+    expect(ports.live.size).toBeGreaterThan(0);
+    expect([...ports.live.values()].every((x) => x.signal.aborted)).toBe(true);
+    expect((await f.host.run16(lease)).ok).toBe(false);
+    expect((await f.body.projectCurrentBody()).status).toBe('projected');
+  }, 120000);
+
+  it('checks caller-owned restore receipt again before publication and never disposes a borrowed live receipt', async () => {
+    const f = await fixture();
+    const gate = deferredSessionValue<void>(),
+      started = deferredSessionValue<void>();
+    beforeWireRead = () => {
+      started.resolve();
+      return gate.promise;
+    };
+    const pending = f.host.restore(f.request);
+    await started.promise;
+    physicalReader.disposeSavedFullAssemblyPhysicalSnapshotV1(f.reader);
+    beforeWireRead = null;
+    gate.resolve();
+    expect((await pending).ok).toBe(false);
+    expect(f.host.getSnapshot().binding).toBeNull();
+    expect((await f.body.projectCurrentBody()).status).toBe('projected');
+  }, 120000);
+  it('rejects a same-content body turn rebound after the last genuine target projection and keeps the source', async () => {
+    const f = await fixture();
+    requireOk(await f.host.restore(f.request));
+    const { lease } = await borrowedLease();
+    requireOk(await f.host.run16(lease));
+    requireOk(await f.host.run32(lease));
+    requireOk(await f.host.mountPreview({} as HTMLCanvasElement));
+    const original = bodyApi.projectCurrentSavedModelGenericObservedTargetV1;
+    let reads = 0,
+      terminal = Infinity;
+    const spy = vi
+      .spyOn(bodyApi, 'projectCurrentSavedModelGenericObservedTargetV1')
+      .mockImplementation(async (...args) => {
+        const result = await original(...args);
+        if (++reads === terminal) {
+          await f.body.observe(null);
+          await f.body.observe(f.observed.input);
+          const replacement = await original(...args);
+          if (!result.ok || !replacement.ok)
+            throw new Error('Genuine target fixture unexpectedly unavailable.');
+          expect(replacement.canonicalSha256).toBe(result.canonicalSha256);
+          expect(replacement.target).toEqual(result.target);
+        }
+        return result;
+      });
+    try {
+      requireOk(await f.host.projectLatestRender());
+      terminal = reads;
+      reads = 0;
+      expect(terminal).toBeGreaterThan(0);
+      expect((await f.host.projectLatestRender()).ok).toBe(false);
+      expect(reads).toBe(terminal);
+      expect(f.host.getSnapshot()).toMatchObject({
+        status: 'blocked',
+        binding: null,
+        numeric: { sourceGeneration: 1, previewReceipt: null },
+      });
+      expect((await f.host.run16(lease)).ok).toBe(false);
+      expect((await f.body.projectCurrentBody()).status).toBe('projected');
+    } finally {
+      spy.mockRestore();
+    }
+  }, 120000);
+
+  it('refuses disposal reentrantly triggered by the last synchronous body-currentness poll', async () => {
+    const f = await fixture();
+    requireOk(await f.host.restore(f.request));
+    const { lease } = await borrowedLease();
+    requireOk(await f.host.run16(lease));
+    const original = bodyApi.isCurrentSavedModelGenericObservedTargetV1;
+    let polls = 0,
+      terminal = Infinity,
+      disposed: Promise<boolean> | null = null;
+    const spy = vi
+      .spyOn(bodyApi, 'isCurrentSavedModelGenericObservedTargetV1')
+      .mockImplementation((...args) => {
+        const current = original(...args);
+        if (++polls === terminal) disposed = f.host.dispose();
+        return current;
+      });
+    try {
+      requireOk(await f.host.projectLatestRender());
+      terminal = polls;
+      polls = 0;
+      expect(terminal).toBeGreaterThan(0);
+      expect((await f.host.projectLatestRender()).ok).toBe(false);
+      expect(disposed).not.toBeNull();
+      await disposed;
+      expect(f.host.getSnapshot()).toMatchObject({ status: 'disposed', binding: null });
+      expect((await f.body.projectCurrentBody()).status).toBe('projected');
+    } finally {
+      spy.mockRestore();
+    }
+  }, 120000);
+
+  it('preview cleanup during pending restore does not cancel the one-shot upstream native compile', async () => {
+    const f = await fixture(),
+      gate = deferredSessionValue<void>(),
+      started = deferredSessionValue<void>();
+    beforeWireRead = () => {
+      started.resolve();
+      return gate.promise;
+    };
+    const pending = f.host.restore(f.request);
+    await started.promise;
+    await f.host.stopPreview();
+    expect(f.host.getSnapshot().status).toBe('restoring');
+    beforeWireRead = null;
+    gate.resolve();
+    expect((await pending).ok).toBe(true);
+  }, 120000);
+
+  it('source caller cancellation revokes restored admission but never the borrowed displayed body', async () => {
+    const f = await fixture(),
+      caller = new AbortController();
+    requireOk(await f.host.restore(f.request, caller.signal));
+    caller.abort();
+    expect(f.host.getSnapshot()).toMatchObject({ status: 'blocked', binding: null });
+    expect((await f.body.projectCurrentBody()).status).toBe('projected');
+  }, 120000);
+  it('captures all restore intent fields before the first fresh-read await without cloning the native draft', async () => {
+    const f = await fixture(),
+      gate = deferredSessionValue<void>(),
+      started = deferredSessionValue<void>();
+    const request = { ...f.request, sourceRequest: { ...f.request.sourceRequest } };
+    beforeWireRead = () => {
+      started.resolve();
+      return gate.promise;
+    };
+    const pending = f.host.restore(request);
+    await started.promise;
+    (request as unknown as Record<string, unknown>).verifiedReceipt = {};
+    (request as unknown as Record<string, unknown>).sourceOwner = {};
+    (request.sourceRequest as unknown as Record<string, unknown>).sourceFileId =
+      'caller-mutated-after-admission';
+    beforeWireRead = null;
+    gate.resolve();
+    expect((await pending).ok).toBe(true);
+    expect(f.host.getSnapshot().binding?.compileInputSha256).toBe(f.context.compileInputSha256);
+  }, 120000);
+
+  it('refuses invalid or missing16 leases before changing an existing durable admission', async () => {
+    const f = await fixture();
+    requireOk(await f.host.restore(f.request));
+    const binding = f.host.getSnapshot().binding;
+    expect((await f.host.run16({} as never)).ok).toBe(false);
+    const { lease } = await borrowedLease();
+    expect((await f.host.run32(lease)).ok).toBe(false);
+    expect(f.host.getSnapshot().binding).toBe(binding);
+    expect((await f.host.run16(lease)).ok).toBe(true);
+  }, 120000);
+
+  it('keeps the exact Workbench selection on the admitted preview when annotation authoring becomes available', async () => {
+    const f = await fixture(false, { nativeExactDesktop: true });
+    const session = await openExactAnnotationFixture(f.storage, 'v7');
+    const geometry = {
+      catalog: f.storage.catalog,
+      projection: f.storage.source.projection,
+      annotationSource: f.storage.source,
+    };
+    requireOk(await f.host.restore(f.request));
+    const { lease } = await borrowedLease();
+    ports.finalValidationFrame = 32;
+    requireOk(await f.host.run16(lease));
+    requireOk(await f.host.run32(lease));
+    const canvas = {} as HTMLCanvasElement;
+    const mounted = requireOk(await f.host.mountPreview(canvas, new AbortController().signal));
+    const saved = physicalReader.projectSavedFullAssemblyPhysicalSnapshotV1(f.reader)!;
+    const { graph } = saved;
+    const operationNumber = session.current.selectedOperation.sourceOperationNumber;
+    const operation = graph.operations.find(
+      (value) => value.sourceOperationNumber === operationNumber,
+    )!;
+    const seam = graph.seams.find(({ id }) => id === operation.seamIds[0])!;
+    const { pieceId, pieceLineKey } = seam.sides[1];
+    const pick = vi.fn(() => ({
+      kind: 'garment' as const,
+      frameReportSha256: mounted.receipt.frameReportSha256,
+      triangleIndex: 7,
+      pieceId,
+      seamSide: { runtimeSeamId: seam.id, sideIndex: 1 as const },
+    }));
+    ports.previewPick = pick;
+    const selectOutline = vi.fn(() => true);
+    ports.previewSelect = selectOutline;
+
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    vi.stubGlobal('window', { event: undefined });
+    cleanup.push(() => vi.unstubAllGlobals());
+    const route = mountAnnotationFixtureView(PatternImportDxfProductExactNSeamProductionMountV2);
+    const mannequin = vi.fn(
+      (context: PatternImportDxfProductExactNSeamProductionMannequinContextV2) => {
+        return bindCadWorkbenchPhysicalPreviewSelectionV1(
+          context.previewScope,
+          operationNumber,
+          context.focusSelection,
+          context.selection,
+          context.previewSeam,
+        );
+      },
+    );
+    const props = {
+      session,
+      desktopGeometry: geometry,
+      activeSeamIndex: 0,
+      onActiveSeamIndexChange: vi.fn(),
+      mannequin: (context: PatternImportDxfProductExactNSeamProductionMannequinContextV2) => {
+        mannequin(context);
+        return null;
+      },
+      operationsPanel: null,
+    };
+    const topologyAnnotationAuthoring = createElement(
+      PatternImportDxfPhaseEExactNTopologyAnnotationEditorV1,
+      {
+        source: f.storage.source,
+        draft: { measurements: [], callouts: [] },
+        onDraftChange: vi.fn(),
+      },
+    );
+    function shell() {
+      const view = route.output();
+      if (!isValidElement<PatternImportDxfPhaseECadWorkbenchSplitShellPropsV1>(view))
+        throw new Error('Saved exact Workbench shell did not mount.');
+      return view.props;
+    }
+    function previewInteraction() {
+      const { mannequin: slot, selection, onSelectionFocus } = shell();
+      if (typeof slot !== 'function')
+        throw new Error('Saved Workbench preview slot did not mount.');
+      slot({
+        source: 'mannequin',
+        selection: selection ?? null,
+        focusSelection: (next = selection ?? null) =>
+          onSelectionFocus?.({ source: 'mannequin', selection: next }),
+      });
+      return mannequin.mock.results.at(-1)!.value;
+    }
+    await route.render(props);
+    const desktop = shell().desktop;
+    if (!isValidElement<PatternImportDxfPhaseECadTableZeroConnectCanvasPropsV1>(desktop))
+      throw new Error('Saved 2D canvas did not mount.');
+    const selectSide = desktop.props.savedSeam?.onFocusSide;
+    if (!selectSide) throw new Error('Exact saved seam has no 2D selection owner.');
+    await act(async () => selectSide(0));
+
+    await route.render({ ...props, topologyAnnotationAuthoring });
+    const currentDesktop = shell().desktop;
+    if (!isValidElement<PatternImportDxfPhaseECadTableZeroConnectCanvasPropsV1>(currentDesktop))
+      throw new Error('Saved 2D canvas did not mount with annotation authoring.');
+    expect(currentDesktop.type).toBe(PatternImportDxfPhaseECadTableZeroConnectCanvasV1);
+    expect(currentDesktop.props.savedSeam?.focusedSideIndex).toBe(0);
+    expect(
+      visitMountedTree(
+        currentDesktop.props.savedAnnotationEditControl,
+        ({ children }) => children === topologyAnnotationAuthoring,
+      ),
+    ).not.toBeNull();
+    const interaction = previewInteraction();
+    if (!interaction) throw new Error('The current physical preview interaction is absent.');
+    expect(interaction?.scope).toEqual({
+      row: saved.row,
+      sourceFileId: graph.source.sourceFileId,
+      sizeToken: graph.source.sizeToken,
+    });
+    const hit = f.host.pickPreview(canvas, interaction.scope, 100, 200, interaction.savedSeam);
+    if (hit?.kind !== 'garment') throw new Error('The admitted face has no garment identity.');
+    expect(hit).toMatchObject({
+      scopeKey: saved.row.scopeKey,
+      pieceId,
+      pieceLineKey,
+      seamSide: { sideIndex: 1 },
+    });
+    await act(async () => interaction.onPick(hit));
+    expect(shell().selection).toMatchObject({ pieceId, pieceLineKey, seamSideIndex: 1 });
+    const reverse = previewInteraction()!;
+    expect(
+      f.host.setPreviewSelectedPiece(
+        canvas,
+        reverse.scope,
+        reverse.selectedPiece,
+        reverse.selectedSide,
+      ),
+    ).toBe(true);
+    expect(selectOutline).toHaveBeenLastCalledWith(
+      pieceId,
+      { runtimeSeamId: seam.id, sideIndex: 1 },
+      undefined,
+    );
+    props.onActiveSeamIndexChange.mockClear();
+    const sideA = seam.sides[0];
+    const anotherPiece = {
+      ...hit,
+      pieceId: sideA.pieceId,
+      pieceLineKey: sideA.pieceLineKey,
+      seamSide: undefined,
+    };
+    for (const wrongPick of [
+      { ...anotherPiece, scopeKey: 'foreign-scope' },
+      { ...anotherPiece, pieceLineKey: 'foreign-line' },
+    ]) {
+      await act(async () => reverse.onPick(wrongPick));
+      expect(shell().selection).toMatchObject({ pieceId, pieceLineKey, seamSideIndex: 1 });
+    }
+    for (const projection of [
+      { ...geometry.projection, sizeToken: 'foreign-size' },
+      { ...geometry.projection, sourceFileId: 'foreign-source' },
+    ]) {
+      await route.render({
+        ...props,
+        topologyAnnotationAuthoring,
+        desktopGeometry: { ...geometry, projection },
+      });
+      expect(previewInteraction()).toBeNull();
+      expect(shell().desktop).toHaveProperty('props.operationWindow', topologyAnnotationAuthoring);
+    }
+    expect(props.onActiveSeamIndexChange).not.toHaveBeenCalled();
+    expect(pick).toHaveBeenCalledTimes(1);
+  }, 120000);
+
+  it('routes current preview face identity through the saved graph and refuses stale or mismatched views', async () => {
+    const f = await fixture();
+    requireOk(await f.host.restore(f.request));
+    const { lease } = await borrowedLease();
+    ports.finalValidationFrame = 32;
+    requireOk(await f.host.run16(lease));
+    requireOk(await f.host.run32(lease));
+    const saved = physicalReader.projectSavedFullAssemblyPhysicalSnapshotV1(f.reader);
+    if (!saved) throw new Error('Current saved physical projection missing.');
+    const { row, graph } = saved;
+    const scope = {
+      row,
+      sourceFileId: graph.source.sourceFileId,
+      sizeToken: graph.source.sizeToken,
+    };
+    const operation = graph.operations.find(({ seamIds }) => seamIds.length === 1)!;
+    const runtimeSeam = graph.seams.find(({ id }) => id === operation.seamIds[0])!;
+    const side = runtimeSeam.sides[0];
+    const piece = graph.pieces.find(({ pieceId }) => pieceId === side.pieceId)!;
+    const savedSeam = {
+      operationNumber: operation.sourceOperationNumber,
+      seamId: runtimeSeam.sourceSeamKey,
+      sides: runtimeSeam.sides.map(({ anchors, ...identity }) => ({
+        ...identity,
+        boundaryVertexIds: anchors,
+      })),
+    };
+    const canvas = { setPointerCapture: vi.fn() } as unknown as HTMLCanvasElement;
+    const caller = new AbortController();
+    const mounted = requireOk(await f.host.mountPreview(canvas, caller.signal));
+    const previewEventsAtMount = [...ports.previewEvents];
+    const frameReportSha256 = mounted.receipt.frameReportSha256;
+    const garment = {
+      kind: 'garment',
+      frameReportSha256,
+      triangleIndex: 7,
+      pieceId: piece.pieceId,
+    } as const;
+    const pick = vi.fn<
+      (x: number, y: number, runtimeSeamId?: string) => DxfGarmentObservedPreviewHitV1 | null
+    >(() => garment);
+    ports.previewPick = pick;
+    for (const wrongScope of [
+      { ...scope, row: { ...row, scopeKey: 'different-scope' } },
+      { ...scope, row: { ...row, cardLockVersion: row.cardLockVersion + 1 } },
+      { ...scope, sourceFileId: 'different-source' },
+      { ...scope, sizeToken: 'different-size' },
+    ])
+      expect(f.host.pickPreview(canvas, wrongScope, 100, 200)).toBeNull();
+    expect(f.host.pickPreview({} as HTMLCanvasElement, scope, 100, 200)).toBeNull();
+    expect(pick).not.toHaveBeenCalled();
+    pick.mockReturnValueOnce({ ...garment, frameReportSha256: '1'.repeat(64) });
+    expect(f.host.pickPreview(canvas, scope, 100, 200)).toBeNull();
+    pick.mockReturnValueOnce({ ...garment, pieceId: 'another-piece' });
+    expect(f.host.pickPreview(canvas, scope, 100, 200)).toBeNull();
+
+    const seamHit = {
+      ...garment,
+      seamSide: { runtimeSeamId: runtimeSeam.id, sideIndex: 0 as const },
+    };
+    pick.mockReturnValueOnce(seamHit);
+    expect(f.host.pickPreview(canvas, scope, 100, 200, savedSeam)).toMatchObject({
+      seamSide: {
+        seamId: savedSeam.seamId,
+        sideIndex: 0,
+        contourId: side.contourId,
+        boundaryVertexIds: side.anchors,
+      },
+    });
+    expect(pick).toHaveBeenLastCalledWith(100, 200, runtimeSeam.id);
+    for (const forged of [
+      { ...savedSeam, operationNumber: -1 },
+      { ...savedSeam, sides: [...savedSeam.sides].reverse() },
+      {
+        ...savedSeam,
+        sides: [
+          { ...savedSeam.sides[0]!, boundaryVertexIds: ['wrong', 'anchor'] },
+          savedSeam.sides[1]!,
+        ],
+      },
+    ]) {
+      pick.mockReturnValueOnce(seamHit);
+      expect(f.host.pickPreview(canvas, scope, 100, 200, forged)).not.toHaveProperty('seamSide');
+      expect(pick).toHaveBeenLastCalledWith(100, 200, undefined);
+    }
+
+    const focusSelection = vi.fn();
+    const selectOutline = vi.fn<
+      (
+        pieceId: string | null,
+        side?: DxfGarmentObservedPreviewSeamSideV1,
+        edge?: DxfGarmentObservedBoundaryEdgeV1,
+      ) => boolean
+    >(() => true);
+    ports.previewSelect = selectOutline;
+    let interaction = bindCadWorkbenchPhysicalPreviewSelectionV1(
+      scope,
+      savedSeam.operationNumber,
+      focusSelection,
+      null,
+      savedSeam,
+    );
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    vi.stubGlobal('window', { event: undefined });
+    const route = createRoot(reactMountContainer() as never);
+    cleanup.push(async () => {
+      await act(async () => route.unmount());
+      vi.unstubAllGlobals();
+    });
+    let controls: ReactNode;
+    let displayUnit: PatternImportDxfPhaseEMeasurementUnitV1 = 'mm';
+    vi.spyOn(
+      workbenchShell,
+      'usePatternImportDxfPhaseECadWorkbenchMeasurementUnitV1',
+    ).mockImplementation(() => ({ unit: displayUnit, setUnit: vi.fn() }));
+    let retainedSnapshot: ReturnType<typeof f.host.getSnapshot> | null = null;
+    function Controls() {
+      // Run the actual React control hooks in the same CPU-only harness as the saved route test.
+      const state = {
+        host: f.host,
+        bodySession: f.body,
+        sourceStatus: 'ready',
+        durableSnapshot: retainedSnapshot ?? f.host.getSnapshot(),
+      } as ComponentProps<typeof CadWorkbenchPhysicalHostControlsV1>['state'];
+      controls = CadWorkbenchPhysicalHostControlsV1({ state, interaction });
+      const canvasNode = visitMountedTree(
+        controls,
+        (item) => item['aria-label'] === 'Cloth simulation on the selected mannequin',
+      );
+      const ref = canvasNode?.ref as RefObject<HTMLCanvasElement | null> | undefined;
+      if (ref) ref.current = canvas;
+      return null;
+    }
+    const drawControls = () => act(async () => route.render(createElement(Controls)));
+    const mountedLegend = () =>
+      visitMountedTree(controls, (props) => props['aria-label'] === 'Strain utilization legend');
+    const mountedMeasurements = () =>
+      visitMountedTree(controls, (props) => props['aria-label'] === 'Current frame measurements');
+    const mountedCanvas = () =>
+      visitMountedTree(
+        controls,
+        (props) => props['aria-label'] === 'Cloth simulation on the selected mannequin',
+      ) as ComponentProps<'canvas'> | null;
+    await drawControls();
+    const legend = mountedLegend();
+    expect(legend).not.toBeNull();
+    const legendMarkup = renderToStaticMarkup(createElement('section', legend));
+    expect(legendMarkup).toContain('Normalized strain utilization · dimensionless');
+    expect(legendMarkup).toContain('1.0 = provisional visualization limit · uncalibrated');
+    expect(legendMarkup).toContain('≥2');
+    expect(legendMarkup).toContain('Range 0.125–2.750');
+    const measurements = mountedMeasurements();
+    expect(measurements).not.toBeNull();
+    const measurementMarkup = renderToStaticMarkup(createElement('section', measurements));
+    expect(measurementMarkup).toContain('Maximum seam gap 0.625 mm');
+    expect(measurementMarkup).toContain('Penetrating garment vertices 0');
+    expect(measurementMarkup).toContain('Reversed triangle normals 0');
+    const admitted = f.host.getSnapshot();
+    const currentReport = admitted.numeric.frame32Report;
+    if (!currentReport) throw new Error('The admitted frame report is absent.');
+    retainedSnapshot = {
+      ...admitted,
+      numeric: {
+        ...admitted.numeric,
+        frame32Report: { ...currentReport, reportSha256: '6'.repeat(64) },
+      },
+    };
+    await drawControls();
+    expect(mountedLegend()).toBeNull();
+    expect(mountedMeasurements()).toBeNull();
+    expect(mountedCanvas()?.className).toContain('hidden');
+    retainedSnapshot = null;
+    await drawControls();
+    const canvasProps = mountedCanvas();
+    if (!canvasProps) throw new Error('Mounted physical preview canvas is absent.');
+    const pointer = (clientX: number, button = 0) =>
+      ({
+        isPrimary: true,
+        button,
+        pointerId: 1,
+        clientX,
+        clientY: 200,
+        currentTarget: canvas,
+      }) as PointerEvent<HTMLCanvasElement>;
+
+    canvasProps.onPointerDown?.(pointer(100, 2));
+    canvasProps.onPointerUp?.(pointer(100, 2));
+    canvasProps.onPointerDown?.(pointer(100));
+    canvasProps.onPointerMove?.(pointer(120));
+    canvasProps.onPointerUp?.(pointer(100));
+    expect(focusSelection).not.toHaveBeenCalled();
+
+    const readCountBeforeClick = readCount;
+    const hit = f.host.pickPreview(canvas, scope, 100, 200);
+    expect(hit).toEqual({ ...garment, scopeKey: row.scopeKey, pieceLineKey: piece.pieceLineKey });
+    expect(readCount).toBe(readCountBeforeClick);
+    pick.mockReturnValueOnce(seamHit);
+    canvasProps.onPointerDown?.(pointer(100));
+    canvasProps.onPointerUp?.(pointer(100));
+    expect(focusSelection).toHaveBeenCalledExactlyOnceWith({
+      operationNumber: savedSeam.operationNumber,
+      scopeKey: row.scopeKey,
+      pieceId: piece.pieceId,
+      pieceLineKey: piece.pieceLineKey,
+      seamId: savedSeam.seamId,
+      seamSideIndex: 0,
+    });
+
+    const body = {
+      kind: 'body',
+      frameReportSha256,
+      triangleIndex: 3,
+      persistedModel: { id: 11, updatedAt: '2026-11-01T00:00:00Z', revision: 'r1' },
+      observedBodyContentSha256: 'a'.repeat(64),
+    } as const;
+    pick.mockReturnValueOnce(body);
+    const bodyHit = f.host.pickPreview(canvas, scope, 100, 200);
+    expect(bodyHit).toEqual(body);
+    interaction?.onPick(bodyHit!);
+    expect(focusSelection).toHaveBeenCalledTimes(1);
+
+    const selected = {
+      scopeKey: row.scopeKey,
+      pieceId: piece.pieceId,
+      pieceLineKey: piece.pieceLineKey,
+    };
+    interaction = bindCadWorkbenchPhysicalPreviewSelectionV1(
+      scope,
+      savedSeam.operationNumber,
+      focusSelection,
+      {
+        ...selected,
+        operationNumber: savedSeam.operationNumber,
+        seamId: savedSeam.seamId,
+        seamSideIndex: 0,
+      },
+      savedSeam,
+    );
+    await act(async () => route.render(createElement(Controls)));
+    const selectedRuntimeSide = { runtimeSeamId: runtimeSeam.id, sideIndex: 0 };
+    expect(selectOutline).toHaveBeenLastCalledWith(piece.pieceId, selectedRuntimeSide, undefined);
+    expect(readCount).toBe(readCountBeforeClick);
+    expect(
+      f.host.setPreviewSelectedPiece({} as HTMLCanvasElement, scope, selected, {
+        seam: savedSeam,
+        sideIndex: 0,
+      }),
+    ).toBe(false);
+    expect(selectOutline).toHaveBeenLastCalledWith(piece.pieceId, selectedRuntimeSide, undefined);
+    expect(
+      f.host.setPreviewSelectedPiece(canvas, scope, selected, {
+        seam: savedSeam,
+        sideIndex: 1,
+      }),
+    ).toBe(false);
+    expect(selectOutline).toHaveBeenLastCalledWith(piece.pieceId, undefined, undefined);
+    expect(
+      f.host.setPreviewSelectedPiece(canvas, scope, selected, {
+        seam: { ...savedSeam, sides: [...savedSeam.sides].reverse() },
+        sideIndex: 0,
+      }),
+    ).toBe(false);
+    expect(selectOutline).toHaveBeenLastCalledWith(piece.pieceId, undefined, undefined);
+
+    expect(
+      f.host.setPreviewSelectedPiece(canvas, scope, { ...selected, pieceLineKey: 'wrong-line' }),
+    ).toBe(false);
+    expect(selectOutline).toHaveBeenLastCalledWith(null, undefined, undefined);
+    expect(f.host.setPreviewSelectedPiece(canvas, scope, selected)).toBe(true);
+    expect(
+      f.host.setPreviewSelectedPiece(canvas, { ...scope, sizeToken: 'wrong-size' }, selected),
+    ).toBe(false);
+    expect(selectOutline).toHaveBeenLastCalledWith(null, undefined, undefined);
+    expect(f.host.setPreviewSelectedPiece(canvas, scope, selected)).toBe(true);
+    const currentFrame = ports.calls.find(({ frame }) => frame === 32)
+      ?.request as unknown as DxfGarmentObservedWebgpuReplayRequestV1;
+    const { refinement, sourceEvidence } = currentFrame.placementRequest.sourceArtifact;
+    const nativeEdges = buildDxfGarmentObservedUnsewnEdgesV1(
+      refinement,
+      sourceEvidence.samplingRequest,
+    );
+    const ownedEdge = nativeEdges.find(({ pieceId }) => pieceId === piece.pieceId);
+    if (!ownedEdge) throw new Error('The genuine saved frame lost its unsewn native edge.');
+    const { contourId, boundaryVertexIds } = ownedEdge;
+    const boundaryEdge = { contourId, boundaryVertexIds };
+    selectOutline.mockImplementation(
+      (pieceId, _side, edge) =>
+        !edge ||
+        nativeEdges.some(
+          (native) =>
+            native.pieceId === pieceId &&
+            native.contourId === edge.contourId &&
+            native.boundaryVertexIds.every((id, ordinal) => id === edge.boundaryVertexIds[ordinal]),
+        ),
+    );
+    interaction = bindCadWorkbenchPhysicalPreviewSelectionV1(
+      scope,
+      savedSeam.operationNumber,
+      focusSelection,
+      { ...selected, operationNumber: savedSeam.operationNumber, boundaryEdge },
+      savedSeam,
+    );
+    await act(async () => route.render(createElement(Controls)));
+    expect(selectOutline).toHaveBeenLastCalledWith(piece.pieceId, undefined, boundaryEdge);
+    expect(
+      f.host.setPreviewSelectedPiece(canvas, scope, selected, undefined, {
+        contourId,
+        boundaryVertexIds: ['forged-1', 'forged-2'],
+      }),
+    ).toBe(false);
+    expect(
+      f.host.setPreviewSelectedPiece(
+        canvas,
+        scope,
+        { ...selected, scopeKey: 'another' },
+        undefined,
+        boundaryEdge,
+      ),
+    ).toBe(false);
+    expect(selectOutline).toHaveBeenLastCalledWith(null, undefined, undefined);
+
+    const tapeText = (value: string) =>
+      visitMountedTree(controls, (props) => props.children === value);
+    const tapeSection = () =>
+      visitMountedTree(controls, (props) => props['aria-label'] === '3D distance measurement');
+    const tapeClick = (label: string) =>
+      act(async () => (tapeText(label)?.onClick as () => void)());
+    const tap = (x: number, hit: DxfGarmentObservedPreviewHitV1) =>
+      act(async () => {
+        pick.mockReturnValueOnce(hit);
+        mountedCanvas()?.onPointerDown?.(pointer(x));
+        mountedCanvas()?.onPointerUp?.(pointer(x));
+      });
+    const anchorA = {
+      ...garment,
+      surfacePoint: { vertexIndices: [0, 1, 2], positionM: [0, 0, 0.25] },
+    } as const;
+    const anchorB = {
+      ...garment,
+      triangleIndex: 8,
+      surfacePoint: { vertexIndices: [3, 4, 5], positionM: [0.3, 0, 0.65] },
+    } as const;
+    await tapeClick('Measure 3D');
+    expect(tapeText('Pick two points on the cloth.')).not.toBeNull();
+    await tap(50, body);
+    await tap(50, { ...anchorA, frameReportSha256: '7'.repeat(64) });
+    expect(tapeText('Pick two points on the cloth.')).not.toBeNull();
+    await tap(100, anchorA);
+    expect(pick).toHaveBeenLastCalledWith(100, 200, undefined, true);
+    expect(tapeText('Pick the second point on the cloth.')).not.toBeNull();
+    await tap(110, anchorB);
+    expect(tapeText('Straight-line distance 500.0 mm')).not.toBeNull();
+    expect(focusSelection).toHaveBeenCalledTimes(1);
+    interaction = bindCadWorkbenchPhysicalPreviewSelectionV1(
+      { ...scope, row: { ...row } },
+      savedSeam.operationNumber,
+      focusSelection,
+      null,
+      savedSeam,
+    );
+    for (const [unit, length] of [
+      ['cm', '50.00 cm'],
+      ['in', '19.685 in'],
+    ] as const) {
+      displayUnit = unit;
+      await drawControls();
+      expect(tapeText(`Straight-line distance ${length}`)).not.toBeNull();
+      expect(f.host.getSnapshot().numeric.previewReceipt).toBe(mounted.receipt);
+    }
+    await tapeClick('Clear');
+    expect(tapeText('Pick two points on the cloth.')).not.toBeNull();
+    expect(tapeText('Straight-line distance 19.685 in')).toBeNull();
+    await tap(100, anchorA);
+    await tap(110, anchorB);
+    expect(tapeText('Straight-line distance 19.685 in')).not.toBeNull();
+
+    const measureTape = vi.fn(async () => 0.65);
+    ports.previewTape = measureTape;
+    await tapeClick('Surface tape');
+    expect(tapeText('Surface tape')?.['aria-pressed']).toBe(true);
+    await tap(100, anchorA);
+    await tap(110, anchorB);
+    expect(measureTape).toHaveBeenCalledWith(anchorA.surfacePoint, anchorB.surfacePoint);
+    expect(tapeText('Surface distance 25.591 in')).not.toBeNull();
+    expect(tapeText('Straight-line distance 19.685 in')).toBeNull();
+    ports.previewTape = async () => null;
+    await tapeClick('Clear');
+    await tap(100, anchorA);
+    await tap(110, anchorB);
+    expect(tapeText('No surface path between these points.')).not.toBeNull();
+    let completeLateTape: (lengthM: number) => void = () => {};
+    ports.previewTape = () =>
+      new Promise<number>((resolve) => {
+        completeLateTape = resolve;
+      });
+    await tapeClick('Clear');
+    await tap(100, anchorA);
+    await tap(110, anchorB);
+    expect(tapeText('Measuring along the cloth…')).not.toBeNull();
+    interaction = null;
+    await drawControls();
+    await act(async () => completeLateTape(0.8));
+    expect(tapeSection()).toBeNull();
+    expect(tapeText('Surface distance 31.496 in')).toBeNull();
+    expect(selectOutline).toHaveBeenLastCalledWith(null, undefined, undefined);
+    expect(f.host.getSnapshot()).toBe(admitted);
+    expect(f.host.getSnapshot().numeric.previewReceipt).toBe(mounted.receipt);
+    expect(f.host.getSnapshot().numeric.frame32Report).toBe(currentReport);
+    expect(ports.previewEvents).toEqual(previewEventsAtMount);
+    expect(ports.calls.map(({ frame }) => frame)).toEqual([16, 32]);
+    expect(readCount).toBe(readCountBeforeClick);
+    expect(mountedLegend()).not.toBeNull();
+    expect(mountedMeasurements()).not.toBeNull();
+
+    interaction = bindCadWorkbenchPhysicalPreviewSelectionV1(
+      scope,
+      savedSeam.operationNumber,
+      focusSelection,
+    );
+    await drawControls();
+    expect(tapeText('Measure 3D')?.['aria-pressed']).toBe(false);
+    await tapeClick('Measure 3D');
+    await tap(100, anchorA);
+    await tap(110, anchorB);
+    expect(tapeText('Straight-line distance 19.685 in')).not.toBeNull();
+
+    pick.mockImplementationOnce(() => {
+      caller.abort();
+      return garment;
+    });
+    expect(f.host.pickPreview(canvas, scope, 100, 200)).toBeNull();
+    expect(f.host.pickPreview(canvas, scope, 100, 200)).toBeNull();
+    selectOutline.mockClear();
+    expect(f.host.setPreviewSelectedPiece(canvas, scope, selected)).toBe(false);
+    expect(selectOutline).not.toHaveBeenCalled();
+    expect(f.host.getSnapshot()).toMatchObject({
+      status: 'frame32-ready',
+      binding: { sourceGeneration: 1 },
+      numeric: { previewReceipt: null },
+    });
+    expect((await f.host.projectLatestRender()).ok).toBe(true);
+    await drawControls();
+    expect(tapeSection()).toBeNull();
+    expect(tapeText('Straight-line distance 19.685 in')).toBeNull();
+    expect(mountedLegend()).toBeNull();
+    expect(mountedMeasurements()).toBeNull();
+    ports.finalValidationFrame = 16;
+    requireOk(await f.host.run32(lease));
+    requireOk(await f.host.mountPreview(canvas));
+    await drawControls();
+    expect(mountedLegend()).not.toBeNull();
+    expect(mountedMeasurements()).toBeNull();
+    ports.finalValidationFrame = 32;
+    requireOk(await f.host.run32(lease));
+    requireOk(await f.host.mountPreview(canvas));
+    await drawControls();
+    expect(mountedLegend()).not.toBeNull();
+    expect(mountedMeasurements()).not.toBeNull();
+    interaction = bindCadWorkbenchPhysicalPreviewSelectionV1(
+      scope,
+      savedSeam.operationNumber,
+      focusSelection,
+    );
+    await drawControls();
+    expect(tapeText('Measure 3D')?.['aria-pressed']).toBe(false);
+    await tapeClick('Measure 3D');
+    await tap(100, {
+      ...anchorA,
+      frameReportSha256: f.host.getSnapshot().numeric.previewReceipt!.frameReportSha256,
+    });
+    expect(tapeText('Pick the second point on the cloth.')).not.toBeNull();
+    // The body turn can be revoked independently of a render carrying the last cloth snapshot.
+    retainedSnapshot = f.host.getSnapshot();
+    const originalBody = f.body.getSnapshot();
+    const disposedBeforeBodyChange = ports.previewDisposed;
+    await f.body.observe(null);
+    await drawControls();
+    expect(tapeSection()).toBeNull();
+    expect(mountedLegend()).toBeNull();
+    expect(mountedMeasurements()).toBeNull();
+    expect(mountedCanvas()?.className).toContain('hidden');
+    expect(ports.previewDisposed).toBe(disposedBeforeBodyChange + 1);
+    await f.body.observe(f.observed.input);
+    const rebound = f.body.getSnapshot();
+    expect(rebound.status).toBe('observed-body-bound');
+    expect(rebound.generation).toBeGreaterThan(originalBody.generation);
+    expect(rebound.binding).toEqual(originalBody.binding);
+    expect(f.host.getSnapshot().numeric.previewReceipt).toBeNull();
+    await drawControls();
+    expect(mountedLegend()).toBeNull();
+    expect(mountedMeasurements()).toBeNull();
+    expect(mountedCanvas()?.className).toContain('hidden');
+    expect(ports.previewDisposed).toBe(disposedBeforeBodyChange + 1);
+  }, 120000);
+
+  it('refuses fresh saved-row drift and clears physical children without revoking the borrowed body', async () => {
+    const f = await fixture();
+    requireOk(await f.host.restore(f.request));
+    const { lease } = await borrowedLease();
+    requireOk(await f.host.run16(lease));
+    requireOk(await f.host.run32(lease));
+    requireOk(await f.host.mountPreview({} as HTMLCanvasElement));
+    const disposedBeforeSavedRowChange = ports.previewDisposed;
+    editWire = (wire) => {
+      wire.row.savedRowRevision++;
+    };
+    expect((await f.host.projectLatestRender()).ok).toBe(false);
+    expect(f.host.getSnapshot()).toMatchObject({
+      status: 'blocked',
+      binding: null,
+      numeric: { previewReceipt: null },
+    });
+    expect([...ports.live.values()].every((x) => x.signal.aborted)).toBe(true);
+    expect((await f.body.projectCurrentBody()).status).toBe('projected');
+    expect(ports.previewDisposed).toBe(disposedBeforeSavedRowChange + 1);
+    await f.host.stopPreview();
+    expect(ports.previewDisposed).toBe(disposedBeforeSavedRowChange + 1);
+  }, 120000);
+});

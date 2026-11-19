@@ -3,14 +3,13 @@
 // are rows of their own: scripts/sewn-label-row-probe.mjs. The whole shelf and sheet 05b with production
 // CSS: scripts/packaging-shelf-probe.mjs. THE NETWORK IS STUBBED.
 //
-//   (1) empty state: the shelf shows ONLY the dashed `+ item` tile — no tile, no detail field;
-//   (2) `+ item` opens the one picker; using a catalog material adds its tile and exactly one form row;
-//   (3) an aux card goes in by kind rank, whatever the order of picking;
-//   (4) a detail edit reaches the row, and clearing it again does NOT drop the row (keepBare);
-//   (5) the picture of the pick shows on its tile, and only on its tile;
-//   (6) the details have exactly ONE remove control, and it removes the row through the writer;
-//   (7) carton row present, one `+ item`.
-//
+//   (1) empty pack with one add door and no pack-row controls;
+//   (2) confirm a catalog pick and write one row with its owned BOM line;
+//   (3) choose hanger separately and verify kind rank and auxiliary defaults;
+//   (4) edit quantity by row and preserve the row's identity on clearing the last detail;
+//   (5) only the picked material with a picture displays that image;
+//   (6) remove the pack row and its owned BOM line, then undo both;
+//   (7) the empty shipping box leaves per-box quantity disabled.
 // Every run is checked on the real code AND on in-memory mutants that each must turn a named
 // check red (the negative controls). The repository is never touched.
 //
@@ -68,8 +67,8 @@ const MUTANTS = {
   // the ✕ no longer calls the writer
   removeNoop: {
     file: `${C}/packaging-shelf.tsx`,
-    from: 'onClick={disabled ? onClose : onRemove}',
-    to: 'onClick={disabled ? onClose : () => {}}',
+    from: 'onClick={() => removePackItem(index)}',
+    to: 'onClick={() => {}}',
     breaks: '6',
   },
   // the tile ignores the pick's picture
@@ -82,14 +81,14 @@ const MUTANTS = {
   // the details patch without keepBare: clearing the last field drops the row
   noKeepBare: {
     file: `${C}/packaging-shelf.tsx`,
-    from: 'onPatch({ size: event.target.value }, { index, keepBare: true })',
-    to: 'onPatch({ size: event.target.value }, { index, keepBare: false })',
+    from: '{ index, keepBare: true },',
+    to: '{ index, keepBare: false },',
     breaks: '4',
   },
   // the door opens nothing
   deadDoor: {
     file: `${C}/packaging-shelf.tsx`,
-    from: 'onClick={() => setPickerOpen(true)}',
+    from: "onClick={() => setPicker('pack')}",
     to: 'onClick={() => {}}',
     breaks: '2',
   },
@@ -97,7 +96,7 @@ const MUTANTS = {
   noRank: {
     file: `${C}/form-writers.ts`,
     from: 'insertPackagingItemByRank(',
-    to: '((_rows, row) => [..._rows, row])(',
+    to: '((_rows, row) => ({ rows: [..._rows, row], index: _rows.length }))(',
     breaks: '3',
   },
 };
@@ -218,133 +217,136 @@ async function run(browser, code, log) {
 
   const form = () => page.evaluate(() => window.__lb.form());
   const rows = async () => (await form()).packagingItems ?? [];
-  const S = '#packaging-spec';
-  const DIALOG = '[role="dialog"]';
-  const door = () => page.locator(`${S} button`, { hasText: /^\+ item$/i });
-  const tile = (title) => page.locator(`${S} button[title="${title}"]`);
-  const use = async (name) => {
-    await door().click();
-    await page.waitForSelector(DIALOG);
-    await page.locator(`${DIALOG} [title="${name}"]`).click();
-    await page.locator(`${DIALOG} button`, { hasText: /^use item$/i }).click();
-    await page.waitForSelector(DIALOG, { state: 'detached' });
-    await page.waitForTimeout(150);
+  const shelf = page.locator('#packaging-spec');
+  const dialog = page.getByRole('dialog');
+  const button = (name) => shelf.getByRole('button', { name, exact: true });
+  const door = () => button('+ item');
+  const remove = (name) => button(`remove ${name}`);
+  const itemRow = (name) => remove(name).locator('..');
+  const quantity = (name) => itemRow(name).getByRole('spinbutton', { name: 'per garment' });
+  const use = async (trigger, name) => {
+    await trigger.click();
+    await dialog.locator(`button[title="${name}"]`).click();
+    await dialog.getByRole('button', { name: 'done', exact: true }).click();
+    await dialog.waitFor({ state: 'detached' });
   };
-  const size = () => page.locator(`${S} div.min-w-0:has(> span:text-is("size")) input`).last();
 
   // (1) empty state
-  try {
-    const tiles = await page.locator(`${S} button[title]`).count();
-    const remove = await page.locator(`${S} button[aria-label="remove item"]`).count();
-    ck(
-      tiles === 0 && remove === 0 && (await door().count()) === 1,
-      '1 · empty items = only the + item tile',
-      `tiles ${tiles}, removes ${remove}`,
-    );
-  } catch (e) {
-    ck(false, '1 · step threw', String(e).split('\n')[0]);
-  }
+  ck(
+    (await shelf.getByRole('spinbutton', { name: 'per garment' }).count()) === 0 &&
+      (await shelf.getByRole('button', { name: /^remove / }).count()) === 0 &&
+      (await door().count()) === 1,
+    '1 · empty pack has one add door and no row controls',
+  );
 
   // (2) picker + a catalog material
   try {
-    await use('poly bag small');
-    ck((await tile('poly bag small').count()) === 1, '2 · the picked thing has its tile');
-    const ls = await rows();
+    await use(door(), 'poly bag small');
+    const current = await form();
+    const [polybag] = current.packagingItems ?? [];
+    ck((await itemRow('poly bag small').count()) === 1, '2 · the picked material has one pack row');
     ck(
-      ls.length === 1 && ls[0].key === 'polybag' && ls[0].materialId === 301,
+      current.packagingItems.length === 1 && polybag.key === 'polybag' && polybag.materialId === 301,
       '2 · the form holds one row keyed polybag with the material',
-      JSON.stringify(ls.map((l) => [l.key, l.materialId])),
+    );
+    ck(
+      !!polybag.bomLineKey &&
+        current.bomItems.filter((line) => line.lineKey === polybag.bomLineKey && line.materialId === 301).length === 1,
+      '2 · the material owns its exact BOM line',
     );
     ck((await door().count()) === 1, '2 · one + item after adding');
   } catch (e) {
     ck(false, '2 · step threw', String(e).split('\n')[0]);
   }
 
-  // (3) kind rank
+  // (3) kind rank across the separate hanger picker and the pack
   try {
-    await use('wooden hanger');
-    await use('octagon tote');
-    const keys = (await rows()).map((l) => l.key);
-    ck(
-      JSON.stringify(keys) === '["hanger","polybag","tote_bag"]',
-      '3 · form keys in kind order',
-      JSON.stringify(keys),
-    );
-    const tote = (await rows()).find((l) => l.key === 'tote_bag');
+    await button('on hanger').click();
+    await use(button('+ hanger'), 'wooden hanger');
+    await use(door(), 'octagon tote');
+    const current = await rows();
+    const keys = current.map((item) => item.key);
+    ck(keys.join() === 'hanger,polybag,tote_bag', '3 · form keys in kind order', keys.join());
+    ck(current[0]?.materialId === 302, '3 · the separate hanger is the picked catalog material');
+    const tote = current.find((item) => item.key === 'tote_bag');
     ck(tote?.auxTechCardId === 41 && tote?.perOrder === true, '3 · the aux card is a per-order row');
   } catch (e) {
     ck(false, '3 · step threw', String(e).split('\n')[0]);
   }
 
-  // (4) a detail edit by row; clearing keeps the row
+  // (4) changing quantity writes the chosen row. The default leaves a chosen bare row in place.
   try {
-    await tile('wooden hanger').click();
-    await size().fill('42 cm');
-    let row = (await rows()).find((l) => l.key === 'hanger');
-    ck(row?.size === '42 cm', '4 · size reached the row');
-    await size().fill('');
-    await page.waitForTimeout(100);
-    row = (await rows()).find((l) => l.key === 'hanger');
-    ck(!!row && (await tile('wooden hanger').count()) === 1, '4 · clearing keeps a picked row and its tile');
-    // A stored row without a pick: its size is its last fact, keepBare is what holds it.
-    await tile('wooden hanger').click();
+    await quantity('poly bag small').fill('3');
+    ck(
+      (await rows()).find((item) => item.key === 'polybag')?.qtyPerGarment === 3 &&
+        (await rows()).find((item) => item.key === 'tote_bag')?.qtyPerGarment === 1,
+      '4 · quantity writes only its own row',
+    );
+    await quantity('poly bag small').fill('');
+    ck(
+      (await rows()).find((item) => item.key === 'polybag')?.qtyPerGarment === 1 &&
+        (await itemRow('poly bag small').count()) === 1,
+      '4 · clearing restores default quantity and keeps a picked row',
+    );
     const picked = await rows();
     await page.evaluate(
       (all) => window.__lb.set('packagingItems', all),
-      [...picked, { key: 'tax stamp', size: '10 cm', qtyPerGarment: 1 }],
+      [...picked, { key: 'tax stamp', qtyPerGarment: 2 }],
     );
-    await page.waitForTimeout(100);
-    await tile('tax stamp').click();
-    await size().fill('');
-    await page.waitForTimeout(100);
-    ck((await rows()).some((l) => l.key === 'tax stamp'), '4 · clearing the last fact keeps a row without a pick');
-    await tile('tax stamp').click().catch(() => {});
+    await quantity('item').fill('');
+    ck(
+      (await rows()).find((item) => item.key === 'tax stamp')?.qtyPerGarment === 1,
+      '4 · clearing the last fact keeps a row without a pick',
+    );
     await page.evaluate((all) => window.__lb.set('packagingItems', all), picked);
-    await page.waitForTimeout(100);
-    await tile('wooden hanger').click();
   } catch (e) {
     ck(false, '4 · step threw', String(e).split('\n')[0]);
   }
 
-  // (5) the pick's picture
-  try {
-    ck(
-      (await tile('poly bag small').locator('img').count()) === 1,
-      '5 · the pick with a picture shows it on the tile',
-    );
-    ck((await tile('wooden hanger').locator('img').count()) === 0, '5 · and not on the neighbour');
-  } catch (e) {
-    ck(false, '5 · step threw', String(e).split('\n')[0]);
-  }
+  // (5) the pick's picture belongs to its own row only.
+  const image = itemRow('poly bag small').getByRole('img', { name: 'poly bag small' });
+  ck(
+    (await image.count()) === 1 &&
+      (await image.getAttribute('src'))?.startsWith('https://cdn.example/601-'),
+    '5 · the photographed material has its exact picture',
+  );
+  ck(
+    (await itemRow('octagon tote').locator('img').count()) === 0,
+    '5 · its neighbouring row without a picture has no image',
+  );
 
-  // (6) one remove control; it removes via the writer
+  // (6) one remove control for the selected row. Removal and undo own both wire rows.
   try {
-    const removes = page.locator(`${S} button[aria-label="remove item"]`);
-    ck((await removes.count()) === 1, '6 · exactly one remove control in the details');
-    await removes.click();
-    await page.waitForTimeout(150);
-    const keys = (await rows()).map((l) => l.key);
+    const before = await form();
+    const polybag = before.packagingItems.find((item) => item.key === 'polybag');
+    ck((await remove('poly bag small').count()) === 1, '6 · one remove control for the row');
+    await remove('poly bag small').click();
+    const after = await form();
+    const keys = after.packagingItems.map((item) => item.key);
     ck(
-      JSON.stringify(keys) === '["polybag","tote_bag"]' &&
-        (await tile('wooden hanger').count()) === 0,
-      '6 · ✕ removed the row and the tile',
-      JSON.stringify(keys),
+      keys.join() === 'hanger,tote_bag' && (await itemRow('poly bag small').count()) === 0 &&
+        !after.bomItems.some((line) => line.lineKey === polybag.bomLineKey),
+      '6 · removal clears only the selected pack row and its BOM line',
+      keys.join(),
+    );
+    await button('undo').click();
+    const restored = await form();
+    ck(
+      JSON.stringify(restored.packagingItems) === JSON.stringify(before.packagingItems) &&
+        JSON.stringify(restored.bomItems) === JSON.stringify(before.bomItems),
+      '6 · undo restores the exact pack items and BOM lines',
     );
   } catch (e) {
     ck(false, '6 · step threw', String(e).split('\n')[0]);
   }
 
-  // (7) packaging block
-  try {
-    ck(
-      (await page.locator('label', { hasText: /^units per box$/ }).count()) === 1 &&
-        (await page.locator(`${S} label`, { hasText: /^gross weight \(g\)$/ }).count()) === 1,
-      '7 · carton row present (units per box, gross weight)',
-    );
-    ck((await door().count()) === 1, '7 · packaging keeps one + item');
-  } catch (e) {
-    ck(false, '7 · step threw', String(e).split('\n')[0]);
-  }
+  // (7) shipping box
+  ck(
+    (await button('+ box').count()) === 1 &&
+      (await shelf.getByRole('spinbutton', { name: 'per box' }).isDisabled()),
+    '7 · shipping box opens separately and quantity is disabled until picked',
+  );
+  ck((await door().count()) === 1, '7 · packaging keeps one + item');
 
   ck(errors.length === 0, 'no page errors', errors.join(' | '));
   await page.close();

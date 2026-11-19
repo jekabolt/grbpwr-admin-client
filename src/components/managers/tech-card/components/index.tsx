@@ -77,6 +77,17 @@ import { CostingField } from './costing-field';
 import { DetailsEditor } from './details-editor';
 import { IssuesField } from './issues-field';
 import { AssemblyField } from './assembly-field';
+import {
+  GuardedPieceRenameContext,
+  verifyGuardedSavedPieceRenameAttachment,
+  writeGuardedSavedPieceRename,
+  type GuardedSavedPieceRename,
+} from './guarded-piece-rename';
+import {
+  GuardedPieceJoinContext,
+  writeGuardedSavedPieceJoin,
+  type SaveJoin,
+} from './guarded-piece-join';
 import { LabelsBlock, PackagingBlock } from './labels-blocks';
 import { StyleProjects } from './style-projects';
 import { TechCardTasksPanel } from './tech-card-tasks-panel';
@@ -386,6 +397,8 @@ function FormWithAutosave({
   gestures,
   undoHistory,
   historyCapture,
+  guardedPieceRename,
+  guardedPieceJoin,
   children,
 }: {
   form: UseFormReturn<TechCardFormData>;
@@ -394,6 +407,8 @@ function FormWithAutosave({
   gestures: GestureProps;
   undoHistory: UndoHistoryApi;
   historyCapture: UndoHistoryCaptureProps;
+  guardedPieceJoin: SaveJoin | null;
+  guardedPieceRename: React.ContextType<typeof GuardedPieceRenameContext>;
   children: React.ReactNode;
 }) {
   return (
@@ -438,7 +453,11 @@ function FormWithAutosave({
             }}
             onPointerUpCapture={historyCapture.onPointerUpCapture}
           >
-            {children}
+            <GuardedPieceRenameContext.Provider value={guardedPieceRename}>
+              <GuardedPieceJoinContext.Provider value={guardedPieceJoin}>
+                {children}
+              </GuardedPieceJoinContext.Provider>
+            </GuardedPieceRenameContext.Provider>
           </div>
         </UndoHistoryProvider>
       </AutosaveContext.Provider>
@@ -1239,6 +1258,7 @@ export function TechCardForm({
   };
   // A write chain of this page is on the wire: its own reads settle `base`; a background read waits.
   const writing = useRef(0);
+  const guardedPatternWriteInFlight = useRef(false);
   // m1: a read this page needed after its own write did not come back — the next body write reads first.
   const needsRead = useRef(false);
   // The version this page's own staged rebuild (the fusing DXF) left when it actually wrote the card
@@ -1660,6 +1680,13 @@ export function TechCardForm({
     data: TechCardFormData,
     opts: { mode: SaveMode; autoStage?: boolean; keepPurpose?: string } = { mode: 'explicit' },
   ): Promise<WriteResult> {
+    if (guardedPatternWriteInFlight.current)
+      return {
+        bodySaved: false,
+        ok: false,
+        outcome: 'error',
+        message: 'Finish the saved piece rename before saving the card.',
+      };
     writing.current += 1;
     try {
       // mn-5: the decision is pending — nothing goes out but its answer («keep mine» closes it first).
@@ -1877,11 +1904,15 @@ export function TechCardForm({
             cardId,
             (data.patterns ?? []).map((p) => p.url),
           );
+          const assemblyGuard = snapshot?.assemblyGuard;
+          if (assemblyGuard && assemblyGuard.expectedLockVersion !== expected)
+            throw new Error('The saved card changed. Reopen the pattern review before applying.');
           await updateTechCard.mutateAsync({
             id: cardId,
             techCard: techCardInsert,
             expectedLockVersion: expected,
             saveSessionId,
+            expectedServerAssemblyRevision: assemblyGuard?.expectedServerAssemblyRevision,
             ...(snapshot ? { snapshotReason: snapshot.reason } : {}),
           });
           consumeReuploadSnapshot(cardId, snapshot);
@@ -2066,13 +2097,17 @@ export function TechCardForm({
           newId,
           (data.patterns ?? []).map((p) => p.url),
         );
+        // The version read a moment ago, including any panels written since create.
+        const expected = current.techCard?.lockVersion ?? 0;
+        const assemblyGuard = snapshot?.assemblyGuard;
+        if (assemblyGuard && assemblyGuard.expectedLockVersion !== expected)
+          throw new Error('The saved card changed. Reopen the pattern review before applying.');
         await updateTechCard.mutateAsync({
           id: newId,
           techCard: payload,
-          // The version read a moment ago. This card is seconds old and only this page knows it; a
-          // version remembered from the create would 409 against the panels written since.
-          expectedLockVersion: current.techCard?.lockVersion ?? 0,
+          expectedLockVersion: expected,
           saveSessionId,
+          expectedServerAssemblyRevision: assemblyGuard?.expectedServerAssemblyRevision,
           ...(snapshot ? { snapshotReason: snapshot.reason } : {}),
         });
         consumeReuploadSnapshot(newId, snapshot);
@@ -3241,6 +3276,113 @@ export function TechCardForm({
     }
   };
 
+  async function withCurrentPatternSave(
+    cardId: number | undefined,
+    lock: number | undefined,
+    perform: (
+      read: () => Promise<common_TechCard>,
+      checkWrite: () => void,
+    ) => Promise<common_TechCard>,
+  ) {
+    if (
+      !cardId ||
+      numId !== cardId ||
+      !canWrite(SECTION.techCards) ||
+      frozen ||
+      writing.current ||
+      conflictOpen.current ||
+      lockOverride.current != null ||
+      needsRead.current ||
+      claimVersion() !== lock ||
+      bodyWorkOf(form) ||
+      staging.peek().length
+    )
+      throw new Error(
+        'Save pending edits and reopen the current pattern before applying this change.',
+      );
+    const release = autosave.holdWrites();
+    guardedPatternWriteInFlight.current = true;
+    writing.current += 1;
+    try {
+      const fresh = await perform(
+        async () => {
+          const { techCard } = await adminService.GetTechCard({
+            id: cardId,
+            vatCountryCode: undefined,
+          });
+          if (!techCard) throw new Error('The saved card could not be read.');
+          return techCard;
+        },
+        () => {
+          if (
+            bodyWorkOf(form) ||
+            staging.peek().length ||
+            writing.current !== 1 ||
+            claimVersion() !== lock ||
+            conflictOpen.current ||
+            lockOverride.current != null
+          )
+            throw new Error('The card changed. Reopen the current pattern.');
+          needsRead.current = true;
+        },
+      );
+      ownBodyVersion.current = fresh.lockVersion ?? null;
+      reconcileRead(fresh);
+      ownBodyVersion.current = null;
+      needsRead.current = false;
+      queryClient.setQueryData(techCardKeys.detail(cardId), fresh);
+    } finally {
+      guardedPatternWriteInFlight.current = false;
+      writing.current -= 1;
+      release();
+      if (writing.current === 0) queueMicrotask(reconcileLatest);
+    }
+  }
+  async function saveGuardedPieceRename(intent: GuardedSavedPieceRename) {
+    await withCurrentPatternSave(
+      intent.row.techCardId,
+      intent.row.cardLockVersion,
+      (read, checkWrite) =>
+        writeGuardedSavedPieceRename(intent, {
+          read,
+          verifyAttachment: verifyGuardedSavedPieceRenameAttachment,
+          update: async (guardedPieceRename) => {
+            checkWrite();
+            try {
+              return (
+                await updateTechCard.mutateAsync({
+                  id: intent.row.techCardId,
+                  expectedLockVersion: intent.row.cardLockVersion,
+                  guardedPieceRename,
+                })
+              ).lockVersion;
+            } catch (error) {
+              throw new Error(techCardErrorMessage(error, 'The saved piece rename was refused.'));
+            }
+          },
+        }),
+    );
+  }
+  const saveGuardedPieceJoin: SaveJoin = async (command, requireCurrent) => {
+    const row = command.expectedRow;
+    await withCurrentPatternSave(row?.techCardId, row?.cardLockVersion, (read, checkWrite) =>
+      writeGuardedSavedPieceJoin(command, {
+        read,
+        update: async (guardedPieceJoin) => {
+          requireCurrent();
+          checkWrite();
+          return (
+            await updateTechCard.mutateAsync({
+              id: row!.techCardId!,
+              expectedLockVersion: row!.cardLockVersion!,
+              guardedPieceJoin,
+            })
+          ).lockVersion;
+        },
+      }),
+    );
+  };
+
   // ═══ THE SEAM WRITE'S DOOR (C7) ═══════════════════════════════════════════════════════════════════
   // A seam gesture writes rows AND step links in one ChangeTechCardSeams under this card's
   // lock_version — the version the body write claims too — so the two take turns here
@@ -3558,6 +3700,12 @@ export function TechCardForm({
       gestures={autosave.gestureProps}
       undoHistory={undoHistory.api}
       historyCapture={undoHistory.captureProps}
+      guardedPieceJoin={
+        isEditMode && canWrite(SECTION.techCards) && !frozen ? saveGuardedPieceJoin : null
+      }
+      guardedPieceRename={
+        isEditMode && canWrite(SECTION.techCards) && !frozen ? saveGuardedPieceRename : null
+      }
     >
       {/* ONE AUTOSAVE FOR THE WHOLE PAGE. The studio's organs read it through `useTechCardAutosave()`
           (design/autosave-contract.ts): the construction draft asks for a save after its autoFill,

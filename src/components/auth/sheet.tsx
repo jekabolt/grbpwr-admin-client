@@ -7,6 +7,9 @@ import { Button, CheckboxCommon, HeaderNote, Input, Row, Section, Text, ViewSwit
 // The approved «sheet» (V3): a narrow side block (wordmark + mode switch, or the team) beside
 // one form block of label|value rows and a foot with the one action. Phone: one column.
 
+/** A side plate: its own height on the phone and tablet; the sheet's height at lg (top-aligned). */
+export const SIDE = 'self-start lg:self-stretch';
+
 export function AuthSheet({ side, children }: { side: ReactNode; children: ReactNode }) {
   return (
     <main className='min-h-screen bg-pageBg px-2.5 pt-4 sm:pt-[12vh]'>
@@ -177,7 +180,7 @@ export function PasswordInput({
 export function SheetValue({ children, onChange }: { children: ReactNode; onChange?: () => void }) {
   return (
     <div className='flex min-w-0 items-baseline justify-between gap-2'>
-      <span className='min-w-0 break-all font-bold'>{children}</span>
+      <span className='min-w-0 break-all'>{children}</span>
       {onChange && <SheetLink onClick={onChange}>change</SheetLink>}
     </div>
   );
@@ -195,7 +198,7 @@ export function Wordmark({ children }: { children: string }) {
 export function RootSide({ mode }: { mode: 'signup' | 'login' }) {
   const navigate = useNavigate();
   return (
-    <Section className='self-start'>
+    <Section className={SIDE}>
       <Wordmark>lekalo</Wordmark>
       <ViewSwitch
         className='[&_*]:normal-case'
@@ -212,14 +215,37 @@ export function RootSide({ mode }: { mode: 'signup' | 'login' }) {
   );
 }
 
-/** Team (or console) side: its name as the wordmark, `lekalo` under it. */
-export function TeamSide({ name, sub = 'lekalo' }: { name: string; sub?: string }) {
-  return (
-    <Section className='self-start'>
+/**
+ * Team (or console) side: its name as the wordmark, `lekalo` under it. `brand` — the team's log-in
+ * page: the logo square (`mark`, when the team has one), the name and `lekalo` as one group centred
+ * in the plate (in the middle of the stretched plate at lg).
+ */
+export function TeamSide({
+  name,
+  sub = 'lekalo',
+  mark,
+  brand,
+}: {
+  name: string;
+  sub?: string;
+  mark?: ReactNode;
+  brand?: boolean;
+}) {
+  const words = (
+    <>
       <Wordmark>{name}</Wordmark>
       <Text size='micro' variant='label' tracking='label' component='span' className='block'>
         {sub}
       </Text>
+    </>
+  );
+  if (!brand) return <Section className={SIDE}>{words}</Section>;
+  return (
+    <Section className={cn(SIDE, 'lg:flex lg:flex-col')}>
+      <div className='flex min-w-0 flex-col items-center gap-3 text-center lg:my-auto'>
+        {mark}
+        {words}
+      </div>
     </Section>
   );
 }
@@ -234,18 +260,30 @@ function legalHref(doc: 'terms' | 'privacy'): string {
   return currentHost().kind === 'root' ? `/${doc}` : rootUrl(`/${doc}`);
 }
 
-/** `agree to` + `terms` `privacy` above the foot of sign up and join; the action waits for it. */
+/**
+ * `agree to` + `terms` `privacy`: the left of the foot line of sign up, new team and join (the
+ * phone: full width above the button); the action waits for it. `need` — a provider was pressed
+ * without it: the box turns red.
+ */
 export function AgreeRow({
   checked,
   onChange,
+  need,
 }: {
   checked: boolean;
   onChange: (checked: boolean) => void;
+  need?: boolean;
 }) {
   return (
-    <div className='flex flex-wrap items-center justify-end gap-1 pt-1.5 max-sm:justify-start'>
+    <div className='flex flex-wrap items-center gap-1'>
       <label htmlFor='agree' className='inline-flex cursor-pointer items-center gap-1.5'>
-        <CheckboxCommon name='agree' checked={checked} onChange={onChange} className='size-3.5' />
+        <CheckboxCommon
+          name='agree'
+          checked={checked}
+          onChange={onChange}
+          aria-invalid={(need && !checked) || undefined}
+          className={cn('size-3.5', need && !checked && 'border-error')}
+        />
         <Text component='span'>agree to</Text>
       </label>
       {(['terms', 'privacy'] as const).map((doc) => (
@@ -264,13 +302,36 @@ export function AgreeRow({
   );
 }
 
-/** The team waits for an operator: its address, nothing to open yet. */
-export function AwaitingApproval({ slug }: { slug: string }) {
+/** The signed-in root side: `lekalo`, the person's email, and `log out` where the page has it. */
+export function AccountSide({ email, onLogOut }: { email: string; onLogOut?: () => void }) {
   return (
-    <AuthSheet side={<RootSide mode='signup' />}>
+    <Section className={SIDE}>
+      <Wordmark>lekalo</Wordmark>
+      <Text
+        size='micro'
+        variant='label'
+        tracking='label'
+        component='span'
+        className='block break-all'
+      >
+        {email}
+      </Text>
+      {onLogOut && (
+        <span className='block'>
+          <SheetLink onClick={onLogOut}>log out</SheetLink>
+        </span>
+      )}
+    </Section>
+  );
+}
+
+/** A server without the root token: the team waits for an operator — its address, nothing to open. */
+export function AwaitingApproval({ slug, email }: { slug: string; email: string }) {
+  return (
+    <AuthSheet side={<AccountSide email={email} />}>
       <SheetForm title='awaiting approval'>
         <SheetRow label='address'>
-          <Text component='span' className='break-all font-bold'>
+          <Text component='span' className='break-all'>
             {slug}
             {baseSuffix()}
           </Text>

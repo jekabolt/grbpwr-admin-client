@@ -1,59 +1,227 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import {
+  createSavedGenericDurablePhysicalHostV1,
+  SavedV7PlacementPersistenceErrorV1,
+  type SavedGenericDurablePhysicalBindingV1,
+  type SavedGenericDurablePhysicalHostSnapshotV1,
+  type SavedV7PlacementChangeV1,
+  type SavedV7PlacementEditV1,
+} from 'components/cloth-simulation-spike/saved-generic-durable-physical-host-v1';
+import {
+  createSavedGenericObservedPhysicalHostV1,
+  projectSavedGenericObservedPhysicalHostAuthoringContextV1,
+} from 'components/cloth-simulation-spike/saved-generic-observed-physical-host-v1';
+import type { SavedGenericObservedSourceGeometryV1 } from 'components/cloth-simulation-spike/saved-generic-observed-source-geometry-v1';
 import type { ModelDisplayedTriangleBodyOwnedInputV1 } from 'components/cloth-simulation-spike/model-displayed-triangle-body-input-v1';
-import type { SavedObservedPhysicalHostV1 } from 'components/cloth-simulation-spike/saved-observed-physical-host-v1';
 import { createSavedModelDisplayedTriangleBodyQuerySessionV2 } from 'components/managers/models/components/saved-model-displayed-triangle-body-query-session-v2';
 import type { SavedModelDisplayedTriangleBodySessionV2 } from 'components/managers/models/components/saved-model-displayed-triangle-body-session-v2';
 import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
-import type { PatternImportDxfPhaseESavedGarmentMeshProductionOwnerV1 } from '../phase-e-workbench/assembly-order-entry';
 
-export type SavedClothPhysicalProfileV1 = '' | 'canonical-reference' | 'observed-saved-model';
+import {
+  disposeSavedFullAssemblyPhysicalSnapshotV1,
+  readSavedFullAssemblyPhysicalSnapshotV1,
+  SavedFullAssemblyPhysicalSnapshotErrorV1,
+} from './saved-full-assembly-physical-snapshot-production-v1';
+import {
+  isExactNSeamDocumentLockCurrent,
+  subscribeExactNSeamDocumentRetirement,
+} from './exact-n-seam-production-session-store-v2';
+import { prepareSavedFullAssemblyGenericNativeHandoffV1 } from './saved-full-assembly-generic-native-handoff-v1';
+import {
+  buildSavedFullAssemblyGenericFirstCompileRequestV1,
+  prepareSavedFullAssemblyGenericFirstBootstrapV1,
+  type SavedFullAssemblyGenericFirstBootstrapV1,
+  type SavedFullAssemblyGenericFirstCompileChoicesV1,
+} from './saved-full-assembly-generic-first-bootstrap-v1';
+import {
+  bindSavedFullAssemblyGenericFirstAuthoringV1,
+  type SavedFullAssemblyTablePiecePlacementV1,
+} from './saved-full-assembly-generic-first-authoring-v1';
+import { persistCurrentSavedGenericObservedPhysicalHostV1 } from './saved-full-assembly-physical-document-production-v1';
+import type { PatternImportDxfPhaseESavedRowCardProjectionV1 } from './saved-row-production-runtime-v1';
 
-export type SavedClothPhysicalSelectionV1 =
-  | Readonly<{
-      profile: 'canonical-reference';
-      owner: PatternImportDxfPhaseESavedGarmentMeshProductionOwnerV1;
-    }>
-  | Readonly<{ profile: 'observed-saved-model'; owner: SavedObservedPhysicalHostV1 }>;
+type BodySession = SavedModelDisplayedTriangleBodySessionV2;
+export type SavedClothDurableHostV1 = ReturnType<typeof createSavedGenericDurablePhysicalHostV1>;
+export type SavedClothPhysicalSourceStatusV1 =
+  | 'idle'
+  | 'awaiting-mannequin'
+  | 'loading'
+  | 'ready'
+  | 'placement-required'
+  | 'blocked';
 
 export interface UseSavedClothPhysicalHostInputV1 {
   readonly row: DxfProductSavedRowIdentityV1 | null;
   readonly selectedOperationNumber: number;
-  /** Keep this factory stable. Every committed source lifetime receives a new one-shot owner. */
-  readonly createCanonicalOwner: () => PatternImportDxfPhaseESavedGarmentMeshProductionOwnerV1;
+  readonly cardProjection?: PatternImportDxfPhaseESavedRowCardProjectionV1 | null;
+  /** Compatibility-only for the rowless zero-operation picker; no owner is constructed. */
+  readonly createCanonicalOwner?: () => unknown;
 }
 
-type BodySession = SavedModelDisplayedTriangleBodySessionV2;
-/** 'ready' means a selected downstream owner exists; it does not claim compiled/body/runtime readiness. */
-export type SavedClothPhysicalSourceStatusV1 = 'idle' | 'loading' | 'ready' | 'blocked';
-type MountedSource = Readonly<{
+type Mounted = Readonly<{
   key: string;
   bodySession: BodySession;
-  factory: UseSavedClothPhysicalHostInputV1['createCanonicalOwner'];
-}> &
-  (
-    | Readonly<{ status: 'loading'; selected: null; error: null }>
-    | Readonly<{ status: 'ready'; selected: SavedClothPhysicalSelectionV1; error: null }>
-    | Readonly<{ status: 'blocked'; selected: null; error: string }>
+  cardProjection: PatternImportDxfPhaseESavedRowCardProjectionV1;
+  host: SavedClothDurableHostV1 | null;
+  initialBinding?: SavedGenericDurablePhysicalBindingV1;
+  status: Exclude<SavedClothPhysicalSourceStatusV1, 'idle' | 'awaiting-mannequin'>;
+  error: string | null;
+}>;
+export type SavedV7PlacementEditorStateV1 =
+  | Readonly<{ status: 'idle' | 'preparing'; draft: null; error: null }>
+  | Readonly<{ status: 'editing' | 'saving'; draft: SavedV7PlacementEditV1; error: null }>
+  | Readonly<{ status: 'save-retry'; draft: SavedV7PlacementEditV1; error: string }>
+  | Readonly<{ status: 'blocked'; draft: SavedV7PlacementEditV1 | null; error: string }>;
+type PlacementEditTurn = {
+  controller: AbortController;
+  actor: SavedClothDurableHostV1 | null;
+  draft: SavedV7PlacementEditV1 | null;
+  pending: SavedV7PlacementChangeV1 | null;
+  current: () => boolean;
+  restore: () => Promise<SavedClothDurableHostV1>;
+  saving: boolean;
+};
+
+function sameSavedPlacement(
+  current: SavedGenericDurablePhysicalBindingV1,
+  prior: SavedGenericDurablePhysicalBindingV1,
+): boolean {
+  return (
+    current.outerSha256 === prior.outerSha256 &&
+    current.graphCanonicalSha256 === prior.graphCanonicalSha256 &&
+    current.compileInputSha256 === prior.compileInputSha256 &&
+    current.physicalInitializationCanonicalSha256 === prior.physicalInitializationCanonicalSha256 &&
+    current.freshSnapshotSha256 === prior.freshSnapshotSha256
   );
+}
+
+export type SavedClothFirstAuthoringStateV1 =
+  | Readonly<{ status: 'idle'; bootstrap: null; sourceGeometry: null; error: null }>
+  | Readonly<{ status: 'preparing'; bootstrap: null; sourceGeometry: null; error: null }>
+  | Readonly<{
+      status: 'compile-required';
+      bootstrap: SavedFullAssemblyGenericFirstBootstrapV1;
+      sourceGeometry: null;
+      error: null;
+    }>
+  | Readonly<{
+      status: 'compiling';
+      bootstrap: SavedFullAssemblyGenericFirstBootstrapV1;
+      sourceGeometry: null;
+      error: null;
+    }>
+  | Readonly<{
+      status: 'placement-required';
+      bootstrap: SavedFullAssemblyGenericFirstBootstrapV1;
+      sourceGeometry: SavedGenericObservedSourceGeometryV1;
+      error: string | null;
+    }>
+  | Readonly<{
+      status: 'save-retry';
+      bootstrap: SavedFullAssemblyGenericFirstBootstrapV1;
+      sourceGeometry: SavedGenericObservedSourceGeometryV1;
+      initializationSha256: string;
+      error: string;
+    }>
+  | Readonly<{
+      status: 'saving';
+      bootstrap: SavedFullAssemblyGenericFirstBootstrapV1;
+      sourceGeometry: SavedGenericObservedSourceGeometryV1;
+      error: null;
+    }>
+  | Readonly<{
+      status: 'blocked';
+      bootstrap: SavedFullAssemblyGenericFirstBootstrapV1 | null;
+      sourceGeometry: SavedGenericObservedSourceGeometryV1 | null;
+      error: string;
+    }>;
+
+const EMPTY_BODY_SNAPSHOT = Object.freeze({ status: 'idle', generation: 0, blocker: null });
+const EMPTY_DURABLE_SNAPSHOT: SavedGenericDurablePhysicalHostSnapshotV1 | null = null;
+const noopSubscribe = () => () => undefined;
+
+function detail(error: unknown): string {
+  return error instanceof Error
+    ? error.message.slice(0, 600)
+    : 'The saved cloth preview could not be restored.';
+}
+
+export function classifySavedClothPhysicalRestoreErrorV1(
+  error: unknown,
+): Extract<SavedClothPhysicalSourceStatusV1, 'placement-required' | 'blocked'> {
+  return error instanceof SavedFullAssemblyPhysicalSnapshotErrorV1 &&
+    (error.code === 'current-v7-required' || error.code === 'physical-initialization-missing')
+    ? 'placement-required'
+    : 'blocked';
+}
+
+/** Fixed production restore chain; tests may replace its imported transports, never inject them. */
+export async function restoreSavedClothPhysicalHostV1(
+  input: Readonly<{
+    row: DxfProductSavedRowIdentityV1;
+    selectedOperationNumber: number;
+    cardProjection: PatternImportDxfPhaseESavedRowCardProjectionV1;
+    bodySession: BodySession;
+  }>,
+  signal: AbortSignal,
+): Promise<SavedClothDurableHostV1> {
+  const { row } = input;
+  const assertCurrent = () => {
+    signal.throwIfAborted();
+    if (!isExactNSeamDocumentLockCurrent(row.techCardId, row.cardLockVersion))
+      throw new DOMException('The previous saved cloth source was retired.', 'AbortError');
+  };
+  let receipt: Awaited<ReturnType<typeof readSavedFullAssemblyPhysicalSnapshotV1>> | null = null;
+  let durable: SavedClothDurableHostV1 | null = null;
+  try {
+    assertCurrent();
+    receipt = await readSavedFullAssemblyPhysicalSnapshotV1(
+      { row, seedOperationNumber: input.selectedOperationNumber },
+      signal,
+    );
+    assertCurrent();
+    const handoff = await prepareSavedFullAssemblyGenericNativeHandoffV1(
+      receipt,
+      input.cardProjection,
+      signal,
+    );
+    assertCurrent();
+    durable = createSavedGenericDurablePhysicalHostV1({
+      row,
+      bodySession: input.bodySession,
+    });
+    const restored = await durable.restore({ verifiedReceipt: receipt, ...handoff }, signal);
+    assertCurrent();
+    if (!restored.ok) throw new Error(restored.detail);
+    return durable;
+  } catch (error) {
+    if (durable) await durable.dispose();
+    throw error;
+  } finally {
+    if (receipt) disposeSavedFullAssemblyPhysicalSnapshotV1(receipt);
+  }
+}
 
 /**
- * Selects the real downstream owner before the table hands off its one-shot saved source.
- * The observed body consumer exists even without a saved row, so N1/zero-operation display
- * observation can arrive first. Displayed inputs are borrowed from the picker and never disposed.
+ * One production owner joins the current saved V7, its genuine native replay and the displayed
+ * mannequin body. There is no profile selector, parallel canonical owner, or savedSession
+ * downstream. A V6 visual arrangement is reported as authoring-required and is never promoted.
  */
 export function useSavedClothPhysicalHostV1({
   row,
   selectedOperationNumber,
-  createCanonicalOwner,
+  cardProjection = null,
 }: UseSavedClothPhysicalHostInputV1) {
   const queryClient = useQueryClient();
-  const [profile, updateProfile] = useState<SavedClothPhysicalProfileV1>('');
-  const setProfile = useCallback((next: SavedClothPhysicalProfileV1) => {
-    if (next !== '' && next !== 'canonical-reference' && next !== 'observed-saved-model')
-      throw new TypeError('Choose an explicit supported cloth body profile.');
-    updateProfile(next);
-  }, []);
   const observation = useRef<{
     accepting: boolean;
     latest: ModelDisplayedTriangleBodyOwnedInputV1 | null;
@@ -88,8 +256,16 @@ export function useSavedClothPhysicalHostV1({
     };
   }, [queryClient]);
   const bodySession = mountedBody?.queryClient === queryClient ? mountedBody.session : null;
+  const subscribeBody = useCallback(
+    (listener: () => void) => bodySession?.subscribe(listener) ?? noopSubscribe(),
+    [bodySession],
+  );
+  const readBody = useCallback(
+    () => bodySession?.getSnapshot() ?? EMPTY_BODY_SNAPSHOT,
+    [bodySession],
+  );
+  const bodySnapshot = useSyncExternalStore(subscribeBody, readBody, readBody);
 
-  // Capture each of the eight original fields. URL, byte size and revision are never inferred.
   const techCardId = row?.techCardId ?? null;
   const scopeKey = row?.scopeKey ?? null;
   const patternLineKey = row?.patternLineKey ?? null;
@@ -98,8 +274,29 @@ export function useSavedClothPhysicalHostV1({
   const url = row?.url ?? null;
   const sizeBytes = row?.sizeBytes ?? null;
   const sha256 = row?.sha256 ?? null;
+  const subscribeDocumentRetirement = useCallback(
+    (listener: () => void) =>
+      techCardId === null
+        ? noopSubscribe()
+        : subscribeExactNSeamDocumentRetirement(techCardId, listener),
+    [techCardId],
+  );
+  const readDocumentRetirement = useCallback(
+    () =>
+      techCardId !== null &&
+      cardLockVersion !== null &&
+      !isExactNSeamDocumentLockCurrent(techCardId, cardLockVersion),
+    [techCardId, cardLockVersion],
+  );
+  // The accepted write advances this floor before the card query can return its new row.
+  const savedDocumentRetired = useSyncExternalStore(
+    subscribeDocumentRetirement,
+    readDocumentRetirement,
+    readDocumentRetirement,
+  );
   const savedRow = useMemo<DxfProductSavedRowIdentityV1 | null>(() => {
     if (
+      savedDocumentRetired ||
       techCardId === null ||
       scopeKey === null ||
       patternLineKey === null ||
@@ -120,81 +317,611 @@ export function useSavedClothPhysicalHostV1({
       sizeBytes,
       sha256,
     });
-  }, [techCardId, scopeKey, patternLineKey, revision, cardLockVersion, url, sizeBytes, sha256]);
+  }, [
+    savedDocumentRetired,
+    techCardId,
+    scopeKey,
+    patternLineKey,
+    revision,
+    cardLockVersion,
+    url,
+    sizeBytes,
+    sha256,
+  ]);
+  const [retryGeneration, setRetryGeneration] = useState(0);
   const sourceKey =
-    savedRow === null ? null : JSON.stringify([profile, savedRow, selectedOperationNumber]);
-  const [mounted, setMounted] = useState<MountedSource | null>(null);
+    savedRow && cardProjection && selectedOperationNumber > 0
+      ? JSON.stringify([
+          savedRow,
+          selectedOperationNumber,
+          cardProjection.cardLockVersion,
+          bodySnapshot.generation,
+          retryGeneration,
+        ])
+      : null;
+  const [mounted, setMounted] = useState<Mounted | null>(null);
+  const firstHostRef = useRef<ReturnType<typeof createSavedGenericObservedPhysicalHostV1> | null>(
+    null,
+  );
+  const firstControllerRef = useRef<AbortController | null>(null);
+  const firstSaveControllerRef = useRef<AbortController | null>(null);
+  const firstGenerationRef = useRef(0);
+  const [firstAuthoring, setFirstAuthoring] = useState<SavedClothFirstAuthoringStateV1>({
+    status: 'idle',
+    bootstrap: null,
+    sourceGeometry: null,
+    error: null,
+  });
+
+  const releaseFirstAuthoring = useCallback(async () => {
+    firstControllerRef.current?.abort();
+    firstControllerRef.current = null;
+    firstSaveControllerRef.current?.abort();
+    firstSaveControllerRef.current = null;
+    const host = firstHostRef.current;
+    firstHostRef.current = null;
+    firstGenerationRef.current = 0;
+    if (host) await host.dispose();
+  }, []);
+
+  const retry = useCallback(() => {
+    void releaseFirstAuthoring();
+    setRetryGeneration((value) => value + 1);
+  }, [releaseFirstAuthoring]);
+
+  useLayoutEffect(() => {
+    setFirstAuthoring({ status: 'idle', bootstrap: null, sourceGeometry: null, error: null });
+    void releaseFirstAuthoring();
+    return () => {
+      void releaseFirstAuthoring();
+    };
+  }, [releaseFirstAuthoring, sourceKey, cardProjection, bodySession]);
 
   useEffect(() => {
-    if (!profile || !savedRow || sourceKey === null || !bodySession) {
+    if (
+      !savedRow ||
+      !cardProjection ||
+      !bodySession ||
+      !sourceKey ||
+      bodySnapshot.status !== 'observed-body-bound'
+    ) {
       setMounted(null);
       return;
     }
     const controller = new AbortController();
-    let owned: SavedClothPhysicalSelectionV1['owner'] | null = null;
-    const binding = { key: sourceKey, bodySession, factory: createCanonicalOwner };
-    setMounted({ ...binding, status: 'loading', selected: null, error: null });
-    const block = () => {
-      if (!controller.signal.aborted)
-        setMounted({
-          ...binding,
-          status: 'blocked',
-          selected: null,
-          error: 'The selected cloth source could not be loaded.',
-        });
-    };
-    const publish = (selected: SavedClothPhysicalSelectionV1) => {
-      if (controller.signal.aborted) {
-        selected.owner.dispose();
-        return;
-      }
-      owned = selected.owner;
-      setMounted({ ...binding, status: 'ready', selected, error: null });
-    };
-    if (profile === 'canonical-reference') {
+    let durable: SavedClothDurableHostV1 | null = null;
+    const isCurrent = () =>
+      !controller.signal.aborted &&
+      isExactNSeamDocumentLockCurrent(savedRow.techCardId, savedRow.cardLockVersion);
+    const base = { key: sourceKey, bodySession, cardProjection };
+    setMounted({ ...base, host: null, status: 'loading', error: null });
+    void (async () => {
       try {
-        publish({ profile, owner: createCanonicalOwner() });
-      } catch {
-        block();
+        durable = await restoreSavedClothPhysicalHostV1(
+          {
+            row: savedRow,
+            selectedOperationNumber,
+            cardProjection,
+            bodySession,
+          },
+          controller.signal,
+        );
+        if (!isCurrent()) {
+          const retired = durable;
+          durable = null;
+          void retired.dispose();
+          return;
+        }
+        const initialBinding = durable.getSnapshot().binding;
+        if (!initialBinding) throw new Error('The restored V7 is no longer current.');
+        setMounted({ ...base, host: durable, initialBinding, status: 'ready', error: null });
+      } catch (error) {
+        if (isCurrent()) {
+          const status = classifySavedClothPhysicalRestoreErrorV1(error);
+          setMounted({ ...base, host: null, status, error: detail(error) });
+        }
       }
-    } else {
-      void import('components/cloth-simulation-spike/saved-observed-physical-host-v1')
-        .then(({ createSavedObservedPhysicalHostV1 }) => {
-          if (controller.signal.aborted) return;
-          publish({
-            profile,
-            owner: createSavedObservedPhysicalHostV1({ row: savedRow, bodySession }),
-          });
-        })
-        .catch(() => {
-          block();
-        });
-    }
+    })();
     return () => {
       controller.abort();
-      owned?.dispose();
-      owned = null;
+      if (durable) void durable.dispose();
     };
-  }, [profile, savedRow, sourceKey, bodySession, createCanonicalOwner]);
+  }, [
+    bodySession,
+    bodySnapshot.generation,
+    bodySnapshot.status,
+    cardProjection,
+    savedRow,
+    selectedOperationNumber,
+    sourceKey,
+  ]);
 
-  // Suppress the preceding source and its error before replacement effects are committed.
   const current =
     mounted?.key === sourceKey &&
     mounted.bodySession === bodySession &&
-    mounted.factory === createCanonicalOwner
+    mounted.cardProjection === cardProjection
       ? mounted
       : null;
-  const selected = current?.status === 'ready' ? current.selected : null;
+  const host = current?.status === 'ready' ? current.host : null;
+  const subscribeHost = useCallback(
+    (listener: () => void) => host?.subscribe(listener) ?? noopSubscribe(),
+    [host],
+  );
+  const readHost = useCallback(() => host?.getSnapshot() ?? EMPTY_DURABLE_SNAPSHOT, [host]);
+  const durableSnapshot = useSyncExternalStore(subscribeHost, readHost, readHost);
   const sourceStatus: SavedClothPhysicalSourceStatusV1 =
-    !profile || !savedRow ? 'idle' : current?.status ?? 'loading';
-  const sourceError = current?.status === 'blocked' ? current.error : null;
+    !savedRow || !cardProjection || selectedOperationNumber <= 0
+      ? 'idle'
+      : !bodySession || bodySnapshot.status !== 'observed-body-bound'
+        ? 'awaiting-mannequin'
+        : current?.status ?? 'loading';
+
+  const [placementEditor, setPlacementEditor] = useState<SavedV7PlacementEditorStateV1>({
+    status: 'idle',
+    draft: null,
+    error: null,
+  });
+  const placementTurn = useRef<PlacementEditTurn | null>(null);
+  const placementContext = useRef({ sourceKey, cardProjection, bodySession, host });
+  placementContext.current = { sourceKey, cardProjection, bodySession, host };
+  const releasePlacementEdit = useCallback(() => {
+    const turn = placementTurn.current;
+    placementTurn.current = null;
+    turn?.controller.abort();
+    void turn?.actor?.dispose();
+  }, []);
+  useLayoutEffect(() => {
+    setPlacementEditor({ status: 'idle', draft: null, error: null });
+    return releasePlacementEdit;
+  }, [sourceKey, cardProjection, bodySession, host, releasePlacementEdit]);
+
+  const canEditSavedPlacement = Boolean(
+    sourceStatus === 'ready' &&
+      host &&
+      current?.initialBinding &&
+      durableSnapshot &&
+      (durableSnapshot.status === 'ready' || durableSnapshot.status === 'blocked') &&
+      !durableSnapshot.numeric.cleanupPending,
+  );
+  const startSavedPlacementEdit = async (previewIdle: () => boolean) => {
+    if (
+      !canEditSavedPlacement ||
+      !previewIdle() ||
+      placementTurn.current ||
+      !savedRow ||
+      !cardProjection ||
+      !bodySession ||
+      !sourceKey ||
+      !host ||
+      !current?.initialBinding
+    )
+      return;
+    const prior = current.initialBinding;
+    const controller = new AbortController();
+    const live = () => {
+      const context = placementContext.current;
+      const body = bodySession.getSnapshot();
+      const numeric = host.getSnapshot();
+      return (
+        !controller.signal.aborted &&
+        isExactNSeamDocumentLockCurrent(savedRow.techCardId, savedRow.cardLockVersion) &&
+        context.sourceKey === sourceKey &&
+        context.cardProjection === cardProjection &&
+        context.bodySession === bodySession &&
+        context.host === host &&
+        body.status === 'observed-body-bound' &&
+        body.generation === bodySnapshot.generation &&
+        (numeric.status === 'ready' || numeric.status === 'blocked') &&
+        !numeric.numeric.cleanupPending &&
+        previewIdle()
+      );
+    };
+    if (!live()) return;
+    const turn: PlacementEditTurn = {
+      controller,
+      actor: null,
+      draft: null,
+      pending: null,
+      current: live,
+      restore: () =>
+        restoreSavedClothPhysicalHostV1(
+          { row: savedRow, selectedOperationNumber, cardProjection, bodySession },
+          controller.signal,
+        ),
+      saving: false,
+    };
+    placementTurn.current = turn;
+    setPlacementEditor({ status: 'preparing', draft: null, error: null });
+    try {
+      const actor = await turn.restore();
+      if (placementTurn.current !== turn || !live()) {
+        await actor.dispose();
+        throw new Error('The current saved placement or preview changed.');
+      }
+      turn.actor = actor;
+      const draft = await actor.preparePlacementEdit(controller.signal);
+      if (!live() || !sameSavedPlacement(draft.binding, prior))
+        throw new Error('The saved V7 changed. Reload the cloth before editing placement.');
+      turn.draft = draft;
+      setPlacementEditor({ status: 'editing', draft, error: null });
+    } catch (error) {
+      if (placementTurn.current !== turn) return;
+      releasePlacementEdit();
+      setPlacementEditor({ status: 'blocked', draft: null, error: detail(error) });
+    }
+  };
+  const saveSavedPlacementEdit = async (
+    draft: SavedV7PlacementEditV1,
+    change: SavedV7PlacementChangeV1,
+  ) => {
+    const turn = placementTurn.current;
+    if (!turn || !turn.actor || turn.draft !== draft || turn.saving || !turn.current()) return;
+    turn.saving = true;
+    const pending = (turn.pending ??=
+      change.kind === 'translate'
+        ? {
+            kind: 'translate',
+            pieces: change.pieces.map((piece) => ({
+              ...piece,
+              translationM: [...piece.translationM] as [number, number, number],
+            })),
+          }
+        : { ...change });
+    setPlacementEditor({ status: 'saving', draft, error: null });
+    try {
+      await turn.actor.savePlacementEdit(draft, pending, turn.controller.signal);
+      if (placementTurn.current !== turn) return;
+      if (turn.current()) retry();
+      else {
+        releasePlacementEdit();
+        setPlacementEditor({ status: 'idle', draft: null, error: null });
+      }
+    } catch (error) {
+      if (placementTurn.current !== turn) return;
+      // The one-shot actor may have already bound the requested initialization.
+      const spent = turn.actor;
+      turn.actor = null;
+      let restored: SavedClothDurableHostV1 | null = null;
+      let message = detail(error);
+      const confirmCurrent = () => {
+        if (placementTurn.current !== turn || !turn.current())
+          throw new Error('The current saved placement or preview changed.');
+      };
+      try {
+        await spent.dispose();
+        confirmCurrent();
+        const intended =
+          error instanceof SavedV7PlacementPersistenceErrorV1
+            ? error.result.intendedOuterSha256
+            : null;
+        if (intended) {
+          restored = await turn.restore();
+          confirmCurrent();
+          const confirmed = restored.getSnapshot().binding;
+          if (confirmed?.outerSha256 === intended) {
+            retry();
+            return;
+          }
+          if (!confirmed || !sameSavedPlacement(confirmed, draft.binding))
+            throw new Error('The saved placement has changed. Reload the current cloth.');
+          const edit = await restored.preparePlacementEdit(turn.controller.signal);
+          confirmCurrent();
+          if (!sameSavedPlacement(edit.binding, draft.binding))
+            throw new Error('The saved placement has changed. Reload the current cloth.');
+          turn.actor = restored;
+          restored = null;
+          turn.draft = edit;
+          turn.saving = false;
+          setPlacementEditor({
+            status: 'save-retry',
+            draft: edit,
+            error: 'The save failed. The previous saved placement is still current.',
+          });
+          return;
+        }
+      } catch (verificationError) {
+        message = detail(verificationError);
+      } finally {
+        if (restored) void restored.dispose();
+      }
+      if (placementTurn.current !== turn) return;
+      turn.saving = false;
+      setPlacementEditor({ status: 'blocked', draft, error: message });
+    }
+  };
+  const cancelSavedPlacementEdit = () => {
+    if (placementTurn.current?.saving) return;
+    releasePlacementEdit();
+    setPlacementEditor({ status: 'idle', draft: null, error: null });
+  };
+
+  const startFirstAuthoring = useCallback(async () => {
+    if (
+      sourceStatus !== 'placement-required' ||
+      !savedRow ||
+      !cardProjection ||
+      !bodySession ||
+      !sourceKey ||
+      firstControllerRef.current ||
+      (firstAuthoring.status !== 'idle' && firstAuthoring.status !== 'blocked')
+    )
+      return;
+    const controller = new AbortController();
+    firstControllerRef.current = controller;
+    setFirstAuthoring({ status: 'preparing', bootstrap: null, sourceGeometry: null, error: null });
+    try {
+      const bootstrap = await prepareSavedFullAssemblyGenericFirstBootstrapV1(
+        savedRow,
+        cardProjection,
+        controller.signal,
+        'native-drawn-sewing',
+        selectedOperationNumber,
+      );
+      if (firstControllerRef.current !== controller || controller.signal.aborted) return;
+      setFirstAuthoring({
+        status: 'compile-required',
+        bootstrap,
+        sourceGeometry: null,
+        error: null,
+      });
+    } catch (error) {
+      if (firstControllerRef.current !== controller || controller.signal.aborted) return;
+      void releaseFirstAuthoring();
+      setFirstAuthoring({
+        status: 'blocked',
+        bootstrap: null,
+        sourceGeometry: null,
+        error: detail(error),
+      });
+    }
+  }, [
+    bodySession,
+    cardProjection,
+    firstAuthoring.status,
+    releaseFirstAuthoring,
+    savedRow,
+    selectedOperationNumber,
+    sourceKey,
+    sourceStatus,
+  ]);
+
+  const publishedSource = firstControllerRef.current;
+  const compileFirstAuthoring = useCallback(
+    async (choices: SavedFullAssemblyGenericFirstCompileChoicesV1) => {
+      if (
+        firstAuthoring.status !== 'compile-required' ||
+        !publishedSource ||
+        firstControllerRef.current !== publishedSource ||
+        firstHostRef.current ||
+        !bodySession ||
+        !savedRow ||
+        !sourceKey
+      )
+        return;
+      const bootstrap = firstAuthoring.bootstrap;
+      setFirstAuthoring({ status: 'compiling', bootstrap, sourceGeometry: null, error: null });
+      publishedSource.abort();
+      const controller = new AbortController();
+      firstControllerRef.current = controller;
+      const authoringHost = createSavedGenericObservedPhysicalHostV1({
+        row: savedRow,
+        bodySession,
+      });
+      firstHostRef.current = authoringHost;
+      try {
+        const compiled = await authoringHost.consume(
+          buildSavedFullAssemblyGenericFirstCompileRequestV1(bootstrap, choices),
+          controller.signal,
+        );
+        if (!compiled.ok)
+          throw new Error(
+            'detail' in compiled
+              ? compiled.detail
+              : compiled.result.blockers
+                  .map(({ detail: blockerDetail }) => blockerDetail)
+                  .join('; '),
+          );
+        const generation = compiled.result.generation;
+        const context = await projectSavedGenericObservedPhysicalHostAuthoringContextV1(
+          authoringHost,
+          generation,
+          controller.signal,
+        );
+        if (!context.ok) throw new Error(context.detail);
+        if (
+          firstHostRef.current !== authoringHost ||
+          firstControllerRef.current !== controller ||
+          controller.signal.aborted
+        )
+          throw new Error('Authoring source changed.');
+        firstGenerationRef.current = generation;
+        setFirstAuthoring({
+          status: 'placement-required',
+          bootstrap,
+          sourceGeometry: context.sourceGeometry,
+          error: null,
+        });
+      } catch (error) {
+        if (
+          firstHostRef.current === authoringHost &&
+          firstControllerRef.current === controller &&
+          !controller.signal.aborted
+        ) {
+          void releaseFirstAuthoring();
+          setFirstAuthoring({
+            status: 'blocked',
+            bootstrap,
+            sourceGeometry: null,
+            error: detail(error),
+          });
+        }
+      }
+    },
+    [bodySession, firstAuthoring, publishedSource, releaseFirstAuthoring, savedRow, sourceKey],
+  );
+
+  const authoringHost = firstHostRef.current;
+  const generation = firstGenerationRef.current;
+  const savePlacement = useCallback(
+    async (placements: readonly SavedFullAssemblyTablePiecePlacementV1[] | null) => {
+      if (
+        (firstAuthoring.status !== 'placement-required' &&
+          firstAuthoring.status !== 'save-retry') ||
+        (placements === null) !== (firstAuthoring.status === 'save-retry') ||
+        !authoringHost ||
+        firstHostRef.current !== authoringHost ||
+        generation < 1 ||
+        firstGenerationRef.current !== generation ||
+        firstSaveControllerRef.current ||
+        !bodySession
+      )
+        return;
+      const sourceController = firstControllerRef.current;
+      if (!sourceController || sourceController.signal.aborted) return;
+      const controller = new AbortController();
+      firstSaveControllerRef.current = controller;
+      const ownsAttempt = () =>
+        firstHostRef.current === authoringHost &&
+        firstControllerRef.current === sourceController &&
+        !sourceController.signal.aborted &&
+        firstSaveControllerRef.current === controller &&
+        !controller.signal.aborted;
+      const bodyCurrent = () => {
+        const snapshot = bodySession.getSnapshot();
+        return (
+          snapshot.status === 'observed-body-bound' &&
+          snapshot.generation === bodySnapshot.generation
+        );
+      };
+      const retire = (error: string) => {
+        void releaseFirstAuthoring();
+        setFirstAuthoring({ status: 'blocked', bootstrap: null, sourceGeometry: null, error });
+      };
+      const { bootstrap, sourceGeometry } = firstAuthoring;
+      let boundSha =
+        firstAuthoring.status === 'save-retry' ? firstAuthoring.initializationSha256 : null;
+      try {
+        // A retained handler from before the bind must never replace the confirmed actor.
+        if (!ownsAttempt()) return;
+        const actor = authoringHost.getSnapshot();
+        if (!bodyCurrent() || actor.sourceGeneration !== generation) {
+          retire('The placement source or mannequin changed.');
+          return;
+        }
+        if (
+          actor.initializationSha256 !== boundSha ||
+          (boundSha && actor.status !== 'initialization-bound')
+        ) {
+          if (boundSha) retire('The confirmed placement changed. Reopen physical setup.');
+          return;
+        }
+        setFirstAuthoring({ status: 'saving', bootstrap, sourceGeometry, error: null });
+        if (placements) {
+          const bound = await bindSavedFullAssemblyGenericFirstAuthoringV1(
+            authoringHost,
+            { expectedGeneration: generation, placements },
+            controller.signal,
+          );
+          if (!bound.ok) throw new Error(bound.detail);
+          boundSha = bound.initializationSha256;
+        }
+        if (!ownsAttempt()) return;
+        if (!bodyCurrent()) {
+          retire('The displayed mannequin changed.');
+          return;
+        }
+        const persisted = await persistCurrentSavedGenericObservedPhysicalHostV1(
+          authoringHost,
+          generation,
+          controller.signal,
+        );
+        if (!persisted.ok) throw new Error(persisted.blockers[0].detail);
+        if (ownsAttempt() && bodyCurrent()) retry();
+      } catch (error) {
+        if (!ownsAttempt()) return;
+        // A read-only check distinguishes a still-current editable/bound actor from a changed
+        // row, body or V6. Only an explicit subsequent gesture may retry persistence.
+        const fresh = await projectSavedGenericObservedPhysicalHostAuthoringContextV1(
+          authoringHost,
+          generation,
+          controller.signal,
+        );
+        if (!ownsAttempt()) return;
+        const actor = authoringHost.getSnapshot();
+        const current =
+          fresh.ok &&
+          fresh.sourceGeneration === generation &&
+          bodyCurrent() &&
+          actor.sourceGeneration === generation &&
+          actor.initializationSha256 === boundSha &&
+          (!boundSha ||
+            (actor.status === 'initialization-bound' &&
+              actor.targetSha256 === fresh.observedTarget.canonicalSha256));
+        if (!current) {
+          retire(
+            fresh.ok ? 'The saved source or confirmed mannequin placement changed.' : fresh.detail,
+          );
+        } else if (boundSha) {
+          setFirstAuthoring({
+            status: 'save-retry',
+            bootstrap,
+            sourceGeometry,
+            initializationSha256: boundSha,
+            error: detail(error),
+          });
+        } else {
+          setFirstAuthoring({
+            status: 'placement-required',
+            bootstrap,
+            sourceGeometry,
+            error: detail(error),
+          });
+        }
+      } finally {
+        if (firstSaveControllerRef.current === controller) firstSaveControllerRef.current = null;
+      }
+    },
+    [
+      authoringHost,
+      generation,
+      bodySession,
+      bodySnapshot.generation,
+      firstAuthoring,
+      releaseFirstAuthoring,
+      retry,
+    ],
+  );
+  const saveFirstAuthoring = (placements: readonly SavedFullAssemblyTablePiecePlacementV1[]) =>
+    savePlacement(placements);
+  const retryFirstPlacementSave = () => savePlacement(null);
+
   return {
-    profile,
-    setProfile,
+    /** Rowless zero-operation compatibility only; saved routes no longer expose profile selection. */
+    profile: '' as '' | 'canonical-reference' | 'observed-saved-model',
+    setProfile: () => undefined,
+    selected: null,
     bodySession,
     onDisplayedBodyInputV1,
-    selected,
+    host,
+    durableSnapshot,
+    savedDocumentRetired,
     sourceStatus,
-    sourceError,
+    sourceError:
+      sourceStatus === 'awaiting-mannequin'
+        ? bodySnapshot.blocker?.detail ??
+          (bodySnapshot.status === 'binding' ? 'Verifying displayed mannequin…' : null)
+        : current?.error ?? null,
+    retry,
+    firstAuthoring,
+    startFirstAuthoring,
+    compileFirstAuthoring,
+    saveFirstAuthoring,
+    retryFirstPlacementSave,
+    placementEditor,
+    canEditSavedPlacement,
+    isEditingSavedPlacement: () => placementTurn.current !== null,
+    startSavedPlacementEdit,
+    saveSavedPlacementEdit,
+    cancelSavedPlacementEdit,
   } as const;
 }

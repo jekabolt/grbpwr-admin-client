@@ -74,9 +74,15 @@ import { parseDecimalNumber } from 'utils/decimal';
 import { nextNumberedRole } from '../bom-roles';
 import { bornBomLine } from '../form-writers';
 import { useTechCardStaging } from '../useTechCardStaging';
-import { clampUtf8Bytes, isDxfUrl } from 'utils/pattern';
+import { isDxfUrl } from 'utils/pattern';
 import { isOsSizeName } from '../size-ids-field';
 import { recipeHoldersByPiece } from '../piece-recipe-hold';
+import {
+  captureTechCardPieceRenameTarget,
+  normalizeTechCardPieceRename,
+  planTechCardPieceRenames,
+  type PieceRenameTarget,
+} from '../piece-rename-plan';
 import {
   IDENTICAL_CUT_SYMMETRY,
   grainlineOptionsFor,
@@ -237,10 +243,6 @@ function interliningInitialChoice(pieceLineKey: string | undefined, wasSkipped: 
   return pieceLineKey?.trim() ?? '';
 }
 
-// tech_card_piece.name is VARCHAR(255) and the server counts UTF-8 BYTES (Go len()), so a
-// 255-character Cyrillic name is twice over the limit and would fail the whole card save.
-const MAX_PIECE_NAME = 255;
-
 // Выпущенная карточка заморожена целиком — тот же ответ, что у pieces-tab и index.tsx. Модалка
 // рисуется порталом, то есть ВНЕ `<fieldset disabled={frozen}>` страницы, поэтому гасит себя сама.
 const RELEASED_STATE = 'TECH_CARD_APPROVAL_STATE_RELEASED';
@@ -254,6 +256,7 @@ type BomLine = NonNullable<TechCardFormData['bomItems']>[number];
 // fusingWidthMm/ungraded/grainline/note); имя существующей детали — тоже здесь.
 type PieceFields = Partial<PieceFuseFields> & {
   name?: string;
+  renameTarget?: PieceRenameTarget | null;
   ungraded?: boolean;
   grainline?: string;
   note?: string;
@@ -1133,6 +1136,7 @@ export function PieceMatchModal({
   // every block that will coalesce into one new piece shares one buffer — keyed by the creating
   // block, FP_R's edits were dropped whenever FP_L (same default name) was processed first.
   const [pieceEdits, setPieceEdits] = useState<Record<string, PieceFields>>({});
+  const [renameRefusal, setRenameRefusal] = useState<string | null>(null);
   // Markup drawn on an older base than the pattern file now holds: marked, never reset (12.11).
   const staleByPiece = useFusingMarkupStale(techCardId, pieces);
   const [newEdits, setNewEdits] = useState<Record<string, PieceFields>>({});
@@ -1369,7 +1373,7 @@ export function PieceMatchModal({
   const withEditedNames = (list: readonly PieceValue[]): PieceValue[] =>
     list.map((p) => {
       const e = pieceEdits[(p.lineKey ?? '').trim().toLowerCase()];
-      return e?.name !== undefined ? { ...p, name: clampUtf8Bytes(e.name, MAX_PIECE_NAME) } : p;
+      return e?.name !== undefined ? { ...p, name: normalizeTechCardPieceRename(e.name) } : p;
     });
 
   // ── исчезнувшие детали ────────────────────────────────────────────────────────────────
@@ -2050,6 +2054,23 @@ export function PieceMatchModal({
       const all = (getValues('pieces') ?? []) as NonNullable<TechCardFormData['pieces']>;
       const dropped = new Set(toDelete.map((c) => c.lineKey.trim().toLowerCase()));
       const live = all.filter((p) => !dropped.has((p.lineKey ?? '').trim().toLowerCase()));
+      const renamePlan = planTechCardPieceRenames(
+        {
+          pieces: live,
+          callouts: getValues('callouts') ?? [],
+          technicalMedia: getValues('technicalMedia') ?? [],
+        },
+        Object.entries(pieceEdits).flatMap(([key, edit]) =>
+          edit.name !== undefined && !dropped.has(key)
+            ? [{ target: edit.renameTarget ?? null, name: edit.name }]
+            : [],
+        ),
+      );
+      if (!renamePlan.ok) {
+        setRenameRefusal(renamePlan.detail);
+        return;
+      }
+      setRenameRefusal(null);
 
       // A renamed new piece leaves its old buffer behind because another block may still resolve
       // to that name. Count it only when this apply really creates that name; existing live pieces
@@ -2459,22 +2480,8 @@ export function PieceMatchModal({
           if (ed[f] === undefined || sameField(ed[f], p[f])) continue;
           setValue(`pieces.${i}.${f}`, ed[f] as never, { shouldDirty: true });
         }
-        if (ed.name !== undefined && ed.name !== (p.name ?? '')) {
-          const value = clampUtf8Bytes(ed.name, MAX_PIECE_NAME);
-          setValue(`pieces.${i}.name`, value, { shouldDirty: true });
-          // S8: a piece pinned to a sketch callout has its name rewritten from `callout.part` by
-          // the server on every save — the rename has to reach the callout too (pieces-tab
-          // renamePiece), or the save silently reverts it.
-          const n = (p.calloutNumber as number) || 0;
-          if (n) {
-            const cs = (getValues('callouts') ?? []) as Array<{ number?: number }>;
-            cs.forEach((c, ci) => {
-              if ((c.number ?? 0) === n)
-                setValue(`callouts.${ci}.part`, value.trim(), { shouldDirty: true });
-            });
-          }
-        }
       });
+      for (const { path, value } of renamePlan.writes) setValue(path, value, { shouldDirty: true });
       setValue('pieceDxfAliases', [...byKey.values()], { shouldDirty: true });
       // The fusible sheets follow the fuse markup. Staged behind the card body: the header's save
       // writes the pieces first, then this rebuilds the DXFs off the stored card. A failed rebuild
@@ -2561,6 +2568,7 @@ export function PieceMatchModal({
     return rest ? Math.max(0, rest.count - rest.uniCount) : 0;
   })();
   const warnings: HeaderWarning[] = [];
+  if (renameRefusal) warnings.push({ text: renameRefusal, error: true });
   if (parse.phase === 'error') warnings.push({ text: parse.message, error: true });
   if (parse.phase === 'ready') {
     // Units are asked at upload — the parse's «units are not set» note is not repeated here.
@@ -2718,15 +2726,41 @@ export function PieceMatchModal({
         ...pieceEdits[k],
       };
       vals.name = pieceName(st.key);
-      patch = (d) =>
+      patch = (d) => {
+        if (d.name !== undefined) setRenameRefusal(null);
+        const target =
+          d.name !== undefined && p?.lineKey
+            ? captureTechCardPieceRenameTarget(
+                {
+                  pieces: getValues('pieces') ?? [],
+                  callouts: getValues('callouts') ?? [],
+                  technicalMedia: getValues('technicalMedia') ?? [],
+                },
+                p.lineKey,
+              )
+            : null;
         setPieceEdits((prev) => {
-          const next = { ...(prev[k] ?? {}), ...d };
-          if (d.name !== undefined && d.name === (nameByPieceKey.get(k) ?? '')) delete next.name;
+          const before = prev[k];
+          const next = { ...before, ...d };
+          if (d.name !== undefined) {
+            if (d.name === (before?.renameTarget?.name ?? nameByPieceKey.get(k) ?? '')) {
+              delete next.name;
+              delete next.renameTarget;
+            } else {
+              next.renameTarget =
+                before?.name !== undefined
+                  ? before.renameTarget ?? null
+                  : target?.name === (p?.name ?? '')
+                    ? target
+                    : null;
+            }
+          }
           const rest = { ...prev };
           if (Object.keys(next).length === 0) delete rest[k];
           else rest[k] = next;
           return rest;
         });
+      };
       title = vals.name;
     } else if (st.kind === 'new') {
       const row = st.row;

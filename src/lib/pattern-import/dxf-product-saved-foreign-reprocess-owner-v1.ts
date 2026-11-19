@@ -1,3 +1,4 @@
+import type { DxfNativeSewingReplayStageOutputV1 } from './dxf-native-sewing-replay-v1';
 import {
   PATTERN_IMPORT_DXF_PRODUCT_WRITER_REPLAY_CARRIER_V1,
   PATIMPORT,
@@ -60,6 +61,7 @@ export type DxfProductSavedForeignReprocessResultV1 =
       sourceFileId: string;
       canonicalWriterSha256: string;
       draft: CardDraft;
+      nativeSewingReplay?: DxfNativeSewingReplayStageOutputV1;
       blockers: readonly [];
     }>
   | Readonly<{
@@ -87,7 +89,13 @@ export type DxfProductSavedForeignReprocessHostV1 = Readonly<{
     }>,
     signal: AbortSignal,
     onProgress: (done: number, total: number, note?: string) => void,
-  ) => Promise<Readonly<{ row: DxfProductSavedRowIdentityV1; draft: CardDraft }>>;
+  ) => Promise<
+    Readonly<{
+      row: DxfProductSavedRowIdentityV1;
+      draft: CardDraft;
+      nativeSewingReplay?: DxfNativeSewingReplayStageOutputV1;
+    }>
+  >;
   readCurrentRowIdentity: (
     expected: DxfProductSavedRowIdentityV1,
     signal: AbortSignal,
@@ -542,6 +550,9 @@ export function createDxfProductSavedForeignReprocessOwnerV1(
         sourceFileId,
         canonicalWriterSha256: validated.canonicalWriterSha256,
         draft: validated.draft,
+        ...(rebuilt.nativeSewingReplay
+          ? { nativeSewingReplay: deepFreezeOwned(structuredClone(rebuilt.nativeSewingReplay)) }
+          : {}),
         blockers: Object.freeze([]) as readonly [],
       });
     } finally {

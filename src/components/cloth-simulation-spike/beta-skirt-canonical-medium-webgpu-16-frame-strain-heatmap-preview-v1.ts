@@ -1,4 +1,8 @@
 import * as THREE from 'three';
+import {
+  mapTriangleStrainToRenderOrderV1,
+  type TriangleStrainRenderOrderReceiptV1,
+} from './triangle-strain-render-order-v1';
 
 import {
   BETA_SKIRT_STRAIN_UTILIZATION_COLOR_LUT_V1,
@@ -26,7 +30,6 @@ const UTILIZATION_COMPONENT = 3;
 const DISPLAY_CLAMP_MAXIMUM = 2;
 const CapturedFloat32Array = Float32Array;
 const CapturedUint8Array = Uint8Array;
-const CapturedUint32Array = Uint32Array;
 const capturedDataViewSetFloat32 = DataView.prototype.setFloat32;
 const capturedDataViewSetUint32 = DataView.prototype.setUint32;
 const capturedReflectApply = Reflect.apply;
@@ -67,6 +70,7 @@ export type BetaSkirtCanonicalMediumWebgpu16FrameStrainHeatmapReceiptV1 = Readon
     strainColorLutSha256: string;
     renderedNonIndexedPositionsFloat32LeSha256: string;
     renderedVertexColorsFloat32LeSha256: string;
+    renderTriangleOrder: TriangleStrainRenderOrderReceiptV1;
   }>;
   counts: Readonly<{
     frameCount: 16;
@@ -296,11 +300,49 @@ async function validateOwners(
   )
     fail('the exact body, garment, topology, or strain dimensions drifted.');
 
+  const [
+    { projectBetaSkirtCanonicalMediumWebgpuRuntimeSourceV1: projectRuntime },
+    { projectBetaSkirtCanonicalMediumWebgpu16FrameContactV2: projectRunner },
+  ] = await Promise.all([
+    import('./beta-skirt-canonical-medium-webgpu-runtime-source-v1'),
+    import('./beta-skirt-canonical-medium-webgpu-16-frame-contact-runner-v2'),
+  ]);
+  const runtime = projectRuntime(runtimeSourceOwner);
+  if (
+    !runtime ||
+    runtime.reportCanonicalSha256 !== contact.receipt.bindings.runtimeSourceCanonicalSha256 ||
+    !bytesEqual(runtime.normalizedTriangles, contact.normalizedTriangles)
+  )
+    fail('the genuine runtime topology is unavailable or stale.');
+  const requireCurrent = () => {
+    if (
+      projectRuntime(runtimeSourceOwner)?.reportCanonicalSha256 !== runtime.reportCanonicalSha256 ||
+      projectRunner(runnerOwner)?.reportCanonicalSha256 !==
+        report.bindings.contactRunnerCanonicalSha256 ||
+      projectBetaSkirtCanonicalMediumStrainUtilizationDiagnosticV1(strainOwner)
+        ?.reportCanonicalSha256 !== strain.reportCanonicalSha256
+    )
+      fail('a borrowed strain preview owner became unavailable.');
+  };
+  requireCurrent();
+  const renderOrder = await mapTriangleStrainToRenderOrderV1({
+    normalizedTopology: contact.normalizedTriangles,
+    continuumTriangleIndices:
+      runtime.normalizedV5.simulation.constraints.continuumStrain.triangleIndices,
+    triangleValues: strain.triangleValues,
+    validityFlags: strain.validityFlags,
+  });
+  requireCurrent();
+  if (
+    renderOrder.receipt.continuumTriangleIndicesSha256 !==
+    report.bindings.port.triangleIndicesSha256
+  )
+    fail('continuum topology differs from the sealed strain source.');
   const heatmap = buildBetaSkirtCanonicalMediumStrainHeatmapGeometryV1({
     positions: contact.finalGarmentPositionsM,
     topology: contact.normalizedTriangles,
-    triangleValues: strain.triangleValues,
-    validityFlags: strain.validityFlags,
+    triangleValues: renderOrder.orderedTriangleValues,
+    validityFlags: renderOrder.orderedValidityFlags,
   });
   const [topologySha256, valuesSha256, flagsSha256, renderedPositionsSha256, colorsSha256] =
     await Promise.all([
@@ -310,6 +352,7 @@ async function validateOwners(
       sha256(float32LeBytes(heatmap.positions)),
       sha256(float32LeBytes(heatmap.colors)),
     ]);
+  requireCurrent();
   if (
     topologySha256 !== contact.receipt.bindings.normalizedTopologySha256 ||
     topologySha256 !== report.bindings.port.normalizedTopologySha256 ||
@@ -352,6 +395,7 @@ async function validateOwners(
       strainColorLutSha256: report.bindings.colorLutSha256,
       renderedNonIndexedPositionsFloat32LeSha256: renderedPositionsSha256,
       renderedVertexColorsFloat32LeSha256: colorsSha256,
+      renderTriangleOrder: renderOrder.receipt,
     }),
     counts: Object.freeze({
       frameCount: 16 as const,
@@ -405,6 +449,7 @@ async function validateOwners(
       authority: 'unsigned-visible-strain-utilization-diagnostic-only' as const,
     }),
   });
+  requireCurrent();
   return Object.freeze({ contact, heatmap, receipt });
 }
 

@@ -22,6 +22,14 @@ import {
   readPatternImportDxfProductCompositeComponentBytesV5,
   restorePatternImportDxfPhaseETopologyAnnotationsV5,
 } from './composite-sidecar-v5';
+import {
+  PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6,
+  decodePatternImportDxfProductCompositeSidecarV6,
+} from './composite-sidecar-v6';
+import {
+  PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7,
+  decodePatternImportDxfProductCompositeSidecarV7,
+} from './composite-sidecar-v7';
 import type { PatternImportDxfPhaseEExactNAssemblyOrderSessionV2 } from './exact-n-seam-production-mount-v2';
 import { resolvePatternImportDxfProductExactNSeamProductionMountV2 } from './exact-n-seam-production-mount-v2';
 import {
@@ -66,7 +74,9 @@ export type PatternImportDxfPhaseETopologyAnnotationApplicationResultV5 =
       status: 'ready' | 'verified-and-read-back';
       mediaType:
         | typeof PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V4
-        | typeof PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V5;
+        | typeof PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V5
+        | typeof PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6
+        | typeof PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7;
       readback: PatternImportDxfPhaseETopologyAnnotationReadbackV5;
       blockers: readonly [];
     }>
@@ -119,6 +129,23 @@ function sameAuthority(
     left.row.sha256 === right.row.sha256 &&
     left.serverAssemblyRevision === right.serverAssemblyRevision &&
     left.assemblyTopologySha256 === right.assemblyTopologySha256
+  );
+}
+
+function sameRowAndRevision(
+  left: PatternImportDxfProductCompositeSidecarBindingsV3,
+  right: PatternImportDxfProductCompositeSidecarBindingsV3,
+): boolean {
+  return (
+    left.row.techCardId === right.row.techCardId &&
+    left.row.scopeKey === right.row.scopeKey &&
+    left.row.patternLineKey === right.row.patternLineKey &&
+    left.row.revision === right.row.revision &&
+    left.row.cardLockVersion === right.row.cardLockVersion &&
+    left.row.url === right.row.url &&
+    left.row.sizeBytes === right.row.sizeBytes &&
+    left.row.sha256 === right.row.sha256 &&
+    left.serverAssemblyRevision === right.serverAssemblyRevision
   );
 }
 
@@ -176,6 +203,36 @@ function resolvedAnchor(
   return Object.freeze({ ...anchor, pointMm: resolved.pointMm });
 }
 
+export function encodePatternImportDxfPhaseETopologyAnnotationDraftV5(
+  authority: PatternImportDxfProductCompositeSidecarBindingsV3,
+  source: PatternImportDxfPhaseETopologyAnnotationSourceV5,
+  annotations: Readonly<{
+    measurements: readonly PatternImportDxfPhaseEMeasurementV1[];
+    callouts: readonly PatternImportDxfPhaseECalloutV1[];
+  }>,
+  crypto?: Pick<Crypto, 'subtle'>,
+) {
+  return encodePatternImportDxfPhaseETopologyAnnotationsV1(
+    {
+      schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_TOPOLOGY_ANNOTATIONS_REQUEST_V1,
+      bindings: derivePatternImportDxfPhaseETopologyAnnotationsBindingsV1(authority, {
+        identity: source.identity,
+        revision: source.revision,
+        sha256: source.sha256,
+      }),
+      measurements: annotations.measurements.map((measurement) => ({
+        ...measurement,
+        anchors: measurement.anchors.map((anchor) => resolvedAnchor(source.projection, anchor)),
+      })),
+      callouts: annotations.callouts.map((callout) => ({
+        ...callout,
+        anchor: resolvedAnchor(source.projection, callout.anchor),
+      })),
+    },
+    crypto,
+  );
+}
+
 export function createPatternImportDxfPhaseETopologyAnnotationApplicationTransactionV5(
   deps: PatternImportDxfPhaseETopologyAnnotationApplicationTransactionDepsV5,
 ) {
@@ -226,21 +283,54 @@ export function createPatternImportDxfPhaseETopologyAnnotationApplicationTransac
         restored: Object.freeze({ measurements: Object.freeze([]), callouts: Object.freeze([]) }),
       });
     }
-    if (row.mediaType !== PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V5)
-      throw new TypeError('Current annotation sidecar is not Composite V4 or V5.');
-    const decoded = await decodePatternImportDxfProductCompositeSidecarV5(bytes, deps.crypto);
+    let decodedV5: Extract<
+      Awaited<ReturnType<typeof decodePatternImportDxfProductCompositeSidecarV5>>,
+      { ok: true }
+    >;
+    let mediaType:
+      | typeof PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V5
+      | typeof PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6
+      | typeof PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7;
+    let outerBindings: PatternImportDxfProductCompositeSidecarBindingsV3;
+    let outerCanonicalSha256: string;
+    if (row.mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V5) {
+      const decoded = await decodePatternImportDxfProductCompositeSidecarV5(bytes, deps.crypto);
+      if (!decoded.ok) throw new TypeError(decoded.blockers[0].detail);
+      decodedV5 = decoded;
+      mediaType = PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V5;
+      outerBindings = decoded.document.bindings;
+      outerCanonicalSha256 = decoded.seal.canonicalSha256;
+    } else if (row.mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6) {
+      const decoded = await decodePatternImportDxfProductCompositeSidecarV6(bytes, deps.crypto);
+      if (!decoded.ok) throw new TypeError(decoded.blockers[0].detail);
+      decodedV5 = decoded.nestedCompositeV5;
+      mediaType = PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6;
+      outerBindings = decoded.document.bindings;
+      outerCanonicalSha256 = decoded.seal.canonicalSha256;
+    } else if (row.mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7) {
+      const decoded = await decodePatternImportDxfProductCompositeSidecarV7(bytes, deps.crypto);
+      if (!decoded.ok) throw new TypeError(decoded.blockers[0].detail);
+      decodedV5 = decoded.nestedCompositeV6.nestedCompositeV5;
+      mediaType = PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7;
+      outerBindings = decoded.document.bindings;
+      outerCanonicalSha256 = decoded.seal.canonicalSha256;
+    } else {
+      throw new TypeError('Current annotation sidecar is not Composite V4–V7.');
+    }
     if (
-      !decoded.ok ||
-      !sameAuthority(decoded.document.bindings, authority) ||
-      decoded.seal.canonicalSha256 !== row.sidecarSha256
+      (mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7
+        ? !sameRowAndRevision(outerBindings, authority)
+        : !sameAuthority(outerBindings, authority)) ||
+      !sameAuthority(decodedV5.document.bindings, authority) ||
+      outerCanonicalSha256 !== row.sidecarSha256
     )
-      throw new TypeError('Fresh Composite V5 annotation readback is invalid.');
+      throw new TypeError('Fresh Composite V5–V7 annotation readback is invalid.');
     const nestedV4Bytes = readPatternImportDxfProductCompositeComponentBytesV5(
-      decoded.owner,
+      decodedV5.owner,
       'composite-v4',
     );
     if (!nestedV4Bytes) throw new TypeError('Composite V5 has no verified V4 base.');
-    const restored = restorePatternImportDxfPhaseETopologyAnnotationsV5(decoded.owner, {
+    const restored = restorePatternImportDxfPhaseETopologyAnnotationsV5(decodedV5.owner, {
       bindings: authority,
       sourceIdentity: source.identity,
       sourceRevision: source.revision,
@@ -248,7 +338,7 @@ export function createPatternImportDxfPhaseETopologyAnnotationApplicationTransac
     });
     if (!restored.ok) throw new TypeError(restored.blockers[0].detail);
     return Object.freeze({
-      mediaType: row.mediaType,
+      mediaType,
       sidecarSha256: row.sidecarSha256,
       nestedV4Bytes,
       restored: Object.freeze({
@@ -291,23 +381,27 @@ export function createPatternImportDxfPhaseETopologyAnnotationApplicationTransac
       callouts: readonly PatternImportDxfPhaseECalloutV1[];
     }>,
     signal: AbortSignal,
+    expectedPreviousSidecarSha256?: string,
   ): Promise<PatternImportDxfPhaseETopologyAnnotationApplicationResultV5> => {
     try {
       const current = await readCurrent(session, source, signal);
+      if (
+        expectedPreviousSidecarSha256 !== undefined &&
+        expectedPreviousSidecarSha256 !== current.sidecarSha256
+      )
+        throw new TypeError('Saved annotations changed. Reload them before saving your edits.');
+      if (
+        current.mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6 ||
+        current.mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7
+      )
+        throw new TypeError(
+          'Composite V6/V7 annotations require the versioned rewrap lane; the V5 writer will not overwrite arrangement or fullgraph bytes.',
+        );
       const authority = authorityFromSession(session);
-      const encodedAnnotations = await encodePatternImportDxfPhaseETopologyAnnotationsV1(
-        {
-          schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_TOPOLOGY_ANNOTATIONS_REQUEST_V1,
-          bindings: derivePatternImportDxfPhaseETopologyAnnotationsBindingsV1(authority, source),
-          measurements: annotations.measurements.map((measurement) => ({
-            ...measurement,
-            anchors: measurement.anchors.map((anchor) => resolvedAnchor(source.projection, anchor)),
-          })),
-          callouts: annotations.callouts.map((callout) => ({
-            ...callout,
-            anchor: resolvedAnchor(source.projection, callout.anchor),
-          })),
-        },
+      const encodedAnnotations = await encodePatternImportDxfPhaseETopologyAnnotationDraftV5(
+        authority,
+        source,
+        annotations,
         deps.crypto,
       );
       if (!encodedAnnotations.ok) throw new TypeError(encodedAnnotations.blocker.detail);

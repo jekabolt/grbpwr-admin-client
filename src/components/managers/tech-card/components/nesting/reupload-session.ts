@@ -17,12 +17,18 @@ import { heldSeamKeys, type SeamHolders } from '../step-seams/step-removal-seams
 // ещё несёт — причину не берёт. Сейв, несущий и перезалив, и удаление, едет с `dxf-delete`: снимок
 // один (до сейва), и restore отменяет оба.
 
+export type AssemblyPatternWriteGuard = Readonly<{
+  expectedLockVersion: number;
+  expectedServerAssemblyRevision: string;
+}>;
+
 type Armed = {
   generation: number;
   reason: string;
   sheetUrl: string;
   /** true — сейв должен нести sheetUrl (перезалив); false — не должен (удаление) */
   carried: boolean;
+  assemblyGuard?: AssemblyPatternWriteGuard;
 };
 const armed = new Map<number, Armed[]>();
 let generation = 0;
@@ -36,6 +42,7 @@ export function armReuploadSnapshot(
   cardId: number | undefined,
   sheetUrl: string,
   replacedUrl?: string,
+  assemblyGuard?: AssemblyPatternWriteGuard,
 ): void {
   if (!cardId || !sheetUrl) return;
   const list = (armed.get(cardId) ?? []).filter((a) => !a.carried || a.sheetUrl !== replacedUrl);
@@ -44,6 +51,7 @@ export function armReuploadSnapshot(
     reason: REUPLOAD_SNAPSHOT_REASON,
     sheetUrl,
     carried: true,
+    ...(assemblyGuard && { assemblyGuard: Object.freeze({ ...assemblyGuard }) }),
   });
   armed.set(cardId, list);
 }
@@ -96,7 +104,7 @@ export function armDeleteSnapshot(cardId: number | undefined, removedUrl: string
 export function peekReuploadSnapshot(
   cardId: number | undefined,
   payloadUrls: Iterable<string | undefined>,
-): { reason: string; generations: number[] } | null {
+): { reason: string; generations: number[]; assemblyGuard?: AssemblyPatternWriteGuard } | null {
   const list = cardId ? armed.get(cardId) : undefined;
   if (!list?.length) return null;
   const urls = new Set([...payloadUrls].filter(Boolean));
@@ -105,7 +113,24 @@ export function peekReuploadSnapshot(
   const reason = hits.some((a) => a.reason === DELETE_SNAPSHOT_REASON)
     ? DELETE_SNAPSHOT_REASON
     : REUPLOAD_SNAPSHOT_REASON;
-  return { reason, generations: hits.map((a) => a.generation) };
+  const assemblyGuard = hits.find((entry) => entry.assemblyGuard)?.assemblyGuard;
+  if (
+    assemblyGuard &&
+    hits.some(
+      ({ assemblyGuard: other }) =>
+        other &&
+        (other.expectedLockVersion !== assemblyGuard.expectedLockVersion ||
+          other.expectedServerAssemblyRevision !== assemblyGuard.expectedServerAssemblyRevision),
+    )
+  )
+    throw new Error(
+      'The pattern edits were reviewed against different Assembly revisions. Reopen Review.',
+    );
+  return {
+    reason,
+    generations: hits.map((a) => a.generation),
+    ...(assemblyGuard && { assemblyGuard }),
+  };
 }
 
 /** Сохранение с этой причиной прошло — снять взведённое ровно для его пейлоада. */

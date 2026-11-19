@@ -1,8 +1,9 @@
 import { lazy, Suspense, useSyncExternalStore } from 'react';
 import { GroupLabel, Select, Text } from 'ui';
-import type { useSavedClothPhysicalHostV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/use-saved-cloth-physical-host-v1';
 import type { PatternImportDxfPhaseESavedGarmentMeshProductionOwnerV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench/assembly-order-entry';
+import type { ModelDisplayedTriangleBodyOwnedInputV1 } from './model-displayed-triangle-body-input-v1';
 import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
+import type { SavedObservedPhysicalHostV1 } from './saved-observed-physical-host-v1';
 
 const CanonicalPanel = lazy(() =>
   import('./saved-physical-preview-panel-v1').then((module) => ({
@@ -14,7 +15,30 @@ const ObservedPanel = lazy(() =>
     default: module.SavedObservedPhysicalPanelV1,
   })),
 );
-type Host = ReturnType<typeof useSavedClothPhysicalHostV1>;
+type Profile = '' | 'canonical-reference' | 'observed-saved-model';
+type Host = Readonly<{
+  profile: Profile;
+  setProfile: (profile: Profile) => void;
+  bodySession:
+    | import('components/managers/models/components/saved-model-displayed-triangle-body-session-v2').SavedModelDisplayedTriangleBodySessionV2
+    | null;
+  onDisplayedBodyInputV1: (input: ModelDisplayedTriangleBodyOwnedInputV1 | null) => void;
+  selected:
+    | Readonly<{
+        profile: 'canonical-reference';
+        owner: PatternImportDxfPhaseESavedGarmentMeshProductionOwnerV1;
+      }>
+    | Readonly<{ profile: 'observed-saved-model'; owner: SavedObservedPhysicalHostV1 }>
+    | null;
+  sourceStatus:
+    | 'idle'
+    | 'awaiting-mannequin'
+    | 'loading'
+    | 'ready'
+    | 'placement-required'
+    | 'blocked';
+  sourceError: string | null;
+}>;
 
 function CanonicalCompiledPreview({
   owner,

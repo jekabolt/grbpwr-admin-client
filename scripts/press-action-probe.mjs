@@ -200,10 +200,14 @@ async function pick(sel, text) {
   return true;
 }
 const values = () => page.evaluate(() => window.__press.values());
-const messageIn = async (sel) => {
-  const n = page.locator(`${sel} [id$="-form-item-message"]`);
-  return (await n.count()) ? ((await n.first().textContent()) ?? '').trim() : '';
-};
+const tile = (field, label) => page.locator(F(field)).getByRole('button', { name: label, exact: true });
+const directionTiles = page.locator(`${F('pressToward')} button[aria-pressed]`);
+const directionError = () => page.locator(F('pressToward')).getByText(/say which way the allowance goes/i);
+async function directionShowsError(expected) {
+  await page.evaluate(() => window.__press.trigger());
+  await directionError().waitFor({ state: expected ? 'visible' : 'hidden', timeout: 2000 }).catch(() => {});
+  return (await directionError().isVisible()) === expected;
+}
 
 // ── 1. СЕМЬ ВТО-ПУНКТОВ РАЗЛИЧИМЫ И КАЖДЫЙ ПИШЕТ СВОЙ ПОД-ГЛАГОЛ ────────────────────────────────
 head('1. пикер: семь ВТО-пунктов, каждый со своим под-глаголом');
@@ -212,7 +216,12 @@ ck(pageErrors.length === 0, 'редактор смонтировался без 
 
 const offered = await page.evaluate(() => window.__press.offered());
 const pressItems = offered.filter((k) => ['G1', 'G2', 'G4', 'G5', 'G6', 'G7', 'G8'].includes(k.id));
-ck(offered.length === 53, 'в списке 53 пункта (было 47 до включения ВТО)', String(offered.length));
+// The label/tag authoring change added J3 to the existing 53 choices.
+ck(
+  offered.length === 54 && offered.some((k) => k.id === 'J3' && k.label === 'Hang tag'),
+  'в списке 54 пункта, включая J3 «Hang tag»',
+  String(offered.length),
+);
 const pressLabels = pressItems.map((k) => k.label);
 ck(pressItems.length === 7, 'семь ВТО-пунктов предлагаются', pressLabels.join(' | '));
 ck(new Set(pressLabels).size === 7, 'все семь названы РАЗНЫМИ словами', pressLabels.join(' | '));
@@ -229,7 +238,7 @@ ck(
   (kindList ?? []).filter((s) => /more/.test(s)).join(' | '),
 );
 ck(
-  (kindList ?? []).length >= 53,
+  (kindList ?? []).length >= offered.length && (kindList ?? []).includes('Hang tag'),
   'пикер сразу предлагает ВСЕ работы, редкие вместе с обычными',
   `${(kindList ?? []).length} строк`,
 );
@@ -264,46 +273,56 @@ head('2. направление припуска: только на «to one sid
 await mount({ operationType: T.PRESS, zone: T.ZONE, pressEquipment: T.IRON });
 ck(await has(F('pressAction')), 'контрол под-глагола на экране — стенд действительно смонтирован');
 
-await pick(F('pressAction'), 'press flat');
-ck(!(await has(F('pressToward'))), 'при «press flat» направления НЕТ');
-await pick(F('pressAction'), 'press to one side');
-ck(await has(F('pressToward')), 'при «press to one side» направление ПОЯВИЛОСЬ');
+await tile('pressAction', 'flat').click();
+ck((await values()).pressAction === 'TECH_CARD_PRESS_ACTION_PRESS_FLAT', 'плитка записала «press flat»');
+ck((await directionTiles.count()) === 0, 'при «press flat» направления НЕТ');
 
-const towardItems = await optionsOf(F('pressToward'));
-// 12 ЧЛЕНОВ, А НЕ 13: `press_toward.SIDE` («toward the side seam») снят из словаря и пикера НАМЕРЕННО
-// в 4e8979fe7 («пятнадцать ложных расщеплений ушли из пикеров», сервер 0327/0328) — через восемь
-// часов после того, как эта проба была написана. Снятый пункт не должен вернуться в список.
+// The unanswered step shows the action quiz. Choosing an action resolves that kind.
+await mount({ operationType: T.PRESS, zone: T.ZONE, pressEquipment: T.IRON });
+await tile('pressAction', 'one side').click();
+ck((await values()).pressAction === T.ONE_SIDE, 'плитка записала «press to one side»');
+ck(await directionTiles.first().isVisible(), 'при «press to one side» направление ПОЯВИЛОСЬ');
+
+const towardItems = await directionTiles.evaluateAll((nodes) =>
+  nodes.map((node) => node.getAttribute('title')),
+);
+const supportedDirections = [
+  'up', 'down', 'to centre', 'from centre', 'front', 'back',
+  'sleeve', 'body', 'facing', 'shell', 'lining', 'other',
+];
+// The retired side-seam option must not return. Unset is represented by no pressed tile.
 ck(
-  (towardItems ?? []).length === 13,
-  'в списке направлений 13 строк (12 членов + «не указано»)',
-  String((towardItems ?? []).length),
+  JSON.stringify(towardItems) === JSON.stringify(supportedDirections),
+  'направления: четыре стрелки и восемь именованных плиток',
+  towardItems.join(' | '),
 );
 ck(
-  !(towardItems ?? []).some((s) => /side seam/i.test(s)),
+  !towardItems.some((label) => /side seam/i.test(label ?? '')),
   'снятое «toward the side seam» в список не вернулось',
-  (towardItems ?? []).find((s) => /side seam/i.test(s)) ?? '—',
-);
-ck(
-  (towardItems ?? []).includes('onto the body, toward the armhole'),
-  'подписи — термины цеха, а не буквальный перевод токена',
-  (towardItems ?? []).find((s) => /armhole/i.test(s)) ?? '—',
 );
 
 // ОТКАЗ СТОИТ НА КОНТРОЛЕ, а не тостом после сохранения шести вкладок.
-await page.evaluate(() => window.__press.trigger());
-await page.waitForTimeout(200);
-const msg = await messageIn(F('pressToward'));
-ck(/which way/i.test(msg), 'пустое направление отвергнуто НА СВОЁМ контроле', msg || 'сообщения нет');
-await pick(F('pressToward'), 'toward the back');
-await page.evaluate(() => window.__press.trigger());
-await page.waitForTimeout(200);
-ck(!/which way/i.test(await messageIn(F('pressToward'))), 'ответ снимает отказ');
+ck(await directionShowsError(true), 'пустое направление отвергнуто НА СВОЁМ контроле');
+const backTile = tile('pressToward', 'back');
+await backTile.click();
+ck((await backTile.getAttribute('aria-pressed')) === 'true', 'плитка «back» выбрана');
+ck(await directionShowsError(false), 'ответ снимает отказ');
+await backTile.click();
+ck(
+  (await values()).pressToward === T.TOWARD_UNSET &&
+    (await backTile.getAttribute('aria-pressed')) === 'false' &&
+    (await directionShowsError(true)),
+  'повторное нажатие очищает направление и возвращает отказ',
+  String((await values()).pressToward),
+);
+await backTile.click();
 
 // И обратно: контрол исчезает — но значение за ним больше НЕ живёт невидимым и НЕ стирается.
 // Ф4 («перестать терять данные») сняла очистку: набранное направление стоит строкой ПОЛОСЫ
 // ОСТАТКОВ с [clear], и стирает его только человек. Тот же `data-field` теперь есть и у строки
 // полосы, поэтому «контрола нет» спрашивается за вычетом строк полосы.
-await pick(F('pressAction'), 'steam');
+ck(await pick(KIND, 'Steam'), 'пикер переключил работу на «Steam»');
+ck((await values()).pressAction === 'TECH_CARD_PRESS_ACTION_STEAM', 'записан именно «Steam»');
 ck(
   (await page.locator(F('pressToward')).count()) ===
     (await page.locator(`[data-residue-strip] ${F('pressToward')}`).count()),

@@ -5,6 +5,7 @@ import { currentHost, goToUrl, rootUrl } from 'lib/host';
 import { useState } from 'react';
 
 import { isRefusal } from './api-error';
+import { TeamMark, useTeamLogo } from './logo-step';
 import {
   AuthSheet,
   PasswordInput,
@@ -29,6 +30,7 @@ export function TeamLogin({
   onSignedIn: () => void;
 }) {
   const isConsole = target === 'SIGN_IN_TARGET_CONSOLE';
+  const logo = useTeamLogo(isConsole ? '' : currentHost().slug);
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -55,7 +57,11 @@ export function TeamLogin({
         isConsole ? (
           <TeamSide name='lekalo' sub='console' />
         ) : (
-          <TeamSide name={currentHost().slug} />
+          <TeamSide
+            name={currentHost().slug}
+            brand
+            mark={logo && <TeamMark src={logo} size='plate' />}
+          />
         )
       }
     >

@@ -62,6 +62,23 @@ describe('a fuse zone with two separate rings', () => {
       { identity: 'BP', blockName: 'BP' },
       { identity: 'BP', blockName: 'BP_PART1' },
     ]);
+    const placements = result.sheets[0].blockPlacements;
+    expect(
+      placements.map(({ blockName, sourceIdentity, sizeId, sizeToken }) => [
+        blockName,
+        sourceIdentity,
+        sizeId,
+        sizeToken,
+      ]),
+    ).toEqual([
+      ['BP_XS', 'BP', 1, 'XS'],
+      ['BP_PART1_XS', 'BP', 1, 'XS'],
+      ['BP_M', 'BP', 2, 'M'],
+      ['BP_PART1_M', 'BP', 2, 'M'],
+    ]);
+    expect(placements[0].hostLocalToBlock).toEqual(placements[2].hostLocalToBlock);
+    expect(placements[1].hostLocalToBlock).toEqual(placements[3].hostLocalToBlock);
+    expect(placements[0].hostLocalToBlock).not.toEqual(placements[1].hostLocalToBlock);
   });
 
   it.each([

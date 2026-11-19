@@ -17,6 +17,8 @@ import {
   type PatternImportDxfTwoSidedSeamOrderedSampleWitnessV1,
 } from './pattern-import-dxf-two-sided-seam-mapping-v1';
 
+import type { PatternImportDxfProductVerifiedReplayV1 } from './pattern-import-dxf-product-commit-replay-v1';
+
 export const PATTERN_IMPORT_DXF_TWO_SIDED_SEAM_MAPPING_V2 =
   'pattern-import-dxf-two-sided-seam-mapping/2' as const;
 export const PATTERN_IMPORT_DXF_TWO_SIDED_SEAM_MAPPING_SEAL_V2 =
@@ -244,7 +246,8 @@ type DetachBudget = { nodes: number; properties: number };
  * The lower-level source-path owner rejects every caller alias so that it never has to reason
  * about mutation through shared references. This composition owner therefore projects a fresh
  * descriptor-safe tree and duplicates aliases before crossing that boundary; actual cycles stay
- * invalid and the expansion is bounded.
+ * invalid and the expansion is bounded. The writer's undefined optional object fields are omitted
+ * in the detached JSON representation. Array entries must still be present and valid.
  */
 function detachDescriptorData(
   value: unknown,
@@ -341,13 +344,15 @@ function detachDescriptorData(
         !descriptor.enumerable ||
         !Object.prototype.hasOwnProperty.call(descriptor, 'value') ||
         descriptor.get !== undefined ||
-        descriptor.set !== undefined
+        descriptor.set !== undefined ||
+        key === '__proto__'
       )
         fail(
           'invalid-input',
           `${field}.${key}`,
           'detached source-path field must be an enumerable data property.',
         );
+      if (descriptor.value === undefined) continue;
       output[key] = detachDescriptorData(
         descriptor.value,
         `${field}.${key}`,
@@ -486,6 +491,7 @@ let claimed = false;
 export async function buildPatternImportDxfTwoSidedSeamMappingV2(
   inputValue: unknown,
   crypto: Pick<Crypto, 'subtle'> | undefined = globalThis.crypto,
+  savedCommit?: PatternImportDxfProductVerifiedReplayV1,
 ): Promise<PatternImportDxfTwoSidedSeamMappingResultV2> {
   if (claimed)
     return blocked(new MappingFailure('reentrant-call', 'input', 'reentrant V2 mapping refused.'));
@@ -504,7 +510,11 @@ export async function buildPatternImportDxfTwoSidedSeamMappingV2(
       fail('invalid-input', 'input.phaseD.sourceSha256', 'must be lowercase SHA-256.');
 
     const base = input.base as PatternImportDxfTwoSidedSeamMappingInputV1;
-    const baseResult = await buildPatternImportDxfTwoSidedSeamMappingV1(base);
+    const baseResult = await buildPatternImportDxfTwoSidedSeamMappingV1(
+      base,
+      { crypto },
+      savedCommit,
+    );
     if (
       baseResult.witness === null ||
       baseResult.mapping !== null ||

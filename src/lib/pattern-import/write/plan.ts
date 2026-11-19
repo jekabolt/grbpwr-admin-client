@@ -1,3 +1,16 @@
+import { num } from './format';
+import {
+  authoredAllowanceCornerMarker,
+  decodeAuthoredAllowanceCorner,
+  mapAuthoredAllowanceCorner,
+  matchesAuthoredAllowanceCorner,
+} from '../manifest/authored-allowance-corner';
+import {
+  mapAuthoredTurnAllowance,
+  turnAllowanceMarker,
+  verifyTurnAllowanceGeometry,
+} from '../manifest/authored-turn-allowance';
+import { readPairedAuthoredOutlineCorner } from '../manifest/authored-outline-corner';
 // PieceSpec[] (source frame) → PlannedBlock[] (written frame): everything the emitters need,
 // with every garment decision already taken. The emitters only serialise.
 //
@@ -19,13 +32,25 @@
 //   • every open 2-point L8 line (internal or fold) gets a midpoint: the card's parser takes any
 //     2-point open chain ≥ 1 cm as a grain candidate (pieces.ts), and a fold line won that way (K1 d).
 
+import {
+  authoredQuadraticGrid,
+  decodeAuthoredQuadratic,
+  isAuthoredInternalLabel,
+  mapAuthoredQuadratic,
+  sampleAuthoredQuadratic,
+} from '../manifest/authored-internal';
 import type {
+  AuthoredInternalLabel,
+  AuthoredQuadraticGrid,
   Affine,
   DraftScopeTarget,
   DrillFeature,
   FoldFeature,
   GrainFeature,
   InternalFeature,
+  ManifestAuthoredInsetOutlineCorner,
+  ManifestAuthoredTurnAllowance,
+  ManifestProtectedLineSplit,
   NotchFeature,
   PieceSizeSpec,
   PieceSpec,
@@ -33,6 +58,7 @@ import type {
 } from '../types';
 import { PATIMPORT } from '../types';
 import { stripSpikes } from '../spikes';
+import { transformCutLoops } from '../semantics/geom';
 import { fitGrainInside, pointOnRings } from '../semantics/grain-inside';
 import {
   IDENTITY,
@@ -69,12 +95,20 @@ export const LAYOUT_GAP_MM = 50;
 export const LAYOUT_ROW_MAX_MM = 4000;
 export const UNI_TOKEN = 'UNI';
 
-export type PlannedNotch = { a: PtMm; b: PtMm; depthMm: number; angleDeg: number };
+export type PlannedNotch = {
+  a: PtMm;
+  b: PtMm;
+  depthMm: number;
+  angleDeg: number;
+  authoredGroup?: NotchFeature['authoredGroup'];
+};
 /** A drill / button mark: a circle keeps the diameter it was drawn with; anything else is the square. */
 export type PlannedDrill = { at: PtMm; form: 'square' | 'circle' | 'point'; sizeMm: number };
 export type PlannedGrain = { tail: PtMm; tip: PtMm; barb: PtMm; u: PtMm };
 
 export type PlannedBlock = {
+  protectedLineSplit?: ManifestProtectedLineSplit;
+  authoredInsetOutlineCorner?: ManifestAuthoredInsetOutlineCorner;
   name: string;
   identity: string;
   /** Card token, or 'UNI' for an ungraded piece. */
@@ -96,7 +130,13 @@ export type PlannedBlock = {
   cutLoops: PtMm[][];
   seam: PtMm[] | null;
   /** L8 lines: internal features, then the fold line. Open 2-pt lines already densified. */
-  internal: { pts: PtMm[]; closed: boolean }[];
+  internal: {
+    pts: PtMm[];
+    closed: boolean;
+    authoredLabel?: AuthoredInternalLabel;
+    quadratic?: AuthoredQuadraticGrid;
+    turnAllowance?: ManifestAuthoredTurnAllowance;
+  }[];
   /** How many of `internal` are the fold line (0/1) — the manifest counts both as internal. */
   foldLines: number;
   /**
@@ -105,6 +145,8 @@ export type PlannedBlock = {
    * is only a reference (layer 8): a mirror line there would double the piece.
    */
   foldIsMirror: boolean;
+  /** A written mirror axis on a confirmed half. Older unresolved folds also set foldIsMirror. */
+  confirmedHalfFold?: true;
   drills: PlannedDrill[];
   grain: PlannedGrain | null;
   notches: PlannedNotch[];
@@ -156,18 +198,41 @@ function transformSize(s: PieceSizeSpec, t: Affine): PieceSizeSpec {
     seg: [P(n.seg[0]), P(n.seg[1])],
   }));
   const drills: DrillFeature[] = s.drills.map((d) => ({ ...d, at: P(d.at) }));
-  const internal: InternalFeature[] = s.internal.map((f) => ({ ...f, pts: mapPts(t, f.pts) }));
+  const internal: InternalFeature[] = s.internal.map((f) => ({
+    ...f,
+    pts: mapPts(t, f.pts),
+    ...(f.authoredQuadratic
+      ? { authoredQuadratic: mapAuthoredQuadratic(f.authoredQuadratic, P) }
+      : {}),
+    ...(f.authoredTurnAllowance
+      ? { authoredTurnAllowance: mapAuthoredTurnAllowance(f.authoredTurnAllowance, P) }
+      : {}),
+  }));
   const fold: FoldFeature | null = s.fold ? { ...s.fold, a: P(s.fold.a), b: P(s.fold.b) } : null;
   const cut = mapPts(t, s.cut);
   return {
     ...s,
+    ...(s.authoredAllowanceCorner
+      ? { authoredAllowanceCorner: mapAuthoredAllowanceCorner(s.authoredAllowanceCorner, P) }
+      : {}),
+    ...(s.authoredOutlineCorner
+      ? { authoredOutlineCorner: mapAuthoredQuadratic(s.authoredOutlineCorner, P) }
+      : {}),
     cut,
-    cutLoops: s.cutLoops?.map((loop) => mapPts(t, loop)),
+    cutLoops: transformCutLoops(t, s.cutLoops),
     seam: s.seam ? mapPts(t, s.seam) : null,
     grain,
     notches,
     drills,
     internal,
+    ...(s.textMarks?.length
+      ? {
+          textMarks: s.textMarks.map((mark) => ({ ...mark, at: P(mark.at) })),
+        }
+      : {}),
+    ...(s.pointMarks?.length
+      ? { pointMarks: s.pointMarks.map((mark) => ({ ...mark, at: P(mark.at) })) }
+      : {}),
     fold,
     bbox: bboxOf(cut),
     areaMm2: areaOf(cut),
@@ -178,7 +243,7 @@ const ccw = (pts: PtMm[]) => (signedArea(pts) < 0 ? [...pts].reverse() : pts);
 const preserveWinding = (before: readonly PtMm[], after: PtMm[]) =>
   signedArea(before) < 0 === signedArea(after) < 0 ? after : [...after].reverse();
 
-const cutBox = (s: PieceSizeSpec) => {
+export const pieceSizeCutBounds = (s: PieceSizeSpec) => {
   let box = bboxOf(s.cut);
   for (const loop of s.cutLoops ?? []) box = unionBox(box, bboxOf(loop));
   return box;
@@ -226,15 +291,20 @@ function deriveSibling(
 
 // ── written primitives ─────────────────────────────────────────────────────────────────────
 
-function grainArrow(g: GrainFeature, cut: readonly PtMm[]): PlannedGrain | null {
+function grainArrow(
+  g: GrainFeature,
+  cut: readonly PtMm[],
+  keepOriginalAnchor: boolean,
+): PlannedGrain | null {
   const L = dist(g.a, g.b);
   if (!(L > 0)) return null;
   const u = { x: (g.b.x - g.a.x) / L, y: (g.b.y - g.a.y) / L };
   const n = { x: -u.y, y: u.x };
   const originalMid = { x: (g.a.x + g.b.x) / 2, y: (g.a.y + g.b.y) / 2 };
-  const fitted = pointOnRings(originalMid, [cut])
-    ? ([g.a, g.b] as const)
-    : fitGrainInside(g.a, g.b, [cut], { minMm: 1 });
+  const fitted =
+    keepOriginalAnchor || pointOnRings(originalMid, [cut])
+      ? ([g.a, g.b] as const)
+      : fitGrainInside(g.a, g.b, [cut], { minMm: 1 });
   if (!fitted) return null;
   const mid = { x: (fitted[0].x + fitted[1].x) / 2, y: (fitted[0].y + fitted[1].y) / 2 };
   const tail = { x: mid.x - (GRAIN_SHAFT_MM / 2) * u.x, y: mid.y - (GRAIN_SHAFT_MM / 2) * u.y };
@@ -252,6 +322,26 @@ function plannedNotch(cut: PtMm[], n: NotchFeature, warnings: string[], who: str
   // (build.ts). One farther off was drawn on another line (a seam-line copy the adapter did not
   // fold) and lands on top of its twin — the written count still matches, so say so here.
   const moved = dist(n.at, q);
+  if (n.authoredGroup) {
+    const {
+      seg: [a, b],
+      authoredGroup,
+    } = n;
+    const depthMm = dist(a, b);
+    if (
+      moved > 0.001 ||
+      dist(n.at, a) > 0.001 ||
+      !(depthMm >= 1 - 1e-5 && depthMm <= PATIMPORT.notchMaxMm + 1e-5)
+    )
+      throw new Error(`${who}: the authored notch stroke moved off its exact cut edge.`);
+    return {
+      a,
+      b,
+      depthMm,
+      authoredGroup,
+      angleDeg: (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI,
+    };
+  }
   if (moved > NOTCH_SNAP_WARN_MM)
     warnings.push(`${who}: notch snapped ${moved.toFixed(1)} mm onto the cut line`);
   const a = cut[seg];
@@ -310,7 +400,9 @@ export function planBlocks(
   input: PieceSpec[],
   scope: DraftScopeTarget,
   warnings: string[] = [],
+  options: { keepOriginalGrainAnchor?: true; preserveNativeLayout?: true } = {},
 ): Plan {
+  const { keepOriginalGrainAnchor = false, preserveNativeLayout } = options;
   // 1. scope membership
   const inScope: PieceSpec[] = [];
   for (const p of input) {
@@ -360,8 +452,15 @@ export function planBlocks(
   let rowH = 0;
   for (const w of written) {
     if (!w.sizes.length) continue;
+    if (preserveNativeLayout) {
+      if (w.derivedFrom) {
+        throw new Error('A derived mirror needs its own layout before keeping native coordinates.');
+      }
+      offsets[w.spec.identity] = { dx: 0, dy: 0 };
+      continue;
+    }
     let box = bboxOf(w.sizes[0].cut);
-    for (const s of w.sizes) box = unionBox(box, cutBox(s)); // srcT already applied in derived sizes
+    for (const s of w.sizes) box = unionBox(box, pieceSizeCutBounds(s)); // srcT already applied
     const W = box.maxX - box.minX;
     const H = box.maxY - box.minY;
     if (cx > 0 && cx + W > LAYOUT_ROW_MAX_MM) {
@@ -387,14 +486,76 @@ export function planBlocks(
       const s = transformSize(s0, T);
       const name = blockNameOf(w.spec, s);
       const who = name;
-      // last defence: a zero-width out-and-back spike is never written (a needle on the line)
-      const cutS = stripSpikes(simplify(s.cut, true, WRITE_SIMPLIFY_MM));
-      const seamS = s.seam ? stripSpikes(simplify(s.seam, true, WRITE_SIMPLIFY_MM)) : null;
+      const insetWidth =
+        s.authoredOutlineCorner && !w.spec.ungraded && w.spec.allowance.allowanceMm > 0
+          ? w.spec.allowance.allowanceMm
+          : undefined;
+      const outline = (ring: readonly PtMm[]) =>
+        stripSpikes(
+          insetWidth === undefined
+            ? simplify(ring, true, WRITE_SIMPLIFY_MM)
+            : ring.map(({ x, y }) => ({ x: Number(num(x)), y: Number(num(y)) })),
+        );
+      // Preserve signed curve samples and the independently verified inset. A zero-width
+      // out-and-back spike is still never written.
+      const cutS = outline(s.cut);
+      const seamS = s.seam ? outline(s.seam) : null;
       const cut = ccw(cutS.ring);
       const cutLoops = (s.cutLoops ?? []).map((loop) =>
         preserveWinding(loop, stripSpikes(simplify(loop, true, WRITE_SIMPLIFY_MM)).ring),
       );
       const seam = seamS ? ccw(seamS.ring) : null;
+      let authoredAllowanceCorner;
+      if (s.authoredAllowanceCorner) {
+        const marker = authoredAllowanceCornerMarker(s.authoredAllowanceCorner);
+        const anchor = marker && decodeAuthoredAllowanceCorner(marker);
+        if (
+          !anchor ||
+          !seam ||
+          cutLoops.length ||
+          w.spec.pairOf ||
+          w.derivedFrom ||
+          s.fold ||
+          s.authoredOutlineCorner ||
+          s.internal.some((path) => path.authoredTurnAllowance) ||
+          anchor.widthMm !== w.spec.allowance.allowanceMm ||
+          !matchesAuthoredAllowanceCorner(cut, seam, anchor, false)
+        )
+          throw new Error(
+            `${who}: the allowance corner no longer matches its exact cut and sewing supports.`,
+          );
+        authoredAllowanceCorner = anchor;
+      }
+      const corner = s.authoredOutlineCorner;
+      let authoredOutlineCorner;
+      let authoredInsetOutlineCorner;
+      if (corner) {
+        const allowance = w.spec.allowance.allowanceMm;
+        const ordered = authoredQuadraticGrid(corner);
+        const reverse = authoredQuadraticGrid([corner[2], corner[1], corner[0]]);
+        const grid =
+          seam &&
+          [ordered, reverse].find(
+            (value) => value && readPairedAuthoredOutlineCorner(cut, seam, value, insetWidth),
+          );
+        if (
+          (insetWidth === undefined
+            ? !w.spec.ungraded || w.sizes.length !== 1 || allowance !== 0
+            : s.fold ||
+              s.authoredAllowanceCorner ||
+              s.internal.some((p) => p.authoredTurnAllowance)) ||
+          cutLoops.length ||
+          w.spec.pairOf ||
+          w.derivedFrom ||
+          !grid
+        )
+          throw new Error(
+            `${who}: rounded corner no longer matches the exact cut and sewing outlines.`,
+          );
+        authoredOutlineCorner = decodeAuthoredQuadratic(grid);
+        if (insetWidth !== undefined)
+          authoredInsetOutlineCorner = { controls: grid, widthMm: insetWidth };
+      }
       // …and never silently dropped (Codex, r5a): what semantics did not already turn into a notch
       // and still goes in and out of the cut line ≥ notchMinMm is written as a notch there, warned
       const slits: NotchFeature[] = cutS.excursions
@@ -416,14 +577,55 @@ export function planBlocks(
         warnings.push(
           `${who}: removed ${cutS.spikes + (seamS?.spikes ?? 0)} zero-width spike(s) from the ${cutS.spikes ? 'cut' : 'seam'} line${slits.length ? ` — ${slits.length} written as notch(es) (${slits.map((e) => `${e.depthMm.toFixed(1)} mm at ${e.at.x.toFixed(1)}, ${e.at.y.toFixed(1)}`).join('; ')})` : ''}`,
         );
-      const sNotches = slits.length ? [...s.notches, ...slits] : s.notches;
+      const sNotches = s.notches.some(({ authoredGroup }) => authoredGroup)
+        ? [
+            ...s.notches.filter(({ authoredGroup }) => !authoredGroup),
+            ...slits,
+            ...s.notches.filter(({ authoredGroup }) => authoredGroup),
+          ]
+        : slits.length
+          ? [...s.notches, ...slits]
+          : s.notches;
       if (!seam) warnings.push(`${who}: no seam line — layer 14 omitted (the gate will block)`);
-      const internal = s.internal.map((f) => ({
-        pts: f.closed
-          ? simplify(f.pts, true, WRITE_SIMPLIFY_MM)
-          : densifyOpen2(simplify(f.pts, false, WRITE_SIMPLIFY_MM)),
-        closed: f.closed,
-      }));
+      const internal: PlannedBlock['internal'] = s.internal.map((f) => {
+        if (f.authoredTurnAllowance) {
+          const marker = turnAllowanceMarker(f.authoredTurnAllowance);
+          const pts = densifyOpen2(f.pts);
+          if (
+            f.label !== 'draft-cad:pattern-line' ||
+            f.closed ||
+            !marker ||
+            !seam ||
+            cutLoops.length ||
+            w.spec.pairOf ||
+            w.derivedFrom ||
+            !verifyTurnAllowanceGeometry(marker, cut, seam, pts, false)
+          )
+            throw new Error(
+              `${who}: the authored turn no longer matches its native crease and paired outline edges.`,
+            );
+          return { pts, closed: false, authoredLabel: f.label, turnAllowance: marker };
+        }
+        if (f.authoredQuadratic) {
+          const quadratic = authoredQuadraticGrid(f.authoredQuadratic);
+          const pts = quadratic && sampleAuthoredQuadratic(quadratic);
+          if (f.label !== 'draft-cad:french-curve' || f.closed || !quadratic || !pts)
+            throw new Error(
+              `${who}: exact French curve cannot be represented as an open native path.`,
+            );
+          return { pts, closed: false, authoredLabel: f.label, quadratic };
+        }
+        return {
+          pts:
+            f.label === 'draft-cad:dart' || f.label === 'draft-cad:fish-eye'
+              ? f.pts
+              : f.closed
+                ? simplify(f.pts, true, WRITE_SIMPLIFY_MM)
+                : densifyOpen2(simplify(f.pts, false, WRITE_SIMPLIFY_MM)),
+          closed: f.closed,
+          ...(isAuthoredInternalLabel(f.label) ? { authoredLabel: f.label } : {}),
+        };
+      });
       let foldLines = 0;
       if (s.fold) {
         // L13: a half on fold (owner decision 19.10 a) is meant so — its fold line IS the mirror line
@@ -435,7 +637,7 @@ export function planBlocks(
         foldLines = 1;
       }
       const foldIsMirror = foldLines === 1 && !w.spec.unfoldedFold;
-      const grain = s.grain ? grainArrow(s.grain, cut) : null;
+      const grain = s.grain ? grainArrow(s.grain, cut, keepOriginalGrainAnchor) : null;
       if (!grain) warnings.push(`${who}: no grain line`);
       const notches = sNotches.map((n) => plannedNotch(cut, n, warnings, who));
       const annotation: string[] = [];
@@ -446,16 +648,29 @@ export function planBlocks(
       const srcT = w.srcT.get(s0.rank) ?? IDENTITY;
       const size: PieceSizeSpec = {
         ...s,
+        ...(authoredAllowanceCorner ? { authoredAllowanceCorner } : {}),
+        ...(authoredOutlineCorner ? { authoredOutlineCorner } : {}),
         cut,
         cutLoops,
         seam,
         notches: sNotches,
-        bbox: cutBox({ ...s, cut, cutLoops }),
+        internal: s.internal.map((feature, index) => {
+          const line = internal[index]!;
+          return line.quadratic
+            ? {
+                ...feature,
+                pts: line.pts,
+                authoredQuadratic: decodeAuthoredQuadratic(line.quadratic),
+              }
+            : feature;
+        }),
+        bbox: pieceSizeCutBounds({ ...s, cut, cutLoops }),
         areaMm2: cutArea(cut, cutLoops),
       };
       outSizes.push(size);
       blocks.push({
         name,
+        ...(authoredInsetOutlineCorner ? { authoredInsetOutlineCorner } : {}),
         identity: w.spec.identity,
         sizeToken: w.spec.ungraded ? UNI_TOKEN : s.sizeToken,
         labelSize: s.sizeToken,
@@ -472,6 +687,7 @@ export function planBlocks(
         internal,
         foldLines,
         foldIsMirror,
+        ...(foldIsMirror && w.spec.halfFold ? { confirmedHalfFold: true as const } : {}),
         drills: s.drills.map((d) => ({
           at: d.at,
           form: d.form ?? 'square',

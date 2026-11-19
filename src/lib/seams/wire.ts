@@ -175,6 +175,8 @@ export function splitWire(wire: readonly TechCardSeamWire[] | undefined): {
   const poses: StoredPose[] = [];
   let unreadable = 0;
   for (const w of wire ?? []) {
+    // Point closures read through the exact Assembly source and never enter the edge resolver.
+    if (w.kind === 'TECH_CARD_SEAM_KIND_POINT_CLOSURE') continue;
     if (isPoseWire(w)) {
       const pose = poseFromWire(w);
       if (pose) poses.push(pose);

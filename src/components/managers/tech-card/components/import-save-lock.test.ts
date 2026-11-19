@@ -13,10 +13,28 @@ import {
 import type { CardDraft } from 'lib/pattern-import/types';
 import { REBUILD_WRITE_TRIES, writeOverOnlyVersionMoved } from 'lib/fusing-dxf/regenerate';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { rebuildReadOnlyVersionMoved } from './nesting/fusing-sheets-stage';
 import { applyRunningLabel } from './pattern-import/apply-label';
 import { importRowsLanded } from './pattern-import/card-apply';
 import { onlyVersionMoved, type CardBase } from './useTechCardAutosave';
+
+it('keeps explicit DXF review from saving through the persisted Autopilot preference', () => {
+  const patterns = readFileSync(new URL('./patterns-field.tsx', import.meta.url), 'utf8');
+  const wizard = readFileSync(
+    new URL('./pattern-import/import-wizard.tsx', import.meta.url),
+    'utf8',
+  );
+  expect(patterns).toContain('requireManualApply: review');
+  expect(patterns).toContain('requireManualApply={importing.requireManualApply}');
+  expect(wizard).toContain('() => !requireManualApply && readAutopilotPref()');
+  const automaticApply = wizard.slice(
+    wizard.indexOf('// the drive stops on check:'),
+    wizard.indexOf('void autopilotApply('),
+  );
+  expect(automaticApply).toMatch(/if\s*\(\s*requireManualApply\s*\|\|/u);
+  expect(automaticApply).toContain('return;');
+});
 
 type Row = NonNullable<common_TechCardInsert['patterns']>[number];
 
@@ -127,6 +145,89 @@ async function importOnce(page: ReturnType<typeof fakePage>, scopeKey: string, f
     mintKey: () => `K${++n}-${filename}`,
   });
 }
+
+describe('explicit new revision of a matching DXF', () => {
+  const filename = 'main.dxf';
+  const existing = {
+    url: 'https://cdn.test/original.dxf',
+    filename,
+    fabricPurpose: 'main',
+    lineKey: 'main-row',
+    sizeId: 56,
+    version: 3,
+    sizeBytes: 100,
+    sha256: 'a'.repeat(64),
+  } as unknown as Row;
+  const draft = draftOf('main', filename);
+  draft.scopes[0].alreadyOnCard = { url: existing.url!, filename };
+  draft.aliases = [
+    {
+      scopeKey: 'main',
+      fabricPurpose: 'main',
+      bomLineKey: '',
+      blockName: 'FLAP',
+      pieceLineKey: 'flap-piece',
+    },
+  ];
+  const uploadResult = {
+    url: 'https://cdn.test/replaced.dxf',
+    filename,
+    sizeBytes: 120,
+    sha256: 'b'.repeat(64),
+  };
+
+  it('reuses by default and replaces the same stable row only on an explicit revision save', async () => {
+    const server = fakeServer(cardAt(4, [existing]));
+    const page = fakePage(server);
+    page.form.pieces = [{ lineKey: 'flap-piece' }];
+    page.form.aliases = draft.aliases;
+    const upload = vi.fn(async () => uploadResult);
+    const deps = {
+      read: page.read,
+      write: page.write,
+      upload,
+      save: page.save,
+      scopeOf: (row: { fabricPurpose?: string }) => row.fabricPurpose ?? '',
+      storageSizeId: 56,
+      readPreviousLockVersion: () => server.get().lockVersion ?? 0,
+    };
+    await expect(applyDraft(draft, deps)).resolves.toMatchObject({ writes: 0, reused: ['main'] });
+    expect(upload).not.toHaveBeenCalled();
+
+    await expect(applyDraft(draft, { ...deps, replaceMatchingFile: true })).resolves.toMatchObject({
+      replaced: [{ lineKey: 'main-row', oldUrl: existing.url, newUrl: uploadResult.url }],
+      commitReceipt: {
+        previousLockVersion: 4,
+        scopes: [{ patternLineKey: 'main-row', patternUrl: uploadResult.url, patternSizeId: 56 }],
+      },
+    });
+    expect(upload).toHaveBeenCalledOnce();
+    expect(server.get().techCard?.patterns).toEqual([
+      expect.objectContaining({ lineKey: 'main-row', url: uploadResult.url }),
+    ]);
+  });
+
+  it('refuses to write if the matching revision moves during upload', async () => {
+    const page = fakePage(fakeServer(cardAt(4, [existing])));
+    const write = vi.fn();
+    const save = vi.fn();
+    const result = await applyDraft(draft, {
+      read: page.read,
+      write,
+      upload: async () => {
+        page.form.patterns[0]!.version = 4;
+        return uploadResult;
+      },
+      save,
+      scopeOf: (row) => row.fabricPurpose ?? '',
+      storageSizeId: 56,
+      replaceMatchingFile: true,
+    });
+    expect(result).toMatchObject({ ok: false, message: expect.stringContaining('row moved') });
+    expect(write).not.toHaveBeenCalled();
+    expect(save).not.toHaveBeenCalled();
+  });
+});
 
 describe('two pattern imports in a row (T3)', () => {
   it('a version-only bump between them: the second import saves on the first click', async () => {

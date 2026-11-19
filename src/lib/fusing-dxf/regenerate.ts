@@ -1,4 +1,5 @@
 import { adminService } from 'api/api';
+import { GENERATED_FUSING_NAME_PREFIX, isGenerated } from './generated-pattern';
 import { OPERATION_FIELDS_AWARE } from 'lib/tech-card-operation-aware';
 import type {
   common_Size,
@@ -72,7 +73,7 @@ import type {
 import { attachGradeMaps } from './grade-map-source';
 import { fuseSpecFromPiece } from './types';
 
-export const GENERATED_FUSING_NAME_PREFIX = 'Fusing · generated · ';
+export { GENERATED_FUSING_NAME_PREFIX, isGenerated } from './generated-pattern';
 
 export type RegenerateFusingSheetsResult = {
   generated: number;
@@ -118,9 +119,6 @@ function interliningLines(items: readonly common_TechCardBomItem[]): FusingBomLi
     ];
   });
 }
-
-export const isGenerated = (pattern: common_TechCardSizePattern) =>
-  (pattern.name ?? '').startsWith(GENERATED_FUSING_NAME_PREFIX);
 
 function isMainPattern(
   pattern: common_TechCardSizePattern,
@@ -763,6 +761,9 @@ export async function regenerateFusingSheets(
         },
         expectedLockVersion,
         snapshotReason: 'Regenerate generated fusing DXF sheets',
+        guardedPieceRename: undefined,
+        guardedPieceJoin: undefined,
+        guardedAssemblyPatternUpdate: undefined,
         saveSessionId,
       });
     wroteOver = await writeOverOnlyVersionMoved(

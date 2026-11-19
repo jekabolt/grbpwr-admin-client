@@ -651,7 +651,7 @@ console.log('\nunit name gesture — one click on the text, parent gestures ever
   const unitBlock = src('src/components/managers/tech-card/components/unit-block.tsx');
   const inlineName =
     unitBlock.match(
-      /export function InlineUnitName[\s\S]*?\/\*\* The labelled PRODUCES control/,
+      /export function InlineUnitName[\s\S]*?(?=\nexport function UnitNameField\b)/,
     )?.[0] ?? '';
 
   ck(

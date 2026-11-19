@@ -88,8 +88,12 @@ export function createPatternImportDxfPhaseEZeroConnectAuthoringRefreshOwnerV1(i
   refreshOwner: PatternImportDxfPhaseEZeroConnectPreparedAuthorityRefreshOwnerV1;
 }): PatternImportDxfPhaseEZeroConnectAuthoringRefreshOwnerV1 | null {
   if (!exactPreparedBinding(input)) return null;
+  const refresh: PatternImportDxfPhaseEZeroConnectPreparedAuthorityRefreshOwnerV1['refresh'] = (
+    signal,
+    lock,
+  ) => input.refreshOwner.refresh(signal, lock);
   const owner = Object.freeze({
-    refresh: (signal: AbortSignal) => input.refreshOwner.refresh(signal),
+    refresh,
   }) as PatternImportDxfPhaseEZeroConnectAuthoringRefreshOwnerV1;
   refreshOwnerStates.set(
     owner,

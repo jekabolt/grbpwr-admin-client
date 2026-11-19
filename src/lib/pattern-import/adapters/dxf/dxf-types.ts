@@ -4,8 +4,19 @@
 import type {
   Affine,
   AllowanceDecision,
+  AuthoredAllowanceCorner,
+  AuthoredInternalLabel,
+  AuthoredNotchStroke,
+  AuthoredPointMark,
+  AuthoredQuadraticControls,
+  AuthoredTurnAllowance,
+  AuthoredTextMark,
   BoxMm,
   Feature,
+  ManifestAuthoredInternalPath,
+  ManifestAuthoredTextMark,
+  ManifestAuthoredNotchGroup,
+  ManifestBlock,
   PathId,
   PieceCandidate,
   PtMm,
@@ -85,6 +96,12 @@ export type DxfUnits = {
   evidence: string;
 };
 
+export type DxfAuthoredOutlineCornerMarker = Readonly<{
+  controls: NonNullable<ManifestBlock['authoredOutlineCorner']>;
+  insetWidthMm?: number;
+  contour?: NonNullable<ManifestBlock['contour']>;
+}>;
+
 export type DxfMeta = {
   version: string | null;
   dialect: DxfDialect;
@@ -95,6 +112,20 @@ export type DxfMeta = {
   binary: 'r12' | 'r13+' | null;
   units: DxfUnits;
   manifest: boolean;
+  /** Display names from the validated product manifest, bound to exact native blocks. */
+  pieceNamesByBlock?: ReadonlyMap<string, { identity: string; displayName: string }>;
+  /** Blocks marked as confirmed single half-on-fold in the validated product manifest. */
+  halfFoldBlocks?: ReadonlySet<string>;
+  /** Manifest blocks explicitly emitted with a sewing boundary and zero allowance. */
+  zeroAllowanceSeamBlocks?: ReadonlyMap<string, NonNullable<ManifestBlock['contour']>>;
+  authoredInternalByBlock?: ReadonlyMap<string, readonly ManifestAuthoredInternalPath[]>;
+  authoredAllowanceCornerByBlock?: ReadonlyMap<
+    string,
+    NonNullable<ManifestBlock['authoredAllowanceCorner']>
+  >;
+  authoredOutlineCornerByBlock?: ReadonlyMap<string, DxfAuthoredOutlineCornerMarker>;
+  authoredTextByBlock?: ReadonlyMap<string, readonly ManifestAuthoredTextMark[]>;
+  authoredNotchesByBlock?: ReadonlyMap<string, readonly ManifestAuthoredNotchGroup[]>;
   /** Proven by the generator's DXF marker or the system-owned card-row flag. */
   generatedFusing: boolean;
   /** Model-space `KEY: value` texts (AAMA header: STYLE NAME, SAMPLE SIZE, UNITS, AUTHOR…). */
@@ -188,6 +219,9 @@ export type DxfNotch = {
   /** Distance from `at` to that contour, mm. */
   distMm: number;
   source: 'line' | 'point' | 'derived';
+  authoredGroup?: AuthoredNotchStroke;
+  /** Exact native end for a deliberately authored angled or parallel stroke. */
+  authoredEnd?: PtMm;
   /** Every source path folded into this logical notch (twins and duplicates included). */
   paths: PathId[];
   /** For `derived` notches: the sample-size notch it was transferred from. */
@@ -275,6 +309,8 @@ export type DxfBlockPiece = {
   cut: DxfContour | null;
   seam: DxfContour | null;
   seamSource: 'L14' | 'L8-loop' | 'L8-chain' | null;
+  /** Both labelled native boundaries are present and exactly coincide by declared design. */
+  zeroAllowanceSeam?: true;
   /** L1 and L14 are the same contour (mode B marker). */
   cutEqualsSeam: boolean;
   /** Median distance seam → cut over seam vertices, mm (the allowance as drawn). */
@@ -285,7 +321,14 @@ export type DxfBlockPiece = {
   /** `sizeMm`: the drawn mark across (a square's side, a circle's diameter); 0 for a bare point. */
   drills: { at: PtMm; path: PathId; form: 'square' | 'circle' | 'point'; sizeMm: number }[];
   roles: Record<PathId, PathRole>;
+  authoredInternalLabels?: ReadonlyMap<PathId, AuthoredInternalLabel>;
+  authoredQuadraticByPath?: ReadonlyMap<PathId, AuthoredQuadraticControls>;
+  authoredTurnAllowanceByPath?: ReadonlyMap<PathId, AuthoredTurnAllowance>;
+  authoredAllowanceCorner?: AuthoredAllowanceCorner;
+  authoredOutlineCorner?: AuthoredQuadraticControls;
   texts: TextId[];
+  textMarks?: AuthoredTextMark[];
+  pointMarks?: AuthoredPointMark[];
   gradePoints: { turn: number; curve: number };
   pointNumbers: number;
   annotations: TextId[];
@@ -359,6 +402,7 @@ export type DxfPieceCandidate = PieceCandidate & {
     block: string;
     group: number;
     identity: string;
+    savedDisplayName?: string;
     size: string;
     /** Whether the size came from an explicit label or the block-name tail. */
     sizeSource?: DxfBlockPiece['sizeSource'];
@@ -366,9 +410,16 @@ export type DxfPieceCandidate = PieceCandidate & {
     identitySource?: DxfBlockPiece['identitySource'];
     /** Proven by the generator's DXF marker or the system-owned card-row flag. */
     generatedFusing?: boolean;
+    /** Routing hint; the decoder-bound surface owns the exact native cut loops. */
+    nativeCutHoles?: true;
     features: Feature[];
     /** The outer contour is L14 (mode A: the true graded line) — cut = outward offset. */
     outerIsSeam: boolean;
+    zeroAllowanceSeam?: true;
+    authoredAllowanceCorner?: AuthoredAllowanceCorner;
+    authoredOutlineCorner?: AuthoredQuadraticControls;
+    textMarks?: AuthoredTextMark[];
+    pointMarks?: AuthoredPointMark[];
     /** The block's `seamPair` allowance, mm (the uniform same-look loop inside the outline). */
     seamPairMm?: number;
     /** F14 R5: the block is inserted this many times (identical copies) = its cut quantity. */

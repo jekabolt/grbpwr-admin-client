@@ -25,6 +25,10 @@ import type {
   DxfProductPhaseDReplayRequestV1,
   DxfProductPhaseDReplayStageOutputV1,
 } from './dxf-product-phase-d-replay-v1';
+import type {
+  DxfNativeSewingReplayRequestV1,
+  DxfNativeSewingReplayStageOutputV1,
+} from './dxf-native-sewing-replay-v1';
 export type { SheetAnswer, SheetLegend, SheetPieces } from './pieces/sheets';
 
 // The garment passport (auto/PASSPORT.md): its own module, re-exported here for the UI.
@@ -1450,12 +1454,16 @@ type FeatureBase = {
   confidence: number;
 };
 
+export type AuthoredNotchShape = 'double' | 'triple' | 'v';
+export type AuthoredNotchStroke = { groupId: string; shape: AuthoredNotchShape; index: number };
+
 export type NotchFeature = FeatureBase & {
   kind: 'notch';
   /** Point ON the contour and the short segment as drawn. */
   at: PtMm;
   seg: [PtMm, PtMm];
   depthMm: Mm;
+  authoredGroup?: AuthoredNotchStroke;
   /**
    * GRADE P1: not drawn in this size — placed from the sizes that draw it (pieces/gfit/notch-grade:
    * ≥ 2 drawn copies at a grade-consistent place on the piece's canonical topology, or the
@@ -1527,11 +1535,47 @@ export type FoldFeature = FeatureBase & {
   b: PtMm;
   label?: string; // "СГИБ", "Stoffbruch", "fold"
 };
+export type AuthoredQuadraticControls = readonly [PtMm, PtMm, PtMm];
+
+export type AuthoredAllowanceCornerVariant =
+  | 'auto'
+  | 'mitre'
+  | 'square'
+  | 'clip'
+  | 'foldback-before'
+  | 'foldback-after';
+export type AuthoredAllowanceCorner = {
+  variant: AuthoredAllowanceCornerVariant;
+  /** Previous vertex, corner and following vertex on the original directed sewing ring. */
+  sewing: [PtMm, PtMm, PtMm];
+  widthMm: number;
+};
+export type ManifestAuthoredAllowanceCorner = {
+  variant: AuthoredAllowanceCornerVariant;
+  sewing: [number, number, number, number, number, number];
+  width: number;
+};
+
+export type AuthoredTurnAllowanceVariant = 'single-turn-hem' | 'cut-on-facing';
+export type AuthoredTurnAllowance = {
+  variant: AuthoredTurnAllowanceVariant;
+  cut: [PtMm, PtMm];
+  sewing: [PtMm, PtMm];
+};
+export type ManifestAuthoredTurnAllowance = {
+  variant: AuthoredTurnAllowanceVariant;
+  cut: [number, number, number, number];
+  sewing: [number, number, number, number];
+};
+
 export type InternalFeature = FeatureBase & {
   kind: 'internal';
   pts: PtMm[];
   closed: boolean;
   label?: string; // "dart", "pocket placement"
+  /** Exact authored start, control and end, in the same frame as pts. */
+  authoredQuadratic?: AuthoredQuadraticControls;
+  authoredTurnAllowance?: AuthoredTurnAllowance;
   /** GRADE P1: not drawn in this size — placed by the operator's "in every size" at its graded place */
   graded?: { from: string[]; answered?: boolean };
 };
@@ -1666,6 +1710,9 @@ export type ShapeIssue = {
   why: string;
 };
 
+export type AuthoredTextMark = { at: PtMm; text: string };
+export type AuthoredPointMark = { at: PtMm; kind: 'draft-point' | 'point-only' };
+
 export type PieceSizeSpec = {
   rank: number;
   sizeToken: string; // card token written into the block name
@@ -1682,6 +1729,11 @@ export type PieceSizeSpec = {
   notches: NotchFeature[];
   drills: DrillFeature[];
   internal: InternalFeature[];
+  textMarks?: AuthoredTextMark[];
+  pointMarks?: AuthoredPointMark[];
+  /** Exact authored rounded-corner controls in the current sheet coordinate frame. */
+  authoredOutlineCorner?: AuthoredQuadraticControls;
+  authoredAllowanceCorner?: AuthoredAllowanceCorner;
   fold: FoldFeature | null;
   offset: OffsetReport | null;
   /** Wall chains the cut line came from — coverage/Hausdorff are computed against them. */
@@ -1799,6 +1851,10 @@ export type SemanticsInput = {
    * a..b in each size) as the mirror line.
    */
   operatorFold?: Partial<Record<SeedId, { a: PtMm; b: PtMm; half?: true }>>;
+  /** Current product saved read only. Each rank must match its own decoder-bound physical axis. */
+  savedNativeHalfFolds?: Partial<
+    Record<SeedId, readonly (ProductDxfFoldAxis & { sizeId: number; sourceSha256: string })[]>
+  >;
   /**
    * Seeds the AI, reading the drawing, says are cut on fold (F10 `suggestion.onFold`) — the sheet's
    * words may be curves. Asked, never unfolded on that alone (E1a, D3).
@@ -2159,6 +2215,8 @@ export type DraftScopeTarget = {
 export type FabricAssignment = {
   /** purpose → seeds; a seed may be in several purposes. */
   byPurpose: Record<FabricPurposeKey, SeedId[]>;
+  /** Whole DXF families explicitly omitted on an import opened from a fabric slot. */
+  dxfOmissions?: { scopeKey: string; seeds: SeedId[] };
   /** Interlining exists in BOM → its own DXF; else these seeds get `fused`. */
   interliningInBom: boolean;
   proposals: FabricProposal[];
@@ -2229,7 +2287,45 @@ export const PATTERN_IMPORT_DXF_PRODUCT_WRITER_REPLAY_CARRIER_V1 =
  * no caller-supplied replacement bytes or digest: a later owner must rerun the production writer,
  * embed the scope's final manifest and hash that rebuilt text itself.
  */
+/** Selected occurrence necessary to reproduce an already verified ordinary writer output. */
+export type RetainedLineSplit = {
+  block: string;
+  identity: string;
+  sizeId: number;
+  sizeToken: string;
+  rank: number;
+  record: ManifestProtectedLineSplit;
+};
+
+/** Private host-to-worker open message. A file or per-stage input cannot opt into this channel. */
+export type ReviewedAddPointOpen = Readonly<{
+  authority?: 'verified-saved-read';
+  fileSha256: string;
+  rowSha256: string;
+  ringSha256: string;
+  entityId: string;
+  techCardId: number;
+  scopeKey: string;
+  block: string;
+  identity: string;
+  sizeId: number;
+  sizeToken: string;
+  rank: number;
+  pieceLineKey: string;
+}>;
+
+/** Current card projection supplied only by the host at the ordinary write phase. */
+export type ReviewedAddPointAtWrite = Readonly<{
+  authority?: 'verified-saved-read';
+  fileSha256: string;
+  techCardId: number;
+  scopeKey: string;
+  pieceLineKey: string;
+  aliases: readonly Readonly<{ scopeKey: string; blockName: string; pieceLineKey: string }>[];
+}>;
+
 export type DraftWriterReplayV1 = {
+  retainedLineSplit?: RetainedLineSplit;
   schemaVersion: typeof PATTERN_IMPORT_DXF_PRODUCT_WRITER_REPLAY_CARRIER_V1;
   job: WriteJob;
   createdAt: string;
@@ -2397,6 +2493,8 @@ export type CardDraft = {
   dxfProvenance?: DxfPipelineProvenanceStageOutputV1;
   /** Opt-in detached Phase-D inputs for a later fresh G4F1 V2 replay; never contains raw DXF. */
   dxfPhaseDReplay?: DxfProductPhaseDReplayStageOutputV1;
+  /** Separate explicitly drawn native sewing view; never replaces the writer source draft. */
+  dxfNativeSewingReplay?: DxfNativeSewingReplayStageOutputV1;
   /** Re-import review only: card settings win; a later UI may warn about these differences. */
   pieceDifferences?: DraftPieceDifference[];
   /** Re-import: blocks bound to no piece because nothing proves which card piece they are. */
@@ -2593,7 +2691,79 @@ export type ManifestPiece = {
   halfFold?: true;
 };
 
+// Describes one actual vertex in an emitted ring. This metadata does not authorize an edit.
+export type ManifestProtectedLineSplit = {
+  v: 1;
+  entityId: string;
+  role: 'cut' | 'seam';
+  sourceSha256: string;
+  sourcePathId: number;
+  sourceStartPointIndex: number;
+  pointIndex: number;
+  ringPointCount: number;
+  ringSha256: string;
+  fromMm: [number, number];
+  pointMm: [number, number];
+  toMm: [number, number];
+  progress: number;
+};
+
+export type AuthoredInternalLabel =
+  | 'draft-cad:internal-line'
+  | 'draft-cad:pattern-line'
+  | 'draft-cad:french-curve'
+  | 'draft-cad:guideline'
+  | 'draft-cad:dart'
+  | 'draft-cad:fish-eye'
+  | 'draft-cad:cross';
+
+export type AuthoredQuadraticGrid = [number, number, number, number, number, number];
+
+export type ManifestAuthoredInternalPath = {
+  /** Zero-based order among the block's native layer-8 paths. */
+  index: number;
+  label: AuthoredInternalLabel;
+  closed: boolean;
+  /** Alternating coordinates on the writer's 0.000001 mm grid, in block coordinates. */
+  vertices: number[];
+  /** Optional start, control and end on the same grid as the native sampled vertices. */
+  quadratic?: AuthoredQuadraticGrid;
+  /** Explicit turn intent on the original finite L14 crease and its paired outer support. */
+  turnAllowance?: ManifestAuthoredTurnAllowance;
+};
+
+export type ManifestAuthoredTextMark = {
+  /** Anchor on the native writer grid, in block coordinates. */
+  anchor: [number, number];
+  text: string;
+};
+
+export type ManifestAuthoredNotchGroup = {
+  groupId: string;
+  shape: AuthoredNotchShape;
+  /** First stroke among the block's native layer-4 LINE entities. */
+  firstStroke: number;
+  /** Each stroke's ordered start and end on the writer's 0.000001 mm grid. */
+  vertices: number[];
+};
+
+export type ManifestAuthoredInsetOutlineCorner = {
+  controls: AuthoredQuadraticGrid;
+  widthMm: number;
+};
+
 export type ManifestBlock = {
+  protectedLineSplit?: ManifestProtectedLineSplit;
+  authoredInternal?: ManifestAuthoredInternalPath[];
+  /** One exact quadratic corner on the same closed L1/L14 outline, in block grid units. */
+  authoredOutlineCorner?: AuthoredQuadraticGrid;
+  /** Unequal perpendicular setbacks on one verified paired L1/L14 corner. */
+  authoredFixedEndOutlineCorner?: AuthoredQuadraticGrid;
+  /** A ranked L1 quadratic whose independent L14 has the declared native inset. */
+  authoredInsetOutlineCorner?: ManifestAuthoredInsetOutlineCorner;
+  authoredAllowanceCorner?: ManifestAuthoredAllowanceCorner;
+  authoredText?: ManifestAuthoredTextMark[];
+  authoredNotches?: ManifestAuthoredNotchGroup[];
   block: string;
   identity: PieceKey;
   sizeToken: string;
@@ -2776,7 +2946,13 @@ export type GateCheckId =
  * collapse on the geometry alone. (No GateCheckId of its own: the check step's label map is the UI
  * session's file — G26 rides in G22 / G8 the way KINKS' G25 rides in G22.)
  */
-export type GradeEvidence = { hold?: string; warn?: string; drawsOwn?: boolean };
+export type GradeEvidence = {
+  hold?: string;
+  warn?: string;
+  drawsOwn?: boolean;
+  /** An independently labelled source DXF block draws the same contour at this other rank. */
+  coincidentDxfRank?: number;
+};
 
 /**
  * MOOD Ф0 (G22): per written size block, the lines of its rank's pen near it and the common edges
@@ -2860,6 +3036,8 @@ export type ConversionManifest = {
   layers: LayerMap;
   /** Layer 1 is the FINAL cutting line: the card must NOT add allowance again. */
   cutLayerIsFinal: true;
+  /** Draw in the existing native coordinate frame when reopening this card and material. */
+  preserveNativeLayout?: true;
   /** File-level allowance, mm, informational (per piece in `pieces`). */
   allowanceMm: Mm;
   sizes: ManifestSize[];
@@ -2956,6 +3134,8 @@ export type WriteJob = {
   generator: string;
   /** Which CLO dialect to emit (K2 decides the default; both must read back through our parser). */
   dialect: 'r12' | 'r2000';
+  /** An exact native edit keeps the recorded block coordinates. */
+  preserveNativeLayout?: true;
   /** A10: the autopilot's assumptions, carried into the manifest as they are. */
   autopilot?: AutopilotRecord;
   /** PASSPORT Ф1: the document's digest, carried into the manifest as it is. */
@@ -3203,6 +3383,8 @@ export type StageName =
   | 'dxf-provenance'
   /** Separate opt-in source/contour replay carrier; the public provenance stage stays path-id-free. */
   | 'dxf-phase-d-replay'
+  /** Additive explicit L14 native sewing replay; never substitutes the outer contour stage. */
+  | 'dxf-native-sewing-replay'
   | 'fabrics'
   | 'render-som'
   /** A9 side stage: page thumbnails + stats for the AI page-role call (invalidates nothing). */
@@ -3210,6 +3392,16 @@ export type StageName =
   | 'write';
 
 /** Input/output of each stage as the worker sees them (session-held artifacts by id). */
+export type ProductDxfFoldAxis = {
+  seed: SeedId;
+  block: string;
+  identity: string;
+  size: string;
+  rank: number;
+  a: PtMm;
+  b: PtMm;
+};
+
 export type StageIO = {
   extract: {
     in: { opts: ExtractOpts };
@@ -3224,6 +3416,8 @@ export type StageIO = {
        * sheet, legend and seed steps.
        */
       presegmented?: boolean;
+      /** Actual header of a single, manifest-bearing native product DXF. */
+      productWriterDialect?: WriteJob['dialect'];
       /** Traced raster pages (F11): the correction each page already carries (`IRPage.calibration`). */
       calibrations?: { file: FileId; page: PageIndex; calibration: RasterCalibration }[];
       /** PASSPORT Ф1: what the document says, as read before any piece (absent = nothing read). */
@@ -3343,6 +3537,8 @@ export type StageIO = {
     out: {
       seeds: Seed[];
       families: PieceFamily[];
+      /** Same native decoder, exact Layer 6 path and one owning cut edge. */
+      productFoldAxes?: ProductDxfFoldAxis[];
       /** D6: the pieces read across the tile sheets (copies, alternatives, splits); null = one sheet. */
       sheets?: SheetPieces | null;
       /**
@@ -3394,6 +3590,10 @@ export type StageIO = {
   'dxf-phase-d-replay': {
     in: DxfProductPhaseDReplayRequestV1;
     out: DxfProductPhaseDReplayStageOutputV1;
+  };
+  'dxf-native-sewing-replay': {
+    in: DxfNativeSewingReplayRequestV1;
+    out: DxfNativeSewingReplayStageOutputV1;
   };
   fabrics: {
     in: {
@@ -3478,6 +3678,7 @@ export type ImportWorkerRequest =
   | {
       type: 'open';
       id: number;
+      reviewedAddPoint?: ReviewedAddPointOpen;
       files: {
         name: string;
         bytes: ArrayBuffer;
@@ -3492,6 +3693,7 @@ export type ImportWorkerRequest =
         id: number;
         sessionId: number;
         stage: S;
+        reviewedAddPointAtWrite?: ReviewedAddPointAtWrite;
         input: StageIO[S]['in'];
       };
     }[StageName]
@@ -3598,7 +3800,7 @@ export type WizardEvent =
    */
   | { type: 'shape-fix'; identity: string; size: string; action: ShapeFixAction | 'clear' }
   /** `token`: the apply lock the caller took (`lockApply`) — the autopilot's gated path. */
-  | { type: 'apply'; token?: number }
+  | { type: 'apply'; token?: number; replaceMatchingFile?: true }
   /** T4: the operator's answers about the assembly at the apply step (`CardDraft.answers`). */
   | { type: 'impact-answer'; answers: ImpactAnswers }
   | { type: 'download' }

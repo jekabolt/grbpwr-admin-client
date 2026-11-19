@@ -9,6 +9,7 @@ import {
   type PatternImportDxfPhaseECadMannequinSceneOverlayV1,
   type PatternImportDxfPhaseECadMannequinScenePiecePlaneV1,
 } from './cad-mannequin-scene-overlay-adapter-v1';
+import { CAD_WORKBENCH_SEAM_SIDE_COLORS } from './cad-workbench-seam-colors-v1';
 
 export const PATTERN_IMPORT_DXF_PHASE_E_CAD_MANNEQUIN_SCENE_OVERLAY_RENDERER_BRIDGE_V1 =
   'pattern-import-dxf-phase-e-cad-mannequin-scene-overlay-renderer-bridge/1' as const;
@@ -67,7 +68,6 @@ type Code = PatternImportDxfPhaseECadMannequinSceneOverlayRendererBridgeBlockerV
 
 const STABLE_REF = /^[A-Za-z0-9][A-Za-z0-9._:/#-]{0,255}$/;
 const THREAD_COLOR = /^#[0-9A-F]{6}$/;
-const SIDE_COLORS = Object.freeze({ A: '#2563EB', B: '#F97316' } as const);
 
 function blocked(
   code: Code,
@@ -227,8 +227,10 @@ function edgeIssue(
     !stable(edge.primitiveId) ||
     !stable(edge.connectionRef) ||
     edge.primitiveId !== `edge:${edge.connectionRef}:${edge.side}` ||
-    edge.semanticColorHex !== SIDE_COLORS[edge.side] ||
+    edge.semanticColorHex !== CAD_WORKBENCH_SEAM_SIDE_COLORS[edge.side] ||
     edge.operationNumber !== overlay.focus.currentOperationNumber ||
+    !Number.isSafeInteger(edge.seamOrdinal) ||
+    edge.seamOrdinal < 1 ||
     edge.authoringOperationId !== overlay.focus.currentOperationId
   )
     return { code: 'stale-overlay', detail: `Edge ${edge.primitiveId} is stale or recoloured.` };
@@ -366,6 +368,11 @@ export function bridgePatternImportDxfPhaseECadMannequinSceneOverlayToRendererV1
         scopeKey: edge.scopeKey,
         pieceId: edge.pieceId,
         contourId: edge.contourId,
+        operationSeam: Object.freeze({
+          operationNumber: edge.operationNumber,
+          ordinal: edge.seamOrdinal,
+        }),
+        ordinalBadgeVisible: overlay.focus.selectedConnectionRef === edge.connectionRef,
         semanticColorCss: edge.semanticColorHex,
         orderedVertexIds: Object.freeze([...edge.orderedVertexIds]),
         thread: null,
@@ -373,9 +380,22 @@ export function bridgePatternImportDxfPhaseECadMannequinSceneOverlayToRendererV1
       }),
     );
   }
+  const seamOrdinals = new Set<number>();
   for (const [connectionRef, sides] of edgesByConnection) {
-    if (sides.size !== 2 || !sides.has('A') || !sides.has('B'))
+    const a = sides.get('A');
+    const b = sides.get('B');
+    if (sides.size !== 2 || !a || !b)
       return blocked('stale-overlay', `Connection ${connectionRef} does not have exact A/B edges.`);
+    if (
+      a.seamOrdinal !== b.seamOrdinal ||
+      a.seamOrdinal > edgesByConnection.size ||
+      seamOrdinals.has(a.seamOrdinal)
+    )
+      return blocked(
+        'stale-overlay',
+        `Connection ${connectionRef} has an inconsistent operation position.`,
+      );
+    seamOrdinals.add(a.seamOrdinal);
   }
 
   const guides: Guide[] = [];

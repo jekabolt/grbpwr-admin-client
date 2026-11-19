@@ -13,6 +13,23 @@ function between(start: string, end: string): string {
   return operationsFieldSource.slice(startAt, endAt);
 }
 
+describe('newly saved zero-operation seam link', () => {
+  it('forwards the refreshed card lock and revalidates the same operation at the strict writer', () => {
+    const owner = between('const zeroConnectPostSaveOwner:', 'const crossScopeOperation =');
+    const gate = between('const guardedStepWrites =', 'if (stepSeams && guardedStepWrites)');
+    expect(owner).toContain('expectedLockVersion = refreshed.authority.row.cardLockVersion');
+    expect(owner).toContain('beforeWrite.techCard.lockVersion !== expectedLockVersion');
+    expect(owner.indexOf('beforeWrite = await adminService.GetTechCard(')).toBeGreaterThan(
+      owner.indexOf('await executePatternImportDxfPhaseEZeroConnectStrictSeamWriteOnceV1('),
+    );
+    expect(owner).toContain('stepSeams.writes.upsertWithReceipt([...rows], undefined, {');
+    expect(owner).toMatch(
+      /expectedLockVersion,\s+validate: \(\) =>\s+currentCapturedOperation\(\)/,
+    );
+    expect(gate).toContain('sourceStepWrites.upsertWithReceipt(rows, errorAt, guard)');
+  });
+});
+
 describe('existing empty operation OperationsField owner', () => {
   it('captures the existing row without appending another Assembly Order operation', () => {
     const routing = between(
@@ -49,7 +66,9 @@ describe('existing empty operation OperationsField owner', () => {
     );
     expect(owner).toContain('verifyPatternImportDxfPhaseEZeroConnectExistingOperationReadbackV1');
     expect(owner).toContain("accepted.outcome === 'not-attempted'");
-    expect(owner).toContain('expectedSeam: prepared.receipt.storedSeam');
+    expect(owner).toContain('expectedSeam: prepared.storedSeam');
+    expect(owner).toContain('preparePatternImportDxfPhaseEZeroConnectStoredSeamV1');
+    expect(owner).not.toContain('same-session-saved-draft-operation');
     expect(owner).not.toContain('append(');
     expect(owner).not.toContain('upsertWithReceipt(');
   });
@@ -69,5 +88,112 @@ describe('existing empty operation OperationsField owner', () => {
     expect(owner).toContain('cancel: clearZeroConnectExistingOperationPending');
     expect(owner).toContain('refuseBeforeWrite');
     expect(owner).toContain("accepted.outcome === 'not-attempted'");
+  });
+});
+
+describe('existing linked one-physical-seam OperationsField owner', () => {
+  it('captures the selected saved operation without appending, removing, or reordering it', () => {
+    const routing = between(
+      'const targetsExistingLinkedN1Operation =',
+      'if (targetsExistingEmptyOperation) {',
+    );
+
+    expect(routing).toContain('capturePatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1');
+    expect(routing).toContain('currentRows: [');
+    expect(routing).toContain('...rowsOf(useSeamsStore.getState())');
+    expect(routing).toContain('...posesOf(useSeamsStore.getState())');
+    expect(routing).toContain('inserted: 0');
+    expect(routing).not.toContain('append(');
+    expect(routing).not.toContain('remove(');
+  });
+
+  it('reuses acceptSeamStrict with CAS and exact readback, never a second seam writer', () => {
+    const owner = between(
+      'const zeroConnectExistingLinkedN1Owner:',
+      '// Phase two is deliberately a separate, user-triggered boundary.',
+    );
+
+    expect(owner).toContain('stepSeams.writes.acceptSeamStrict(');
+    expect(owner).toContain('expectedLockVersion: pending.target.capturedCardLockVersion');
+    expect(owner).toContain('expectedExistingSeamKey: pending.target.seamKey');
+    expect(owner).toContain('const late = revalidate(pending.target.seamKey);');
+    expect(owner).toContain('rowsOf(seamState, committedSeamKey)');
+    expect(owner).toContain('selectedIndex: seenRows.current.open');
+    expect(owner).toContain('verifyPatternImportDxfPhaseEZeroConnectExistingLinkedN1ReadbackV1');
+    expect(owner).toContain("accepted.outcome === 'not-attempted'");
+    expect(owner).not.toContain('append(');
+    expect(owner).not.toContain('upsertWithReceipt(');
+  });
+
+  it('offers explicit diagnostic material and retries metadata without re-arming the seam write', () => {
+    const action = between(
+      'function ZeroConnectExistingLinkedN1Action(',
+      'function ZeroConnectExistingOperationAction(',
+    );
+    const clear = between('const clearZeroConnectExistingLinkedN1Pending =', 'useEffect(() => {');
+
+    const owner = between(
+      'const zeroConnectExistingLinkedN1Owner:',
+      '// Phase two is deliberately a separate, user-triggered boundary.',
+    );
+    expect(action).toContain("aria-label='Connection preview material'");
+    expect(action).toContain('Retry pattern metadata');
+    expect(action).toContain('owner.cancel(pending)');
+    expect(action).toContain("{result ? 'Close' : 'Cancel'}");
+    expect(clear).toContain('canReleasePatternImportDxfPhaseEZeroConnectExistingLinkedN1V1');
+    expect(owner).toContain('await atomicWrite?.catch(');
+    expect(
+      owner.indexOf('verifyPatternImportDxfPhaseEZeroConnectExistingLinkedN1ReadbackV1'),
+    ).toBeLessThan(owner.indexOf('finalizePatternImportDxfPhaseEExistingLinkedN1V1({'));
+    expect(owner).toContain('persist: durable.persist');
+  });
+
+  it('routes the explicit saved seam metadata action to same-lock readback outside the seam writer', () => {
+    const action = between(
+      'function ZeroConnectExistingLinkedN1Action(',
+      'function ZeroConnectExistingOperationAction(',
+    );
+    const routing = between(
+      'const targetsExistingLinkedN1Operation =',
+      'if (targetsExistingEmptyOperation) {',
+    );
+    const owner = between(
+      'const zeroConnectExistingLinkedN1Owner:',
+      '// Phase two is deliberately a separate, user-triggered boundary.',
+    );
+    expect(action).toContain('Save pattern metadata');
+    expect(action).toContain("owner.rebind(pending, direction, profile, 'resume-metadata')");
+    expect(routing).toContain('resolvePatternImportDxfPhaseELinkedN1MetadataResumeDirectionV1');
+    const branch = owner.slice(
+      owner.indexOf('if (resumeMetadata) {'),
+      owner.indexOf('executePatternImportDxfPhaseEZeroConnectExistingLinkedN1WriteOnceV1('),
+    );
+    expect(branch).toContain('refreshed.authority.row.cardLockVersion');
+    expect(branch).toMatch(/\}\s*else\s*atomicWrite\s*=/);
+    expect(owner).toContain("{ ...readbackInput, mode: 'resume-metadata' }");
+    expect(owner).toContain('metadataResumeAuthority,');
+  });
+});
+
+describe('durable retry lifecycle in OperationsField', () => {
+  it('rejects a replaced pending gesture or card before starting its durable writer', () => {
+    const effect = between(
+      'const retry = zeroConnectDurableRetry;',
+      'const retryZeroConnectDurablePersistence = useCallback',
+    );
+    expect(effect).toContain('retry.pending !== zeroConnectPendingHandoff');
+    expect(effect.indexOf('retry.row.techCardId !== techCardId')).toBeLessThan(
+      effect.indexOf('durable.persist,'),
+    );
+    expect(effect).toContain('controller.abort();');
+    expect(effect).toContain(
+      '[exactNApplicationOwner, techCardId, zeroConnectDurableRetry, zeroConnectPendingHandoff]',
+    );
+    expect(effect).toContain('zeroConnectDurableRetryRef.current !== retry');
+    const retryAction = between(
+      'const retryZeroConnectDurablePersistence = useCallback',
+      'const selected = selection.index;',
+    );
+    expect(retryAction).toContain('current.pending !== zeroConnectPendingHandoffRef.current');
   });
 });

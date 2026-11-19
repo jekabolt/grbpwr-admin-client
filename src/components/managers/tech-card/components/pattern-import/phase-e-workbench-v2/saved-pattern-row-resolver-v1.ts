@@ -1,3 +1,4 @@
+import { savedWorkbenchScopeKeyV1 } from './saved-workbench-scope-v1';
 import {
   bindingScopes,
   scopeKeyOfBinding,
@@ -205,7 +206,7 @@ export function resolvePatternImportDxfPhaseESavedPatternRowV1(
     ok: true as const,
     row: Object.freeze({
       techCardId: request.techCardId,
-      scopeKey,
+      scopeKey: savedWorkbenchScopeKeyV1(request.scopes.find((scope) => scope.key === scopeKey)!),
       patternLineKey: lineKey,
       revision: savedRowRevision!,
       cardLockVersion: request.cardLockVersion,

@@ -711,6 +711,8 @@ type ResolvedEdge = {
   readonly end: BoundaryVertex;
   readonly lengthMm: number;
   segmentCount: number;
+  exactProgress?: readonly number[];
+  declaredSeamId?: string | null;
   sharedEqualSeamId: string | null;
   insertedBoundarySampleIds: string[];
   orderedBoundaryVertexIds: string[];
@@ -994,6 +996,8 @@ function sampleId(edge: ResolvedEdge, numerator: number): string {
     edge.witness.native.sourceCurveTRange[0],
     edge.witness.native.sourceCurveTRange[1],
   ].join('\u0000');
+  if (edge.exactProgress)
+    return `p2ng-${fnv1a64(identity + '\u0000' + JSON.stringify(edge.exactProgress) + '\u0000' + JSON.stringify(edge.declaredSeamId))}-${numerator}`;
   return `p2s-${fnv1a64(identity)}-${numerator}-of-${edge.segmentCount}`;
 }
 
@@ -1035,7 +1039,7 @@ function buildSampledRing(
       );
     const [startT, endT] = edge.witness.native.sourceCurveTRange;
     for (let numerator = 1; numerator < edge.segmentCount; numerator += 1) {
-      const u = numerator / edge.segmentCount;
+      const u = edge.exactProgress ? edge.exactProgress[numerator] : numerator / edge.segmentCount;
       const id = sampleId(edge, numerator);
       if (allBoundaryIds.has(id))
         failure(
@@ -1249,7 +1253,10 @@ function edgeEvidence(edges: readonly ResolvedEdge[]): readonly Phase2BoundaryEd
     sourceCurveTRange: [...edge.witness.native.sourceCurveTRange] as [number, number],
     lengthMm: edge.lengthMm,
     segmentCount: edge.segmentCount,
-    maximumSampledSegmentLengthMm: edge.lengthMm / edge.segmentCount,
+    maximumSampledSegmentLengthMm: edge.exactProgress
+      ? Math.max(...edge.exactProgress.slice(1).map((u, i) => u - edge.exactProgress![i])) *
+        edge.lengthMm
+      : edge.lengthMm / edge.segmentCount,
     insertedBoundarySampleIds: [...edge.insertedBoundarySampleIds],
     sharedEqualSeamId: edge.sharedEqualSeamId,
   }));
@@ -1412,11 +1419,10 @@ function freezeOwnedPlainData<T>(value: T): T {
   return value;
 }
 
-function executeSample(
-  snapshot: unknown,
+function executePieces(
+  validated: ValidatedRequest,
   triangulator: ConstrainedTriangulator,
-): Phase2BoundarySamplingArtifactV1 {
-  const validated = validateRequest(snapshot);
+): Phase2BoundarySamplingPieceResultV1[] {
   const request = validated.request;
   const edgeByOccurrence = new Map(
     validated.orderedEdges.map((edge) => [
@@ -1464,6 +1470,16 @@ function executeSample(
       result,
     });
   }
+  return pieces;
+}
+
+function executeSample(
+  snapshot: unknown,
+  triangulator: ConstrainedTriangulator,
+): Phase2BoundarySamplingArtifactV1 {
+  const validated = validateRequest(snapshot);
+  const request = validated.request;
+  const pieces = executePieces(validated, triangulator);
   const edges = edgeEvidence(validated.orderedEdges);
   if (
     edges.some(
@@ -1557,7 +1573,11 @@ function assertArtifactEnvelope(artifact: Phase2BoundarySamplingArtifactV1): voi
     ],
     'artifact.claims',
   );
-  artifact.pieces.forEach((piece, pieceIndex) => {
+  assertArtifactPieces(artifact.pieces);
+}
+
+function assertArtifactPieces(pieces: readonly Phase2BoundarySamplingPieceResultV1[]): void {
+  pieces.forEach((piece, pieceIndex) => {
     const path = `artifact.pieces[${pieceIndex}]`;
     assertKeys(
       piece,
@@ -1907,4 +1927,313 @@ export function samplePhase2BoundariesV1(
   request: Phase2BoundarySamplingRequestV1,
 ): Phase2BoundarySamplingArtifactV1 {
   return createPhase2BoundarySamplerV1().sample(request);
+}
+
+/** Content-only exact progress kernel. Pairing and source authority require upstream replay. */
+export const EXACT_NATIVE_BOUNDARY_GRID_V1 = 'exact-native-boundary-grid/1' as const;
+export const EXACT_NATIVE_BOUNDARY_GRID_ARTIFACT_V1 =
+  'exact-native-boundary-grid-artifact/1' as const;
+export type ExactNativeBoundaryGridRequestV1 = Readonly<{
+  schemaVersion: typeof EXACT_NATIVE_BOUNDARY_GRID_V1;
+  samplingRequest: Phase2BoundarySamplingRequestV1;
+  minSegmentMm: number;
+  edgeProgress: readonly Readonly<{
+    edgeId: string;
+    progress: readonly number[];
+    seamId: string | null;
+  }>[];
+}>;
+export type ExactNativeBoundaryGridArtifactV1 = Readonly<{
+  schemaVersion: typeof EXACT_NATIVE_BOUNDARY_GRID_ARTIFACT_V1;
+  sourceFileId: string;
+  targetEdgeMm: number;
+  minSegmentMm: number;
+  phase1AdapterCallCount: number;
+  pieces: readonly Phase2BoundarySamplingPieceResultV1[];
+  edges: readonly (Phase2BoundaryEdgeEvidenceV1 &
+    Readonly<{ progress: readonly number[]; declaredSeamId: string | null }>)[];
+  deterministicFingerprint: string;
+  claims: Readonly<{
+    contentOnly: true;
+    sourceAuthenticityAccepted: false;
+    seamPairingAccepted: false;
+    runtimeIntegrated: false;
+  }>;
+}>;
+
+function validateExactGrid(snapshot: unknown): {
+  request: ExactNativeBoundaryGridRequestV1;
+  validated: ValidatedRequest;
+} {
+  assertKeys(
+    snapshot,
+    ['schemaVersion', 'samplingRequest', 'minSegmentMm', 'edgeProgress'],
+    'exactGrid',
+  );
+  const request = snapshot as ExactNativeBoundaryGridRequestV1;
+  if (request.schemaVersion !== EXACT_NATIVE_BOUNDARY_GRID_V1)
+    failure('input-snapshot-invalid', 'Unsupported exact native grid schema.');
+  assertNumber(request.minSegmentMm, 'minSegmentMm');
+  if (request.minSegmentMm <= 0)
+    failure('input-snapshot-invalid', 'minSegmentMm must be positive.');
+  const validated = validateRequest(request.samplingRequest);
+  if (request.samplingRequest.equalSeams.length)
+    failure('unsupported-seam-semantics', 'Exact grid kernel accepts no legacy equalSeams.');
+  assertArray(request.edgeProgress, 'edgeProgress');
+  if (request.edgeProgress.length > PHASE2_BOUNDARY_SAMPLING_LIMITS_V1.maximumEdges)
+    failure('resource-budget-exceeded', 'Too many exact grid entries.');
+  const entries = new Map<string, ExactNativeBoundaryGridRequestV1['edgeProgress'][number]>();
+  for (const entry of request.edgeProgress) {
+    assertKeys(entry, ['edgeId', 'progress', 'seamId'], 'edgeProgress entry');
+    assertString(entry.edgeId, 'edgeId');
+    if (entry.seamId !== null) {
+      assertString(entry.seamId, 'seamId');
+      if (!entry.seamId) failure('input-snapshot-invalid', 'Empty seam label.');
+    }
+    if (entries.has(entry.edgeId) || !validated.edgeById.has(entry.edgeId))
+      failure('edge-coverage-invalid', 'Duplicate or unknown exact grid edge.');
+    assertArray(entry.progress, 'progress');
+    entries.set(entry.edgeId, entry);
+  }
+  let total = 0;
+  const maximumSegmentMm = request.samplingRequest.targetEdgeMm + Number.EPSILON * 16;
+  for (const edge of validated.orderedEdges) {
+    const entry = entries.get(edge.witness.edgeId);
+    const uniform = (segments: number) =>
+      Array.from({ length: segments + 1 }, (_, i) => i / segments);
+    let progress = entry ? [...entry.progress] : uniform(edge.segmentCount);
+    // At an exact target multiple, represented fractions can put an automatic segment over target.
+    if (
+      !entry &&
+      progress.some((u, i) => i > 0 && (u - progress[i - 1]) * edge.lengthMm > maximumSegmentMm)
+    )
+      progress = uniform(edge.segmentCount + 1);
+    if (
+      progress.length < 2 ||
+      progress.length - 1 > PHASE2_BOUNDARY_SAMPLING_LIMITS_V1.maximumSamplesPerEdge
+    )
+      failure('resource-budget-exceeded', 'Exact grid segment count out of bounds.');
+    if (progress[0] !== 0 || progress.at(-1) !== 1)
+      failure('edge-coverage-invalid', 'Exact progress must include both original endpoints.');
+    const [t0, t1] = edge.witness.native.sourceCurveTRange;
+    const endArc =
+      edge.witness.edgeIndex + 1 < edge.ring.vertices.length ? edge.end.source.normalizedArc : 1;
+    let previousT = t0,
+      previousArc = edge.start.source.normalizedArc;
+    for (let i = 0; i < progress.length; i++) {
+      const u = progress[i];
+      assertNumber(u, 'progress');
+      if (u < 0 || u > 1 || (i > 0 && !(u > progress[i - 1])))
+        failure('edge-coverage-invalid', 'Exact progress must be strictly increasing in [0,1].');
+      if (i === 0) continue;
+      const length = (u - progress[i - 1]) * edge.lengthMm;
+      if (length < request.minSegmentMm || length > maximumSegmentMm)
+        failure('edge-coverage-invalid', 'Exact grid violates minimum segment or target spacing.');
+      const t = t0 + (t1 - t0) * u;
+      const arc = edge.start.source.normalizedArc + (endArc - edge.start.source.normalizedArc) * u;
+      if (!((t - previousT) / (t1 - t0) > 0) || !(arc > previousArc))
+        failure('edge-coverage-invalid', 'Exact grid loses representable native or arc progress.');
+      previousT = t;
+      previousArc = arc;
+    }
+    edge.exactProgress = progress;
+    edge.declaredSeamId = entry?.seamId ?? null;
+    edge.segmentCount = progress.length - 1;
+    total += edge.segmentCount;
+    if (total > PHASE2_BOUNDARY_SAMPLING_LIMITS_V1.maximumSampledBoundaryVertices)
+      failure('resource-budget-exceeded', 'Exact grid boundary vertex budget exceeded.');
+  }
+  return { request, validated };
+}
+
+function exactGridPayload(
+  artifact:
+    | Omit<ExactNativeBoundaryGridArtifactV1, 'deterministicFingerprint'>
+    | ExactNativeBoundaryGridArtifactV1,
+): unknown {
+  return {
+    schemaVersion: artifact.schemaVersion,
+    sourceFileId: artifact.sourceFileId,
+    targetEdgeMm: artifact.targetEdgeMm,
+    minSegmentMm: artifact.minSegmentMm,
+    phase1AdapterCallCount: artifact.phase1AdapterCallCount,
+    pieces: artifactPayload(artifact.sourceFileId, artifact.targetEdgeMm, artifact.pieces, [], [])
+      .pieces,
+    edges: artifact.edges,
+    claims: artifact.claims,
+  };
+}
+
+function executeExactGrid(snapshot: unknown): {
+  request: ExactNativeBoundaryGridRequestV1;
+  artifact: ExactNativeBoundaryGridArtifactV1;
+} {
+  const { request, validated } = validateExactGrid(snapshot);
+  const pieces = executePieces(validated, createCdt2dConstrainedTriangulatorV1());
+  const evidence = edgeEvidence(validated.orderedEdges);
+  const payload: Omit<ExactNativeBoundaryGridArtifactV1, 'deterministicFingerprint'> = {
+    schemaVersion: EXACT_NATIVE_BOUNDARY_GRID_ARTIFACT_V1,
+    sourceFileId: request.samplingRequest.sourceFileId,
+    targetEdgeMm: request.samplingRequest.targetEdgeMm,
+    minSegmentMm: request.minSegmentMm,
+    phase1AdapterCallCount: pieces.length,
+    pieces,
+    edges: evidence.map((edge, i) => ({
+      ...edge,
+      progress: [...validated.orderedEdges[i].exactProgress!],
+      declaredSeamId: validated.orderedEdges[i].declaredSeamId ?? null,
+    })),
+    claims: {
+      contentOnly: true,
+      sourceAuthenticityAccepted: false,
+      seamPairingAccepted: false,
+      runtimeIntegrated: false,
+    },
+  };
+  return {
+    request: freezeOwnedPlainData(request),
+    artifact: freezeOwnedPlainData({
+      ...payload,
+      deterministicFingerprint: `p2ng1-fnv1a64:${fnv1a64(JSON.stringify(exactGridPayload(payload)))}`,
+    }),
+  };
+}
+
+/** Captures owned data only; this does not validate or admit the artifact's claims. */
+export function snapshotExactNativeBoundaryGridArtifactV1(
+  input: unknown,
+): ExactNativeBoundaryGridArtifactV1 {
+  try {
+    const artifact = snapshotArtifactData(input, 'exactGridArtifact', 0, {
+      nodes: 0,
+      properties: 0,
+      active: new Set<object>(),
+    }) as ExactNativeBoundaryGridArtifactV1;
+    assertKeys(
+      artifact,
+      [
+        'schemaVersion',
+        'sourceFileId',
+        'targetEdgeMm',
+        'minSegmentMm',
+        'phase1AdapterCallCount',
+        'pieces',
+        'edges',
+        'deterministicFingerprint',
+        'claims',
+      ],
+      'exactGridArtifact',
+    );
+    if (artifact.schemaVersion !== EXACT_NATIVE_BOUNDARY_GRID_ARTIFACT_V1)
+      failure('artifact-snapshot-invalid', 'Unsupported exact grid artifact schema.');
+    assertString(artifact.sourceFileId, 'sourceFileId');
+    assertString(artifact.deterministicFingerprint, 'deterministicFingerprint');
+    assertNumber(artifact.targetEdgeMm, 'targetEdgeMm');
+    assertNumber(artifact.minSegmentMm, 'minSegmentMm');
+    assertNumber(artifact.phase1AdapterCallCount, 'phase1AdapterCallCount');
+    assertArray(artifact.pieces, 'pieces');
+    assertArray(artifact.edges, 'edges');
+    assertArtifactPieces(artifact.pieces);
+    for (const piece of artifact.pieces) {
+      for (const loop of piece.result.boundaryLoops)
+        assertKeys(loop, ['inputRingId', 'role', 'vertexIndices'], 'boundaryLoop');
+    }
+    for (const edge of artifact.edges) {
+      assertKeys(
+        edge,
+        [
+          'edgeId',
+          'pieceId',
+          'ringId',
+          'edgeIndex',
+          'sourceCurveId',
+          'sourceCurveTRange',
+          'lengthMm',
+          'segmentCount',
+          'maximumSampledSegmentLengthMm',
+          'insertedBoundarySampleIds',
+          'sharedEqualSeamId',
+          'progress',
+          'declaredSeamId',
+        ],
+        'exactGridArtifact.edge',
+      );
+      assertArray(edge.progress, 'edge.progress');
+      assertArray(edge.sourceCurveTRange, 'sourceCurveTRange', 2);
+      assertArray(edge.insertedBoundarySampleIds, 'insertedBoundarySampleIds');
+      if (edge.sharedEqualSeamId !== null)
+        failure('artifact-snapshot-invalid', 'Low kernel cannot claim an equal seam.');
+      if (edge.declaredSeamId !== null) assertString(edge.declaredSeamId, 'declaredSeamId');
+    }
+
+    assertKeys(
+      artifact.claims,
+      ['contentOnly', 'sourceAuthenticityAccepted', 'seamPairingAccepted', 'runtimeIntegrated'],
+      'claims',
+    );
+    if (
+      artifact.claims.contentOnly !== true ||
+      artifact.claims.sourceAuthenticityAccepted !== false ||
+      artifact.claims.seamPairingAccepted !== false ||
+      artifact.claims.runtimeIntegrated !== false
+    )
+      failure('artifact-snapshot-invalid', 'Unsupported exact grid claims.');
+    return freezeOwnedPlainData(artifact);
+  } catch (error) {
+    if (error instanceof Phase2BoundarySamplingErrorV1) throw error;
+    failure('artifact-snapshot-invalid', 'Exact grid capture failed closed.');
+  }
+}
+
+export function sampleExactNativeBoundaryGridV1(
+  request: ExactNativeBoundaryGridRequestV1,
+): ExactNativeBoundaryGridArtifactV1 {
+  if (realmActive) failure('reentrant-call', 'Exact grid rejects reentrant sampling.');
+  realmActive = true;
+  try {
+    return executeExactGrid(snapshotRequest(request)).artifact;
+  } catch (error) {
+    if (error instanceof Phase2BoundarySamplingErrorV1) throw error;
+    failure('input-snapshot-invalid', 'Exact native grid failed closed.');
+  } finally {
+    realmActive = false;
+  }
+}
+
+export function evaluateExactNativeBoundaryGridV1(
+  request: ExactNativeBoundaryGridRequestV1,
+  artifact: unknown,
+): Readonly<{
+  canonicalRequest: ExactNativeBoundaryGridRequestV1;
+  canonicalArtifact: ExactNativeBoundaryGridArtifactV1;
+}> {
+  if (realmActive) failure('reentrant-call', 'Exact grid rejects reentrant evaluation.');
+  realmActive = true;
+  try {
+    const capturedRequest = snapshotRequest(request);
+    const capturedArtifact = snapshotExactNativeBoundaryGridArtifactV1(artifact);
+    const expected = executeExactGrid(capturedRequest);
+    const difference = firstJsonDifference(
+      exactGridPayload(capturedArtifact),
+      exactGridPayload(expected.artifact),
+    );
+    if (
+      difference ||
+      capturedArtifact.deterministicFingerprint !== expected.artifact.deterministicFingerprint
+    )
+      failure(
+        'artifact-request-mismatch',
+        'Exact native grid artifact replay mismatch.',
+        difference ? [difference] : [],
+      );
+    return Object.freeze({
+      canonicalRequest: expected.request,
+      canonicalArtifact: expected.artifact,
+    });
+  } catch (error) {
+    if (error instanceof Phase2BoundarySamplingErrorV1) throw error;
+    failure('input-snapshot-invalid', 'Exact native grid failed closed.');
+  } finally {
+    realmActive = false;
+  }
 }

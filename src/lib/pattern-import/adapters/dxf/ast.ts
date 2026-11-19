@@ -31,6 +31,7 @@ export type RawBlock = {
   base: { x: number; y: number };
   entities: RawEntity[];
   line: number;
+  ownerHandle?: string;
   handle?: string;
 };
 
@@ -205,6 +206,7 @@ function readBlocks(body: Tag[], out: RawDxf, op: { n: number }) {
       entities: readEntities(body, j, end, out, op).list,
       line: t.line,
       handle: str(head, 5) ?? undefined,
+      ...(str(head, 330) && { ownerHandle: str(head, 330)! }),
     };
     bump(out, 'BLOCK');
     bump(out, 'ENDBLK');

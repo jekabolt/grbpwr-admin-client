@@ -1,8 +1,11 @@
+import {
+  savedWorkbenchBindingScopeKeyV1,
+  savedWorkbenchScopeKeyV1,
+} from './saved-workbench-scope-v1';
 import type { common_TechCard } from 'api/proto-http/admin';
 import {
   bindingForScope,
   bindingScopes,
-  scopeKeyOfBinding,
 } from 'components/managers/tech-card/components/bom-purpose';
 import { rollGoodsScopes } from 'components/managers/tech-card/components/piece-block-refs';
 
@@ -177,6 +180,7 @@ function exactPiecePair(
     const left = sideA[0]?.pieceLineKey?.trim() ?? '';
     const right = sideB[0]?.pieceLineKey?.trim() ?? '';
     if (
+      seam.kind === 'TECH_CARD_SEAM_KIND_POINT_CLOSURE' ||
       seam.status !== 'TECH_CARD_SEAM_STATUS_CONFIRMED' ||
       seam.stale ||
       sideA.length !== 1 ||
@@ -214,6 +218,19 @@ function exactPiecePair(
   });
 }
 
+/** The R12 writer embeds the target label. Use the same BOM label on import and exact replay. */
+export function patternImportSavedScopeLabelV1(scope: {
+  key: string;
+  lines: readonly { name?: string }[];
+}): string {
+  return (
+    scope.lines
+      .map(({ name }) => name?.trim())
+      .filter(Boolean)
+      .join(' · ') || scope.key
+  );
+}
+
 export function buildPatternImportDxfPhaseESavedCardContextV1(
   techCard: common_TechCard,
   orderSizeIds: (ids: number[]) => number[],
@@ -226,7 +243,7 @@ export function buildPatternImportDxfPhaseESavedCardContextV1(
   const aliasBindings = bindingScopes(scopes, aliases);
   const patternBindings = bindingScopes(scopes, patterns);
   const rawSizeName = (id: number) => sizeNameById.get(id);
-  return buildCardContext({
+  const card = buildCardContext({
     techCardId: techCard.id!,
     orderedSizeIds: orderSizeIds([...(insert.sizeIds ?? [])]),
     sizeName: (id) => rawSizeName(id) ?? `#${id}`,
@@ -234,11 +251,7 @@ export function buildPatternImportDxfPhaseESavedCardContextV1(
     scopes: scopes.map((scope) => ({
       key: scope.key,
       byPurpose: scope.byPurpose,
-      label:
-        scope.lines
-          .map(({ name }) => name?.trim())
-          .filter((name): name is string => !!name)
-          .join(' · ') || scope.key,
+      label: patternImportSavedScopeLabelV1(scope),
       binding: bindingForScope(scope),
       sections: scope.lines.flatMap(({ section }) => (section ? [section] : [])),
     })),
@@ -251,12 +264,20 @@ export function buildPatternImportDxfPhaseESavedCardContextV1(
       fusingMode: piece.fusingMode,
     })),
     aliases: aliases.map((alias) => ({
-      scopeKey: scopeKeyOfBinding(alias.fabricPurpose, alias.bomLineKey, aliasBindings),
+      scopeKey: savedWorkbenchBindingScopeKeyV1(
+        alias.fabricPurpose,
+        alias.bomLineKey,
+        aliasBindings,
+      ),
       blockName: alias.blockName,
       pieceLineKey: alias.pieceLineKey,
     })),
     patterns: patterns.map((pattern) => ({
-      scopeKey: scopeKeyOfBinding(pattern.fabricPurpose, pattern.bomLineKey, patternBindings),
+      scopeKey: savedWorkbenchBindingScopeKeyV1(
+        pattern.fabricPurpose,
+        pattern.bomLineKey,
+        patternBindings,
+      ),
       filename: pattern.filename,
       url: pattern.url,
       lineKey: pattern.lineKey,
@@ -269,6 +290,13 @@ export function buildPatternImportDxfPhaseESavedCardContextV1(
     cardName: insert.name ?? '',
     styleNumber: insert.styleNumber ?? '',
   });
+  return {
+    ...card,
+    scopes: card.scopes.map((target, index) => ({
+      ...target,
+      scopeKey: savedWorkbenchScopeKeyV1(scopes[index]),
+    })),
+  };
 }
 
 /** Builds only reprocess metadata from GetTechCard; Assembly authority still comes from snapshot. */

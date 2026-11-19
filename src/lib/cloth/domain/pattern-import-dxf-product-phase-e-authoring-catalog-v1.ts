@@ -92,6 +92,14 @@ const REQUIRED_EXPLICIT_FIELDS = Object.freeze([
 ] as const);
 
 const textEncoder = new TextEncoder();
+const preparedCatalogs = new WeakSet<PatternImportDxfProductPhaseEAuthoringCatalogV1>();
+
+/** The current module built and sealed this immutable catalog from exact Phase-D replay. */
+export function isPreparedPatternImportDxfProductPhaseEAuthoringCatalogV1(
+  catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1,
+): boolean {
+  return preparedCatalogs.has(catalog);
+}
 
 function canonical(value: unknown): string {
   if (value === null || typeof value === 'boolean' || typeof value === 'string')
@@ -285,9 +293,11 @@ export async function buildPatternImportDxfProductPhaseEAuthoringCatalogV1(
     crypto,
   );
   if (!canonicalSha256) return blocked('sha256-unavailable', 'SHA-256 is unavailable.');
+  const catalog = deepFreeze({ ...unsigned, canonicalSha256 });
+  preparedCatalogs.add(catalog);
   return deepFreeze({
     ok: true as const,
-    catalog: { ...unsigned, canonicalSha256 },
+    catalog,
     blockers: [] as const,
   });
 }

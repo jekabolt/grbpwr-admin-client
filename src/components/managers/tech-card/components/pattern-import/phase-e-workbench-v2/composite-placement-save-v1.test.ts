@@ -309,6 +309,11 @@ describe('confirmed placement save through existing Composite writers', () => {
       ok: false,
       blockers: [{ code: 'unsupported-current-sidecar' }],
     });
+    test.state.stored.mediaType = 'application/vnd.grbpwr.pattern-dxf-product-composite.v7+json';
+    expect(await test.saver.save(test.request)).toMatchObject({
+      ok: false,
+      blockers: [{ code: 'fullgraph-reissue-required' }],
+    });
     expect(test.put).not.toHaveBeenCalled();
   });
 

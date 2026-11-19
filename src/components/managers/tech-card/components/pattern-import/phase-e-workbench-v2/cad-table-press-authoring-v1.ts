@@ -93,6 +93,7 @@ export type PatternImportDxfPhaseECadTablePressDraftRowV1 = Readonly<{
   historyKey: string;
   operationNumber: 0;
   operationType: 'TECH_CARD_OPERATION_TYPE_PRESS';
+  zone: 'TECH_CARD_GARMENT_ZONE_OTHER';
   work: string;
   draft: true;
   inputKeys: readonly string[];
@@ -131,6 +132,7 @@ export type PatternImportDxfPhaseECadTablePressAuthoringOwnerV1 =
       status: 'available';
       ingest: (
         candidate: PatternImportDxfPhaseECadTablePressCandidateV1,
+        options?: Readonly<{ focusDraft: boolean }>,
       ) => PatternImportDxfPhaseECadTablePressAuthoringResultV1;
     }>
   | Readonly<{
@@ -149,19 +151,21 @@ function blocked(
   });
 }
 
-/** Current prepared scope + selected exact projected pieces → detached Press candidate. */
-export function planPatternImportDxfPhaseECadTablePressCandidateV1(
-  input: Readonly<{
-    preparation: PatternImportDxfPhaseECadMaterialScopePreparationResultV1 | null;
-    projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
-    techCardId: number;
-    scopeKey: string;
-    selectedPieceIds: readonly string[];
-    pressAction: string;
-    pressEquipment: string;
-  }>,
+type PressSelection = Readonly<{
+  projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
+  techCardId: number;
+  scopeKey: string;
+  selectedPieceIds: readonly string[];
+  pressAction: string;
+  pressEquipment: string;
+}>;
+
+export function planPatternImportDxfPhaseECadTablePressForProjectionV1(
+  input: PressSelection &
+    Readonly<{
+      readPieceScopeKeys: (pieceLineKey: string) => readonly string[];
+    }>,
 ): PatternImportDxfPhaseECadTablePressCandidateResultV1 {
-  const preparation = input.preparation;
   const selectedIds = input.selectedPieceIds.map((pieceId) => pieceId.trim()).filter(Boolean);
   if (!selectedIds.length || new Set(selectedIds).size !== selectedIds.length)
     return blocked(
@@ -174,27 +178,10 @@ export function planPatternImportDxfPhaseECadTablePressCandidateV1(
     !PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_PRESS_EQUIPMENT_V1.includes(input.pressEquipment as never)
   )
     return blocked('press-equipment-required', 'Choose explicit Press equipment.');
-  if (!preparation?.ok || preparation.catalog.techCardId !== input.techCardId)
+  if (!Number.isSafeInteger(input.techCardId) || input.techCardId <= 0 || !input.scopeKey)
     return blocked(
       'press-exact-selection-unavailable',
-      'Current exact prepared material geometry is unavailable.',
-    );
-  const scopes = preparation.scopes.filter(({ scopeKey }) => scopeKey === input.scopeKey);
-  if (scopes.length !== 1)
-    return blocked(
-      'press-material-scope-ambiguous',
-      'The selected material scope must resolve to exactly one current DXF authority.',
-    );
-  const scope = scopes[0]!;
-  if (
-    scope.projection.sourceFileId !== input.projection.sourceFileId ||
-    scope.projection.expectedCatalogCanonicalSha256 !==
-      input.projection.expectedCatalogCanonicalSha256 ||
-    scope.projection.sizeSelectionCanonicalSha256 !== input.projection.sizeSelectionCanonicalSha256
-  )
-    return blocked(
-      'press-exact-selection-unavailable',
-      'The selected projection changed before the Press draft was prepared.',
+      'The selected pieces must belong to the active pattern set.',
     );
   const pieces = selectedIds.map((pieceId) =>
     input.projection.pieces.filter((piece) => piece.pieceId === pieceId),
@@ -212,7 +199,7 @@ export function planPatternImportDxfPhaseECadTablePressCandidateV1(
     );
   if (
     inputKeys.some((pieceLineKey) => {
-      const scopeKeys = preparation.catalog.pieceScopeKeys[pieceLineKey] ?? [];
+      const scopeKeys = input.readPieceScopeKeys(pieceLineKey);
       return scopeKeys.length !== 1 || scopeKeys[0] !== input.scopeKey;
     })
   )
@@ -235,6 +222,41 @@ export function planPatternImportDxfPhaseECadTablePressCandidateV1(
       claims: PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_PRESS_AUTHORING_CLAIMS_V1,
     }),
     blocker: null,
+  });
+}
+
+/** Current prepared scope + selected exact projected pieces → detached Press candidate. */
+export function planPatternImportDxfPhaseECadTablePressCandidateV1(
+  input: PressSelection &
+    Readonly<{
+      preparation: PatternImportDxfPhaseECadMaterialScopePreparationResultV1 | null;
+    }>,
+): PatternImportDxfPhaseECadTablePressCandidateResultV1 {
+  const { preparation, projection } = input;
+  if (!preparation?.ok || preparation.catalog.techCardId !== input.techCardId)
+    return blocked(
+      'press-exact-selection-unavailable',
+      'Current exact prepared material geometry is unavailable.',
+    );
+  const scopes = preparation.scopes.filter(({ scopeKey }) => scopeKey === input.scopeKey);
+  if (scopes.length !== 1)
+    return blocked(
+      'press-material-scope-ambiguous',
+      'The selected material scope must resolve to exactly one current DXF authority.',
+    );
+  const current = scopes[0].projection;
+  if (
+    current.sourceFileId !== projection.sourceFileId ||
+    current.expectedCatalogCanonicalSha256 !== projection.expectedCatalogCanonicalSha256 ||
+    current.sizeSelectionCanonicalSha256 !== projection.sizeSelectionCanonicalSha256
+  )
+    return blocked(
+      'press-exact-selection-unavailable',
+      'The selected projection changed before the Press draft was prepared.',
+    );
+  return planPatternImportDxfPhaseECadTablePressForProjectionV1({
+    ...input,
+    readPieceScopeKeys: (pieceLineKey) => preparation.catalog.pieceScopeKeys[pieceLineKey] ?? [],
   });
 }
 
@@ -299,6 +321,7 @@ export function preparePatternImportDxfPhaseECadTablePressDraftRowV1(
       historyKey: input.historyKey,
       operationNumber: 0 as const,
       operationType: 'TECH_CARD_OPERATION_TYPE_PRESS' as const,
+      zone: 'TECH_CARD_GARMENT_ZONE_OTHER' as const,
       work,
       draft: true as const,
       inputKeys: Object.freeze(inputKeys),

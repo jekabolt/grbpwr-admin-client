@@ -6,6 +6,8 @@ import {
   type PatternImportDxfProductCompositeSidecarProductionPersistenceV5,
 } from './composite-sidecar-persistence-v5';
 import { PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V5 } from './composite-sidecar-v5';
+import { PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6 } from './composite-sidecar-v6';
+import { PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7 } from './composite-sidecar-v7';
 import type { PatternImportDxfPhaseEDraftCadTopologyScopeV1 } from './draft-cad-topology-scope-v1';
 
 export const PATTERN_IMPORT_DXF_PHASE_E_TOPOLOGY_ANNOTATION_PERSISTENCE_CAPABILITY_V1 =
@@ -158,6 +160,7 @@ export type PatternImportDxfPhaseETopologyAnnotationPersistenceBlockerCodeV1 =
   | 'stale-card-lock-version'
   | 'stale-server-assembly-revision'
   | 'stale-assembly-topology'
+  | 'versioned-rewrap-required'
   | 'current-composite-v4-or-v5-unavailable'
   | 'production-v5-writer-unavailable';
 
@@ -324,6 +327,15 @@ export function resolvePatternImportDxfPhaseETopologyAnnotationPersistenceCapabi
     return unavailable(
       'stale-assembly-topology',
       'The canonical assembly topology changed after annotations were authored.',
+    );
+  if (
+    input.currentCompositeMediaType ===
+      PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6 ||
+    input.currentCompositeMediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7
+  )
+    return unavailable(
+      'versioned-rewrap-required',
+      'Composite V6/V7 annotations require a version-matched rewrap owner. The V5 writer is intentionally not exposed because it would erase arrangement or fullgraph bytes.',
     );
   if (
     input.currentCompositeMediaType !==

@@ -4,51 +4,19 @@ import type {
 } from 'api/proto-http/admin';
 import { pressProfileFitsStep } from './equipment-options';
 import {
-  KIND_FAMILY_LABEL,
-  KIND_WORK_TOKEN,
-  OPERATION_KINDS,
   kindClears,
-  kindIsOffered,
-  kindLabelOf,
   kindWrites,
   operationHowKind,
   type OperationKind,
   type OperationKindStep,
 } from './operation-kinds';
 import type { OperationFormStringField } from './operation-options';
+import workSnapshot from './operation-work-snapshot.json';
 import { isWorkVariant } from '../op-icons/work-variants';
 import { TOPSTITCH_EDGE_KINDS } from './step-icon-tiles/rules';
 
-// КАТАЛОГ РАБОТ — СЕРВЕРНЫЕ ДАННЫЕ, А НЕ СПИСОК В БАНДЛЕ.
-//
-// До этой фазы «вид операции» существовал ровно одним способом: пятьюдесятью четырьмя строками в
-// `operation-kinds.ts`, которые НИГДЕ не хранились — экран каждый раз выводил вид заново из пары
-// (глагол, машинка). Из-за этого сто прод-строк из ста двадцати шести неотличимы друг от друга,
-// сервер не мог сказать «такой работы нет», а поиск по слову технолога («моско») был невозможен:
-// русских слов в бандле нет и быть не должно.
-//
-// ЧТО ЭТОТ МОДУЛЬ ЕСТЬ. Чистый разбор ответа `GetOperationWorkCatalog` в форму, удобную пикеру:
-// пункты, синонимный индекс, группы по стадии, глобальные дефолты и реестр полей дефолта. Ни
-// одного обращения к сети, ни одного React-импорта — вся поверхность проверяется пробой.
-//
-// ЧЕГО В НЁМ НЕТ И ПОЧЕМУ:
-//   * НИ ОДНОГО РУССКОГО СЛОВА. Синонимы приходят с сервера (`operation_work_syn`, 0329) и живут
-//     ровно столько, сколько живёт ответ. Скопировать их в бандл значило бы завести второй словарь
-//     поиска, который разойдётся с первым на первой же правке владельца, — и разойдётся молча;
-//   * никакой записи. Что выбор пункта пишет в строку шага, решает вызыватель — здесь только
-//     перевод серверных токенов в имена enum'а провода.
-//
-// ФОЛБЭК-СНАПШОТ. Пикер НИКОГДА не бывает пустым: не приехал каталог — список собирается из
-// `OPERATION_KINDS` и токенов `KIND_WORK_TOKEN`. Снимок ВЫВОДИТСЯ из таблицы пунктов, а не набран
-// второй раз руками: `machine_mode`, машинки и глагол считаются из тех же полей, из которых их
-// пишет `kindWrites`. Расходиться нечему по построению. Цена деградации названа честно: у
-// выведенных работ синонимов нет, значит нет и поиска по русскому слову — только по английскому
-// имени пункта.
-//
-// ВЫВЕСТИ УДАЁТСЯ НЕ ВСЁ, И НЕВЫВОДИМОЕ ВЫПИСАНО ОТДЕЛЬНО (`CATALOG_ONLY_WORKS` и две карты рядом
-// с ним): работа, у которой пункта в этом файле нет вовсе, выводиться не из чего, а `retired` и
-// `label` — колонки каталога, а не факты бандла. Дельта ровно одна, стережёт её проба, читающая
-// сами миграции; всё выводимое по-прежнему выводится.
+// The live catalog supplies the work vocabulary and user defaults. The same vocabulary is
+// available offline as a committed snapshot generated from the backend's seed migrations.
 
 /** Как работа отвечает на вопрос «на чём»: машинка следует из неё, спрашивается, либо не машинная. */
 export type WorkMachineMode = 'fixed' | 'ask' | 'none';
@@ -68,7 +36,7 @@ export type WorkItem = {
 };
 
 export type WorkCatalog = {
-  /** Откуда список: ответ сервера или снимок бандла. Показывается человеку, а не только логу. */
+  /** Whether the work vocabulary came from the server or the bundled snapshot. */
   source: 'server' | 'bundle';
   items: readonly WorkItem[];
   byToken: ReadonlyMap<string, WorkItem>;
@@ -105,10 +73,6 @@ export const verbTokenToEnum = (token: string): string =>
   token ? `${OPERATION_TYPE_PREFIX}${token.toUpperCase()}` : '';
 export const machineTokenToEnum = (token: string): string =>
   token ? `${MACHINE_TYPE_PREFIX}${token.toUpperCase()}` : '';
-export const enumToVerbToken = (name: string): string =>
-  name.startsWith(OPERATION_TYPE_PREFIX)
-    ? name.slice(OPERATION_TYPE_PREFIX.length).toLowerCase()
-    : '';
 export const enumToMachineToken = (name: string): string =>
   name.startsWith(MACHINE_TYPE_PREFIX) ? name.slice(MACHINE_TYPE_PREFIX.length).toLowerCase() : '';
 
@@ -169,12 +133,6 @@ export function searchWorks(catalog: WorkCatalog, query: string): WorkItem[] {
  * показывается своим токеном, а не прячется.
  */
 const STAGE_LABEL: Readonly<Record<string, string>> = {
-  // Группы СНИМКА подписываются семействами бандла — тем же словарём, каким пикер подписывал их до
-  // этой фазы. Выводятся, а не набраны второй раз: снимок группируется по `fam_<буква>` (см.
-  // `bundleItem`), и подпись обязана прийти из того же места, что и буква.
-  ...Object.fromEntries(
-    Object.entries(KIND_FAMILY_LABEL).map(([family, label]) => [`fam_${family}`, label]),
-  ),
   join_seam: 'seams & joins',
   edges_hems: 'edges & hems',
   closures: 'closures',
@@ -277,6 +235,12 @@ const parseItem = (raw: OperationWorkCatalogItem): WorkItem | undefined => {
   };
 };
 
+const parseWorkItems = (works: readonly OperationWorkCatalogItem[]): WorkItem[] =>
+  works
+    .map(parseItem)
+    .filter((w): w is WorkItem => !!w)
+    .sort((a, b) => a.sort - b.sort || a.token.localeCompare(b.token));
+
 /**
  * Ответ сервера → каталог. `undefined` значит «этот ответ каталогом не является» (пустой список
  * работ, отказ RPC) — и вызыватель обязан взять снимок бандла, а не показать пустой пикер.
@@ -284,10 +248,7 @@ const parseItem = (raw: OperationWorkCatalogItem): WorkItem | undefined => {
 export function parseWorkCatalog(
   resp: GetOperationWorkCatalogResponse | undefined,
 ): WorkCatalog | undefined {
-  const items = (resp?.works ?? [])
-    .map(parseItem)
-    .filter((w): w is WorkItem => !!w)
-    .sort((a, b) => a.sort - b.sort || a.token.localeCompare(b.token));
+  const items = parseWorkItems(resp?.works ?? []);
   if (items.length === 0) return undefined;
 
   const defaults = new Map<string, Map<string, string>>();
@@ -321,80 +282,6 @@ export function parseWorkCatalog(
   };
 }
 
-// --- СНИМОК БАНДЛА ------------------------------------------------------------------------------
-
-const bundleItem = (k: OperationKind, sort: number): WorkItem | undefined => {
-  const token = KIND_WORK_TOKEN[k.id];
-  if (!token) return undefined;
-  const fixed = enumToMachineToken(k.writes?.machineType ?? '');
-  const asked = (k.askMachine ?? []).map((m) => enumToMachineToken(m)).filter(Boolean);
-  const machineMode: WorkMachineMode = asked.length ? 'ask' : fixed ? 'fixed' : 'none';
-  return {
-    token,
-    verb: enumToVerbToken(k.verb),
-    // ГРУППА СНИМКА — СЕМЕЙСТВО БАНДЛА, А НЕ СТАДИЯ СЕРВЕРА, и это осознанная неточность. Стадия
-    // живёт в каталоге (`operation_work.stage`); переписать её сюда значило бы завести второй
-    // список группировки, который разъедется с первым молча. Пока каталог не приехал, список
-    // группируется так, как его группирует бандл, — и это видно человеку по подписи источника.
-    stage: `fam_${k.family}`,
-    label: kindLabelOf(k),
-    machineMode,
-    defaultMachine: asked.length ? enumToMachineToken(k.defaultMachine ?? '') || asked[0] : fixed,
-    machines: asked.length ? asked : fixed ? [fixed] : [],
-    // СИНОНИМОВ У СНИМКА НЕТ. Это цена деградации, названная вслух: русские слова живут на
-    // сервере, и класть их в бандл ради оффлайна значило бы завести второй словарь поиска.
-    syn: [],
-    sort,
-    retired: false,
-  };
-};
-
-// --- WHAT THE CATALOG SAYS AND THE KINDS TABLE CANNOT (0331) -------------------------------------
-//
-// THE SNAPSHOT IS DERIVED FROM THE KINDS TABLE, AND FOR THREE OF THE CATALOG'S FACTS THERE IS
-// NOTHING TO DERIVE FROM. Migration 0331 did three things no `OperationKind` can express: it minted FOUR
-// works that have no picker item in this bundle at all, it RETIRED `gather_ease` (a false merge of
-// two different jobs — gathering and easing a sleeve head), and it renamed the label of the dump
-// `join_lockstitch` without touching the token. Derivation cannot reach any of them: a work with no
-// item has no row to derive from, and `retired` / `label` are catalog columns, not bundle facts.
-//
-// SO THE DELTA IS WRITTEN OUT, AND ONLY THE DELTA. Everything derivable stays derived — one more
-// hand-typed copy of the fifty-three existing works is exactly the second dictionary this phase is
-// removing. Three named lists, each answering one question the kinds table cannot be asked.
-//
-// PRICE OF LEAVING IT UNDONE, MEASURED IN THE OWNER'S OWN WORDS: `moscow_hem` and `slit_overcast`
-// are the two jobs he asked for BY NAME. With the catalog request refused they would not be in the
-// picker at all — and the picker is the one place a job can be named at all.
-//
-// THE GUARD IS NOT A PROMISE, IT IS A PROBE. `work-picker-probe` parses the migrations themselves
-// (0329 + 0331 + whatever comes next) and compares them with this snapshot token by token, label by
-// label, sort by sort. A work seeded server-side and forgotten here turns it red; so does a label
-// changed on one side only. It skips — never fails — when the backend tree is not next to this one,
-// the same way the probes skip a missing playwright: an absent guard is not a statement about code.
-
-/**
- * WORKS THAT LIVE ONLY IN THE CATALOG — no `OperationKind`, no `KIND_WORK_TOKEN` row, nothing to
- * derive. Their identity IS the pair (verb, machine), which is why they need no picker item: see
- * `workWrites`, which writes exactly that pair for a work with no kind.
- *
- * THE SYNONYMS ARE HERE, AND THAT BENDS THE RULE STATED ABOVE ON PURPOSE. The snapshot carries no
- * Russian for the fifty-three derived works: they have English labels a person can find them by,
- * and copying the server's synonym table would be a second search dictionary. For these four the
- * calculation is different — the label is the ONLY string that reaches the bundle, and the
- * technologist searching for the rolled hem types «моско», not «rolled». Without these words the
- * degraded picker holds the job he asked for and refuses to show it to him. The copy is bounded
- * (four works, one migration) and the guard compares it with the migration word for word.
- *
- * SORT NUMBERS ARE THE SERVER'S OWN. 0329 stepped by tens precisely so a later work could stand
- * next to its kin: 75 right after the blindhem (70), 141/142 right after the retired ancestor
- * (140), 165 between the buttonhole (160) and the button (170). The derived rows step by tens in
- * the same order, so the merged list comes out in catalog order without a second ordering rule.
- *
- * GROUP IS THE BUNDLE'S FAMILY, NOT THE CATALOG'S STAGE — the same deliberate imprecision the
- * derived rows carry (see `bundleItem`), and for the same reason: while the catalog is down the
- * list groups the way the bundle groups. Which family is not a guess — it is the family of the
- * neighbours the SERVER sorted each work among.
- */
 /**
  * ПРОРЕЗЬ, ОБМЁТАННАЯ ЗИГЗАГОМ — ЕДИНСТВЕННЫЙ ТОКЕН РАБОТЫ, КОТОРЫЙ ЧИТАЮТ ПРАВИЛА ПОЛЕЙ (0331).
  *
@@ -450,162 +337,16 @@ export function cutLengthNoun(catalog: WorkCatalog | undefined, work: string | u
   return n.kind === 'catalog' ? 'buttonhole' : n.token;
 }
 
-const CATALOG_ONLY_WORKS: readonly WorkItem[] = [
-  {
-    token: 'moscow_hem',
-    verb: 'machine',
-    stage: 'fam_A',
-    label: 'Hem — rolled (Moscow)',
-    machineMode: 'fixed',
-    defaultMachine: 'lockstitch',
-    machines: ['lockstitch'],
-    syn: [
-      'московский',
-      'московский шов',
-      'узкая подгибка',
-      'рубильник',
-      'moscow',
-      'moscow hem',
-      'rolled hem',
-      'narrow hem',
-    ],
-    sort: 75,
-    retired: false,
-  },
-  {
-    // 0332: the plain double-turned hem on the lockstitch — not the narrow Moscow roll.
-    token: 'hem_turned',
-    verb: 'machine',
-    stage: 'fam_A',
-    label: 'Hem — turned twice',
-    machineMode: 'fixed',
-    defaultMachine: 'lockstitch',
-    machines: ['lockstitch'],
-    syn: [
-      'подгиб',
-      'подгибка',
-      'подогнуть',
-      'подгиб вдвое',
-      'закрытый срез',
-      'hem',
-      'turned hem',
-      'double fold hem',
-      'double turn',
-    ],
-    sort: 76,
-    retired: false,
-  },
-  {
-    token: 'gather',
-    verb: 'machine',
-    stage: 'fam_B',
-    label: 'Gather',
-    machineMode: 'fixed',
-    defaultMachine: 'gathering',
-    machines: ['gathering'],
-    syn: ['сборка', 'сборить', 'присборить', 'оборка', 'gather', 'gathering', 'ruffle'],
-    sort: 141,
-    retired: false,
-  },
-  {
-    token: 'ease_in',
-    verb: 'machine',
-    stage: 'fam_B',
-    label: 'Ease in — machine',
-    machineMode: 'fixed',
-    defaultMachine: 'gathering',
-    machines: ['gathering'],
-    syn: ['посадка', 'посадить', 'посадка оката', 'припосадить', 'ease', 'ease in', 'sleeve ease'],
-    sort: 142,
-    retired: false,
-  },
-  {
-    // ASK, AND THE TWO MACHINES ARE TWO WAYS OF DOING ONE JOB: the zigzag overcasts the raw edge of
-    // the slit, the buttonhole automat cuts and overcasts in one pass. Without this row the
-    // degraded picker cannot even ask the question.
-    token: 'slit_overcast',
-    verb: 'machine',
-    stage: 'fam_C',
-    label: 'Slit — overcast',
-    machineMode: 'ask',
-    defaultMachine: 'zigzag',
-    machines: ['zigzag', 'buttonhole'],
-    syn: [
-      'прорезь',
-      'обметать прорезь',
-      'обмётанная прорезь',
-      'разрез',
-      'slit',
-      'slit overcast',
-      'overcast slit',
-    ],
-    sort: 165,
-    retired: false,
-  },
-];
-
-/**
- * RETIRED SERVER-SIDE — offered to nobody, readable by everybody. A retired work is dropped from
- * the picker by `searchWorks` and kept in `byToken`, because a step that already carries the token
- * must still open and still be named by its own label. Deleting the row instead would take from a
- * person the right to save a card he once marked up.
- */
-const RETIRED_WORKS: ReadonlySet<string> = new Set(['gather_ease']);
-
-/**
- * LABEL CHANGED WITHOUT THE TOKEN CHANGING, and that asymmetry is the whole point. «Join —
- * lockstitch» fails the substitution test — move the job to an overlock and the name becomes a lie
- * — so 0331 renamed it to «Join / seam», which names the JOB. The token never moves: it travels
- * into the digest projection of every step row, and a token edited after the fact splits the
- * signature in two. So the bundle overrides the derived label and leaves `KIND_WORK_TOKEN` alone.
- *
- * THE KIND'S OWN LABEL IS NOT TOUCHED HERE. `OPERATION_KINDS[A1].label` names a picker ITEM anchored
- * on the lockstitch, and it is read by the picker trigger of every step that has no work at all —
- * the hundred production rows this phase is untangling. Renaming that string would rename those
- * rows on nine screens in the same commit that only meant to catch the snapshot up.
- */
-const RELABELLED_WORKS: Readonly<Record<string, string>> = {
-  join_lockstitch: 'Join / seam',
+// The snapshot contains seed data. Card-specific time and user defaults are available live.
+const bundledWorkItems = parseWorkItems(workSnapshot);
+export const BUNDLED_WORK_CATALOG: WorkCatalog = {
+  source: 'bundle',
+  items: bundledWorkItems,
+  byToken: new Map(bundledWorkItems.map((work) => [work.token, work])),
+  defaults: new Map(),
+  defaultFields: [],
+  smvHints: new Map(),
 };
-
-/**
- * Снимок бандла — на один релиз, пока хоть один клиент может не получить каталог. Стоит в
- * `WorkCatalog` тем же типом, что и серверный ответ: у пикера ровно один путь отрисовки.
- */
-export const BUNDLED_WORK_CATALOG: WorkCatalog = (() => {
-  const items: WorkItem[] = [];
-  let sort = 0;
-  for (const k of OPERATION_KINDS) {
-    if (!kindIsOffered(k)) continue;
-    // The step of ten is the SERVER'S step (0329), not a bundle habit — it is what lets a work
-    // minted later stand between two derived ones instead of at the end of the list.
-    sort += 10;
-    const item = bundleItem(k, sort);
-    if (!item) continue;
-    const relabelled = RELABELLED_WORKS[item.token];
-    items.push({
-      ...item,
-      ...(relabelled ? { label: relabelled } : null),
-      retired: RETIRED_WORKS.has(item.token),
-    });
-  }
-  items.push(...CATALOG_ONLY_WORKS);
-  // ONE ORDER FOR BOTH SOURCES — the same comparator `parseWorkCatalog` sorts the server answer by.
-  // A merged list ordered any other way would put the same two works in a different order depending
-  // on whether the catalog answered, and the person would read that as the list being broken.
-  items.sort((a, b) => a.sort - b.sort || a.token.localeCompare(b.token));
-  return {
-    source: 'bundle',
-    items,
-    byToken: new Map(items.map((w) => [w.token, w])),
-    defaults: new Map(),
-    // РЕЕСТРА ДЕФОЛТОВ У СНИМКА НЕТ — и жест «запомнить как дефолт» без каталога не рисуется
-    // вовсе. Свой список здесь был бы ровно тем вторым реестром, ради отсутствия которого сервер
-    // и отдаёт `default_fields`.
-    defaultFields: [],
-    smvHints: new Map(),
-  };
-})();
 
 // --- ДЕФОЛТЫ: ИМЕНА И ЗНАЧЕНИЯ -------------------------------------------------------------------
 

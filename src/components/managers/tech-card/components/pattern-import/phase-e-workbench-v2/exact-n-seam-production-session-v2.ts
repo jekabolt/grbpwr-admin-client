@@ -7,6 +7,13 @@ import {
   type PatternImportDxfProductExactNSeamRestoreOwnerV2,
 } from './composite-sidecar-restore-authority-v4';
 import { verifyPatternImportDxfPhaseEGoldenCardReconstructionV1 } from './golden-card-reconstruction-v1';
+import { storeExactNSeamProductionSession } from './exact-n-seam-production-session-store-v2';
+
+export {
+  clearPatternImportDxfProductExactNSeamProductionSessionV2,
+  readPatternImportDxfProductExactNSeamProductionSessionV2,
+  subscribePatternImportDxfProductExactNSeamProductionSessionV2,
+} from './exact-n-seam-production-session-store-v2';
 
 export const PATTERN_IMPORT_DXF_PRODUCT_EXACT_N_SEAM_PRODUCTION_SESSION_CLAIMS_V2 = Object.freeze({
   genuineAtomicSelectionOwnerRequired: true,
@@ -20,13 +27,6 @@ export const PATTERN_IMPORT_DXF_PRODUCT_EXACT_N_SEAM_PRODUCTION_SESSION_CLAIMS_V
   uiStateReconstructionUsed: false,
   fromScratchCarrierBuilderIntegrated: false,
 } as const);
-
-const sessions = new Map<number, PatternImportDxfPhaseEExactNAssemblyOrderSessionV2>();
-const listeners = new Map<number, Set<() => void>>();
-
-function notify(techCardId: number): void {
-  for (const listener of listeners.get(techCardId) ?? []) listener();
-}
 
 function sameOrdered(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
@@ -55,14 +55,6 @@ function sameCurrent(
     left.catalogCanonicalSha256 === right.catalogCanonicalSha256 &&
     left.phaseEAggregatePlanSha256 === right.phaseEAggregatePlanSha256
   );
-}
-
-function storeSession(
-  techCardId: number,
-  session: PatternImportDxfPhaseEExactNAssemblyOrderSessionV2,
-): void {
-  sessions.set(techCardId, Object.freeze(session));
-  notify(techCardId);
 }
 
 /** Durable no-feed ingress requires the opaque restore owner that minted this exact selection. */
@@ -101,11 +93,10 @@ export function publishPatternImportDxfProductExactNSeamDurableReloadSessionV2(
     })
   )
     return false;
-  storeSession(techCardId, {
+  return storeExactNSeamProductionSession(techCardId, {
     selectionOwner: session.selectionOwner,
     current: session.current,
   });
-  return true;
 }
 
 /**
@@ -185,34 +176,5 @@ export function publishPatternImportDxfProductExactNSeamProductionSessionV2(
     current: session.current,
     productionFeed: feed,
   });
-  storeSession(techCardId, frozen);
-  return true;
-}
-
-export function readPatternImportDxfProductExactNSeamProductionSessionV2(
-  techCardId: number | undefined,
-): PatternImportDxfPhaseEExactNAssemblyOrderSessionV2 | null {
-  if (!techCardId || !Number.isSafeInteger(techCardId) || techCardId < 1) return null;
-  return sessions.get(techCardId) ?? null;
-}
-
-export function subscribePatternImportDxfProductExactNSeamProductionSessionV2(
-  techCardId: number | undefined,
-  listener: () => void,
-): () => void {
-  if (!techCardId || !Number.isSafeInteger(techCardId) || techCardId < 1) return () => {};
-  const current = listeners.get(techCardId) ?? new Set<() => void>();
-  current.add(listener);
-  listeners.set(techCardId, current);
-  return () => {
-    current.delete(listener);
-    if (!current.size) listeners.delete(techCardId);
-  };
-}
-
-export function clearPatternImportDxfProductExactNSeamProductionSessionV2(
-  techCardId: number | undefined,
-): void {
-  if (!techCardId || !sessions.delete(techCardId)) return;
-  notify(techCardId);
+  return storeExactNSeamProductionSession(techCardId, frozen);
 }

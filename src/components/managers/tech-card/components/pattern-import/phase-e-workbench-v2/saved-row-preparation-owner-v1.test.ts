@@ -516,6 +516,61 @@ beforeEach(() => {
 });
 
 describe('saved-row Phase-E preparation owner V1', () => {
+  it('opens first exact two-seam review without prefilled intervals or a compiler source', async () => {
+    const fixture = harness();
+    const semanticV1Sha256 = '8'.repeat(64);
+    const readInitialAssembly = vi.fn<
+      NonNullable<PatternImportDxfPhaseESavedRowPreparationHostV1['readInitialAssembly']>
+    >(async ({ row, selectedOperationNumber }) => ({
+      ...authorityEvidence(row, selectedOperationNumber),
+      exactTopology: null,
+      semanticV1Sha256,
+    }));
+    const owner = createPatternImportDxfPhaseESavedRowPreparationOwnerV1({
+      ...fixture.host,
+      readInitialAssembly,
+    });
+    const preparation = await owner.prepareInitial(request());
+    expect(preparation).toMatchObject({
+      ok: true,
+      prepared: { exactTopology: null, semanticV1Sha256 },
+    });
+    if (!preparation.ok) return;
+    const { prepared } = preparation;
+    expect(readInitialAssembly).toHaveBeenCalledTimes(2);
+    expect(fixture.readAuthoritativeAssembly).not.toHaveBeenCalled();
+    expect(prepared.initialState.documentRevisionConfirmed).toBe(false);
+    expect(prepared.initialState.seams.flatMap(({ sides }) => [...sides])).toEqual(
+      Array.from({ length: 4 }, () =>
+        expect.objectContaining({
+          contourId: null,
+          boundaryVertexIds: [],
+          confirmed: false,
+        }),
+      ),
+    );
+    expect(owner.isCurrentInitial(prepared)).toBe(true);
+    owner.cancel();
+    expect(owner.isCurrentInitial(prepared)).toBe(false);
+  });
+
+  it('rejects a changed standalone V1 under the same saved row and assembly clock', async () => {
+    const fixture = harness();
+    let next = 0;
+    const owner = createPatternImportDxfPhaseESavedRowPreparationOwnerV1({
+      ...fixture.host,
+      readInitialAssembly: async ({ row, selectedOperationNumber }) => ({
+        ...authorityEvidence(row, selectedOperationNumber),
+        exactTopology: null,
+        semanticV1Sha256: String(++next).repeat(64),
+      }),
+    });
+    await expect(owner.prepareInitial(request())).resolves.toMatchObject({
+      ok: false,
+      blockers: [{ code: 'assembly-topology-stale-after-prepare' }],
+    });
+  });
+
   it('fresh-reprocesses and prepares an exact raw-free two-seam saved-row envelope', async () => {
     const state = harness();
     const owner = createPatternImportDxfPhaseESavedRowPreparationOwnerV1(state.host);

@@ -40,6 +40,20 @@ export type PatternImportDxfPhaseECadOperationNavigationV1 = Readonly<{
   items: readonly PatternImportDxfPhaseECadOperationNavigationItemV1[];
 }>;
 
+export function resolvePatternImportDxfPhaseECadSelectedOperationV1(
+  navigation?: PatternImportDxfPhaseECadOperationNavigationV1 | null,
+): PatternImportDxfPhaseECadOperationNavigationItemV1 | null {
+  return navigation?.items.find(({ index }) => index === navigation.selectedIndex) ?? null;
+}
+
+export function countPatternImportDxfPhaseECadSelectedOperationWarningsV1(
+  navigation: PatternImportDxfPhaseECadOperationNavigationV1 | null | undefined,
+  operationNumber: number,
+): number {
+  const item = resolvePatternImportDxfPhaseECadSelectedOperationV1(navigation);
+  return item?.operationNumber === operationNumber ? item.context.warnings.length : 0;
+}
+
 export type PatternImportDxfPhaseECadOperationSwitchDirectionV1 = 'previous' | 'next';
 
 export function resolvePatternImportDxfPhaseECadOperationSwitchIndexV1(

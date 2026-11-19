@@ -6,6 +6,13 @@
 // polupalto at 777 MB RSS in node with docs + sheet alive). Once a sheet is assembled the docs are
 // dropped; the file bytes stay in the blob store (Blob, not a JS ArrayBuffer), so re-assembling a
 // different sheet or with a hand grid re-reads them (seconds) instead of keeping them (hundreds MB).
+import { isNativeCutOrFoldPolyline } from '../adapters/dxf/extract';
+import { productDxfFoldAxes } from '../adapters/dxf/product-fold-axis';
+import { readManifestBytes } from '../manifest';
+import { sha256Hex as hashNativeOutput } from '../adapters/vector/builder';
+import { readProtectedLineSplit } from '../write/read-protected-line-split';
+import { identifyReviewedAddPoint } from './reviewed-add-point';
+import type { ConversionManifest, ReviewedAddPointOpen, ReviewedAddPointAtWrite } from '../types';
 import type {
   AllowanceDecision,
   BackgroundKind,
@@ -99,6 +106,7 @@ import {
   bridgeDxfPipelineProvenanceV1,
   computeDxfPipelineContentBindingV1,
   createDxfCandidateLineageSidecarV1,
+  createDxfNativeSewingCandidateLineageV1,
   createDxfPipelineContourIdV1,
   dxfPipelineBlockerV1,
   phaseCBlockersToPipelineV1,
@@ -113,6 +121,20 @@ import {
   validateDxfProductPhaseDReplayRequestV1,
   type DxfProductPhaseDReplayStageOutputV1,
 } from '../dxf-product-phase-d-replay-v1';
+import {
+  blockedDxfNativeSewingReplayV1,
+  buildDxfNativeSewingReplayV1,
+  validateDxfNativeSewingReplayRequestV1,
+  type DxfNativeSewingReplayStageOutputV1,
+} from '../dxf-native-sewing-replay-v1';
+import {
+  readDxfWithSourceNativeStraightEdgeAuthorityV1,
+  readDxfWithSourceNativeStraightEdgeSelectedPathAuthorityV1,
+  projectDxfSourceNativeStraightEdgeAuthorityV1,
+  projectDxfSourceNativeStraightEdgeSelectedPathsV1,
+  DXF_SOURCE_NATIVE_STRAIGHT_EDGE_PROJECTION_REQUEST_V1,
+  DXF_SOURCE_NATIVE_STRAIGHT_EDGE_SELECTED_PATHS_REQUEST_V1,
+} from '../dxf-source-native-straight-edge-authority-v1';
 import { createDxfSourceCurveIdV1 } from '../dxf-path-provenance-v1';
 import { extractRasterImageDetailed } from '../adapters/raster';
 import { pdfHasNoCurves } from '../etalon/junk';
@@ -257,6 +279,7 @@ const ORDER: StageName[] = [
 ];
 
 export type StageCtx = {
+  reviewedAddPointAtWrite?: ReviewedAddPointAtWrite;
   progress: Progress;
   /** Throws `cancelled` when the operator stopped the stage (checked at every progress tick). */
   checkCancel: () => void;
@@ -508,6 +531,11 @@ export class Session {
   /** Private pre-candidate PathId selection; never returned by any worker stage. */
   private dxfCandidateLineage: DxfCandidateLineageSidecarV1 | null = null;
   private dxfPipelineProvenance: DxfPipelineProvenanceStageOutputV1 | null = null;
+  private dxfSewingLineage: DxfCandidateLineageSidecarV1 | null = null;
+  private dxfSewingBlockers: readonly DxfPipelineProvenanceBlockerV1[] = [];
+  private dxfSewingTrace: SemanticsDetail['dxfSewingProvenanceOf'] | null = null;
+  private dxfSewingEpoch = 0;
+
   /** Several DXF files, one per size (owner decision 5): merged into one drawing by the first read
    * (R4: in the cancellable read stage, never at open), kept for the rereads. */
   private isDxfSet = false;
@@ -598,10 +626,15 @@ export class Session {
   /** sha256 per file id, computed once when the bytes are first read (provenance, error report). */
   private sha = new Map<string, string>();
 
-  constructor(id: number, input: SessionOpenFile[]) {
+  private readonly reviewedAddPoint?: ReviewedAddPointOpen;
+  private readonly protectedInput: boolean;
+  private readonly nativeLayout?: Pick<ConversionManifest, 'techCardId' | 'scope'>;
+  constructor(id: number, input: SessionOpenFile[], reviewedAddPoint?: ReviewedAddPointOpen) {
     let files = input;
     this.id = id;
     this.dxfOpenProvenance = captureDxfOpenProvenance(input);
+    this.reviewedAddPoint =
+      reviewedAddPoint === undefined ? undefined : structuredClone(reviewedAddPoint);
     this.dxfProvenanceSetupBlockers = [...this.dxfOpenProvenance.blockers];
     if (!files.length) throw new ImportError('out-of-order', 'no files given');
     // M6: the main thread checked the File sizes already; the worker re-checks what it received.
@@ -681,6 +714,20 @@ export class Session {
     // Several DXF files = one file per size: merged into one drawing by the read stage (R4: the
     // set is guarded, decoded and merged there — cancellable, after its size checks), read as one
     // DXF after.
+    let nativeLayout: typeof this.nativeLayout;
+    this.protectedInput = files.some((f, index) => {
+      if (routes[index]?.route !== 'dxf') return false;
+      try {
+        const manifest = readManifestBytes(f.bytes);
+        if (files === input && files.length === 1 && manifest?.preserveNativeLayout) {
+          nativeLayout = { techCardId: manifest.techCardId, scope: manifest.scope };
+        }
+        return !!manifest?.blocks.some((b) => b.protectedLineSplit);
+      } catch (error) {
+        return error instanceof Error && error.message.includes('.protectedLineSplit');
+      }
+    });
+    this.nativeLayout = nativeLayout;
     this.isDxfSet = routes[0].route === 'dxf' && files.length > 1;
     this.files = files.map((f, i) => ({
       id: String(i),
@@ -700,6 +747,10 @@ export class Session {
   }
 
   close() {
+    this.dxfSewingEpoch += 1;
+    this.dxfSewingLineage = null;
+    this.dxfSewingTrace = null;
+    this.dxfSewingBlockers = [];
     this.blobs.clear();
     this.docs = null;
     this.sheet = null;
@@ -716,6 +767,8 @@ export class Session {
   private invalidateAfter(stage: StageName) {
     const at = ORDER.indexOf(stage);
     if (at < 0) return;
+    this.dxfSewingEpoch += 1;
+    if (at <= ORDER.indexOf('semantics')) this.dxfSewingTrace = null;
     if (at < ORDER.indexOf('clean')) {
       this.masks = null;
       this.cleanEdits = [];
@@ -726,6 +779,8 @@ export class Session {
       this.decision = null;
       this.fast = null;
       this.dxfCandidateLineage = null;
+      this.dxfSewingLineage = null;
+      this.dxfSewingBlockers = [];
     }
     if (at < ORDER.indexOf('assemble')) this.sheet = null;
     if (at < ORDER.indexOf('chains')) {
@@ -795,6 +850,11 @@ export class Session {
           return this.dxfProvenanceStage(input as StageIO['dxf-provenance']['in']);
         case 'dxf-phase-d-replay':
           return this.dxfPhaseDReplayStage(input as StageIO['dxf-phase-d-replay']['in']);
+        case 'dxf-native-sewing-replay':
+          return this.dxfNativeSewingReplayStage(
+            input as StageIO['dxf-native-sewing-replay']['in'],
+            ctx,
+          );
         case 'render-som':
           return this.renderSomStage(input as StageIO['render-som']['in']);
         case 'render-pages':
@@ -820,6 +880,9 @@ export class Session {
     this.dxfProvenanceContours = null;
     this.dxfCandidateLineage = null;
     this.dxfPipelineProvenance = null;
+    this.dxfSewingLineage = null;
+    this.dxfSewingTrace = null;
+    this.dxfSewingBlockers = [];
     this.dxfProvenanceRunBlockers = [...this.dxfProvenanceSetupBlockers];
     // C4: one work budget for all files of this read (adapters/budget.ts)
     const runOpts: ExtractOpts = { ...opts, budget: new WorkBudget() };
@@ -1191,6 +1254,16 @@ export class Session {
       scale,
       warnings,
       presegmented: !!this.dxf,
+      ...(this.files.length === 1 &&
+      this.dxf?.read.meta.manifest &&
+      !this.dxf.read.meta.binary &&
+      !this.dxf.read.meta.generatedFusing &&
+      (this.dxf.read.meta.version === 'AC1009' || this.dxf.read.meta.version === 'AC1015')
+        ? {
+            productWriterDialect:
+              this.dxf.read.meta.version === 'AC1009' ? ('r12' as const) : ('r2000' as const),
+          }
+        : {}),
       calibrations: this.calibrations.length ? this.calibrations : undefined,
       ...(this.passport ? { passport: this.passport } : {}),
     };
@@ -1220,7 +1293,16 @@ export class Session {
               return { read: r2, seg: segmentDxf(r2) };
             })();
       this.dxfCandidateLineage = null;
+      this.dxfSewingLineage = null;
+      this.dxfSewingBlockers = [];
       if (this.dxfProvenanceSource && this.dxfProvenanceRunBlockers.length === 0) {
+        const sewing = createDxfNativeSewingCandidateLineageV1(
+          scaled.seg,
+          this.dxfProvenanceSource,
+          appliedDxfFactor,
+        );
+        if (sewing.ok) this.dxfSewingLineage = sewing.value;
+        else this.dxfSewingBlockers = sewing.blockers;
         const lineage = createDxfCandidateLineageSidecarV1(
           scaled.seg,
           this.dxfProvenanceSource,
@@ -1763,7 +1845,14 @@ export class Session {
       this.setAside = [];
       this.run = this.run ?? this.fast.run;
       this.wallSet = this.fast.chains;
-      return { seeds: this.fast.seeds, families };
+      const productFoldAxes = this.dxf
+        ? productDxfFoldAxes(this.dxf.read, families, isNativeCutOrFoldPolyline)
+        : [];
+      return {
+        seeds: this.fast.seeds,
+        families,
+        ...(productFoldAxes.length ? { productFoldAxes } : {}),
+      };
     }
     const base = this.chains;
     if (!base) throw new ImportError('out-of-order', 'trace the lines first', 'pieces');
@@ -2162,6 +2251,7 @@ export class Session {
     this.onePieceOf = detail.onePieceOf;
     this.gradeOf = detail.gradeOf;
     this.dxfPipelineProvenance = await this.buildDxfPipelineProvenance(detail, output);
+    this.dxfSewingTrace = detail.dxfSewingProvenanceOf;
     return output;
   }
 
@@ -2309,6 +2399,50 @@ export class Session {
         );
         if (projected.ok) boundaries.push(projected.value);
         else blockers.push(...phaseCBlockersToPipelineV1(projected.blockers));
+        const cutLoopPaths = trace.cutLoopSourcePathIds ?? [];
+        if (
+          (size.cutLoops?.length ?? 0) !== cutLoopPaths.length ||
+          (cutLoopPaths.length > 0 && (trace.geometry !== 'cut' || mutations.length > 0))
+        ) {
+          blockers.push(
+            dxfPipelineBlockerV1(
+              'ambiguous-final-locator',
+              'Native cut holes must keep their original path, order, and unmodified outer cut.',
+              piece.identity,
+              size.sizeToken,
+            ),
+          );
+          continue;
+        }
+        for (const [index, sourcePathId] of cutLoopPaths.entries()) {
+          const geometry = { kind: 'cut-loop', index } as const;
+          const holeId = createDxfPipelineContourIdV1(piece.identity, size.sizeToken, geometry);
+          if (!holeId) {
+            blockers.push(
+              dxfPipelineBlockerV1(
+                'bounds-exceeded',
+                'The native cut-loop identity exceeds 256 UTF-8 bytes.',
+                piece.identity,
+                size.sizeToken,
+              ),
+            );
+            break;
+          }
+          const hole = projectDxfPieceSpecContourBoundaryV1(piece, size.sizeToken, {
+            contourId: holeId,
+            role: 'hole',
+            geometry,
+            lineage: {
+              sourcePathIds: [sourcePathId],
+              uniformPositiveScale: lineage.uniformPositiveScale,
+              cyclicShift: 0,
+              direction: 'forward',
+              mutations: [],
+            },
+          });
+          if (hole.ok) boundaries.push(hole.value);
+          else blockers.push(...phaseCBlockersToPipelineV1(hole.blockers));
+        }
       }
     }
     for (const entry of lineage.entries) {
@@ -2382,6 +2516,119 @@ export class Session {
         ),
       ])
     );
+  }
+
+  private async dxfNativeSewingReplayStage(
+    input: StageIO['dxf-native-sewing-replay']['in'],
+    ctx: StageCtx,
+  ): Promise<DxfNativeSewingReplayStageOutputV1> {
+    const invalid = validateDxfNativeSewingReplayRequestV1(input);
+    if (invalid) return blockedDxfNativeSewingReplayV1([invalid]);
+    const refuse = (detail: string) =>
+      blockedDxfNativeSewingReplayV1([dxfPipelineBlockerV1('candidate-lineage-missing', detail)]);
+    if (!this.dxfOpenProvenance.requested)
+      return refuse('Native sewing requires exact original-source opt-in.');
+    if (this.dxfProvenanceRunBlockers.length)
+      return blockedDxfNativeSewingReplayV1(this.dxfProvenanceRunBlockers);
+    if (this.dxfSewingBlockers.length)
+      return blockedDxfNativeSewingReplayV1(this.dxfSewingBlockers);
+    const lineage = this.dxfSewingLineage,
+      semantics = this.semantics,
+      trace = this.dxfSewingTrace;
+    const sourceIndex = this.dxfOpenProvenance.fileIndex;
+    const sourceFileId = this.dxfOpenProvenance.sourceFileId;
+    if (!lineage || !semantics || !trace || sourceIndex === null || sourceFileId === null)
+      return refuse('Native sewing needs a current pre-flatten lineage and semantics pass.');
+    const blob = this.blobs.get(`file:${sourceIndex}`),
+      sourceSha256 = this.sha.get(String(sourceIndex));
+    if (!blob || !sourceSha256)
+      return refuse('Exact retained original bytes and digest are unavailable.');
+    const epoch = this.dxfSewingEpoch;
+    const current = () => {
+      ctx.checkCancel();
+      if (
+        epoch !== this.dxfSewingEpoch ||
+        lineage !== this.dxfSewingLineage ||
+        semantics !== this.semantics ||
+        trace !== this.dxfSewingTrace ||
+        blob !== this.blobs.get(`file:${sourceIndex}`)
+      )
+        throw new ImportError(
+          'out-of-order',
+          'Native sewing source changed during replay.',
+          'dxf-native-sewing-replay',
+        );
+    };
+    current();
+    const traces = semantics.pieces.flatMap((piece) =>
+      piece.sizes.map((size) => ({
+        pieceId: piece.identity,
+        sizeToken: size.sizeToken,
+        trace: trace(piece.identity, size.rank) ?? null,
+      })),
+    );
+    const bytes = await blob.arrayBuffer();
+    current();
+    const file = { id: String(sourceIndex), name: this.files[sourceIndex].name, bytes };
+    // Extra opt-in decode is intentional: parameter-space labels alone never prove a straight line.
+    const nativeRead = await readDxfWithSourceNativeStraightEdgeAuthorityV1(
+      file,
+      DEFAULT_OPTS,
+      { sourceFileId },
+      () => current(),
+    );
+    current();
+    let native;
+    let sourceDecodePasses: 1 | 2 = 1;
+    if (nativeRead.ok) {
+      native = projectDxfSourceNativeStraightEdgeAuthorityV1(nativeRead.value.owner, {
+        schemaVersion: DXF_SOURCE_NATIVE_STRAIGHT_EDGE_PROJECTION_REQUEST_V1,
+        sourceFileId,
+        sourceSha256,
+      });
+    } else {
+      if (nativeRead.blockers[0]?.code !== 'canonical-bytes-exceeded')
+        return refuse(nativeRead.blockers.map((blocker) => blocker.detail).join('; '));
+      if (
+        lineage.entries.some(
+          (entry) => entry.sourceGeometry !== 'seam' || entry.sourcePathIds.length !== 1,
+        )
+      )
+        return refuse('Scoped native sewing requires one exact path per private candidate.');
+      const sourcePathIds = [
+        ...new Set(lineage.entries.map((entry) => entry.sourcePathIds[0])),
+      ].sort((a, b) => a - b);
+      const request = {
+        schemaVersion: DXF_SOURCE_NATIVE_STRAIGHT_EDGE_SELECTED_PATHS_REQUEST_V1,
+        sourceFileId,
+        sourceSha256,
+        sourcePathIds,
+      };
+      const scoped = await readDxfWithSourceNativeStraightEdgeSelectedPathAuthorityV1(
+        file,
+        DEFAULT_OPTS,
+        request,
+        () => current(),
+      );
+      current();
+      if (!scoped.ok) return refuse(scoped.blockers.map((blocker) => blocker.detail).join('; '));
+      native = await projectDxfSourceNativeStraightEdgeSelectedPathsV1(scoped.value.owner, request);
+      current();
+      if (native.ok && !native.projection.complete)
+        return refuse(native.projection.blockers.map((blocker) => blocker.detail).join('; '));
+      sourceDecodePasses = 2;
+    }
+    if (!native.ok) return refuse(native.blockers.map((blocker) => blocker.detail).join('; '));
+    current();
+    const result = await buildDxfNativeSewingReplayV1(
+      lineage,
+      semantics.pieces,
+      traces,
+      native.projection,
+      sourceDecodePasses,
+    );
+    current();
+    return result;
   }
 
   private async dxfPhaseDReplayStage(
@@ -2565,6 +2812,11 @@ export class Session {
   ): Promise<StageIO['write']['out']> {
     const sem = this.semantics;
     if (!sem) throw new ImportError('out-of-order', 'piece details have not been built', 'write');
+    if (
+      input.assignment.dxfOmissions?.seeds.length &&
+      (!this.fast || !this.dxf || this.files.length !== 1 || this.rul)
+    )
+      throw new ImportError('out-of-order', 'Select pieces from one garment DXF file.', 'write');
     const raster = this.files.some((f) => f.kind === 'raster');
     const presegmentedIdentities = [
       ...new Set([
@@ -2685,8 +2937,8 @@ export class Session {
     // reads a FILL's faces: a DXF's pieces are its blocks, each drawn in its own frame — they are
     // not faces of one drawing, and blocks laid over each other are no outline across two pieces
     const onePiece = this.fast ? null : this.onePieceOf;
-    // SILENT (G26 / G8): the grade model reads the fill's nested size lines, as G24 does
-    const grade = this.fast ? null : this.gradeOf;
+    // G8 consumes source evidence for both drawn DXF blocks and nested size lines.
+    const grade = this.gradeOf;
     const specOf = new Map(sem.pieces.map((p) => [p.identity, p]));
     // The fill's snapped outline votes which segments are this piece's — only where it is in the
     // spec's frame: the first identity of a seed (a derived `_R` is mirrored), not unfolded.
@@ -2736,6 +2988,34 @@ export class Session {
         });
       }
     const sheets = this.sheetCover(sem.pieces.map((p) => p.seed));
+    const reviewed = this.reviewedAddPoint;
+    const contours = this.dxfProvenanceContours,
+      sourceBlob = this.blobs.get('file:0');
+    const checkReviewedPhase = () => {
+      ctx.checkCancel();
+      if (
+        this.semantics !== sem ||
+        this.dxfProvenanceContours !== contours ||
+        this.blobs.get('file:0') !== sourceBlob
+      )
+        throw new Error('Reviewed Add point worker phase changed during write.');
+    };
+    if (this.protectedInput && !reviewed)
+      throw new Error('Protected Add point requires an explicit current review File.');
+    if (
+      reviewed &&
+      (!this.protectedInput ||
+        this.files.length !== 1 ||
+        plan.scopes.length !== 1 ||
+        !this.dxfOpenProvenance.sourceFileId ||
+        this.dxfOpenProvenance.fileIndex !== 0 ||
+        input.storage === 'rul' ||
+        !this.blobs.has('file:0'))
+    ) {
+      throw new Error(
+        'Reviewed Add point requires its exact single DXF, native source and material scope.',
+      );
+    }
     const scopes: DraftScope[] = [];
     const gate: Record<string, GateReport> = {};
     let k = 0;
@@ -2743,6 +3023,12 @@ export class Session {
       ctx.checkCancel();
       const scope = sp.target;
       ctx.progress(k++, plan.scopes.length, scope.label);
+      const retained = this.nativeLayout;
+      const preserveNativeLayout =
+        input.storage !== 'rul' &&
+        retained?.techCardId === input.techCardId &&
+        retained.scope.bomLineKey === scope.bomLineKey &&
+        retained.scope.fabricPurpose === scope.fabricPurpose;
       const writerJob: WriteJob = {
         techCardId: input.techCardId,
         scope,
@@ -2751,11 +3037,24 @@ export class Session {
         source: sourceFor(sp.specs),
         generator: input.generator,
         dialect: input.dialect,
+        ...(preserveNativeLayout ? { preserveNativeLayout: true as const } : {}),
         ...(input.autopilot ? { autopilot: input.autopilot } : {}),
         ...(this.passportBound ? { passport: passportDigest(this.passportBound) } : {}),
         ...(input.replay ? { replay: input.replay } : {}),
       };
+      const retainedLineSplit = reviewed
+        ? await identifyReviewedAddPoint({
+            bytes: await sourceBlob!.arrayBuffer(),
+            fileId: this.dxfOpenProvenance.sourceFileId!,
+            wire: reviewed,
+            atWrite: ctx.reviewedAddPointAtWrite,
+            job: writerJob,
+            sourceOf: sp.sourceOf,
+            contours,
+          })
+        : undefined;
       const res = await writeAndGate(writerJob, {
+        ...(retainedLineSplit ? { retainedLineSplit } : {}),
         rules: cardRules,
         sizeTokens,
         wallsOf: rawWalls ? (id, rank) => rawWalls(sp.sourceOf[id] ?? id, rank) : undefined,
@@ -2781,6 +3080,15 @@ export class Session {
         input.sizes,
         this.rul && !this.rulSkipped ? this.rulGrades : null,
       );
+      if (retainedLineSplit) {
+        const outputBytes = new TextEncoder().encode(mapped.text).buffer;
+        await readProtectedLineSplit(outputBytes, 'reviewed-add-point-output', {
+          fileSha256: await hashNativeOutput(outputBytes),
+          block: retainedLineSplit.block,
+          record: retainedLineSplit.record,
+        });
+        checkReviewedPhase();
+      }
       scopes.push({
         target: scope,
         filename,
@@ -2790,6 +3098,7 @@ export class Session {
         manifest: res.detail.manifest,
         writerReplay: {
           schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_WRITER_REPLAY_CARRIER_V1,
+          ...(retainedLineSplit ? { retainedLineSplit } : {}),
           job: writerJob,
           createdAt: res.detail.manifest.createdAt,
         },

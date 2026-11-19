@@ -43,7 +43,14 @@ const LABEL: Record<Provider, string> = {
   apple: 'continue with apple',
 };
 
-export function ProviderButtons({ fields }: { fields: () => Record<string, string> }) {
+export function ProviderButtons({
+  fields,
+  gate,
+}: {
+  fields: () => Record<string, string>;
+  /** False keeps the person on the page (e.g. consent not given yet). */
+  gate?: () => boolean;
+}) {
   const [shown, setShown] = useState<Provider[] | null>(known);
   const [leaving, setLeaving] = useState<Provider | null>(null);
 
@@ -72,6 +79,7 @@ export function ProviderButtons({ fields }: { fields: () => Record<string, strin
             disabled={leaving !== null}
             className='flex w-full items-center justify-center gap-2.5 py-2 max-sm:py-2.5'
             onClick={() => {
+              if (gate && !gate()) return;
               setLeaving(p);
               startProvider(p, fields());
             }}

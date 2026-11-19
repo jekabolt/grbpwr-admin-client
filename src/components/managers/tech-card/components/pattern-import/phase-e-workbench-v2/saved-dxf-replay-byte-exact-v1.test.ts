@@ -5,6 +5,8 @@ import type {
   CardDraft,
   ConversionManifest,
   DraftScopeTarget,
+  PieceSizeSpec,
+  PieceSpec,
   ReplayAnswer,
   WriteJob,
 } from 'lib/pattern-import/types';
@@ -136,5 +138,119 @@ describe('saved-only unknown manifest replay preservation', () => {
     if (!secondManifest) throw new Error('Second saved-only reload has no manifest.');
     expect(exactJsonBytes(replayAnswer(secondManifest))).toEqual(expectedAnswerBytes);
     expect(encoder.encode(second.dxfText)).toEqual(expectedDxfBytes);
+  });
+});
+
+function mixedRankJob(dialect: WriteJob['dialect']): WriteJob {
+  const sizes = ['XS', 'S', 'M', 'L', 'XL'].map((token, rank) => ({
+    token,
+    name: token,
+    sourceLabel: token,
+    rank,
+    sizeId: 56 + rank,
+  }));
+  const spec = (identity: string, ungraded: boolean, seed: PieceSpec['seed']): PieceSpec => ({
+    identity,
+    code: identity,
+    mods: [],
+    displayName: identity,
+    nameOrigin: 'operator',
+    seed,
+    variant: null,
+    pairHand: null,
+    pairOf: null,
+    unfoldedFold: false,
+    piecesPerGarment: 1,
+    allowance: { meaning: 'cut', allowanceMm: 0, origin: 'operator', evidence: [] },
+    fabrics: [TARGET.scopeKey],
+    fused: false,
+    ungraded,
+    sizes: (ungraded ? sizes.slice(2, 3) : sizes).map(({ token, sizeId, rank }): PieceSizeSpec => {
+      const width = 40 + rank;
+      const cut = [
+        { x: 0, y: 0 },
+        { x: width, y: 0 },
+        { x: width, y: 30 },
+        { x: 0, y: 30 },
+      ];
+      return {
+        rank,
+        sizeToken: token,
+        sizeId,
+        cut,
+        seam: structuredClone(cut),
+        grain: null,
+        notches: [],
+        drills: [],
+        internal: [],
+        fold: null,
+        offset: null,
+        walls: [],
+        bbox: { minX: 0, minY: 0, maxX: width, maxY: 30 },
+        areaMm2: width * 30,
+      };
+    }),
+  });
+  return {
+    ...writerJob(),
+    sizes,
+    dialect,
+    pieces: [
+      spec('BOUNDARY', false, 1 as PieceSpec['seed']),
+      spec('RECT', true, 2 as PieceSpec['seed']),
+    ],
+  };
+}
+
+describe('exact saved UNI writer block replay', () => {
+  it.each(['r12', 'r2000'] as const)(
+    'retains one UNI block and all five ranked blocks byte-exact in %s',
+    (dialect) => {
+      const job = mixedRankJob(dialect);
+      const options = { now: () => new Date(CREATED_AT) };
+      const initial = writeDxfDetailed(job, options);
+      const restored = restoredJob(initial, job);
+      expect(restored.pieces.find(({ identity }) => identity === 'RECT')?.sizes).toMatchObject([
+        { sizeToken: 'M', sizeId: 58, rank: 2 },
+      ]);
+      const actual = writeDxfDetailed(restored, options);
+      expect(actual.manifest.blocks.map(({ block, sizeToken }) => [block, sizeToken])).toEqual([
+        ['BOUNDARY_XS', 'XS'],
+        ['BOUNDARY_S', 'S'],
+        ['BOUNDARY_M', 'M'],
+        ['RECT_UNI', 'UNI'],
+        ['BOUNDARY_L', 'L'],
+        ['BOUNDARY_XL', 'XL'],
+      ]);
+      expect(actual.dxfText).toBe(initial.dxfText);
+    },
+  );
+
+  it('refuses a false UNI identity, mismatched authoring rank or extra candidate', () => {
+    const job = mixedRankJob('r12');
+    const initial = writeDxfDetailed(job, { now: () => new Date(CREATED_AT) });
+    const withoutRestoration = () => structuredClone(draftFrom(initial, job));
+    const manifest = () => structuredClone(initial.manifest);
+
+    const wrongName = manifest();
+    wrongName.blocks.find(({ sizeToken }) => sizeToken === 'UNI')!.block = 'FOREIGN_UNI';
+    expect(() =>
+      restorePatternImportDxfSavedWriterReplayV1(withoutRestoration(), wrongName),
+    ).toThrow('Saved manifest has no unique exact block for RECT / M.');
+
+    const wrongRank = withoutRestoration();
+    wrongRank.scopes[0]!.writerReplay!.job.pieces.find(
+      ({ identity }) => identity === 'RECT',
+    )!.sizes[0]!.rank = 1;
+    expect(() => restorePatternImportDxfSavedWriterReplayV1(wrongRank, manifest())).toThrow(
+      'Saved manifest has no unique exact block for RECT / M.',
+    );
+
+    const duplicate = manifest();
+    const block = duplicate.blocks.find(({ sizeToken }) => sizeToken === 'UNI')!;
+    duplicate.blocks.push(structuredClone(block));
+    expect(() =>
+      restorePatternImportDxfSavedWriterReplayV1(withoutRestoration(), duplicate),
+    ).toThrow('Saved manifest has no unique exact block for RECT / M.');
   });
 });

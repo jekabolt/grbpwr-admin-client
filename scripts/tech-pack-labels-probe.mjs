@@ -154,7 +154,7 @@ const CARD_A = base(
       colorways: [{ colorwayId: 101, fibers: [{ part: 'TECH_CARD_BOM_LABEL_PART_SHELL', fiberCode: 'COT', pct: 100 }] }],
     },
     garmentLabels: [
-      { key: 'hangtag', placement: 'left side seam', attachment: 'loop pin', folding: 'flat',
+      { key: 'hangtag', placement: 'left side seam', attachment: 'loop pin', fold: 'flat',
         size: '50 × 90 mm', qtyPerGarment: 1, note: 'recycled board', mediaIds: [501] },
       { key: 'tax stamp', placement: 'inside pocket', mediaIds: [] },
     ],
@@ -234,9 +234,23 @@ async function run(browser, code, log) {
     const decoded = (await img.count()) ? await img.evaluate((i) => i.complete && i.naturalWidth > 0) : false;
     ck(src === 'https://cdn.example/501.png' && decoded && (await hang.locator('[data-no-mockup]').count()) === 0,
       'A2 · hangtag prints its resolved mockup', `src ${src}, decoded ${decoded}`);
-    const ht = (await hang.innerText()).replace(/\s+/g, ' ');
-    ck(['hangtag', 'left side seam', 'loop pin', 'flat', '50 × 90 mm', '1', 'recycled board'].every((s) => ht.includes(s)),
-      'A2 · hangtag row carries name, placement, attachment, folding, size, qty, note', ht);
+    const columns = await page.locator('[data-tp-labels]').getByRole('columnheader').allTextContents();
+    const cells = await hang.getByRole('cell').allTextContents();
+    const row = Object.fromEntries(columns.map((column, index) => [column.trim(), cells[index]?.trim()]));
+    const expected = {
+      label: 'hangtag',
+      placement: 'left side seam',
+      attachment: 'loop pin',
+      folding: 'flat',
+      size: '50 × 90 mm',
+      'qty / garment': '1',
+      note: 'recycled board',
+    };
+    ck(
+      Object.entries(expected).every(([column, value]) => row[column] === value),
+      'A2 · hangtag prints the exact values in their own columns',
+      JSON.stringify(row),
+    );
     const tax = page.locator('[data-tp-label="tax stamp"]');
     ck((await tax.locator('[data-no-mockup]').count()) === 1 && /no mockup/i.test(await tax.innerText()),
       'A2 · a label without a mockup prints «no mockup»');

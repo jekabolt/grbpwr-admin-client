@@ -9,6 +9,7 @@
 // import-ux PR5: the screen says the consequences (pieces, sizes, fabric files, what is left out)
 // and names replacements before apply. The piece list, block links and assumptions are folds.
 import type { FollowUpCell, FollowUpRow, FollowUpStep } from 'lib/pattern-import/fabrics/followup';
+import type { SavedJoinDescription } from '../phase-e-workbench-v2/draft-cad-saved-join-file';
 import type { DraftScope } from 'lib/pattern-import/types';
 import { useContext, useState } from 'react';
 import {
@@ -69,6 +70,7 @@ function FollowUpValue({ cell, onRetry }: { cell: FollowUpCell; onRetry?: () => 
 }
 
 export function ApplyStep({
+  join,
   api,
   card,
   stub,
@@ -77,6 +79,7 @@ export function ApplyStep({
   onRetryFollowUp,
   onReviewPieces,
 }: {
+  join?: SavedJoinDescription;
   api: ImportSessionApi;
   card: CardContext;
   stub: boolean;
@@ -92,6 +95,7 @@ export function ApplyStep({
   if (card.downloadOnly) return <DownloadOnly api={api} onClose={onClose} />;
   const running = apply.phase === 'running';
   const done = apply.phase === 'done' ? apply.result : null;
+  const joinSaved = !stub && done?.ok && done.save === 'ok' && (done.writes ?? 0) > 0;
   const progress = apply.phase === 'idle' ? {} : apply.progress;
   // T4: the assembly impact (the run's card snapshot, as the session gates on it) and the draft as
   // apply will write it — the operator's answers made into rows (the minted keys are placeholders)
@@ -188,7 +192,23 @@ export function ApplyStep({
           className='[&>span:first-child]:shrink-0 [&>span:last-child]:shrink'
         />
       )}
-      <AssemblyTiles api={api} card={runCard} impacts={impacts} locked={running || !!done?.ok} />
+      {join && (
+        <Row
+          label={joinSaved ? 'Joined pieces' : 'Join pieces'}
+          value={
+            joinSaved
+              ? join.fixed + ' and ' + join.moving + ' replaced by ' + join.identity
+              : 'Replace ' + join.fixed + ' and ' + join.moving + ' with ' + join.identity
+          }
+        />
+      )}
+      <AssemblyTiles
+        newPieceOnly={join?.identity}
+        api={api}
+        card={runCard}
+        impacts={impacts}
+        locked={running || !!done?.ok}
+      />
       {eff.pieceUpdates.length > 0 && (
         <>
           <GroupLabel>card pieces rewritten</GroupLabel>
@@ -211,7 +231,7 @@ export function ApplyStep({
                 <Text size='micro' component='p'>
                   {sc.target.label}: “{r.name || r.filename}”
                 </Text>
-                {(sc.vanished ?? []).length > 0 && (
+                {!join && (sc.vanished ?? []).length > 0 && (
                   <Fold label={`${plural(sc.vanished!.length, 'block')} no longer drawn`}>
                     <Text
                       size='nano'
@@ -239,7 +259,7 @@ export function ApplyStep({
                     </DataTable>
                   </Fold>
                 )}
-                {(sc.vanished ?? []).length > 0 && !sc.readsBack && (
+                {!join && (sc.vanished ?? []).length > 0 && !sc.readsBack && (
                   <Text size='nano' component='p' className='mt-1 text-error'>
                     ! the new file did not read back completely (gate G1), so removal is not offered
                     from here.
@@ -431,7 +451,7 @@ export function ApplyStep({
             areas and size index: after the card saves
           </Text>
         )}
-        {done?.ok && !stub && vanishedScopes.length > 0 && (
+        {done?.ok && !stub && !join && vanishedScopes.length > 0 && (
           <div className='mb-2'>
             <GroupLabel flush>no longer drawn</GroupLabel>
             {vanishedScopes.map((sc) => (

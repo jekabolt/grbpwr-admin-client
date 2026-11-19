@@ -56,7 +56,7 @@ export function AddressField({
           autoComplete='off'
           aria-label='address'
           invalid={bad}
-          className='min-w-0 flex-1 font-bold'
+          className='min-w-0 flex-1'
           onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
             onChange(e.target.value.toLowerCase())
           }

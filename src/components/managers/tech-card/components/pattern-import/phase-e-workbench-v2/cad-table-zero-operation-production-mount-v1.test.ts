@@ -1,6 +1,7 @@
+import { resolveStrictSeamUpsertReceipt } from '../../assembly-seams/use-seam-decisions';
 import type { common_TechCard } from 'api/proto-http/admin';
 import { describe, expect, it, vi } from 'vitest';
-import { toWire, type StoredSeam } from 'lib/seams';
+import { fromWire, toWire, type StoredPose, type StoredSeam } from 'lib/seams';
 
 import { buildPatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import { selectPatternImportDxfProductDraftPhaseDSizeV1 } from 'lib/cloth/domain/pattern-import-dxf-product-draft-phase-d-selection-v1';
@@ -8,7 +9,10 @@ import { createPatternImportDxfProductSavedRuntimeSeedV1Fixture } from 'lib/clot
 import { projectPatternImportDxfProductPhaseEAssemblyV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 
 import { derivePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1 } from './cad-table-connect-edge-segments-v1';
-import { capturePatternImportDxfPhaseECadTableZeroOperationSavedRebindExpectationV1 } from './cad-table-zero-operation-authority-rebind-v1';
+import {
+  capturePatternImportDxfPhaseECadTableZeroOperationSavedRebindExpectationV1,
+  verifyPatternImportDxfPhaseECadTableZeroOperationSavedAuthorityRefreshV1,
+} from './cad-table-zero-operation-authority-rebind-v1';
 import {
   createPatternImportDxfPhaseECadTableZeroConnectControllerStateV1,
   selectPatternImportDxfPhaseECadTableZeroConnectControllerEdgeV1,
@@ -19,6 +23,10 @@ import type { PatternImportDxfPhaseECadTableZeroOperationFreshPreparationResultV
 import { createPatternImportDxfPhaseECadTableZeroOperationGenerationOwnerV1 } from './cad-table-zero-operation-generation-owner-v1';
 import { createPatternImportDxfPhaseEZeroConnectPendingHandoffV1 } from './cad-table-zero-connect-post-save-owner-v1';
 import {
+  preparePatternImportDxfPhaseEZeroConnectPostSaveSeamLinkV1,
+  preparePatternImportDxfPhaseEZeroConnectStoredSeamV1,
+} from './cad-table-zero-connect-post-save-seam-link-v1';
+import {
   capturePatternImportDxfPhaseEZeroConnectExistingOperationPendingV1,
   executePatternImportDxfPhaseEZeroConnectExistingOperationAttachOnceV1,
   readPatternImportDxfPhaseEZeroConnectExistingOperationAttachOnceV1,
@@ -26,7 +34,19 @@ import {
   verifyPatternImportDxfPhaseEZeroConnectExistingOperationReadbackV1,
 } from './cad-table-zero-connect-existing-operation-attach-v1';
 import {
+  canReleasePatternImportDxfPhaseEZeroConnectExistingLinkedN1V1,
+  capturePatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1,
+  resolvePatternImportDxfPhaseELinkedN1MetadataResumeDirectionV1,
+  executePatternImportDxfPhaseEZeroConnectExistingLinkedN1WriteOnceV1,
+  preparePatternImportDxfPhaseEZeroConnectExistingLinkedN1RebindV1,
+  readPatternImportDxfPhaseEZeroConnectExistingLinkedN1WriteOnceV1,
+  resolvePatternImportDxfPhaseEZeroConnectExistingLinkedN1TargetV1,
+  verifyPatternImportDxfPhaseEZeroConnectExistingLinkedN1ReadbackV1,
+} from './cad-table-zero-connect-existing-linked-operation-rebind-v1';
+import {
   createPatternImportDxfPhaseECadTableZeroOperationAuthoringRefreshV1,
+  currentCadTableSavedReviewSizeV1,
+  resolveCadTableSavedReviewSizeV1,
   isPatternImportDxfPhaseECadTableZeroOperationAuthoringReadyV1,
   preparePatternImportDxfPhaseECadTableZeroOperationSavedFailoverV1,
   readPatternImportDxfPhaseECurrentSavedCardGateV1,
@@ -54,6 +74,10 @@ type FreshPrepared = Extract<
 async function genuineSavedPrepared(
   importGeneration = 37,
   cardLockVersion = 12,
+  savedSizes = [
+    { sizeId: 45, sizeToken: 'M', label: 'm_48ta_m' },
+    { sizeId: 46, sizeToken: 'L', label: 'l_50ta_m' },
+  ],
 ): Promise<SavedPrepared> {
   const seed = await createPatternImportDxfProductSavedRuntimeSeedV1Fixture();
   const selection = await selectPatternImportDxfProductDraftPhaseDSizeV1(seed.draft, 'main', 'M');
@@ -81,6 +105,7 @@ async function genuineSavedPrepared(
     draft: seed.draft,
     selection: selection.selection,
     catalog: catalog.catalog,
+    savedSizes,
     generation,
   });
   if (!authoringAuthority) throw new Error('The production mount fixture authority was rejected.');
@@ -123,6 +148,7 @@ function savedCardWithRow(prepared: SavedPrepared): common_TechCard {
           sizeBytes: row.sizeBytes,
           sha256: row.sha256,
           savedRowRevision: row.revision,
+          version: 3,
           filename: 'main.dxf',
         },
       ],
@@ -175,6 +201,86 @@ function freshChoices(techCardId: number, ok = true) {
         blocker: Object.freeze({ code: 'fresh-session-invalid', detail: FRESH_DETAIL }),
       }) as never);
 }
+
+describe('the verified saved review grade in Pattern set', () => {
+  const xs = { sizeId: 7, sizeToken: 'XS', label: 'XS', rank: 0 };
+  const m = { sizeId: 45, sizeToken: 'M', label: 'M', rank: 1 };
+  const l = { sizeId: 46, sizeToken: 'L', label: 'L', rank: 2 };
+
+  it('moves ordinary XS to verified M, allows an explicit override and resets it for a new review', async () => {
+    const prepared = await genuineSavedPrepared();
+    const card = savedCardWithRow(prepared);
+    card.techCard!.sizeIds = [xs.sizeId, m.sizeId, l.sizeId];
+    const review = {
+      row: prepared.authoringAuthority.row,
+      operationNumber: 170,
+      sizeId: m.sizeId,
+      sizeToken: m.sizeToken,
+    };
+    const size = currentCadTableSavedReviewSizeV1(review, card, 170);
+    expect(size).toBe(review);
+
+    const choices = [xs, m, l];
+    const previousXs = { sizeId: xs.sizeId, review: null };
+    expect(resolveCadTableSavedReviewSizeV1(choices, previousXs, null)).toEqual({
+      selectedSize: xs,
+      matchesReview: false,
+    });
+    expect(resolveCadTableSavedReviewSizeV1(choices, previousXs, size)).toEqual({
+      selectedSize: m,
+      matchesReview: true,
+    });
+    const explicitXs = { sizeId: xs.sizeId, review: size };
+    expect(resolveCadTableSavedReviewSizeV1(choices, explicitXs, size)).toEqual({
+      selectedSize: xs,
+      matchesReview: false,
+    });
+    expect(
+      resolveCadTableSavedReviewSizeV1(choices, { sizeId: m.sizeId, review: size }, size),
+    ).toEqual({
+      selectedSize: m,
+      matchesReview: true,
+    });
+    expect(resolveCadTableSavedReviewSizeV1(choices, explicitXs, { ...review })).toEqual({
+      selectedSize: m,
+      matchesReview: true,
+    });
+    expect(resolveCadTableSavedReviewSizeV1(choices, explicitXs, null).selectedSize).toBe(xs);
+  });
+
+  it('refuses moved saved authorities and does not substitute another ID with the same size name', async () => {
+    const prepared = await genuineSavedPrepared();
+    const card = savedCardWithRow(prepared);
+    card.techCard!.sizeIds = [xs.sizeId, m.sizeId];
+    const review = {
+      row: prepared.authoringAuthority.row,
+      operationNumber: 170,
+      sizeId: m.sizeId,
+      sizeToken: m.sizeToken,
+    };
+    expect(currentCadTableSavedReviewSizeV1(review, card, 171)).toBeNull();
+    expect(currentCadTableSavedReviewSizeV1(review, { ...card, lockVersion: 13 }, 170)).toBeNull();
+    expect(
+      currentCadTableSavedReviewSizeV1(
+        { ...review, row: { ...review.row, revision: 99 } },
+        card,
+        170,
+      ),
+    ).toBeNull();
+    expect(
+      currentCadTableSavedReviewSizeV1(
+        { ...review, row: { ...review.row, patternLineKey: 'other' } },
+        card,
+        170,
+      ),
+    ).toBeNull();
+    const sameNameWrongId = { ...m, sizeId: 77 };
+    expect(resolveCadTableSavedReviewSizeV1([xs, sameNameWrongId], null, review)).toEqual({
+      selectedSize: xs,
+      matchesReview: false,
+    });
+  });
+});
 
 describe('zero-operation current saved-card gate', () => {
   it('replaces a stale cached projection with the independently read saved DXF', async () => {
@@ -382,6 +488,14 @@ describe('zero-operation current saved-card gate', () => {
 
     expect(pendingRoute).toMatchObject({ mode: 'saved' });
     expect(admittedRoute).toMatchObject({ mode: 'fresh' });
+    expect(
+      routePatternImportDxfPhaseECadTableAfterCurrentSavedCardGateV1({
+        techCardId,
+        freshChoices: freshChoices(techCardId + 1),
+        cachedSavedChoices: cachedChoices,
+        currentSavedCardGate: gate,
+      }),
+    ).toMatchObject({ mode: 'saved', choices: { ok: false } });
   });
 
   it('does not admit fresh when the current card has a complete saved row but saved choices are blocked', async () => {
@@ -537,6 +651,52 @@ async function genuineZeroConnectRequest() {
 }
 
 describe('existing saved empty operation zero-connect attach', () => {
+  it('preserves the existing AO history key and prepares exact anchors from the gesture', async () => {
+    const { prepared, request } = await genuineZeroConnectRequest();
+    const inputKeys = request.candidate.connection.sides.map(({ pieceLineKey }) => pieceLineKey);
+    const savedCard = savedCardWithRow(prepared);
+    savedCard.techCard!.operations = [{ operationNumber: 41, inputKeys, seamKeys: [] } as never];
+    const captured = capturePatternImportDxfPhaseEZeroConnectExistingOperationPendingV1({
+      request,
+      techCardId: prepared.techCardId,
+      selectedIndex: 0,
+      liveOperations: [{ historyKey: 'existing-op', operationNumber: 41, inputKeys, seamKeys: [] }],
+      savedCard,
+      seamWriterCardId: prepared.techCardId,
+      seamWriterLockVersion: savedCard.lockVersion,
+    });
+    if (!captured.ok) throw new Error(captured.blocker.detail);
+    expect(captured.pending.historyKey).not.toBe(request.candidate.operation.sessionOperationId);
+    const geometry = {
+      candidate: request.candidate,
+      catalog: request.catalog,
+      projection: request.projection,
+      direction: 'reversed' as const,
+      nameOf: (lineKey: string) => lineKey,
+      grainDeg: null,
+    };
+    expect(
+      preparePatternImportDxfPhaseEZeroConnectPostSaveSeamLinkV1({
+        ...geometry,
+        savedOperation: {
+          status: 'same-session-saved-draft-operation',
+          historyKey: captured.pending.historyKey,
+          operationNumber: 41,
+        },
+      }),
+    ).toMatchObject({ ok: false, blocker: { code: 'saved-operation-correlation-mismatch' } });
+    const result = preparePatternImportDxfPhaseEZeroConnectStoredSeamV1(geometry);
+    expect(result).toMatchObject({
+      ok: true,
+      storedSeam: {
+        direction: 'reversed',
+        anchoredSize: prepared.sizeToken,
+        sideA: [{ piece: inputKeys[0] }],
+        sideB: [{ piece: inputKeys[1] }],
+      },
+    });
+  });
+
   it('captures only the exact empty saved operation and rejects live or saved drift', async () => {
     const { prepared, request } = await genuineZeroConnectRequest();
     const inputKeys = request.candidate.connection.sides.map(({ pieceLineKey }) => pieceLineKey);
@@ -750,11 +910,494 @@ describe('existing saved empty operation zero-connect attach', () => {
   });
 });
 
+describe('existing saved one-physical-seam operation exact rebind', () => {
+  async function existingLinkedN1Fixture() {
+    const { prepared, request } = await genuineZeroConnectRequest();
+    const inputKeys = request.candidate.connection.sides.map(({ pieceLineKey }) => pieceLineKey);
+    const seam: StoredSeam = {
+      seamKey: 'existing-edge',
+      status: 'confirmed',
+      kind: 'edge',
+      direction: 'same',
+      source: 'manual',
+      sideA: [
+        {
+          piece: inputKeys[0]!,
+          samples: [[0, 0]],
+          perimShare: 0.5,
+          lenMm: 120,
+          notches: 0,
+          turnDeg: 0,
+          range: [0, 1],
+          edgeHint: 'legacy-a',
+          contourSig: 'legacy-a-contour',
+          placement: { xMm: 0, yMm: 1, rotDeg: 5, flip: false },
+          layer: 'over',
+        },
+      ],
+      sideB: [
+        {
+          piece: inputKeys[1]!,
+          samples: [[1, 0]],
+          perimShare: 0.5,
+          lenMm: 120,
+          notches: 0,
+          turnDeg: 0,
+          range: [0, 1],
+          edgeHint: 'legacy-b',
+          contourSig: 'legacy-b-contour',
+        },
+      ],
+      anchoredSize: '',
+      note: 'legacy exact connection',
+    };
+    const pose: StoredPose = {
+      ...seam,
+      seamKey: 'existing-pose',
+      kind: 'pose',
+      sideA: [
+        {
+          ...seam.sideA[0]!,
+          placement: { xMm: 10, yMm: 20, rotDeg: 5, flip: false },
+        },
+      ],
+      sideB: [seam.sideB[0]!],
+      note: 'keep this placement row',
+    };
+    const savedOperations = Array.from({ length: 71 }, (_, index) => {
+      const operationNumber = (index + 1) * 10;
+      return {
+        operationNumber,
+        inputKeys: operationNumber === 30 ? inputKeys : [],
+        seamKeys: operationNumber === 30 ? [seam.seamKey, pose.seamKey] : [],
+      };
+    });
+    const liveOperations = savedOperations.map((operation) => ({
+      ...structuredClone(operation),
+      historyKey: `operation-${operation.operationNumber}`,
+    }));
+    const savedCard = savedCardWithRow(prepared);
+    savedCard.techCard!.operations = structuredClone(savedOperations) as never;
+    savedCard.seams = [toWire(seam), toWire(pose)] as never;
+    return {
+      prepared,
+      request,
+      inputKeys,
+      seam,
+      pose,
+      savedOperations,
+      liveOperations,
+      savedCard,
+      selectedIndex: 2,
+    };
+  }
+
+  it('captures one physical seam while preserving its linked placement row and all 71 operations', async () => {
+    const fixture = await existingLinkedN1Fixture();
+    const captured = capturePatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1({
+      request: fixture.request,
+      techCardId: fixture.prepared.techCardId,
+      selectedIndex: fixture.selectedIndex,
+      liveOperations: fixture.liveOperations,
+      savedCard: fixture.savedCard,
+      currentRows: [fixture.seam, fixture.pose],
+      seamWriterCardId: fixture.prepared.techCardId,
+      seamWriterLockVersion: fixture.savedCard.lockVersion,
+    });
+
+    expect(captured).toMatchObject({
+      ok: true,
+      operationIndex: 2,
+      pending: {
+        target: {
+          operationNumber: 30,
+          seamKey: 'existing-edge',
+          orderedRowKeys: ['existing-edge', 'existing-pose'],
+          operationCount: 71,
+        },
+      },
+    });
+    if (!captured.ok) throw new Error(captured.blocker.detail);
+    const exact = preparePatternImportDxfPhaseEZeroConnectExistingLinkedN1RebindV1(
+      captured.pending,
+      'reversed',
+      { nameOf: (key) => key, grainDeg: null },
+    );
+    expect(exact).toMatchObject({
+      ok: true,
+      receipt: {
+        storedSeam: {
+          sideA: [{ layer: 'over', placement: fixture.seam.sideA[0]?.placement }],
+          seamKey: fixture.seam.seamKey,
+          anchoredSize: 'M',
+        },
+      },
+    });
+  });
+
+  it('rejects a legacy numeric spelling shared with another card rank and invalidates pending authority on rank drift', async () => {
+    const original = await genuineSavedPrepared();
+    const rank = { sizeId: 45, sizeToken: 'M', label: 'm_48ta_m' };
+    const competing = await genuineSavedPrepared(37, 12, [
+      rank,
+      { sizeId: 35, sizeToken: '48', label: '48' },
+    ]);
+    expect(original.authoringAuthority.selectedRank).toEqual({
+      sizeId: 45,
+      spellings: ['48', 'm'],
+    });
+    expect(competing.authoringAuthority.selectedRank).toEqual({ sizeId: 45, spellings: ['m'] });
+    const ambiguous = await genuineSavedPrepared(37, 12, [
+      rank,
+      { sizeId: 39, sizeToken: 'M', label: 'm_38ta_f' },
+    ]);
+    expect(ambiguous.authoringAuthority.selectedRank.spellings).toHaveLength(0);
+    const otherId = await genuineSavedPrepared(37, 12, [{ ...rank, sizeId: 39 }]);
+    const expected =
+      capturePatternImportDxfPhaseECadTableZeroOperationSavedRebindExpectationV1(original);
+    for (const wrong of [competing, ambiguous, otherId])
+      expect(
+        verifyPatternImportDxfPhaseECadTableZeroOperationSavedAuthorityRefreshV1(expected, wrong)
+          .ok,
+      ).toBe(false);
+  });
+
+  it('rebinds a stale anchored seam only from its original rank and unique operation owner', async () => {
+    const fixture = await existingLinkedN1Fixture();
+    const rank = fixture.request.catalog.sizeToken;
+    const staleSeam = { ...fixture.seam, anchoredSize: rank, stale: true };
+    const card = structuredClone(fixture.savedCard);
+    card.seams = [{ ...toWire(staleSeam), stale: true }, toWire(fixture.pose)] as never;
+    const inputs = {
+      request: fixture.request,
+      techCardId: fixture.prepared.techCardId,
+      selectedIndex: fixture.selectedIndex,
+      liveOperations: fixture.liveOperations,
+      savedCard: card,
+      currentRows: [staleSeam, fixture.pose],
+      seamWriterCardId: fixture.prepared.techCardId,
+      seamWriterLockVersion: card.lockVersion,
+    };
+    const capture = capturePatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1;
+    const captured = capture(inputs);
+    if (!captured.ok) throw new Error(captured.blocker.detail);
+    const context = { nameOf: (key: string) => key, grainDeg: null };
+    expect(
+      resolvePatternImportDxfPhaseELinkedN1MetadataResumeDirectionV1(
+        captured.pending,
+        card,
+        context,
+      ),
+    ).toBeNull();
+    const rebind = preparePatternImportDxfPhaseEZeroConnectExistingLinkedN1RebindV1(
+      captured.pending,
+      'reversed',
+      context,
+    );
+    if (!rebind.ok) throw new Error(rebind.blocker.detail);
+    expect(rebind.receipt.storedSeam).toMatchObject({
+      seamKey: staleSeam.seamKey,
+      anchoredSize: rank,
+      direction: 'reversed',
+    });
+    expect(rebind.receipt.storedSeam.sideA[0]!.contourSig).not.toBe(staleSeam.sideA[0]!.contourSig);
+    expect(rebind.receipt.storedSeam.sideB[0]!.contourSig).not.toBe(staleSeam.sideB[0]!.contourSig);
+    for (const spelling of ['m', '48', '<M>']) {
+      const legacy = { ...staleSeam, anchoredSize: spelling };
+      const saved = structuredClone(card);
+      saved.seams![0]!.anchoredSize = spelling;
+      expect(capture({ ...inputs, currentRows: [legacy, fixture.pose], savedCard: saved }).ok).toBe(
+        true,
+      );
+    }
+    const wrongRank = { ...staleSeam, anchoredSize: 'L' };
+    expect(rank).toBe('M');
+    const other = structuredClone(card);
+    other.seams![0]!.anchoredSize = wrongRank.anchoredSize;
+    expect(
+      capture({ ...inputs, currentRows: [wrongRank, fixture.pose], savedCard: other }),
+    ).toMatchObject({
+      ok: false,
+      blocker: { code: 'existing-linked-n1-source-size-invalid' },
+    });
+    const conflicting = structuredClone(card);
+    conflicting.techCard!.operations![0]!.seamKeys = [staleSeam.seamKey.toUpperCase()];
+    const localConflict = structuredClone(fixture.liveOperations);
+    localConflict[0]!.seamKeys = [staleSeam.seamKey];
+    for (const conflict of [{ savedCard: conflicting }, { liveOperations: localConflict }])
+      expect(capture({ ...inputs, ...conflict })).toMatchObject({
+        ok: false,
+        blocker: { code: 'existing-linked-n1-seam-ambiguous' },
+      });
+  });
+
+  it('fails closed on stale CAS, row-key drift, input reorder, or a second physical seam', async () => {
+    const fixture = await existingLinkedN1Fixture();
+    const base = {
+      techCardId: fixture.prepared.techCardId,
+      selectedIndex: fixture.selectedIndex,
+      liveOperations: fixture.liveOperations,
+      savedCard: fixture.savedCard,
+      currentRows: [fixture.seam, fixture.pose],
+      seamWriterCardId: fixture.prepared.techCardId,
+      seamWriterLockVersion: fixture.savedCard.lockVersion,
+    };
+    expect(
+      resolvePatternImportDxfPhaseEZeroConnectExistingLinkedN1TargetV1({
+        ...base,
+        seamWriterLockVersion: (fixture.savedCard.lockVersion ?? 0) - 1,
+      }),
+    ).toMatchObject({ ok: false, blocker: { code: 'existing-linked-n1-writer-stale' } });
+    expect(
+      resolvePatternImportDxfPhaseEZeroConnectExistingLinkedN1TargetV1({
+        ...base,
+        liveOperations: fixture.liveOperations.map((operation, index) =>
+          index === fixture.selectedIndex
+            ? { ...operation, seamKeys: ['other-edge', fixture.pose.seamKey] }
+            : operation,
+        ),
+      }),
+    ).toMatchObject({ ok: false, blocker: { code: 'existing-linked-n1-operation-not-n1' } });
+    expect(
+      resolvePatternImportDxfPhaseEZeroConnectExistingLinkedN1TargetV1({
+        ...base,
+        liveOperations: fixture.liveOperations.map((operation, index) =>
+          index === fixture.selectedIndex
+            ? { ...operation, inputKeys: [...fixture.inputKeys].reverse() }
+            : operation,
+        ),
+      }),
+    ).toMatchObject({ ok: false, blocker: { code: 'existing-linked-n1-input-mismatch' } });
+    const secondPhysical = { ...fixture.seam, seamKey: 'second-edge' };
+    const savedWithSecond = structuredClone(fixture.savedCard);
+    savedWithSecond.seams = [
+      toWire(fixture.seam),
+      toWire(fixture.pose),
+      toWire(secondPhysical),
+    ] as never;
+    savedWithSecond.techCard!.operations![fixture.selectedIndex]!.seamKeys = [
+      fixture.seam.seamKey,
+      fixture.pose.seamKey,
+      secondPhysical.seamKey,
+    ];
+    expect(
+      resolvePatternImportDxfPhaseEZeroConnectExistingLinkedN1TargetV1({
+        ...base,
+        savedCard: savedWithSecond,
+        currentRows: [fixture.seam, fixture.pose, secondPhysical],
+        liveOperations: fixture.liveOperations.map((operation, index) =>
+          index === fixture.selectedIndex
+            ? {
+                ...operation,
+                seamKeys: [fixture.seam.seamKey, fixture.pose.seamKey, secondPhysical.seamKey],
+              }
+            : operation,
+        ),
+      }),
+    ).toMatchObject({ ok: false, blocker: { code: 'existing-linked-n1-operation-not-n1' } });
+  });
+
+  it('retains one writer, rejects a direction race, and verifies exact readback without changing order', async () => {
+    const fixture = await existingLinkedN1Fixture();
+    const captured = capturePatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1({
+      request: fixture.request,
+      techCardId: fixture.prepared.techCardId,
+      selectedIndex: fixture.selectedIndex,
+      liveOperations: fixture.liveOperations,
+      savedCard: fixture.savedCard,
+      currentRows: [fixture.seam, fixture.pose],
+      seamWriterCardId: fixture.prepared.techCardId,
+      seamWriterLockVersion: fixture.savedCard.lockVersion,
+    });
+    if (!captured.ok) throw new Error(captured.blocker.detail);
+    const persisted = { ...fixture.seam, anchoredSize: 'M', direction: 'reversed' as const };
+    const accepted = Object.freeze({
+      ok: true as const,
+      row: persisted,
+      seamKey: persisted.seamKey,
+      lockVersion: (fixture.savedCard.lockVersion ?? 0) + 1,
+      outcome: 'verified-echo' as const,
+      blocker: null,
+    });
+    const write = vi.fn(async () => accepted);
+    const first = executePatternImportDxfPhaseEZeroConnectExistingLinkedN1WriteOnceV1(
+      captured.pending,
+      'reversed',
+      write,
+    );
+    const same = executePatternImportDxfPhaseEZeroConnectExistingLinkedN1WriteOnceV1(
+      captured.pending,
+      'reversed',
+      write,
+    );
+    const conflicting = executePatternImportDxfPhaseEZeroConnectExistingLinkedN1WriteOnceV1(
+      captured.pending,
+      'same',
+      write,
+    );
+    expect(first).toBe(same);
+    expect(conflicting).toBeNull();
+    expect(
+      readPatternImportDxfPhaseEZeroConnectExistingLinkedN1WriteOnceV1(
+        captured.pending,
+        'reversed',
+      ),
+    ).toBe(first);
+    expect(canReleasePatternImportDxfPhaseEZeroConnectExistingLinkedN1V1(captured.pending)).toBe(
+      false,
+    );
+    await expect(first!).resolves.toBe(accepted);
+    expect(canReleasePatternImportDxfPhaseEZeroConnectExistingLinkedN1V1(captured.pending)).toBe(
+      true,
+    );
+    expect(write).toHaveBeenCalledOnce();
+
+    const freshCard = structuredClone(fixture.savedCard);
+    freshCard.lockVersion = accepted.lockVersion;
+    freshCard.seams = [toWire(persisted), toWire(fixture.pose)] as never;
+    expect(
+      verifyPatternImportDxfPhaseEZeroConnectExistingLinkedN1ReadbackV1({
+        pending: captured.pending,
+        accepted,
+        expectedSeam: persisted,
+        freshCard,
+      }),
+    ).toMatchObject({ ok: true, seamKey: fixture.seam.seamKey, operationNumber: 30 });
+    // Source-fingerprint staleness is a server read verdict. The seam key, anchors and accepted lock can all agree.
+    const staleWire = { ...toWire(persisted), stale: true };
+    const staleEcho = resolveStrictSeamUpsertReceipt(
+      [persisted],
+      [staleWire],
+      accepted.lockVersion,
+    );
+    expect(staleEcho).toMatchObject({ ok: false, outcome: 'acknowledged-unverified' });
+
+    const staleReadback = verifyPatternImportDxfPhaseEZeroConnectExistingLinkedN1ReadbackV1({
+      pending: captured.pending,
+      accepted,
+      expectedSeam: persisted,
+      freshCard: {
+        ...freshCard,
+        seams: [staleWire, toWire(fixture.pose)] as NonNullable<common_TechCard['seams']>,
+      },
+    });
+    expect(staleReadback).toMatchObject({
+      ok: false,
+      blocker: { code: 'existing-linked-n1-readback-mismatch' },
+    });
+    freshCard.techCard!.operations![0]!.inputKeys = ['unexpected'];
+    expect(
+      verifyPatternImportDxfPhaseEZeroConnectExistingLinkedN1ReadbackV1({
+        pending: captured.pending,
+        accepted,
+        expectedSeam: persisted,
+        freshCard,
+      }),
+    ).toMatchObject({ ok: false, blocker: { code: 'existing-linked-n1-readback-mismatch' } });
+  });
+
+  it('verifies a metadata-only continuation only for the exact saved anchors at the capture lock', async () => {
+    const fixture = await existingLinkedN1Fixture();
+    const { savedCard, selectedIndex, liveOperations } = fixture;
+    savedCard.techCard!.operations![selectedIndex]!.seamKeys = [fixture.seam.seamKey];
+    liveOperations[selectedIndex]!.seamKeys = [fixture.seam.seamKey];
+    const capture = (seam: StoredSeam) => {
+      savedCard.seams = [toWire(seam)] as never;
+      const stored = fromWire(savedCard.seams![0]!);
+      if (!stored) throw new Error('Expected a persisted exact seam.');
+      const captured = capturePatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1({
+        request: fixture.request,
+        techCardId: fixture.prepared.techCardId,
+        selectedIndex,
+        liveOperations,
+        savedCard,
+        currentRows: [stored],
+        seamWriterCardId: fixture.prepared.techCardId,
+        seamWriterLockVersion: savedCard.lockVersion,
+      });
+      if (!captured.ok) throw new Error(captured.blocker.detail);
+      return captured.pending;
+    };
+    const prepared = preparePatternImportDxfPhaseEZeroConnectExistingLinkedN1RebindV1(
+      capture(fixture.seam),
+      'reversed',
+      { nameOf: (key) => key, grainDeg: null },
+    );
+    if (!prepared.ok) throw new Error(prepared.blocker.detail);
+    const seam = prepared.receipt.storedSeam;
+    const pending = capture(seam);
+    const verify = (card: typeof savedCard) =>
+      verifyPatternImportDxfPhaseEZeroConnectExistingLinkedN1ReadbackV1({
+        mode: 'resume-metadata',
+        pending,
+        expectedSeam: seam,
+        freshCard: card,
+      });
+    expect(verify(savedCard)).toMatchObject({
+      ok: true,
+      cardLockVersion: savedCard.lockVersion,
+      seamKey: fixture.seam.seamKey,
+    });
+    expect(verify({ ...savedCard, lockVersion: savedCard.lockVersion! + 1 }).ok).toBe(false);
+    const edited = structuredClone(savedCard);
+    edited.seams![0]!.sideB!.parts![0]!.lenMm! += 1;
+    expect(verify(edited).ok).toBe(false);
+    const unanchored = structuredClone(savedCard);
+    unanchored.seams![0]!.anchoredSize = '';
+    expect(verify(unanchored).ok).toBe(false);
+    expect(
+      readPatternImportDxfPhaseEZeroConnectExistingLinkedN1WriteOnceV1(pending, 'reversed'),
+    ).toBeUndefined();
+  });
+
+  it('releases a not-attempted writer so the user can cancel or retry safely', async () => {
+    const fixture = await existingLinkedN1Fixture();
+    const captured = capturePatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1({
+      request: fixture.request,
+      techCardId: fixture.prepared.techCardId,
+      selectedIndex: fixture.selectedIndex,
+      liveOperations: fixture.liveOperations,
+      savedCard: fixture.savedCard,
+      currentRows: [fixture.seam, fixture.pose],
+      seamWriterCardId: fixture.prepared.techCardId,
+      seamWriterLockVersion: fixture.savedCard.lockVersion,
+    });
+    if (!captured.ok) throw new Error(captured.blocker.detail);
+    const refused = Object.freeze({
+      ok: false as const,
+      rows: Object.freeze([]) as readonly [],
+      seamKeys: Object.freeze([]) as readonly [],
+      outcome: 'not-attempted' as const,
+      blocker: Object.freeze({
+        code: 'write-failed' as const,
+        detail: 'The saved card moved before the request.',
+      }),
+    });
+    const first = executePatternImportDxfPhaseEZeroConnectExistingLinkedN1WriteOnceV1(
+      captured.pending,
+      'same',
+      async () => refused,
+    );
+    await expect(first!).resolves.toBe(refused);
+    await Promise.resolve();
+    expect(
+      readPatternImportDxfPhaseEZeroConnectExistingLinkedN1WriteOnceV1(captured.pending, 'same'),
+    ).toBeUndefined();
+  });
+});
+
 describe('zero-operation production mount fresh-to-saved race failover', () => {
   it('re-reads the saved card after fresh preparation when the row appeared after Host routing', async () => {
-    const prepared = await genuineSavedPrepared();
-    const latestCard = savedCardWithRow(prepared);
+    const original = await genuineSavedPrepared();
+    const latestCard = savedCardWithRow(original);
     const sizeNameById = new Map([[7, 'M']]);
+    const savedChoices = listPatternImportDxfPhaseECadTableZeroOperationSavedChoicesV1(
+      latestCard,
+      (ids) => ids,
+      sizeNameById,
+    );
+    if (!savedChoices.ok) throw new Error(savedChoices.blocker.detail);
+    const prepared = { ...original, choices: savedChoices.choices };
     const cachedChoices = listPatternImportDxfPhaseECadTableZeroOperationSavedChoicesV1(
       cachedCardWithoutRow(prepared.techCardId),
       (ids) => ids,
@@ -789,6 +1432,7 @@ describe('zero-operation production mount fresh-to-saved race failover', () => {
       importGeneration: 37,
       scopeKey: 'main',
       sizeToken: 'M',
+      choices: savedChoices.choices,
       selection: {
         selection: {
           pipeline: {
@@ -798,8 +1442,23 @@ describe('zero-operation production mount fresh-to-saved race failover', () => {
       },
       catalog: prepared.catalog,
     } as unknown as FreshPrepared;
-    const result = await preparePatternImportDxfPhaseECadTableZeroOperationSavedFailoverV1({
+    const row = prepared.authoringAuthority.row;
+    const evidence = {
+      techCardId: row.techCardId,
+      scopeKey: row.scopeKey,
+      patternLineKey: row.patternLineKey,
+      dxfSha256: row.sha256,
+      patternVersion: 3,
+      cardLockVersion: row.cardLockVersion,
+    };
+    const loadDocumentEvidence = vi.fn(async () => ({
+      ok: true as const,
+      evidence,
+      blocker: null,
+    }));
+    const hostResolution = await preparePatternImportDxfPhaseECadTableZeroOperationSavedFailoverV1({
       fresh: freshPrepared,
+      loadDocumentEvidence,
       expectedCommit: { techCardId: prepared.techCardId, previousLockVersion: 10 },
       savedAuthority: { resolveLatestCommittedCard } as never,
       orderSizeIds: (ids) => ids,
@@ -810,13 +1469,12 @@ describe('zero-operation production mount fresh-to-saved race failover', () => {
       signal: new AbortController().signal,
       prepareSaved: prepareSaved as never,
     });
-
     expect(resolveLatestCommittedCard).toHaveBeenCalledOnce();
     expect(prepareSaved).toHaveBeenCalledOnce();
-    const hostResolution = resolvePatternImportDxfPhaseECadTableZeroOperationAfterFreshV1(
-      freshPrepared,
-      result,
+    expect(loadDocumentEvidence.mock.invocationCallOrder[0]).toBeLessThan(
+      prepareSaved.mock.invocationCallOrder[0],
     );
+    if (!hostResolution) throw new Error('Expected the independently prepared saved row');
     expect(hostResolution).toMatchObject({
       result: { ok: true, importGeneration: 37 },
       resolvedSavedCard: { lockVersion: 12 },
@@ -831,6 +1489,46 @@ describe('zero-operation production mount fresh-to-saved race failover', () => {
       ),
     ).toBe(true);
 
+    expect(loadDocumentEvidence).toHaveBeenCalledWith('main');
+    const result = {
+      result: prepared,
+      resolvedSavedCard: latestCard,
+      authoringPrepared: prepared,
+      rebindExpectation:
+        capturePatternImportDxfPhaseECadTableZeroOperationSavedRebindExpectationV1(prepared),
+      resolvedSource: 'saved' as const,
+    };
+    const document = { ok: true as const, evidence, blocker: null };
+    const resolveSource = resolvePatternImportDxfPhaseECadTableZeroOperationAfterFreshV1;
+    for (const change of [
+      { patternLineKey: 'same-bytes-replacement-row' },
+      { patternVersion: 4 },
+      { scopeKey: 'lining' },
+      { techCardId: row.techCardId + 1 },
+      { cardLockVersion: row.cardLockVersion + 1 },
+      { dxfSha256: '0'.repeat(64) },
+    ]) {
+      expect(
+        resolveSource(freshPrepared, result, {
+          ok: true,
+          evidence: { ...evidence, ...change },
+          blocker: null,
+        }),
+      ).toBe(result);
+    }
+    expect(resolveSource(freshPrepared, result, null)).toBe(result);
+    expect(
+      resolveSource(freshPrepared, result, {
+        ok: false,
+        evidence: null,
+        blocker: { code: 'confirmed-pattern-row-unavailable', detail: 'Row revision changed' },
+      }),
+    ).toBe(result);
+    expect(resolveSource({ ...freshPrepared, choices: [] }, result, document)).toBe(result);
+    expect(resolveSource({ ...freshPrepared, importGeneration: 38 }, result, document)).toBe(
+      result,
+    );
+
     const failedFreshResolution = resolvePatternImportDxfPhaseECadTableZeroOperationAfterFreshV1(
       {
         ok: false,
@@ -841,6 +1539,7 @@ describe('zero-operation production mount fresh-to-saved race failover', () => {
         blocker: { code: 'fresh-session-invalid', detail: FRESH_DETAIL },
       } as never,
       result,
+      document,
     );
     expect(failedFreshResolution).toMatchObject({ resolvedSource: 'saved', result: { ok: true } });
     expect(JSON.stringify(failedFreshResolution)).not.toContain(FRESH_DETAIL);
@@ -879,7 +1578,9 @@ describe('zero-operation production mount fresh-to-saved race failover', () => {
       techCard: savedCardWithRow(refreshed),
       row: refreshed.authoringAuthority.row,
     }));
-    const prepareSaved = vi.fn(async () => refreshed);
+    const prepareSaved = vi.fn(
+      async (_request: { sourceSurface?: 'explicit-native-drawn-sewing' }) => refreshed,
+    );
     const owner = createPatternImportDxfPhaseECadTableZeroOperationAuthoringRefreshV1({
       prepared,
       expectation,
@@ -887,6 +1588,7 @@ describe('zero-operation production mount fresh-to-saved race failover', () => {
       preparationKey: 'card:6:main:M',
       orderSizeIds: (ids) => ids,
       sizeNameById: new Map([[7, 'M']]),
+      sourceSurface: 'explicit-native-drawn-sewing',
       prepareSaved: prepareSaved as never,
     });
 
@@ -897,12 +1599,47 @@ describe('zero-operation production mount fresh-to-saved race failover', () => {
       expect.any(AbortSignal),
     );
     expect(prepareSaved).toHaveBeenCalledOnce();
+    expect(prepareSaved.mock.calls[0]?.[0]).toMatchObject({
+      sourceSurface: 'explicit-native-drawn-sewing',
+    });
     expect(result).toMatchObject({
       ok: true,
       authority: refreshed.authoringAuthority,
       importGeneration: 37,
       blocker: null,
     });
+  });
+
+  it('refreshes the same captured lock before an existing operation writes its seam', async () => {
+    const prepared = await genuineSavedPrepared(37, 12);
+    const refreshed = await genuineSavedPrepared(37, 12);
+    const expectation =
+      capturePatternImportDxfPhaseECadTableZeroOperationSavedRebindExpectationV1(prepared);
+    const resolveExactCurrentCard = vi.fn(async () => ({
+      techCard: savedCardWithRow(refreshed),
+      row: refreshed.authoringAuthority.row,
+    }));
+    const resolveLatestCard = vi.fn();
+    const prepareSaved = vi.fn(async () => refreshed);
+    const owner = createPatternImportDxfPhaseECadTableZeroOperationAuthoringRefreshV1({
+      prepared,
+      expectation,
+      savedAuthority: { resolveExactCurrentCard, resolveLatestCard } as never,
+      preparationKey: 'card:6:main:M',
+      orderSizeIds: (ids) => ids,
+      sizeNameById: new Map([[7, 'M']]),
+      sourceSurface: 'explicit-native-drawn-sewing',
+      prepareSaved: prepareSaved as never,
+    });
+    const signal = new AbortController().signal;
+
+    await expect(owner!.refresh(signal, 'current')).resolves.toMatchObject({
+      ok: true,
+      authority: refreshed.authoringAuthority,
+    });
+    expect(resolveExactCurrentCard).toHaveBeenCalledWith(prepared.authoringAuthority.row, signal);
+    expect(resolveLatestCard).not.toHaveBeenCalled();
+    expect(prepareSaved).toHaveBeenCalledOnce();
   });
 
   it('fails closed before reading when refresh is aborted and rejects structural authority', async () => {

@@ -1,4 +1,5 @@
 import type { AdminService, TechCardPatternSemanticSidecar } from 'api/proto-http/admin';
+import { extractFieldViolations, violationReason } from 'utils/field-errors';
 
 import {
   PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_PERSISTENCE_REQUEST_V3,
@@ -39,12 +40,13 @@ export type PatternImportDxfProductCompositeSidecarStorageBlockerV3 = Readonly<{
     | 'current-readback-invalid'
     | 'planning-blocked'
     | 'next-sidecar-invalid'
+    | 'pre-put-blocked'
     | 'put-failed'
     | 'put-readback-invalid'
     | 'get-failed'
     | 'get-readback-invalid'
     | 'dual-readback-mismatch';
-  phase: 'input' | 'current-get' | 'planning' | 'put' | 'get' | 'dual-readback';
+  phase: 'input' | 'current-get' | 'planning' | 'pre-put' | 'put' | 'get' | 'dual-readback';
   detail: string;
 }>;
 
@@ -151,6 +153,7 @@ export type PatternImportDxfProductCompositeSidecarStoragePlannedWriteV3<
     selectedOperationNumber: number;
   }>;
   previousSidecarSha256: string | null;
+  previousPostSaveReceiptSha256?: string;
   sidecarSha256: string;
   byteLength: number;
   bytes: Uint8Array<ArrayBuffer>;
@@ -169,12 +172,18 @@ export type PatternImportDxfProductCompositeSidecarStorageWriterStrategyV3<
   receiptSchemaVersion: ReceiptSchema;
   mediaType: MediaType;
   acceptedCurrentMediaTypes: readonly string[];
+  historicalPredecessorLockVersion?: number;
   label: string;
   prepare: (
     request: Request,
     current: PatternImportDxfProductCompositeSidecarStorageVerifiedGetV3,
     crypto: Pick<Crypto, 'subtle'> | undefined,
   ) => Promise<PatternImportDxfProductCompositeSidecarStoragePlannedWriteV3<MediaType>>;
+  beforeRequest?: (
+    request: Request,
+    planned: PatternImportDxfProductCompositeSidecarStoragePlannedWriteV3<MediaType>,
+    signal: AbortSignal,
+  ) => Promise<void>;
   verifyCanonical: (
     bytes: Uint8Array<ArrayBuffer>,
     crypto: Pick<Crypto, 'subtle'> | undefined,
@@ -270,6 +279,21 @@ class StorageFailure extends Error {
 
 function fail(code: Code, phase: Phase, detail: string): never {
   throw new StorageFailure(code, phase, detail);
+}
+
+function unconfirmedPutDetail(label: string, error: unknown): string {
+  const status = error instanceof Error && 'status' in error ? error.status : undefined;
+  if (typeof status !== 'number' || !Number.isInteger(status) || status < 400 || status > 599)
+    return `${label} PUT failed and may have committed.`;
+  let reason: string | undefined;
+  try {
+    reason = extractFieldViolations(error)
+      .map(({ description }) => violationReason(description))
+      .find((code) => /^[a-z][a-z0-9_]{0,79}$/.test(code));
+  } catch {
+    // A malformed gateway detail still leaves the independently known HTTP status.
+  }
+  return `${label} PUT returned HTTP ${status}${reason ? ` (${reason})` : ''}. Its outcome requires fresh verification.`;
 }
 
 function blocked(
@@ -515,12 +539,15 @@ function verifyCurrentTransportBinding(
   if (!row) return;
   if (
     row.patternVersion !== planned.transport.patternVersion ||
-    row.postSaveReceiptSha256 !== planned.transport.postSaveReceiptSha256
+    row.postSaveReceiptSha256 !==
+      (planned.previousPostSaveReceiptSha256 ?? planned.transport.postSaveReceiptSha256)
   )
     fail(
       'current-readback-invalid',
       'current-get',
-      'Current sidecar metadata differs from its preserved semantic-product-v1 receipt.',
+      planned.previousPostSaveReceiptSha256 === undefined
+        ? 'Current sidecar metadata differs from its preserved semantic-product-v1 receipt.'
+        : 'Current sidecar metadata differs from its verified prior receipt.',
     );
 }
 
@@ -620,6 +647,7 @@ export function createPatternImportDxfProductCompositeSidecarStorageWriterV3<
     typeof strategy.label !== 'string' ||
     !Array.isArray(strategy.acceptedCurrentMediaTypes) ||
     typeof strategy.prepare !== 'function' ||
+    (strategy.beforeRequest !== undefined && typeof strategy.beforeRequest !== 'function') ||
     typeof strategy.verifyCanonical !== 'function'
   )
     fail('invalid-client', 'input', 'A complete sidecar codec strategy is required.');
@@ -671,9 +699,27 @@ export function createPatternImportDxfProductCompositeSidecarStorageWriterV3<
       let planned: PatternImportDxfProductCompositeSidecarStoragePlannedWriteV3<MediaType>;
       let base64: string;
       try {
+        const { currentAuthority } = request;
+        const lock = strategy.historicalPredecessorLockVersion;
+        if (
+          lock !== undefined &&
+          (!Number.isSafeInteger(lock) || lock < 0 || lock >= currentAuthority.row.cardLockVersion)
+        )
+          fail(
+            'current-readback-invalid',
+            'current-get',
+            'The fallback placement is not an earlier saved row.',
+          );
+        const predecessorAuthority =
+          lock === undefined
+            ? currentAuthority
+            : {
+                ...currentAuthority,
+                row: { ...currentAuthority.row, cardLockVersion: lock },
+              };
         const current = await mapCurrentEvidence(
           currentRow,
-          request.currentAuthority,
+          predecessorAuthority,
           acceptedCurrentMediaTypes,
         );
         try {
@@ -696,6 +742,9 @@ export function createPatternImportDxfProductCompositeSidecarStorageWriterV3<
           planned.byteLength < 1 ||
           planned.byteLength > MAX_SIDECAR_BYTES ||
           (planned.previousSidecarSha256 !== null && !SHA256.test(planned.previousSidecarSha256)) ||
+          (planned.previousPostSaveReceiptSha256 !== undefined &&
+            (planned.previousSidecarSha256 === null ||
+              !SHA256.test(planned.previousPostSaveReceiptSha256))) ||
           !Number.isSafeInteger(planned.transport.patternVersion) ||
           planned.transport.patternVersion < 1 ||
           !SHA256.test(planned.transport.postSaveReceiptSha256) ||
@@ -716,6 +765,26 @@ export function createPatternImportDxfProductCompositeSidecarStorageWriterV3<
         checkSignal(signal, 'planning');
       } catch (error) {
         return blocked(error, 'not-attempted');
+      }
+
+      try {
+        checkSignal(signal, 'pre-put');
+        if (strategy.beforeRequest) await strategy.beforeRequest(request, planned, signal);
+        checkSignal(signal, 'pre-put');
+      } catch (error) {
+        if (error instanceof StorageFailure) return blocked(error, 'not-attempted');
+        return blocked(
+          new StorageFailure(
+            signal.aborted ? 'cancelled' : 'pre-put-blocked',
+            'pre-put',
+            signal.aborted
+              ? `${strategy.label} persistence was cancelled before PUT.`
+              : error instanceof Error
+                ? `${strategy.label} pre-PUT currentness check failed: ${error.message}`
+                : `${strategy.label} pre-PUT currentness check failed closed.`,
+          ),
+          'not-attempted',
+        );
       }
 
       let putRow: TechCardPatternSemanticSidecar | undefined;
@@ -751,7 +820,7 @@ export function createPatternImportDxfProductCompositeSidecarStorageWriterV3<
             'put',
             signal.aborted
               ? `${strategy.label} PUT was cancelled and may have committed.`
-              : `${strategy.label} PUT failed and may have committed.`,
+              : unconfirmedPutDetail(strategy.label, error),
           ),
           'unknown',
         );

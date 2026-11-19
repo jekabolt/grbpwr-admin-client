@@ -1098,27 +1098,19 @@ const SEAM_STEPS = [
   { operationType: T.MACHINE, machineType: T.LOCKSTITCH, zone: T.ZONE, seamClass: GONE_CLASS, attachmentKind: FOOT_KIND },
 ];
 
-/**
- * СВОДКА ШВА ОТКРЫТОГО ШАГА — та строка редактора, что читает то же поле, что и карта примерки.
- *
- * АДРЕС — ПЕРВОЕ СЛОВО СТРОКИ, а не новый `data-*`: сводок в открытом шаге три («machine · »,
- * «pressing · », «seam · »), они различаются ровно им, и открытый шаг на странице один. Заводить
- * ради пробы разметку в продуктовом коде там, где адрес уже есть, — это правка, которую однажды
- * забудут откатить (тот же довод, по которому `mapSpec` читает соседей, а не свой атрибут).
- *
- * ЧИСЛО НАЙДЕННЫХ УЗЛОВ ВОЗВРАЩАЕТСЯ ТЕКСТОМ, а не молча схлопывается в первый: сводка, которой
- * НЕ ДОЛЖНО БЫТЬ (шаг без шва), и сводка, которой не нашли, — разные показания, и красное обязано
- * их различать.
- */
-const editorSeam = () =>
-  page.evaluate(() => {
-    const hits = [...document.querySelectorAll('button')]
-      .map((n) => (n.textContent ?? '').replace(/\s+/g, ' ').trim())
-      .filter((t) => t.startsWith('seam · '));
-    if (hits.length === 0) return '(сводки шва нет)';
-    if (hits.length > 1) return `(сводок шва ${hits.length})`;
-    return hits[0].slice('seam · '.length);
+/** Setup shows the current step's combined machine/operation and seam summary. */
+const editorSetupSummary = () =>
+  page.locator('[role="button"][aria-expanded]').getByText('setup', { exact: true }).evaluateAll((labels) => {
+    const summary = labels.length === 1 ? labels[0].nextElementSibling : null;
+    return summary?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
   });
+
+/** These seam fixtures have no machine parameters before the seam, only the leading machine/operation. */
+const editorSeam = async () => {
+  const summary = await editorSetupSummary();
+  if (!summary) return '(сводка setup не найдена)';
+  return summary.split(' · ').slice(1).join(' · ');
+};
 
 /**
  * СТРОКА БЛОКА «construction (frozen)» АРХИВА — ПО ЕЁ СОБСТВЕННОЙ ПОДПИСИ.
@@ -1317,17 +1309,6 @@ const sheetName = async (i) =>
     .replace(/\s+/g, ' ')
     .trim();
 
-/** Сводка МАШИНКИ открытого шага — адресуется первым словом, как и сводка шва. */
-const editorMachine = () =>
-  page.evaluate(() => {
-    const hits = [...document.querySelectorAll('button')]
-      .map((n) => (n.textContent ?? '').replace(/\s+/g, ' ').trim())
-      .filter((t) => t.startsWith('machine \u00b7 '));
-    if (hits.length === 0) return '(сводки машинки нет)';
-    if (hits.length > 1) return `(сводок машинки ${hits.length})`;
-    return hits[0].slice('machine \u00b7 '.length);
-  });
-
 /** Клетки долевой в раскройной таблице листа — все, где вообще названа долевая. */
 const sheetGrainCells = () =>
   page.evaluate(() =>
@@ -1485,8 +1466,13 @@ async function mount(ops = STEPS, card) {
   await page.waitForTimeout(500);
 }
 
-/** Заголовок строки рельса — ИЗ `title`, а не из textContent: в узле рядом лежат номер и норма. */
-const railTitle = (i) => page.getAttribute(`[data-rail-step="${i}"]`, 'title');
+/** Имя в видимой строке и полная подпись при наведении принадлежат одному узлу. */
+const railTitle = async (i) => {
+  const name = page.locator(`[data-rail-step="${i}"] > span:last-child > span[title]`);
+  if ((await name.count()) !== 1 || !(await name.isVisible())) return '';
+  const label = (await name.textContent())?.trim() ?? '';
+  return label === (await name.getAttribute('title')) ? label : '';
+};
 /** Имя шага в карте примерки — узел, в котором лежит ТОЛЬКО имя. */
 const mapName = async (i) =>
   ((await page.locator(`#map [data-map-step="${i}"]`).textContent()) ?? '').trim();
@@ -1939,7 +1925,7 @@ ck(
 );
 await openStep(2);
 ck(
-  (await editorSeam()) === '(сводки шва нет)',
+  (await editorSeam()) === '',
   'и редактор на нём сводку шва не рисует вовсе',
   await editorSeam(),
 );
@@ -2139,7 +2125,7 @@ ck(
 await openStep(5);
 const clsGoneEditor = await editorSeam();
 ck(
-  !clsGoneEditor.includes('TECH_CARD_'),
+  clsGoneEditor !== '(сводка setup не найдена)' && !clsGoneEditor.includes('TECH_CARD_'),
   'и редактор его не печатает: у живых поверхностей ОДИН ярлык, значит и одно молчание',
   clsGoneEditor,
 );
@@ -2268,7 +2254,7 @@ ck(
 // карточную плотность безусловно.
 head('Ф. карточная плотность наследуется ТОЛЬКО там, где есть строчка');
 await openStep(0);
-const sewMachine = await editorMachine();
+const sewMachine = await editorSetupSummary();
 ck(
   sewMachine.includes('4 st/cm (2.5 mm)'),
   'на швейном шаге карточная плотность наследуется — как и раньше',
@@ -2280,9 +2266,9 @@ ck(
   String(await sheetCell(0, 'seam')),
 );
 await openStep(3);
-const weldMachine = await editorMachine();
+const weldMachine = await editorSetupSummary();
 ck(
-  !weldMachine.includes('st/cm'),
+  weldMachine !== '' && !weldMachine.includes('st/cm'),
   'а на сварочной машине сводка редактора о плотности МОЛЧИТ',
   weldMachine,
 );

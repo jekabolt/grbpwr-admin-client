@@ -33,6 +33,8 @@ export type PatternImportDxfPhaseEForeignSavedAliasIdentityRequestV1 = Readonly<
   pieces: readonly Readonly<{
     lineKey: string;
     name: string;
+    cutSymmetry?: string;
+    piecesPerGarment?: number;
   }>[];
 }>;
 
@@ -338,11 +340,20 @@ export function buildPatternImportDxfPhaseEForeignSavedAliasIdentityOverridesV1(
     seenWriterIdentities.set(writerIdentity, sourceBlockIdentity);
 
     const piece = pieces[0];
+    const quantity = piece.piecesPerGarment;
+    const exactIdenticalCopies =
+      piece.cutSymmetry === 'TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL' &&
+      typeof quantity === 'number' &&
+      Number.isSafeInteger(quantity) &&
+      quantity > 0;
     pieceOverrides[family.seed] = {
       code: writerIdentity,
       mods: [],
       displayName: sourceBlockIdentity,
       nameOrigin: 'text',
+      // A saved one-to-one alias with explicit identical copies already answers pairing and quantity.
+      // Do not infer another hand from that piece's shape or append its hand to the bound identity.
+      ...(exactIdenticalCopies ? { pairHand: null, piecesPerGarment: quantity } : {}),
       ...(sourceRanks.length === mappedSourceRanks.size ? { ungraded: false } : {}),
     };
     bindings.push(

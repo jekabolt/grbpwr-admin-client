@@ -1,9 +1,10 @@
+import {
+  savedWorkbenchBindingScopeKeyV1,
+  savedWorkbenchScopeKeyV1,
+} from './saved-workbench-scope-v1';
 import { adminService } from 'api/api';
 import type { common_TechCard } from 'api/proto-http/admin';
-import {
-  bindingScopes,
-  scopeKeyOfBinding,
-} from 'components/managers/tech-card/components/bom-purpose';
+import { bindingScopes } from 'components/managers/tech-card/components/bom-purpose';
 import { rollGoodsScopes } from 'components/managers/tech-card/components/piece-block-refs';
 import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 
@@ -50,6 +51,11 @@ export type PatternImportDxfPhaseEZeroOperationSavedCardAuthorityRuntimeV1 = Rea
     selector: DxfProductSavedRowIdentityV1,
     signal: AbortSignal,
   ) => Promise<PatternImportDxfPhaseESavedDxfAuthorityReadV1>;
+  /** Reads the exact row and card at the captured lock before editing an already saved operation. */
+  resolveExactCurrentCard: (
+    selector: DxfProductSavedRowIdentityV1,
+    signal: AbortSignal,
+  ) => Promise<Readonly<{ techCard: common_TechCard; row: DxfProductSavedRowIdentityV1 }>>;
   /** Independently re-reads the card after a confirmed import save before saved preparation. */
   resolveLatestCommittedCard: (
     expected: Readonly<{ techCardId: number; previousLockVersion: number }>,
@@ -117,14 +123,15 @@ function selectedCurrentRow(
 
   const insert = techCard.techCard;
   const scopes = rollGoodsScopes(insert.bomItems ?? []);
-  if (!scopes.some(({ key }) => key === selector.scopeKey))
+  if (!scopes.some((scope) => savedWorkbenchScopeKeyV1(scope) === selector.scopeKey))
     throw new Error('The saved DXF material scope is absent from the current card.');
   const patterns = insert.patterns ?? [];
   const bindings = bindingScopes(scopes, patterns);
   const matches = patterns.filter(
     (pattern) =>
       pattern.lineKey?.trim() === selector.patternLineKey &&
-      scopeKeyOfBinding(pattern.fabricPurpose, pattern.bomLineKey, bindings) === selector.scopeKey,
+      savedWorkbenchBindingScopeKeyV1(pattern.fabricPurpose, pattern.bomLineKey, bindings) ===
+        selector.scopeKey,
   );
   if (matches.length !== 1)
     throw new Error('The current card has no unique exact saved DXF row for this scope and key.');
@@ -167,7 +174,7 @@ function selectedCurrentRow(
   return Object.freeze({ row: current, downloadUrl: pattern.downloadUrl });
 }
 
-function exactCurrentRow(
+export function assertExactZeroOperationSavedPatternRowV1(
   techCard: common_TechCard,
   expected: DxfProductSavedRowIdentityV1,
 ): Readonly<{ row: DxfProductSavedRowIdentityV1; downloadUrl: string }> {
@@ -205,7 +212,7 @@ export function createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1(
     assertLive(signal);
     const techCard = await readTechCard(expected.techCardId);
     assertLive(signal);
-    const current = exactCurrentRow(techCard, expected);
+    const current = assertExactZeroOperationSavedPatternRowV1(techCard, expected);
     return Object.freeze({ techCard, ...current });
   };
 
@@ -241,6 +248,7 @@ export function createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1(
       const current = await readSelected(selector, signal);
       return Object.freeze({ row: current.row, downloadUrl: current.downloadUrl });
     },
+    resolveExactCurrentCard: readCurrent,
     async resolveLatestCommittedCard(expected, signal) {
       assertLive(signal);
       if (
