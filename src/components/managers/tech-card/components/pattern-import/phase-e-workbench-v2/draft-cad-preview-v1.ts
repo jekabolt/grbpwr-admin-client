@@ -17,7 +17,9 @@ import {
   selectDraftSharpCornerV1,
 } from './draft-cad-edge-length-geometry-v1';
 import {
+  editFixedEndAuthoredOutlineCorner,
   readAuthoredOutlineCorner,
+  readPairedAuthoredOutlineCorner,
   roundDraftConvexOrthogonalCornerV1,
 } from 'lib/pattern-import/manifest/authored-outline-corner';
 import { selectDraftCutAllowanceOffsetV1 } from './draft-cad-allowance-offset-geometry-v1';
@@ -658,7 +660,8 @@ export function buildPatternImportDxfPhaseEDraftCadPreviewV1(
         break;
       }
       case 'round-corner': {
-        const { contourId, vertexId, setbackMm, sizeToken, savedCorner } = command.payload;
+        const { contourId, vertexId, setbackMm, sizeToken, savedCorner, fixedEnd } =
+          command.payload;
         const piece = projection.pieces.find(
           ({ pieceId, pieceLineKey }) =>
             pieceId === command.target.pieceId && pieceLineKey === command.target.pieceLineKey,
@@ -666,18 +669,25 @@ export function buildPatternImportDxfPhaseEDraftCadPreviewV1(
         const contour = piece?.contours.find((item) => item.contourId === contourId);
         const points = contour?.vertices.map(({ pointMm }) => pointMm);
         const index = contour?.vertices.findIndex(({ vertexId: id }) => id === vertexId) ?? -1;
-        const prior = savedCorner && points && readAuthoredOutlineCorner(points, savedCorner);
+        const prior =
+          savedCorner &&
+          points &&
+          (fixedEnd
+            ? readPairedAuthoredOutlineCorner(points, points, savedCorner)
+            : readAuthoredOutlineCorner(points, savedCorner));
         const rounded =
           contour?.closed &&
           contour.role === 'cut-boundary' &&
           projection.sizeToken === sizeToken &&
           points &&
           (!savedCorner || (prior && prior.start === index))
-            ? roundDraftConvexOrthogonalCornerV1(
-                prior ? prior.originalOutline : points,
-                index,
-                setbackMm,
-              )
+            ? fixedEnd && savedCorner
+              ? editFixedEndAuthoredOutlineCorner(points, points, savedCorner, fixedEnd, setbackMm)
+              : roundDraftConvexOrthogonalCornerV1(
+                  prior ? prior.originalOutline : points,
+                  index,
+                  setbackMm,
+                )
             : null;
         if (!rounded) {
           blockers.push(

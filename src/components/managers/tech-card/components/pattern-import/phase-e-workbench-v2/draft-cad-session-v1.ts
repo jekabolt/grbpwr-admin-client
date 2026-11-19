@@ -1,5 +1,6 @@
 import {
   parseAuthoredOutlineCorner,
+  parseAuthoredFixedEndOutlineCorner,
   validDraftCornerSetbackV1,
 } from 'lib/pattern-import/manifest/authored-outline-corner';
 import { normalizeAuthoredText } from 'lib/pattern-import/manifest/authored-text';
@@ -231,6 +232,7 @@ export type PatternImportDxfPhaseEDraftCadCommandV1 =
         sizeToken: string;
         setbackMm: number;
         savedCorner?: AuthoredQuadraticGrid;
+        fixedEnd?: 'start' | 'end';
       }
     >
   | Command<
@@ -602,8 +604,12 @@ function validCommand(value: unknown): value is PatternImportDxfPhaseEDraftCadCo
         stableId(payload.sizeToken) &&
         typeof payload.setbackMm === 'number' &&
         validDraftCornerSetbackV1(payload.setbackMm) &&
-        (payload.savedCorner === undefined ||
-          parseAuthoredOutlineCorner(payload.savedCorner) !== null)
+        (payload.fixedEnd === undefined
+          ? payload.savedCorner === undefined ||
+            parseAuthoredOutlineCorner(payload.savedCorner) !== null
+          : (payload.fixedEnd === 'start' || payload.fixedEnd === 'end') &&
+            (parseAuthoredOutlineCorner(payload.savedCorner) !== null ||
+              parseAuthoredFixedEndOutlineCorner(payload.savedCorner) !== null))
       );
     case 'edge-length':
       return (

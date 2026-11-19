@@ -34,7 +34,10 @@
 // and `contour-sig.ts`, the F14f cut-ring signature the writer embeds and the card checks).
 import { parseManifestAuthoredText } from './authored-text';
 import { parseManifestAuthoredInternal } from './authored-internal';
-import { parseAuthoredOutlineCorner } from './authored-outline-corner';
+import {
+  parseAuthoredFixedEndOutlineCorner,
+  parseAuthoredOutlineCorner,
+} from './authored-outline-corner';
 import { parseManifestAuthoredNotches } from './authored-notches';
 import { parseProtectedLineSplit } from './protected-line-split';
 import { Inflate, deflateSync } from 'fflate';
@@ -934,16 +937,27 @@ export function validateManifest(x: unknown): ConversionManifest {
       b.authoredOutlineCorner === undefined
         ? null
         : parseAuthoredOutlineCorner(b.authoredOutlineCorner);
-    if (
-      b.authoredOutlineCorner !== undefined &&
-      (!authoredOutlineCorner ||
+    const authoredFixedEndOutlineCorner =
+      b.authoredFixedEndOutlineCorner === undefined
+        ? null
+        : parseAuthoredFixedEndOutlineCorner(b.authoredFixedEndOutlineCorner);
+    if (b.authoredOutlineCorner !== undefined || b.authoredFixedEndOutlineCorner !== undefined) {
+      const hasLinked = b.authoredOutlineCorner !== undefined;
+      const hasFixedEnd = b.authoredFixedEndOutlineCorner !== undefined;
+      if (
+        hasLinked === hasFixedEnd ||
+        !(authoredOutlineCorner ?? authoredFixedEndOutlineCorner) ||
         !piece.ungraded ||
         b.sizeToken !== 'UNI' ||
         !b.hasSeam ||
         piece.allowanceMm !== 0 ||
-        !b.contour)
-    )
-      fail(`${p}.authoredOutlineCorner`, 'invalid shared rounded outline metadata');
+        !b.contour
+      )
+        fail(
+          `${p}.${hasFixedEnd ? 'authoredFixedEndOutlineCorner' : 'authoredOutlineCorner'}`,
+          'invalid shared rounded outline metadata',
+        );
+    }
     const authoredText =
       b.authoredText === undefined ? null : parseManifestAuthoredText(b.authoredText);
     if (b.authoredText !== undefined && !authoredText)
@@ -960,6 +974,7 @@ export function validateManifest(x: unknown): ConversionManifest {
       ...(split ? { protectedLineSplit: split } : {}),
       ...(authoredInternal ? { authoredInternal } : {}),
       ...(authoredOutlineCorner ? { authoredOutlineCorner } : {}),
+      ...(authoredFixedEndOutlineCorner ? { authoredFixedEndOutlineCorner } : {}),
       ...(authoredText ? { authoredText } : {}),
       ...(authoredNotches ? { authoredNotches } : {}),
       identity: b.identity,

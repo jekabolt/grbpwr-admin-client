@@ -43,10 +43,16 @@ import {
   sharedOutlineBlockForWriterPieceV1,
 } from './draft-cad-outline-move-history-v1';
 import { selectSavedFrenchCurveV1 } from './draft-cad-saved-french-curve-v1';
+import {
+  isSavedFixedEndAuthorityV1,
+  type SavedFixedEndAuthorityV1,
+  type SavedFixedEndReplacementV1,
+} from './saved-fixed-end-outline-authority-v1';
 
 export type SavedGeometryCurrentV1 = SavedAddPointCurrentV1 &
   Readonly<{
     sharedOutlineBlock?: string;
+    fixedEndAuthority?: SavedFixedEndAuthorityV1;
   }>;
 
 const prepared = new WeakMap<CompileInput, Readonly<{ sharedOutlineBlock?: string }>>();
@@ -72,6 +78,7 @@ type Review = {
   geometry: string;
   cardId: number;
   scopeKey: string;
+  fixedEndReplacement?: SavedFixedEndReplacementV1;
 };
 const artifacts = new WeakMap<Artifact, Review>();
 function markers(manifest: ConversionManifest) {
@@ -84,6 +91,7 @@ function markers(manifest: ConversionManifest) {
         b.sizeId,
         b.authoredInternal ?? [],
         b.authoredOutlineCorner ?? null,
+        b.authoredFixedEndOutlineCorner ?? null,
       ])
       .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
   );
@@ -215,6 +223,17 @@ export async function compileSavedDraftGeometryReviewV1(
     'Record saved outline points, a corner, curve, dart or parallel opening edit.',
   );
   const { pieceId, pieceLineKey } = command.target;
+  const fixedEnd = command.tool === 'round-corner' && command.payload.fixedEnd;
+  const fixedEndAuthority = fixedEnd ? opening.fixedEndAuthority : undefined;
+  if (fixedEnd)
+    requireSavedEdit(
+      round && isSavedFixedEndAuthorityV1(fixedEndAuthority, row, pieceLineKey),
+      'Open a fresh guarded review for the saved corner.',
+    );
+  const verifyReviewSource = async () => {
+    await verifyCurrentRow();
+    await fixedEndAuthority?.verify(new AbortController().signal);
+  };
   let affectedBlockNames = [sharedOutlineBlock ?? pieceId + '_' + sizeToken];
   const current = () => {
     const now = readCurrent();
@@ -224,6 +243,7 @@ export async function compileSavedDraftGeometryReviewV1(
       now.generation !== generation ||
       now.sizeToken !== sizeToken ||
       now.sharedOutlineBlock !== sharedOutlineBlock ||
+      (fixedEnd && now.fixedEndAuthority !== fixedEndAuthority) ||
       !sameSavedDraftRowV1(now.row, row) ||
       now.card.techCardId !== row.techCardId
     )
@@ -643,7 +663,7 @@ export async function compileSavedDraftGeometryReviewV1(
         : 'The original dart must contain exactly two native straight legs.',
     );
   }
-  await verifyCurrentRow();
+  await verifyReviewSource();
   requireSavedEdit(current(), 'The saved geometry changed during verification.');
   const { compilePatternImportDxfPhaseEDraftCadGeometryV1 } = await import(
     './draft-cad-geometry-compile-v1'
@@ -666,7 +686,8 @@ export async function compileSavedDraftGeometryReviewV1(
               : savedCurve
                 ? 'saved French curve'
                 : 'saved dart',
-        verifyCurrentRow,
+        verifyCurrentRow: verifyReviewSource,
+        ...(fixedEndAuthority && { fixedEndReplacement: fixedEndAuthority.replacement }),
         manifest: result.artifact.manifest,
         geometry: (parallel ? openingGeometry : geometry)(result.artifact.compiledJob),
         cardId: row.techCardId,
@@ -735,6 +756,7 @@ export function openSavedDraftGeometryFileV1(artifact: Artifact, name: string) {
     },
     review.kind,
     preserveHeadings ? { scopeKey: review.scopeKey, manifest: review.manifest } : undefined,
+    review.fixedEndReplacement,
   );
   return file;
 }

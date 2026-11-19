@@ -161,7 +161,17 @@ export async function applyDirectDxfReviewedDraftV1(
     if (!isCurrent()) throw new Error('The Join review changed before Apply.');
     return apply({ join });
   }
-  await verifySavedDartTipApplyV1(draft, files, autopilotToken != null, isCurrent);
+  const fixedEndReplacement = await verifySavedDartTipApplyV1(
+    draft,
+    files,
+    autopilotToken != null,
+    isCurrent,
+  );
+  if (fixedEndReplacement) {
+    if (pinnedSavedFile !== files[0] || !isCurrent())
+      throw new Error('Confirm the current saved corner with Apply.');
+    return apply({ fixedEndReplacement });
+  }
   if (draft.scopes.some((scope) => scope.writerReplay?.retainedLineSplit)) {
     if (autopilotToken != null)
       throw new Error('Confirm the saved Add point with the Apply button.');

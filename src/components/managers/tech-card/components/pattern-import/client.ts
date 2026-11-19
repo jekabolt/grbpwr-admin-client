@@ -175,5 +175,6 @@ export type ApplyDraftFn = (
     replaceMatchingFile?: true;
     newPieceIntent?: ApplyNewPieceIntent;
     join?: import('./phase-e-workbench-v2/draft-cad-saved-join-review').JoinApply;
+    fixedEndReplacement?: import('./phase-e-workbench-v2/saved-fixed-end-outline-authority-v1').SavedFixedEndReplacementV1;
   }>,
 ) => Promise<ApplyResult>;

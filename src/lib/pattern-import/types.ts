@@ -2717,6 +2717,8 @@ export type ManifestBlock = {
   authoredInternal?: ManifestAuthoredInternalPath[];
   /** One exact quadratic corner on the same closed L1/L14 outline, in block grid units. */
   authoredOutlineCorner?: AuthoredQuadraticGrid;
+  /** Unequal perpendicular setbacks on one verified paired L1/L14 corner. */
+  authoredFixedEndOutlineCorner?: AuthoredQuadraticGrid;
   authoredText?: ManifestAuthoredTextMark[];
   authoredNotches?: ManifestAuthoredNotchGroup[];
   block: string;

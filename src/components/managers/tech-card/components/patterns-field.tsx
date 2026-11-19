@@ -5199,8 +5199,8 @@ export function PatternsField({
                 return g.phase === 'generating' && g.run > importSaveRun.current;
               },
               // A sheet replaced in place: its save archives the old file with a card snapshot.
-              onReplaced: (list) =>
-                list.forEach((r) => armReuploadSnapshot(techCardId, r.newUrl, r.oldUrl)),
+              onReplaced: (list, guard) =>
+                list.forEach((r) => armReuploadSnapshot(techCardId, r.newUrl, r.oldUrl, guard)),
               unsaved: {
                 get: () => importUnsaved.current,
                 set: (v) => {

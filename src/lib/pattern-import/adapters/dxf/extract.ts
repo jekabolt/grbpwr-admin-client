@@ -1972,8 +1972,11 @@ async function readDxfInternal(
     }
   }
   const authoredOutlineCornerByBlock = new Map(
-    (conversion?.blocks ?? []).flatMap(({ block, authoredOutlineCorner }) =>
-      authoredOutlineCorner ? [[block, authoredOutlineCorner]] : [],
+    (conversion?.blocks ?? []).flatMap(
+      ({ block, authoredOutlineCorner, authoredFixedEndOutlineCorner }) => {
+        const corner = authoredOutlineCorner ?? authoredFixedEndOutlineCorner;
+        return corner ? [[block, corner]] : [];
+      },
     ),
   );
   const b = new Builder(

@@ -1,4 +1,5 @@
 import type { CardDraft, ConversionManifest } from 'lib/pattern-import/types';
+import type { SavedFixedEndReplacementV1 } from './saved-fixed-end-outline-authority-v1';
 
 type Scope = CardDraft['scopes'][number];
 type Verify = (draft: CardDraft, scope: Scope, isCurrent: () => boolean) => Promise<void>;
@@ -6,6 +7,7 @@ const files = new WeakMap<File, Verify | null>();
 const scopes = new WeakMap<Scope, { file: File; text: string }>();
 type SavedPieceHeading = Readonly<{ scopeKey: string; manifest: ConversionManifest }>;
 const pieceHeadings = new WeakMap<File, SavedPieceHeading>();
+const fixedEndReplacements = new WeakMap<File, SavedFixedEndReplacementV1>();
 
 type SavedGeometryReviewLabel =
   | 'saved dart'
@@ -22,10 +24,12 @@ export function registerSavedDartTipFileV1(
   verify: Verify,
   label: SavedGeometryReviewLabel = 'saved dart',
   pieceHeading?: SavedPieceHeading,
+  fixedEndReplacement?: SavedFixedEndReplacementV1,
 ) {
   if (files.has(file)) throw new Error('This dart review File is already bound.');
   labels.set(file, label);
   files.set(file, verify);
+  if (fixedEndReplacement) fixedEndReplacements.set(file, fixedEndReplacement);
   if (
     pieceHeading &&
     (label === 'saved allowance offset' ||
@@ -65,4 +69,5 @@ export async function verifySavedDartTipApplyV1(
   )
     throw new Error('Confirm the current saved geometry review with Apply.');
   await verify(draft, scope, () => files.get(file) === verify && isCurrent());
+  return fixedEndReplacements.get(file);
 }

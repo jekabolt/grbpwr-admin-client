@@ -16,6 +16,7 @@ import {
   type SavedDraftPairedAllowanceProofV1,
 } from './draft-cad-paired-allowance-authority-v1';
 import {
+  editFixedEndAuthoredOutlineCorner,
   readPairedAuthoredOutlineCorner,
   roundDraftConvexOrthogonalCornerV1,
 } from 'lib/pattern-import/manifest/authored-outline-corner';
@@ -333,6 +334,7 @@ function editExactOutlineVertex(
   const cornerGrid =
     source.authoredOutlineCorner && authoredQuadraticGrid(source.authoredOutlineCorner);
   const savedCorner = command.tool === 'round-corner' ? command.payload.savedCorner : undefined;
+  const fixedEnd = command.tool === 'round-corner' ? command.payload.fixedEnd : undefined;
   const originalCorner =
     cornerGrid &&
     seam &&
@@ -345,23 +347,35 @@ function editExactOutlineVertex(
     (!originalCorner ||
       originalCorner.start !== index ||
       source.notches.length ||
-      originalCorner.setbackMm === command.payload.setbackMm)
+      (!fixedEnd && originalCorner.setbackMm === command.payload.setbackMm))
   )
     return { ok: false, detail: 'The selected saved corner or its setback changed.' };
   const originalOutline = originalCorner ? originalCorner.originalOutline : vertices;
   const rounding =
     command.tool === 'round-corner' &&
-    roundDraftConvexOrthogonalCornerV1(originalOutline, index, command.payload.setbackMm);
-  const nonRectangularRound = Boolean(
+    (fixedEnd
+      ? originalCorner &&
+        seam &&
+        savedCorner &&
+        editFixedEndAuthoredOutlineCorner(
+          vertices,
+          seam,
+          savedCorner,
+          fixedEnd,
+          command.payload.setbackMm,
+        )
+      : roundDraftConvexOrthogonalCornerV1(originalOutline, index, command.payload.setbackMm));
+  const requiresNativeMarks = Boolean(
     rounding &&
-      (originalOutline.length !== 4 ||
+      (fixedEnd ||
+        originalOutline.length !== 4 ||
         originalOutline.some(({ x, y }, i) => {
           const next = originalOutline[(i + 1) % originalOutline.length]!;
           return x !== next.x && y !== next.y;
         })),
   );
   if (
-    nonRectangularRound &&
+    requiresNativeMarks &&
     source.drills.some(
       ({ form, sizeMm }) =>
         form !== 'point' &&
@@ -431,7 +445,7 @@ function editExactOutlineVertex(
     // The native grain annotation may extend beyond the piece. Refuse only if its line
     // reaches the original corner triangle, which bounds the material removed by this command.
     const affectedGrain =
-      nonRectangularRound &&
+      requiresNativeMarks &&
       rounding &&
       source.grain &&
       (() => {

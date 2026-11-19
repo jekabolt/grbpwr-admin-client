@@ -1,3 +1,4 @@
+import { parseAuthoredOutlineCorner } from '../manifest/authored-outline-corner';
 // The ConversionManifest of one scope file (08-CONTRACT §3), built from the plan — never from
 // the text, so the gate can compare the two.
 
@@ -107,7 +108,7 @@ export function manifestBlock(b: PlannedBlock, sigPts?: number): ManifestBlock {
         ]
       : [],
   );
-  const authoredOutlineCorner =
+  const corner =
     b.size.authoredOutlineCorner && authoredQuadraticGrid(b.size.authoredOutlineCorner);
   const authoredText = b.size.textMarks?.map(({ text, at }) => {
     const [x, y] = authoredInternalVertices([at]);
@@ -118,7 +119,11 @@ export function manifestBlock(b: PlannedBlock, sigPts?: number): ManifestBlock {
     block: b.name,
     ...(b.protectedLineSplit ? { protectedLineSplit: b.protectedLineSplit } : {}),
     ...(authoredInternal.length ? { authoredInternal } : {}),
-    ...(authoredOutlineCorner ? { authoredOutlineCorner } : {}),
+    ...(corner
+      ? parseAuthoredOutlineCorner(corner)
+        ? { authoredOutlineCorner: corner }
+        : { authoredFixedEndOutlineCorner: corner }
+      : {}),
     ...(authoredText?.length ? { authoredText } : {}),
     ...(authoredNotches.length ? { authoredNotches } : {}),
     identity: b.identity,

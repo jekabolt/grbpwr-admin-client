@@ -19,6 +19,10 @@ import {
 } from './draft-cad-session-v1';
 import { createPatternImportDxfPhaseEDraftCadTopologySessionV1 } from './draft-cad-topology-session-v1';
 import { createSavedGeometryReviewRuntimeV1 } from './saved-row-production-runtime-v1';
+import {
+  captureSavedFixedEndAuthorityV1,
+  type SavedFixedEndAuthorityV1,
+} from './saved-fixed-end-outline-authority-v1';
 import type { PatternImportDxfPhaseEZeroOperationSavedCardAuthorityRuntimeV1 } from './zero-operation-saved-card-authority-v1';
 
 export default function CadTableSavedSharedOutlineEditV1({
@@ -85,6 +89,7 @@ export default function CadTableSavedSharedOutlineEditV1({
   const sessionRef = useRef(session);
   const runtimeRef = useRef<ReturnType<typeof createSavedGeometryReviewRuntimeV1> | null>(null);
   const pending = useRef(false);
+  const reviewCapture = useRef<AbortController | null>(null);
   const [preparing, setPreparing] = useState(false);
   const [error, setError] = useState('');
   useLayoutEffect(() => {
@@ -95,6 +100,7 @@ export default function CadTableSavedSharedOutlineEditV1({
     runtimeRef.current = runtime;
     return () => {
       runtimeRef.current = null;
+      reviewCapture.current?.abort();
       runtime.dispose();
     };
   }, [authority]);
@@ -124,17 +130,37 @@ export default function CadTableSavedSharedOutlineEditV1({
     const runtime = runtimeRef.current;
     const captured = sessionRef.current;
     if (!runtime || !captured?.cursor || pending.current) return;
+    let fixedEndAuthority: SavedFixedEndAuthorityV1 | undefined;
     const readCurrent = () =>
       runtimeRef.current === runtime &&
       sessionRef.current === captured &&
       (readPatternImportDxfPhaseECardSessionV1(row.techCardId)?.importGeneration ?? 0) ===
         generation
-        ? { row, sizeToken, generation, session: captured, sharedOutlineBlock: block }
+        ? {
+            row,
+            sizeToken,
+            generation,
+            session: captured,
+            sharedOutlineBlock: block,
+            fixedEndAuthority,
+          }
         : null;
     pending.current = true;
     setPreparing(true);
     setError('');
     try {
+      const [command] = activeDraftCadTransactionsV1(captured).flatMap(({ commands }) => commands);
+      if (command?.tool === 'round-corner' && command.payload.fixedEnd) {
+        const controller = new AbortController();
+        reviewCapture.current = controller;
+        fixedEndAuthority = await captureSavedFixedEndAuthorityV1(
+          row,
+          command.target.pieceLineKey,
+          authority.resolveExactCurrentCard,
+          controller.signal,
+        );
+        if (!readCurrent()) return;
+      }
       const result = await runtime.prepareSavedGeometryReview(row, readCurrent);
       if (!readCurrent()) return;
       if (!result.ok)
@@ -151,6 +177,7 @@ export default function CadTableSavedSharedOutlineEditV1({
         setError(err instanceof Error ? err.message : 'Could not review the shared outline.');
     } finally {
       if (runtimeRef.current === runtime) {
+        reviewCapture.current = null;
         pending.current = false;
         setPreparing(false);
       }

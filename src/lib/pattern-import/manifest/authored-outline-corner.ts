@@ -57,12 +57,22 @@ export function roundDraftConvexOrthogonalCornerV1(
   index: number,
   setbackMm: number,
 ) {
+  return roundedCorner(ring, index, setbackMm, setbackMm);
+}
+
+function roundedCorner(
+  ring: readonly PtMm[],
+  index: number,
+  startSetbackMm: number,
+  endSetbackMm: number,
+) {
   if (
     (ring.length !== 4 && ring.length !== 5) ||
     !Number.isInteger(index) ||
     index < 0 ||
     index >= ring.length ||
-    !validDraftCornerSetbackV1(setbackMm)
+    !validDraftCornerSetbackV1(startSetbackMm) ||
+    !validDraftCornerSetbackV1(endSetbackMm)
   )
     return null;
   const wire = ring.map(wirePoint);
@@ -78,13 +88,24 @@ export function roundDraftConvexOrthogonalCornerV1(
     (after.x !== 0n && after.y !== 0n)
   )
     return null;
-  const setback = wirePoint({ x: setbackMm, y: 0 })?.x;
-  if (!setback || [before, after].some(({ x, y }) => abs(x) + abs(y) < 3n * setback)) return null;
-  const trim = (d: WirePoint): PtMm => ({
+  const startSetback = wirePoint({ x: startSetbackMm, y: 0 })?.x;
+  const endSetback = wirePoint({ x: endSetbackMm, y: 0 })?.x;
+  if (
+    !startSetback ||
+    !endSetback ||
+    abs(before.x) + abs(before.y) < 3n * startSetback ||
+    abs(after.x) + abs(after.y) < 3n * endSetback
+  )
+    return null;
+  const trim = (d: WirePoint, setback: bigint): PtMm => ({
     x: Number(corner.x + (d.x === 0n ? 0n : d.x > 0n ? setback : -setback)) / 1e6,
     y: Number(corner.y + (d.y === 0n ? 0n : d.y > 0n ? setback : -setback)) / 1e6,
   });
-  const controls = authoredQuadraticGrid([trim(before), ring[index]!, trim(after)]);
+  const controls = authoredQuadraticGrid([
+    trim(before, startSetback),
+    ring[index]!,
+    trim(after, endSetback),
+  ]);
   const samples = controls && sampleAuthoredQuadratic(controls);
   if (
     !controls ||
@@ -98,23 +119,38 @@ export function roundDraftConvexOrthogonalCornerV1(
   return { controls, samples, ring: ring.flatMap((point, i) => (i === index ? samples : [point])) };
 }
 
-export function parseAuthoredOutlineCorner(value: unknown): AuthoredQuadraticGrid | null {
+function orthogonalControls(value: unknown) {
   if (!Array.isArray(value) || value.length !== 6 || !value.every(Number.isSafeInteger))
     return null;
   const [sx, sy, cx, cy, ex, ey] = value;
   const first = sx === cx ? Math.abs(sy - cy) : sy === cy ? Math.abs(sx - cx) : 0;
   const second = ex === cx ? Math.abs(ey - cy) : ey === cy ? Math.abs(ex - cx) : 0;
-  return Number.isSafeInteger(first) &&
-    first >= 1_000_000 &&
-    first === second &&
-    (sx === cx) !== (ex === cx)
-    ? [sx, sy, cx, cy, ex, ey]
-    : null;
+  if (
+    !Number.isSafeInteger(first) ||
+    !Number.isSafeInteger(second) ||
+    first < 1_000_000 ||
+    second < 1_000_000 ||
+    (sx === cx) === (ex === cx)
+  )
+    return null;
+  const grid: AuthoredQuadraticGrid = [sx, sy, cx, cy, ex, ey];
+  return { grid, startSetbackMm: first / 1e6, endSetbackMm: second / 1e6 };
 }
 
-/** This lookup only admits the single exact, ordered rounded span on its reconstructed original outline. */
-export function readAuthoredOutlineCorner(ring: readonly PtMm[], grid: AuthoredQuadraticGrid) {
-  if (!parseAuthoredOutlineCorner(grid)) return null;
+export function parseAuthoredOutlineCorner(value: unknown): AuthoredQuadraticGrid | null {
+  const control = orthogonalControls(value);
+  return control && control.startSetbackMm === control.endSetbackMm ? control.grid : null;
+}
+
+export function parseAuthoredFixedEndOutlineCorner(value: unknown): AuthoredQuadraticGrid | null {
+  const control = orthogonalControls(value);
+  return control && control.startSetbackMm !== control.endSetbackMm ? control.grid : null;
+}
+
+function readCorner(ring: readonly PtMm[], grid: AuthoredQuadraticGrid) {
+  const control = orthogonalControls(grid);
+  if (!control) return null;
+  const { startSetbackMm, endSetbackMm } = control;
   const samples = sampleAuthoredQuadratic(grid);
   if (!samples || ![3, 4].includes(ring.length - samples.length)) return null;
   const fixed = authoredInternalVertices(ring);
@@ -131,15 +167,33 @@ export function readAuthoredOutlineCorner(ring: readonly PtMm[], grid: AuthoredQ
     controls[1],
     ...local.slice(start + samples.length),
   ];
-  const setbackMm = Math.abs(grid[0] - grid[2] + grid[1] - grid[3]) / 1e6;
-  const rebuilt = roundDraftConvexOrthogonalCornerV1(originalOutline, start, setbackMm);
-  if (!rebuilt?.controls || !rebuilt.controls.every((v, i) => v === grid[i])) return null;
-  return {
-    start,
-    sampleCount: samples.length,
-    setbackMm,
-    originalOutline,
-  };
+  const rebuilt = roundedCorner(originalOutline, start, startSetbackMm, endSetbackMm);
+  if (!rebuilt || !rebuilt.controls.every((v, i) => v === grid[i])) return null;
+  return { start, sampleCount: samples.length, startSetbackMm, endSetbackMm, originalOutline };
+}
+
+export function readAuthoredOutlineCornerSetbacks(grid: AuthoredQuadraticGrid) {
+  const control = orthogonalControls(grid);
+  return control ? { start: control.startSetbackMm, end: control.endSetbackMm } : null;
+}
+
+/** Existing linked-setback editor remains bound to equal controls. */
+export function readAuthoredOutlineCorner(ring: readonly PtMm[], grid: AuthoredQuadraticGrid) {
+  const corner = readCorner(ring, grid);
+  if (!corner || corner.startSetbackMm !== corner.endSetbackMm) return null;
+  const { start, sampleCount, startSetbackMm: setbackMm, originalOutline } = corner;
+  return { start, sampleCount, setbackMm, originalOutline };
+}
+
+function readPairedOutline(
+  cut: readonly PtMm[],
+  seam: readonly PtMm[],
+  grid: AuthoredQuadraticGrid,
+) {
+  if (cut.length !== seam.length) return null;
+  const c = authoredInternalVertices(cut),
+    s = authoredInternalVertices(seam);
+  return c.every((value, i) => value === s[i]) ? readCorner(cut, grid) : null;
 }
 
 export function readPairedAuthoredOutlineCorner(
@@ -147,11 +201,10 @@ export function readPairedAuthoredOutlineCorner(
   seam: readonly PtMm[],
   grid: AuthoredQuadraticGrid,
 ) {
-  const corner = readAuthoredOutlineCorner(cut, grid);
-  if (!corner || cut.length !== seam.length) return null;
-  const c = authoredInternalVertices(cut),
-    s = authoredInternalVertices(seam);
-  return c.every((v, i) => v === s[i]) ? corner : null;
+  const corner = readPairedOutline(cut, seam, grid);
+  if (!corner) return null;
+  const { start, sampleCount, startSetbackMm: setbackMm, originalOutline } = corner;
+  return { start, sampleCount, setbackMm, originalOutline };
 }
 
 /** Signed native DXF entities must already be on the wire grid before any coordinate transform. */
@@ -160,8 +213,32 @@ export function readNativePairedAuthoredOutlineCorner(
   seam: readonly PtMm[],
   grid: AuthoredQuadraticGrid,
 ) {
-  const isWirePoint = ({ x, y }: PtMm) =>
-    [x, y].every((value) => Number.isFinite(value) && Number(value.toFixed(6)) === value);
-  if (!cut.every(isWirePoint) || !seam.every(isWirePoint)) return null;
+  if (!cut.every(wirePoint) || !seam.every(wirePoint)) return null;
   return readPairedAuthoredOutlineCorner(cut, seam, grid);
+}
+
+/** Replays the existing corner before moving exactly one endpoint on its original support. */
+export function editFixedEndAuthoredOutlineCorner(
+  cut: readonly PtMm[],
+  seam: readonly PtMm[],
+  grid: AuthoredQuadraticGrid,
+  fixedEnd: 'start' | 'end',
+  movingSetbackMm: number,
+) {
+  if (
+    (fixedEnd !== 'start' && fixedEnd !== 'end') ||
+    !cut.every(wirePoint) ||
+    !seam.every(wirePoint)
+  )
+    return null;
+  const corner = readPairedOutline(cut, seam, grid);
+  if (!corner) return null;
+  const { start, startSetbackMm, endSetbackMm, originalOutline } = corner;
+  if (movingSetbackMm === (fixedEnd === 'start' ? endSetbackMm : startSetbackMm)) return null;
+  return roundedCorner(
+    originalOutline,
+    start,
+    fixedEnd === 'start' ? startSetbackMm : movingSetbackMm,
+    fixedEnd === 'end' ? endSetbackMm : movingSetbackMm,
+  );
 }

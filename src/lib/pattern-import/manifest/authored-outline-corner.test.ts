@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  editFixedEndAuthoredOutlineCorner,
+  parseAuthoredFixedEndOutlineCorner,
   parseAuthoredOutlineCorner,
   readAuthoredOutlineCorner,
   readNativePairedAuthoredOutlineCorner,
@@ -48,4 +50,33 @@ describe('a signed linked outline corner', () => {
     invalidControl[2]! += 1;
     expect(parseAuthoredOutlineCorner(invalidControl)).toBeNull();
   });
+});
+
+it('moves either endpoint on its exact support while retaining the other endpoint and all other vertices', () => {
+  const { controls, ring } = roundedCorner();
+  const keepStart = editFixedEndAuthoredOutlineCorner(ring, ring, controls, 'start', 6);
+  const keepEnd = editFixedEndAuthoredOutlineCorner(ring, ring, controls, 'end', 6);
+  expect(keepStart?.controls).toEqual([
+    305280573, 32224397, 305280573, 36224397, 299280573, 36224397,
+  ]);
+  expect(keepEnd?.controls).toEqual([
+    305280573, 30224397, 305280573, 36224397, 301280573, 36224397,
+  ]);
+  expect(keepStart?.ring.slice(0, 2)).toEqual(rectangle.slice(0, 2));
+  expect(keepStart?.ring.at(-1)).toEqual(rectangle.at(-1));
+  expect(keepEnd?.ring.slice(0, 2)).toEqual(rectangle.slice(0, 2));
+  expect(keepEnd?.ring.at(-1)).toEqual(rectangle.at(-1));
+  for (const edit of [keepStart, keepEnd]) {
+    expect(parseAuthoredOutlineCorner(edit?.controls)).toBeNull();
+    expect(parseAuthoredFixedEndOutlineCorner(edit?.controls)).toEqual(edit?.controls);
+    expect(readAuthoredOutlineCorner(edit!.ring, edit!.controls)).toBeNull();
+    expect(
+      readNativePairedAuthoredOutlineCorner(edit!.ring, edit!.ring, edit!.controls),
+    ).toBeTruthy();
+  }
+  const noMove = editFixedEndAuthoredOutlineCorner(ring, ring, controls, 'start', 4);
+  expect(noMove).toBeNull();
+  expect(editFixedEndAuthoredOutlineCorner(ring, ring, controls, 'end', 13)).toBeNull();
+  const drift = ring.map((p, i) => (i === 2 ? { ...p, x: p.x + 0.0000001 } : p));
+  expect(editFixedEndAuthoredOutlineCorner(ring, drift, controls, 'end', 6)).toBeNull();
 });

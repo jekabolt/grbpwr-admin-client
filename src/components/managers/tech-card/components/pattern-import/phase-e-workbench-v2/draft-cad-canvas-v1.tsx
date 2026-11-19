@@ -1,4 +1,9 @@
-import { readAuthoredOutlineCorner } from 'lib/pattern-import/manifest/authored-outline-corner';
+import {
+  editFixedEndAuthoredOutlineCorner,
+  readAuthoredOutlineCorner,
+  readAuthoredOutlineCornerSetbacks,
+  readPairedAuthoredOutlineCorner,
+} from 'lib/pattern-import/manifest/authored-outline-corner';
 import {
   draftOutlineMoveHistoryV1,
   draftOutlineMovePositionsV1,
@@ -472,12 +477,17 @@ export function recordPatternImportDxfPhaseEDraftCadDeletePointV1(
 
 export function recordPatternImportDxfPhaseEDraftCadRoundCornerV1(
   input: OutlinePointEditInput &
-    Readonly<{ setbackMm: number; savedCorner?: AuthoredQuadraticGrid }>,
+    Readonly<{
+      setbackMm: number;
+      savedCorner?: AuthoredQuadraticGrid;
+      fixedEnd?: 'start' | 'end';
+    }>,
 ): PatternImportDxfPhaseEDraftCadCanvasPointResultV1 {
   return recordOutlinePointEdit(input, {
     tool: 'round-corner',
     setbackMm: input.setbackMm,
     savedCorner: input.savedCorner,
+    fixedEnd: input.fixedEnd,
   });
 }
 function recordOutlinePointEdit(
@@ -485,7 +495,12 @@ function recordOutlinePointEdit(
   edit:
     | Readonly<{ tool: 'move-point'; pointMm: PtMm }>
     | Readonly<{ tool: 'delete-point' }>
-    | Readonly<{ tool: 'round-corner'; setbackMm: number; savedCorner?: AuthoredQuadraticGrid }>,
+    | Readonly<{
+        tool: 'round-corner';
+        setbackMm: number;
+        savedCorner?: AuthoredQuadraticGrid;
+        fixedEnd?: 'start' | 'end';
+      }>,
 ): PatternImportDxfPhaseEDraftCadCanvasPointResultV1 {
   const { session, projection, activePieceIndex, sequence } = input;
   const fail = (blocker: string) => ({
@@ -530,19 +545,31 @@ function recordOutlinePointEdit(
     );
     const points = contour?.vertices.map(({ pointMm }) => pointMm);
     const index = contour?.vertices.findIndex((vertex) => vertex.vertexId === vertexId) ?? -1;
-    const prior = edit.savedCorner && points && readAuthoredOutlineCorner(points, edit.savedCorner);
-    if (
-      !contour?.closed ||
-      contour.role !== 'cut-boundary' ||
-      !points ||
-      (edit.savedCorner &&
-        (!prior || prior.start !== index || prior.setbackMm === edit.setbackMm)) ||
-      !roundDraftConvexOrthogonalCornerV1(
-        prior ? prior.originalOutline : points,
-        index,
-        edit.setbackMm,
-      )
-    )
+    const prior =
+      edit.savedCorner &&
+      points &&
+      (edit.fixedEnd
+        ? readPairedAuthoredOutlineCorner(points, points, edit.savedCorner)
+        : readAuthoredOutlineCorner(points, edit.savedCorner));
+    const rounded =
+      points &&
+      (!edit.savedCorner || prior?.start === index) &&
+      (edit.fixedEnd
+        ? edit.savedCorner &&
+          editFixedEndAuthoredOutlineCorner(
+            points,
+            points,
+            edit.savedCorner,
+            edit.fixedEnd,
+            edit.setbackMm,
+          )
+        : (!prior || prior.setbackMm !== edit.setbackMm) &&
+          roundDraftConvexOrthogonalCornerV1(
+            prior ? prior.originalOutline : points,
+            index,
+            edit.setbackMm,
+          ));
+    if (!contour?.closed || contour.role !== 'cut-boundary' || !rounded)
       return fail('Choose a right-angle corner and keep a straight rail on each side.');
     command = {
       commandId: ids.commandId,
@@ -552,6 +579,7 @@ function recordOutlinePointEdit(
         ...payload,
         setbackMm: edit.setbackMm,
         ...(edit.savedCorner ? { savedCorner: edit.savedCorner } : {}),
+        ...(edit.fixedEnd ? { fixedEnd: edit.fixedEnd } : {}),
       },
     };
   } else {
@@ -1927,6 +1955,8 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
   const [resizeLength, setResizeLength] = useState('');
   const [resizeFixed, setResizeFixed] = useState<'start' | 'end'>('start');
   const [cornerSetback, setCornerSetback] = useState('4');
+  const [fixedCornerEnd, setFixedCornerEnd] = useState<'linked' | 'start' | 'end'>('linked');
+  const savedSetbacks = savedRoundCorner && readAuthoredOutlineCornerSetbacks(savedRoundCorner);
   const [outlinePointInput, setOutlinePointInput] = useState<{
     key: string;
     x: string;
@@ -2036,7 +2066,8 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
     );
     if (!contour) return [];
     const points = contour.vertices.map(({ pointMm }) => pointMm);
-    const corner = savedRoundCorner && readAuthoredOutlineCorner(points, savedRoundCorner);
+    const corner =
+      savedRoundCorner && readPairedAuthoredOutlineCorner(points, points, savedRoundCorner);
     const select = savedRoundCorner
       ? (index: number) => corner && corner.start === index
       : (index: number) => roundDraftConvexOrthogonalCornerV1(points, index, 1);
@@ -2070,7 +2101,7 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
   const activeToolInstruction = savedFrenchCurveOnly
     ? 'Move a start, control or end point.'
     : activeTool === 'round-corner' && savedRoundCorner
-      ? 'Select the saved corner handle to change its linked setback.'
+      ? 'Select the saved corner to adjust its setback.'
       : activeTool === 'move-point' && moveSharedOutline
         ? 'Drag an outline point or click it to enter X and Y in millimetres.'
         : toolInstruction(activeTool, projection.sizeToken);
@@ -2139,15 +2170,15 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
       onSessionChange(result.session);
     }
   };
+  const chooseCornerEnd = (end: 'linked' | 'start' | 'end') => {
+    setFixedCornerEnd(end);
+    if (savedSetbacks)
+      setCornerSetback(String(end === 'start' ? savedSetbacks.end : savedSetbacks.start));
+    setInputError(null);
+  };
   const chooseOutlinePoint = (option: PatternImportDxfPhaseEDraftCadExactVertexOptionV1 | null) => {
-    if (option && activeTool === 'round-corner' && savedRoundCorner)
-      setCornerSetback(
-        String(
-          Math.abs(
-            savedRoundCorner[0] - savedRoundCorner[2] + savedRoundCorner[1] - savedRoundCorner[3],
-          ) / 1e6,
-        ),
-      );
+    if (option && activeTool === 'round-corner' && savedSetbacks)
+      chooseCornerEnd(savedSetbacks.start === savedSetbacks.end ? 'linked' : 'start');
     setOutlinePointInput(
       option ? { key: option.key, x: String(option.pointMm.x), y: String(option.pointMm.y) } : null,
     );
@@ -2162,6 +2193,9 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
             ...input,
             setbackMm: Number(cornerSetback),
             savedCorner: savedRoundCorner,
+            ...(savedRoundCorner && fixedCornerEnd !== 'linked'
+              ? { fixedEnd: fixedCornerEnd }
+              : {}),
           })
         : recordPatternImportDxfPhaseEDraftCadDeletePointV1(input);
     setInputError(result.blocker);
@@ -2918,8 +2952,30 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
       )}
       {activeTool === 'round-corner' && outlinePointInput && interactionEnabled && (
         <div className='flex flex-wrap items-end gap-2'>
+          {savedSetbacks && (
+            <div className='grid gap-1 text-small' role='group' aria-label='Corner endpoint'>
+              Corner endpoint
+              <Selector
+                label='Corner endpoint'
+                compact
+                value={fixedCornerEnd}
+                onChange={(value: string) =>
+                  chooseCornerEnd(value === 'start' || value === 'end' ? value : 'linked')
+                }
+                options={[
+                  ...(savedSetbacks.start === savedSetbacks.end
+                    ? [{ value: 'linked', label: 'Move both ends' }]
+                    : []),
+                  { value: 'start', label: 'Keep start fixed' },
+                  { value: 'end', label: 'Keep end fixed' },
+                ]}
+              />
+            </div>
+          )}
           <label className='grid gap-1 text-small'>
-            Setback on both sides (mm)
+            {savedSetbacks && fixedCornerEnd !== 'linked'
+              ? 'Setback on moving side (mm)'
+              : 'Setback on both sides (mm)'}
             <Input
               className='w-28'
               type='number'

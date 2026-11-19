@@ -115,6 +115,15 @@ export type ApplyDeps = {
    * the caller can arm the snapshot reason the save carries (nesting/reupload-session.ts).
    */
   onReplaced?: (replaced: ApplyReplaced[]) => void;
+  /** Exact single saved row for an Assembly-clock-guarded replacement. */
+  expectedReplacement?: Readonly<{
+    scopeKey: string;
+    lineKey: string;
+    oldUrl: string;
+    sha256: string;
+    sizeBytes: number;
+    expectedLockVersion: number;
+  }>;
   /**
    * Codex r5 #3: rows an earlier try wrote into the form whose save was not confirmed ('ok') — a
    * retry finds them there (nothing to write) and must still save. Kept by the caller across tries.
@@ -632,6 +641,37 @@ export async function applyDraft(
   const reused: string[] = [];
   const scopeOf = deps.scopeOf ?? scopeKeyOf;
   const newPieceIntent = deps.newPieceIntent;
+  const guarded = deps.expectedReplacement;
+  const replacementMoved = (): ApplyResult => ({
+    ok: false,
+    failedScope: guarded?.scopeKey ?? '',
+    message: 'The guarded pattern or editing lock changed. Open a fresh corner review.',
+    uploaded,
+  });
+  const guardedRowCurrent = (live: LiveCard) => {
+    if (!guarded) return false;
+    const rows = live.patterns.filter(
+      (row) => scopeOf(row, 'sheet') === guarded.scopeKey && row.lineKey === guarded.lineKey,
+    );
+    return (
+      rows.length === 1 &&
+      rows[0]?.url === guarded.oldUrl &&
+      rows[0]?.sha256 === guarded.sha256 &&
+      Number(rows[0]?.sizeBytes) === guarded.sizeBytes
+    );
+  };
+  if (
+    guarded &&
+    (!deps.save ||
+      !deps.onReplaced ||
+      deps.saveJoinedPattern ||
+      newPieceIntent ||
+      draft.scopes.length !== 1 ||
+      draft.scopes[0]?.target.scopeKey !== guarded.scopeKey ||
+      deps.readPreviousLockVersion?.() !== guarded.expectedLockVersion ||
+      !guardedRowCurrent(deps.read()))
+  )
+    return replacementMoved();
   const newPiece =
     newPieceIntent === undefined
       ? null
@@ -785,6 +825,23 @@ export async function applyDraft(
   // No await occurs between this read and the writes/save request below. It is the editing base the
   // host is about to claim, not a lock value reconstructed from the later response.
   const previousLockVersion = deps.readPreviousLockVersion?.();
+
+  if (
+    guarded &&
+    (previousLockVersion !== guarded.expectedLockVersion ||
+      !guardedRowCurrent(live) ||
+      uploaded.length !== 1 ||
+      plan.replaced.length !== 1 ||
+      plan.created !== 0 ||
+      plan.commitBindingBlockers.length ||
+      plan.commitBindings.length !== 1 ||
+      plan.writes.some(({ path }) => path === 'pieceDxfAliases') ||
+      plan.replaced[0]?.scopeKey !== guarded.scopeKey ||
+      plan.replaced[0]?.lineKey !== guarded.lineKey ||
+      plan.replaced[0]?.oldUrl !== guarded.oldUrl ||
+      plan.replaced[0]?.newUrl !== uploaded[0]?.url)
+  )
+    return replacementMoved();
   const commitFields = (persisted: boolean) => {
     if (!persisted) return {};
     const blockers = [...plan.commitBindingBlockers];
@@ -833,8 +890,9 @@ export async function applyDraft(
       };
     }
   }
+  if (guarded) deps.onReplaced!(plan.replaced);
   for (const w of plan.writes) deps.write(w.path, w.value);
-  if (plan.replaced.length) deps.onReplaced?.(plan.replaced);
+  if (!guarded && plan.replaced.length) deps.onReplaced?.(plan.replaced);
   const retry = !plan.writes.length && !!deps.unsaved?.get();
   if (plan.writes.length) deps.unsaved?.set(true);
 
@@ -850,7 +908,8 @@ export async function applyDraft(
         )
       : undefined;
   if (save !== undefined) {
-    const fine = retry ? save === 'ok' : save === 'ok' || save === 'nothing' || save === 'off';
+    const fine =
+      guarded || retry ? save === 'ok' : save === 'ok' || save === 'nothing' || save === 'off';
     // T3: the rows are the saved card's — the card saved; a later write is what is owed.
     const landed = fine ? null : deps.landed?.(urls) ?? null;
     if (landed) {
