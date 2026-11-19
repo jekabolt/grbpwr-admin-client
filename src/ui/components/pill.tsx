@@ -15,9 +15,14 @@ import { cva, VariantProps } from 'class-variance-authority';
  * Border and text share the tone colour; the background is always transparent.
  */
 const pillVariants = cva(
-  'inline-flex items-center whitespace-nowrap border px-[7px] py-px text-micro uppercase tracking-pill',
+  'inline-flex items-center whitespace-nowrap border px-[7px] py-px text-micro',
   {
     variants: {
+      // The quiet pill: the word as written (lowercase), in the label tracking. Default unchanged.
+      lowercase: {
+        false: 'uppercase tracking-pill',
+        true: 'tracking-label',
+      },
       tone: {
         ok: ['border-success', 'text-success'],
         warn: ['border-error', 'text-error'],
@@ -27,7 +32,7 @@ const pillVariants = cva(
         gap: ['border-dashed', 'border-borderColor', 'text-labelColor'],
       },
     },
-    defaultVariants: { tone: 'mut' },
+    defaultVariants: { tone: 'mut', lowercase: false },
   },
 );
 
@@ -37,9 +42,9 @@ interface Props extends VariantProps<typeof pillVariants> {
   title?: string;
 }
 
-export function Pill({ tone, children, className, ...props }: Props) {
+export function Pill({ tone, lowercase, children, className, ...props }: Props) {
   return (
-    <span {...props} className={pillVariants({ tone, className })}>
+    <span {...props} className={pillVariants({ tone, lowercase, className })}>
       {children}
     </span>
   );

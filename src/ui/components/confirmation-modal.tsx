@@ -1,4 +1,5 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
+import { cn } from 'lib/utility';
 import { useEffect, useState } from 'react';
 import { Button } from './button';
 import { Close } from './close';
@@ -107,6 +108,16 @@ interface Props {
    * it shows (e.g. phone only); nothing is drawn when it is absent.
    */
   dock?: React.ReactNode;
+  /**
+   * The quiet shell: the title and both footer buttons as written (lowercase), buttons at body
+   * size. Absent — the shell renders exactly as before.
+   */
+  lowercase?: boolean;
+  /**
+   * On the phone (below `lg`) the panel docks to the bottom edge as a full-width sheet, footer
+   * actions split the row at the bottom. From `lg` up it is the centred panel as usual.
+   */
+  sheet?: boolean;
 }
 
 export function ConfirmationModal({
@@ -134,12 +145,21 @@ export function ConfirmationModal({
   fullScreen,
   hideHeader,
   dock,
+  lowercase,
+  sheet,
 }: Props) {
   const [typed, setTyped] = useState('');
   // Never carry a satisfied guard across openings — reopening must re-arm it.
   useEffect(() => {
     if (!open) setTyped('');
   }, [open]);
+
+  // Quiet buttons: body size, 30px tall; in a docked sheet on the phone they grow to 40px.
+  const quietButton = lowercase
+    ? cn('px-4 py-[7px]', sheet && 'max-lg:py-[11px]')
+    : sheet
+      ? 'max-lg:py-2.5'
+      : undefined;
 
   const guardUnmet = !!typeToConfirm && typed !== typeToConfirm;
 
@@ -171,7 +191,9 @@ export function ConfirmationModal({
           className={
             fullScreen
               ? 'fixed inset-0 z-[var(--z-modal)] flex max-h-none w-full flex-col overflow-hidden bg-bgColor text-textColor'
-              : `fixed inset-x-2.5 top-1/2 z-[var(--z-modal)] flex max-h-[90vh] w-auto -translate-y-1/2 flex-col border border-textColor bg-bgColor text-textColor shadow-[var(--shadow-modal)] lg:inset-x-auto lg:left-1/2 lg:-translate-x-1/2 ${WIDTH[width]}`
+              : sheet
+                ? `fixed inset-x-0 bottom-0 z-[var(--z-modal)] flex max-h-[90vh] w-auto flex-col border-t border-textColor bg-bgColor text-textColor shadow-[var(--shadow-modal)] lg:inset-x-auto lg:bottom-auto lg:left-1/2 lg:top-1/2 lg:-translate-x-1/2 lg:-translate-y-1/2 lg:border ${WIDTH[width]}`
+                : `fixed inset-x-2.5 top-1/2 z-[var(--z-modal)] flex max-h-[90vh] w-auto -translate-y-1/2 flex-col border border-textColor bg-bgColor text-textColor shadow-[var(--shadow-modal)] lg:inset-x-auto lg:left-1/2 lg:-translate-x-1/2 ${WIDTH[width]}`
           }
         >
           <DialogPrimitives.Description className='sr-only'>
@@ -182,7 +204,7 @@ export function ConfirmationModal({
               <DialogPrimitives.Title asChild>
                 <Text
                   size='micro'
-                  variant='uppercase'
+                  variant={lowercase ? undefined : 'uppercase'}
                   tracking='group'
                   component='span'
                   className='font-bold'
@@ -238,7 +260,12 @@ export function ConfirmationModal({
               каждый факт правится у своего поля» — а она у такого диалога и есть единственное
               содержание подвала. Дополнительные `footerActions` тоже рисуют подвал. */}
           {(!hideActions || footerHint || footerActions) && (
-            <div className='flex shrink-0 items-center justify-end gap-1.5 border-t border-borderColor px-2.5 py-1.5'>
+            <div
+              className={cn(
+                'flex shrink-0 items-center justify-end gap-1.5 border-t border-borderColor px-2.5 py-1.5',
+                sheet && 'max-lg:p-2.5 max-lg:[&>button]:flex-1',
+              )}
+            >
               {footerHint && (
                 <Text
                   size='micro'
@@ -255,7 +282,8 @@ export function ConfirmationModal({
                   type='button'
                   onClick={handleCancel}
                   variant='secondary'
-                  size='sm'
+                  size={lowercase ? 'default' : 'sm'}
+                  className={cn(quietButton, lowercase && 'enabled:!border-textColor')}
                   disabled={cancelDisabled}
                 >
                   {cancelLabel}
@@ -267,7 +295,8 @@ export function ConfirmationModal({
                   type='button'
                   onClick={handleConfirm}
                   variant='main'
-                  size='sm'
+                  size={lowercase ? 'default' : 'sm'}
+                  className={quietButton}
                   disabled={confirmDisabled || guardUnmet}
                 >
                   {confirmLabel}
