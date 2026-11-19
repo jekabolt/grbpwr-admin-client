@@ -41,6 +41,7 @@ import {
   measurementSurfaceRestoreCameraV10,
   pickMeasurementSurfaceAcceptedClothPieceV1,
   pickMeasurementSurfaceAcceptedClothPointV1,
+  createMeasurementSurfaceAcceptedInternalLinesV1,
   updateMeasurementSurfaceAcceptedClothBacksideV1,
   updateMeasurementSurfaceAcceptedClothStrainV1,
   measurementSurfaceRotationGizmoMatrixV6,
@@ -54,6 +55,35 @@ import {
   type MeasurementSurfacePatternPieceOverlayV1,
   type MeasurementSurfaceAcceptedClothV1,
 } from './measurement-watertight-surface-v1-stage';
+
+it('draws only native line buffers belonging to the current accepted cloth frame', () => {
+  const positionsM = Float32Array.of(0, 0, 0, 1, 0, 0, 0, 1, 0);
+  const segmentsM = Float32Array.of(0.25, 0.25, 0, 0.5, 0.25, 0);
+  const nativeInternalLines = { frameNumber: 29, positionsM, segmentsM };
+  const current = {
+    positionsM,
+    frameNumber: 29,
+    isCurrent: () => true,
+    ranges: [{ triangleOffset: 0, triangleCount: 1, color: 0 }],
+    nativeInternalLines,
+  };
+  expect(
+    createMeasurementSurfaceAcceptedInternalLinesV1({ ...current, frameNumber: 30 }),
+  ).toBeNull();
+  expect(
+    createMeasurementSurfaceAcceptedInternalLinesV1({ ...current, positionsM: positionsM.slice() }),
+  ).toBeNull();
+  expect(
+    createMeasurementSurfaceAcceptedInternalLinesV1({ ...current, isCurrent: () => false }),
+  ).toBeNull();
+  const display = createMeasurementSurfaceAcceptedInternalLinesV1(current);
+  expect(display?.geometry.getAttribute('position').array).toEqual(segmentsM);
+  expect(display?.geometry.getAttribute('position').array).not.toBe(segmentsM);
+  expect(display?.material.depthTest).toBe(true);
+  expect(display?.material.depthWrite).toBe(false);
+  display?.geometry.dispose();
+  display?.material.dispose();
+});
 
 it('tracks signed group Z rotation through the angle boundary, rejects ambiguous pivots and finishes once', () => {
   const pivot = { anchor: new Group(), content: new Group() };

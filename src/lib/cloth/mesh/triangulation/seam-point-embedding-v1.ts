@@ -80,19 +80,20 @@ export function locateSeamPointEmbeddingV1(
   return result;
 }
 
-/** True when every point of the segment is on the closed material triangulation. */
-export function seamSegmentIsCoveredByMeshV1(
+type SeamSegmentCoverageBandV1 = readonly [from: number, to: number, triangleIndex: number];
+
+function captureSeamSegmentCoverageBands(
   verticesMm: readonly Vec2Mm[],
   triangles: Uint32Array,
   start: Vec2Mm,
   end: Vec2Mm,
-): boolean {
+): SeamSegmentCoverageBandV1[] | boolean {
   if (!finitePoint(start) || !finitePoint(end) || triangles.length % 3 !== 0)
     throw new RangeError('Invalid seam segment or triangle indices.');
   const axis = Math.abs(end[0] - start[0]) >= Math.abs(end[1] - start[1]) ? 0 : 1;
   const span = end[axis] - start[axis];
   if (span === 0) return locateSeamPointEmbeddingV1(verticesMm, triangles, start) !== null;
-  const bands: [number, number][] = [];
+  const bands: SeamSegmentCoverageBandV1[] = [];
   for (let i = 0; i < triangles.length; i += 3) {
     const ids = [triangles[i], triangles[i + 1], triangles[i + 2]];
     const [a, b, c] = ids.map((id) => verticesMm[id]);
@@ -130,9 +131,41 @@ export function seamSegmentIsCoveredByMeshV1(
       else upper = Math.min(upper, crossing);
       if (upper <= lower) break;
     }
-    if (upper > lower) bands.push([lower, upper]);
+    if (upper > lower) bands.push([lower, upper, i / 3]);
   }
   bands.sort((a, b) => a[0] - b[0] || b[1] - a[1]);
+  return bands;
+}
+
+/**
+ * Return the gap-free, nonoverlapping triangle partition of a nonzero segment.
+ * Ambiguous shared-edge coverage is refused for a trace, even where a Boolean coverage check passes.
+ */
+export function seamSegmentMeshPartitionV1(
+  verticesMm: readonly Vec2Mm[],
+  triangles: Uint32Array,
+  start: Vec2Mm,
+  end: Vec2Mm,
+): readonly SeamSegmentCoverageBandV1[] | null {
+  const bands = captureSeamSegmentCoverageBands(verticesMm, triangles, start, end);
+  if (typeof bands === 'boolean') return null;
+  let covered = 0;
+  for (const [lower, upper] of bands) {
+    if (lower !== covered) return null;
+    covered = upper;
+  }
+  return covered === 1 ? bands : null;
+}
+
+/** True when every point of the segment is on the closed material triangulation. */
+export function seamSegmentIsCoveredByMeshV1(
+  verticesMm: readonly Vec2Mm[],
+  triangles: Uint32Array,
+  start: Vec2Mm,
+  end: Vec2Mm,
+): boolean {
+  const bands = captureSeamSegmentCoverageBands(verticesMm, triangles, start, end);
+  if (typeof bands === 'boolean') return bands;
   let covered = 0;
   for (const [lower, upper] of bands) {
     if (lower > covered) return false;

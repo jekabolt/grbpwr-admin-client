@@ -69,6 +69,11 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
   const pausedCheckpoint = useRef<SavedWholeAssemblyResumeV1 | null>(null);
   const activeWholeCloth = useRef<MeasurementSurfaceAcceptedClothV1 | null>(null);
   const [showBackside, setShowBackside] = useState(true);
+  const [showNativeLines, setShowNativeLines] = useState(false);
+  const [nativeLineReading, setNativeLineReading] = useState<Readonly<{
+    cloth: MeasurementSurfaceAcceptedClothV1;
+    value: Awaited<ReturnType<SavedWholeAssemblyPreviewProgressV1['readNativeInternalLines']>>;
+  }> | null>(null);
   const [showStrain, setShowStrain] = useState(false);
   const [strainReading, setStrainReading] = useState<Readonly<{
     cloth: MeasurementSurfaceAcceptedClothV1;
@@ -281,6 +286,8 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
         pausedCheckpoint.current = null;
         activeWholeCloth.current = null;
         setShowBackside(true);
+        setShowNativeLines(false);
+        setNativeLineReading(null);
         setShowStrain(false);
         setStrainReading(null);
         setTape(null);
@@ -301,6 +308,8 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
       setPlacementStatus({ pending: false, error: null });
       activeWholeCloth.current = null;
       setShowBackside(true);
+      setShowNativeLines(false);
+      setNativeLineReading(null);
       setShowStrain(false);
       setStrainReading(null);
       setTape(null);
@@ -320,6 +329,7 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
 
   const wholeCloth = wholeProgress?.cloth;
   const readPrincipalStrain = wholeProgress?.readPrincipalStrain;
+  const readNativeInternalLines = wholeProgress?.readNativeInternalLines;
   const measureSurfaceTape = wholeProgress?.measureSurfaceTape;
   const canMeasureTape = !disabled && !status.pending && wholeCloth?.isCurrent() === true;
   const activeTape = canMeasureTape && tape?.cloth === wholeCloth ? tape : null;
@@ -373,19 +383,56 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
         : undefined,
     [displayedStrain, wholeCloth],
   );
+  const currentLineReading =
+    showNativeLines && nativeLineReading?.cloth === wholeCloth ? nativeLineReading : null;
+  const measuredNativeLines = currentLineReading?.value;
+  const nativeInternalLines = useMemo(
+    () =>
+      measuredNativeLines && wholeCloth
+        ? Object.freeze({
+            frameNumber: wholeCloth.frameNumber,
+            positionsM: wholeCloth.positionsM,
+            segmentsM: measuredNativeLines.segmentsM,
+          })
+        : undefined,
+    [measuredNativeLines, wholeCloth],
+  );
   useLayoutEffect(() => {
     if (!wholeCloth?.isCurrent() || activeWholeCloth.current !== wholeCloth) return;
     onAcceptedCloth(
-      !showBackside || principalStrain || pickTapePoint
+      !showBackside || principalStrain || nativeInternalLines || pickTapePoint
         ? Object.freeze({
             ...wholeCloth,
             onMeasurePoint: pickTapePoint,
             ...(!showBackside && { showBackside: false }),
             ...(principalStrain && { principalStrain }),
+            ...(nativeInternalLines && { nativeInternalLines }),
           })
         : wholeCloth,
     );
-  }, [onAcceptedCloth, pickTapePoint, principalStrain, showBackside, wholeCloth]);
+  }, [
+    nativeInternalLines,
+    onAcceptedCloth,
+    pickTapePoint,
+    principalStrain,
+    showBackside,
+    wholeCloth,
+  ]);
+
+  useEffect(() => {
+    if (!showNativeLines || !readNativeInternalLines || !wholeCloth?.isCurrent()) return;
+    const controller = new AbortController();
+    const publish = (value: NonNullable<typeof nativeLineReading>['value']) => {
+      if (
+        !controller.signal.aborted &&
+        activeWholeCloth.current === wholeCloth &&
+        wholeCloth.isCurrent()
+      )
+        setNativeLineReading({ cloth: wholeCloth, value });
+    };
+    void readNativeInternalLines(controller.signal).then(publish, () => publish(null));
+    return () => controller.abort();
+  }, [readNativeInternalLines, showNativeLines, wholeCloth]);
 
   useEffect(() => {
     if (!showStrain || !readPrincipalStrain || !wholeCloth?.isCurrent()) return;
@@ -598,6 +645,23 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
             Show backside
           </Button>
         )}
+        {!disabled &&
+          wholeCloth?.isCurrent() &&
+          (wholeProgress?.nativeInternalLineCount ?? 0) > 0 && (
+            <Button
+              type='button'
+              variant={showNativeLines ? 'main' : 'secondary'}
+              size='xs'
+              aria-pressed={showNativeLines}
+              data-whole-assembly-native-lines-toggle=''
+              onClick={() => {
+                setShowNativeLines(!showNativeLines);
+                if (showNativeLines) setNativeLineReading(null);
+              }}
+            >
+              Show internal stitch lines
+            </Button>
+          )}
         {wholeCloth?.isCurrent() && (
           <Button
             type='button'
@@ -721,6 +785,15 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
       {!status.pending && wholeProgress?.paused && (
         <Text component='p' size='micro' role='status'>
           Paused after accepted frame {wholeProgress.paused.lastAcceptedFrame}.
+        </Text>
+      )}
+      {showNativeLines && wholeCloth?.isCurrent() && (
+        <Text component='p' size='micro' role='status' data-whole-assembly-native-lines=''>
+          {measuredNativeLines
+            ? `${measuredNativeLines.count} of ${wholeProgress?.nativeInternalLineCount} native stitch lines visible`
+            : currentLineReading
+              ? 'No internal stitch line could be verified on this frame.'
+              : 'Checking internal stitch lines…'}
         </Text>
       )}
       {activeTape && (

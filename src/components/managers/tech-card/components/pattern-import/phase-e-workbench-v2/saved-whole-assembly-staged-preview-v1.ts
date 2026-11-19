@@ -12,6 +12,7 @@ import type {
   MeasurementSurfaceAcceptedClothV1,
 } from 'components/shared/measurement-watertight-surface-v1-stage';
 import type { SourceCutPrincipalStrainV1 } from 'lib/cloth/runtime/cpu/source-cut-principal-strain-v1';
+import type { SavedNativeCutInternalLineTraceV1 } from 'components/cloth-simulation-spike/trace-saved-native-cut-internal-line-v1';
 import { inspectOwnedActiveXpbdDeviceLeaseV1 } from 'lib/cloth/runtime/webgpu/xpbd-device-session';
 import type { SavedCompleteAssemblyNativeStitchAnchorsV1 } from './saved-complete-assembly-native-stitch-anchors-v1';
 import type { RestoredWholeSourceCutPlacementV1 } from 'components/cloth-simulation-spike/prepare-saved-complete-whole-source-cut-v1';
@@ -90,6 +91,11 @@ export type SavedWholeAssemblyPreviewProgressV1 = Readonly<{
     end: MeasurementSurfaceAcceptedClothPointV1,
     signal: AbortSignal,
   ) => Promise<number | null>;
+  nativeInternalLineCount: number;
+  readNativeInternalLines: (signal: AbortSignal) => Promise<Readonly<{
+    count: number;
+    segmentsM: Float32Array;
+  }> | null>;
   paused?: SavedWholeAssemblyResumeV1;
   stopped?: Readonly<{ operationNumber: number; detail: string }>;
 }>;
@@ -214,6 +220,10 @@ type PausedRun = Readonly<{
   nextCommand: number;
   surface: SurfaceProjection;
   readStrainEvaluator: () => Promise<PrincipalStrainEvaluator>;
+  readInternalLineTraces: (
+    signal: AbortSignal,
+  ) => Promise<readonly SavedNativeCutInternalLineTraceV1[]>;
+  nativeInternalLineCount: number;
   ranges: MeasurementSurfaceAcceptedClothV1['ranges'];
   last: SavedWholeAssemblyPreviewProgressV1;
 }>;
@@ -294,6 +304,36 @@ export async function runSavedWholeAssemblyStagedPreviewV1(
       );
       return (strainEvaluator ??= prepareSourceCutPrincipalStrainV1(cut, maxSurfaceTriangles));
     };
+    const internalLines = source.spans.filter((span) => span.kind === 'native-internal-l8');
+    let internalLineTraces: readonly SavedNativeCutInternalLineTraceV1[] | undefined;
+    const readInternalLineTraces = async (active: AbortSignal) => {
+      if (internalLineTraces) return internalLineTraces;
+      const [
+        { prepareSavedNativeCutInternalLineTraceV1 },
+        { snapshotGarmentStagedSourceCutDisplayChartV1 },
+      ] = await Promise.all([
+        import('components/cloth-simulation-spike/trace-saved-native-cut-internal-line-v1'),
+        import('lib/cloth/runtime/webgpu/garment-staged-source-cut-core-v1'),
+      ]);
+      active.throwIfAborted();
+      if (!isCurrent()) return [];
+      const chart = snapshotGarmentStagedSourceCutDisplayChartV1(plan.frame.material);
+      const traces = internalLines.flatMap((line) => {
+        const materialCut = chart.readCut(line.pieceLineKey);
+        const trace =
+          materialCut &&
+          prepareSavedNativeCutInternalLineTraceV1({
+            source,
+            line,
+            materialCut,
+            carrierRestPositions2Mm: chart.carrierRestPositions2Mm,
+            surface,
+            maxTriangleTests: 2_000_000,
+          });
+        return trace ? [trace] : [];
+      });
+      return (internalLineTraces = Object.freeze(traces));
+    };
     const uniqueCuts = new Map<string, Source['sourceCuts'][number] | null>();
     for (const cut of source.sourceCuts) {
       uniqueCuts.set(cut.pieceLineKey, uniqueCuts.has(cut.pieceLineKey) ? null : cut);
@@ -330,14 +370,24 @@ export async function runSavedWholeAssemblyStagedPreviewV1(
       commands,
       surface,
       readStrainEvaluator,
+      readInternalLineTraces,
+      nativeInternalLineCount: internalLines.length,
       ranges,
       observedBody: plan.observedBody,
       totalStages: plan.frame.seams.stages.length,
     };
   }
   const initial = prior ? undefined : await initialize(source);
-  const { commands, surface, readStrainEvaluator, ranges, observedBody, totalStages } =
-    prior ?? initial!;
+  const {
+    commands,
+    surface,
+    readStrainEvaluator,
+    readInternalLineTraces,
+    nativeInternalLineCount,
+    ranges,
+    observedBody,
+    totalStages,
+  } = prior ?? initial!;
 
   await verifySource(source, signal);
   requireCurrent();
@@ -429,6 +479,26 @@ export async function runSavedWholeAssemblyStagedPreviewV1(
     let strain: SourceCutPrincipalStrainV1 | undefined;
     last = Object.freeze({
       cloth: Object.freeze({ positionsM, frameNumber: frame.frame, ranges, isCurrent }),
+      nativeInternalLineCount,
+      async readNativeInternalLines(active: AbortSignal) {
+        active.throwIfAborted();
+        if (!isCurrent() || nativeInternalLineCount === 0) return null;
+        const traces = await readInternalLineTraces(active);
+        active.throwIfAborted();
+        if (!isCurrent()) return null;
+        const lines = traces.flatMap((trace) => {
+          const line = trace.project(positionsM);
+          return line ? [line] : [];
+        });
+        if (lines.length === 0) return null;
+        const segmentsM = new Float32Array(lines.reduce((count, line) => count + line.length, 0));
+        let offset = 0;
+        for (const line of lines) {
+          segmentsM.set(line, offset);
+          offset += line.length;
+        }
+        return Object.freeze({ count: lines.length, segmentsM });
+      },
       async measureSurfaceTape(
         start: MeasurementSurfaceAcceptedClothPointV1,
         end: MeasurementSurfaceAcceptedClothPointV1,
@@ -496,6 +566,8 @@ export async function runSavedWholeAssemblyStagedPreviewV1(
         nextCommand: index + 1,
         surface,
         readStrainEvaluator,
+        readInternalLineTraces,
+        nativeInternalLineCount,
         ranges,
         last,
       });

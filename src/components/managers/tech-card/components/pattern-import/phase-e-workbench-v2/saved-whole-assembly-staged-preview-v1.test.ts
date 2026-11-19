@@ -93,6 +93,7 @@ function fixture() {
     sizeId: 58,
     sizeToken: 'M',
     sourceCuts: [],
+    spans: [],
     savedCarrier: { mediaType: 'v10', sidecarSha256: 'exact-placement' },
     unavailable: [],
   } as unknown as NonNullable<Request['source']>;

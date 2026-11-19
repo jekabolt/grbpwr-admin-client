@@ -128,6 +128,8 @@ function frame(number: number, isCurrent: () => boolean) {
       isCurrent,
     },
     readPrincipalStrain: read,
+    nativeInternalLineCount: 0,
+    readNativeInternalLines: async () => null,
     measureSurfaceTape,
     action: 'activate',
     activeSeams: [],
@@ -155,6 +157,65 @@ function frame(number: number, isCurrent: () => boolean) {
 afterEach(() => {
   vi.resetAllMocks();
   vi.unstubAllGlobals();
+});
+
+it('toggles native guides on the same accepted cloth and cancels its outstanding read', async () => {
+  const page = mountTestRoot();
+  type Props = ComponentProps<typeof SavedCompleteAssemblyNativePreviewControlsV8>;
+  const body = { isCurrent: () => true } as NonNullable<Props['body']>;
+  const review = { wholeAssembly: { load: async () => ({}) } } as unknown as Props['review'];
+  const original = frame(29, body.isCurrent).progress;
+  const segmentsM = Float32Array.of(29, 0.25, 0.25, 29, 0.45, 0.25);
+  const later = Promise.withResolvers<{ count: number; segmentsM: Float32Array }>();
+  const readNativeInternalLines = vi
+    .fn<SavedWholeAssemblyPreviewProgressV1['readNativeInternalLines']>()
+    .mockResolvedValueOnce({ count: 1, segmentsM })
+    .mockReturnValueOnce(later.promise);
+  const progress = { ...original, nativeInternalLineCount: 3, readNativeInternalLines };
+  let published: MeasurementSurfaceAcceptedClothV1 | undefined;
+  mocks.run.mockImplementation(async ({ onAccepted }) => {
+    onAccepted(progress);
+    return progress;
+  });
+  mocks.start.mockImplementationOnce((host: CadWorkbenchBoundedClothPreviewHostV1) =>
+    host.runBounded({} as Parameters<typeof host.runBounded>[0], new AbortController().signal),
+  );
+  try {
+    await act(async () =>
+      page.root.render(
+        createElement(SavedCompleteAssemblyNativePreviewControlsV8, {
+          review,
+          body,
+          disabled: false,
+          onAcceptedCloth: (cloth) => {
+            published = cloth;
+          },
+        }),
+      ),
+    );
+    await act(async () => page.click('Preview full layout'));
+    expect(published).toBe(progress.cloth);
+    expect(readNativeInternalLines).not.toHaveBeenCalled();
+    await act(async () => page.click('Show internal stitch lines'));
+    expect(published?.positionsM).toBe(progress.cloth.positionsM);
+    expect(published?.nativeInternalLines).toEqual({
+      frameNumber: 29,
+      positionsM: progress.cloth.positionsM,
+      segmentsM,
+    });
+    expect(page.text()).toContain('1 of 3 native stitch lines visible');
+    await act(async () => page.click('Show internal stitch lines'));
+    expect(published).toBe(progress.cloth);
+    await act(async () => page.click('Show internal stitch lines'));
+    expect(page.text()).toContain('Checking internal stitch lines…');
+    await act(async () => page.click('Show internal stitch lines'));
+    expect(readNativeInternalLines.mock.calls[1][0].aborted).toBe(true);
+    await act(async () => later.resolve({ count: 1, segmentsM }));
+    expect(published?.nativeInternalLines).toBeUndefined();
+    expect(mocks.start).toHaveBeenCalledTimes(1);
+  } finally {
+    await act(async () => page.root.unmount());
+  }
 });
 
 it('toggles the current ordinary whole frame, ignores late readings and keeps the focused control', async () => {

@@ -467,3 +467,16 @@ export function snapshotGarmentStagedSourceCutCoreV1(plan: Handle) {
   if (!core) throw new TypeError('A prepared staged source-cut plan is required.');
   return structuredClone(core);
 }
+
+/** Detached native chart for overlays on this material's accepted cut surface. */
+export function snapshotGarmentStagedSourceCutDisplayChartV1(plan: Handle) {
+  const chart = carriers.get(plan);
+  if (!chart) throw new TypeError('A prepared staged source-cut plan is required.');
+  return Object.freeze({
+    carrierRestPositions2Mm: chart.mesh.restPositions2Mm.slice(),
+    readCut(pieceId: string) {
+      const cut = chart.cuts.get(pieceId);
+      return cut ? structuredClone(cut) : null;
+    },
+  });
+}

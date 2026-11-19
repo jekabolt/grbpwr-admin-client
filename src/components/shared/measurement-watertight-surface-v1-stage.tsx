@@ -184,6 +184,11 @@ export type MeasurementSurfaceAcceptedClothV1 = Readonly<{
   showBackside?: boolean;
   onSelectPiece?: (piece: MeasurementSurfaceAcceptedClothPieceV1) => void;
   onMeasurePoint?: (hit: MeasurementSurfaceAcceptedClothPointV1) => void;
+  nativeInternalLines?: Readonly<{
+    frameNumber: number;
+    positionsM: Float32Array;
+    segmentsM: Float32Array;
+  }>;
   principalStrain?: Readonly<{
     frameNumber: number;
     positionsM: Float32Array;
@@ -204,6 +209,32 @@ function sameAcceptedClothFrame(
 }
 
 type AcceptedClothMesh = THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial[]>;
+
+export function createMeasurementSurfaceAcceptedInternalLinesV1(
+  cloth: MeasurementSurfaceAcceptedClothV1,
+) {
+  const overlay = cloth.nativeInternalLines;
+  if (
+    !overlay ||
+    overlay.frameNumber !== cloth.frameNumber ||
+    overlay.positionsM !== cloth.positionsM ||
+    overlay.segmentsM.length === 0 ||
+    overlay.segmentsM.length % 6 !== 0 ||
+    !overlay.segmentsM.every(Number.isFinite) ||
+    !cloth.isCurrent()
+  )
+    return null;
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(overlay.segmentsM.slice(), 3));
+  const material = new THREE.LineBasicMaterial({
+    color: 0xee8657,
+    depthWrite: false,
+    toneMapped: false,
+  });
+  const lines = new THREE.LineSegments(geometry, material);
+  lines.renderOrder = 1;
+  return lines;
+}
 
 /** The rendered material side also controls ordinary raycasting against the same mesh. */
 export function updateMeasurementSurfaceAcceptedClothBacksideV1(
@@ -2117,6 +2148,9 @@ export function MeasurementWatertightSurfaceV1Stage({
     let cameraFitRadius = 0;
     let patternPieceLayer: THREE.Group | null = null;
     let acceptedClothMesh: AcceptedClothMesh | null = null;
+    let acceptedClothInternalLines: ReturnType<
+      typeof createMeasurementSurfaceAcceptedInternalLinesV1
+    > = null;
     let mountedCloth: MeasurementSurfaceAcceptedClothV1 | undefined;
     let acceptedClothPointer: {
       id: number;
@@ -2133,6 +2167,16 @@ export function MeasurementWatertightSurfaceV1Stage({
       }
       return pointer;
     };
+    const removeAcceptedClothInternalLines = () => {
+      const lines = acceptedClothInternalLines;
+      acceptedClothInternalLines = null;
+      delete canvas.dataset.acceptedClothInternalLinesFrame;
+      if (lines) {
+        lines.removeFromParent();
+        lines.geometry.dispose();
+        lines.material.dispose();
+      }
+    };
     const removeAcceptedCloth = () => {
       const previous = acceptedClothMesh;
       acceptedClothMesh = null;
@@ -2141,6 +2185,7 @@ export function MeasurementWatertightSurfaceV1Stage({
       delete canvas.dataset.acceptedClothFrame;
       delete canvas.dataset.acceptedClothOverlay;
       delete canvas.dataset.acceptedClothOverlayFrame;
+      removeAcceptedClothInternalLines();
       if (!previous) return;
       previous.removeFromParent();
       previous.geometry.dispose();
@@ -3657,6 +3702,14 @@ export function MeasurementWatertightSurfaceV1Stage({
           delete canvas.dataset.acceptedClothOverlayFrame;
         }
       };
+      const syncAcceptedClothInternalLines = (frame: MeasurementSurfaceAcceptedClothV1) => {
+        removeAcceptedClothInternalLines();
+        const lines = createMeasurementSurfaceAcceptedInternalLinesV1(frame);
+        if (!lines) return;
+        acceptedClothInternalLines = lines;
+        scene?.add(lines);
+        canvas.dataset.acceptedClothInternalLinesFrame = String(frame.frameNumber);
+      };
 
       const syncAcceptedCloth = () => {
         if (disposed || !scene) return;
@@ -3671,10 +3724,13 @@ export function MeasurementWatertightSurfaceV1Stage({
         ) {
           const strainChanged = mountedCloth.principalStrain !== next.principalStrain;
           const backsideChanged = mountedCloth.showBackside !== next.showBackside;
+          const internalLinesChanged =
+            mountedCloth.nativeInternalLines !== next.nativeInternalLines;
           if (strainChanged) syncAcceptedClothStrain(acceptedClothMesh, next);
           if (backsideChanged)
             updateMeasurementSurfaceAcceptedClothBacksideV1(acceptedClothMesh, next.showBackside);
-          if (strainChanged || backsideChanged) scheduleRender();
+          if (internalLinesChanged) syncAcceptedClothInternalLines(next);
+          if (strainChanged || backsideChanged || internalLinesChanged) scheduleRender();
           mountedCloth = next;
           return;
         }
@@ -3716,6 +3772,7 @@ export function MeasurementWatertightSurfaceV1Stage({
         updateMeasurementSurfaceAcceptedClothBacksideV1(acceptedClothMesh, next.showBackside);
         syncAcceptedClothStrain(acceptedClothMesh, next);
         scene.add(acceptedClothMesh);
+        syncAcceptedClothInternalLines(next);
         canvas.dataset.acceptedClothFrame = String(next.frameNumber);
         mountedCloth = next;
         scheduleRender();
