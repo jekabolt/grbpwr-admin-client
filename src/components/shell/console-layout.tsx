@@ -17,7 +17,7 @@ function ConsoleLayout() {
   const queryClient = useQueryClient();
   const { total, loading, error } = useConsoleData();
   const signOut = () => {
-    authService.SignOut({}).catch(() => undefined);
+    authService.SignOut({ device: undefined }).catch(() => undefined);
     clearAuthToken();
     queryClient.clear();
     navigate('/', { replace: true });

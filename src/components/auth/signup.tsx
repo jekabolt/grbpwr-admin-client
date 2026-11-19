@@ -94,6 +94,7 @@ export function SignUp() {
         termsAccepted: true,
         logo: withLogo ? logo?.base64 : undefined,
         brand: undefined,
+        name: undefined,
       });
       rememberEmail(draft.email.trim());
       setStep('code');

@@ -99,7 +99,7 @@ export function WorkspacePeople({
     act.remove.mutate(m.username ?? '', {
       onSuccess: () => {
         // no team left behind this token: sign out to the root host
-        authService.SignOut({}).catch(() => undefined);
+        authService.SignOut({ device: undefined }).catch(() => undefined);
         clearAuthToken();
         qc.clear();
         goToUrl(rootUrl('/'));

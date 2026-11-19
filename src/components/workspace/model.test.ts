@@ -27,6 +27,9 @@ const m = (username: string, role: string, you = false): TeamMember => ({
   lastSeenAt: undefined,
   you,
   permissions: [],
+  name: undefined,
+  publicUsername: undefined,
+  avatarUrl: undefined,
 });
 const inv = (ref: string, extra: Partial<TeamInvite> = {}): TeamInvite => ({
   inviteRef: ref,
@@ -35,6 +38,7 @@ const inv = (ref: string, extra: Partial<TeamInvite> = {}): TeamInvite => ({
   sentAt: undefined,
   expiresAt: undefined,
   status: 'pending',
+  name: undefined,
   ...extra,
 });
 

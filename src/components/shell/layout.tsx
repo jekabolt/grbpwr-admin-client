@@ -33,7 +33,7 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
 
   const handleLogout = () => {
     // A backend before teams has no SignOut: only a workspace says the call exists.
-    if (workspace) authService.SignOut({}).catch(() => undefined);
+    if (workspace) authService.SignOut({ device: undefined }).catch(() => undefined);
     clearAuthToken();
     queryClient.removeQueries({ queryKey: accountsKeys.all });
     navigate(ROUTES.login, { replace: true });
