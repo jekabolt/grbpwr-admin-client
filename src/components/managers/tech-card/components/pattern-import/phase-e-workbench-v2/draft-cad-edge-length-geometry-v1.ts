@@ -20,7 +20,7 @@ import type { PatternImportDxfPhaseEDraftCadCommandV1 } from './draft-cad-sessio
 type Command = Extract<PatternImportDxfPhaseEDraftCadCommandV1, { tool: 'edge-length' }>;
 type VertexEdit = Extract<
   PatternImportDxfPhaseEDraftCadCommandV1,
-  { tool: 'move-point' | 'delete-point' }
+  { tool: 'move-point' | 'delete-point' | 'sharpen-corner' }
 >;
 type SelectedSizePhaseD = Extract<DxfProductPhaseDSizeSelectionResultV1, { ok: true }>['phaseD'];
 type Result =
@@ -44,6 +44,43 @@ function strictlyConvex(points: readonly PtMm[]) {
       return winding * ((b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x)) > EPS;
     })
   );
+}
+
+type ProjectedContour =
+  PatternImportDxfProductPhaseEAssemblyProjectionV1['pieces'][number]['contours'][number];
+
+/** Intersect the two native supporting lines of an exactly selected convex bevel. */
+export function selectDraftSharpCornerV1(
+  contour: ProjectedContour | undefined,
+  edge: readonly [string, string],
+): Readonly<{ before: PtMm; corner: PtMm; after: PtMm }> | null {
+  if (!contour?.closed || contour.role !== 'cut-boundary' || contour.vertices.length < 4)
+    return null;
+  const vertices = contour.vertices;
+  const n = vertices.length;
+  const i = vertices.findIndex(({ vertexId }) => vertexId === edge[0]);
+  if (i < 0 || vertices[(i + 1) % n]?.vertexId !== edge[1]) return null;
+  const before = vertices[(i + n - 1) % n]!.pointMm;
+  const from = vertices[i]!.pointMm;
+  const to = vertices[(i + 1) % n]!.pointMm;
+  const after = vertices[(i + 2) % n]!.pointMm;
+  if (
+    ![before, from, to, after].every(({ x, y }) =>
+      [x, y].every((value) => Number.isFinite(value) && Number(value.toFixed(6)) === value),
+    )
+  )
+    return null;
+  const horizontalFirst = before.y === from.y && to.x === after.x;
+  const verticalFirst = before.x === from.x && to.y === after.y;
+  if (horizontalFirst === verticalFirst) return null;
+  const corner = horizontalFirst ? { x: to.x, y: from.y } : { x: from.x, y: to.y };
+  const dot = (a: PtMm, b: PtMm, c: PtMm) => (c.x - b.x) * (b.x - a.x) + (c.y - b.y) * (b.y - a.y);
+  if (dot(before, from, corner) <= 0 || dot(after, to, corner) <= 0) return null;
+  const turn = (a: PtMm, b: PtMm, c: PtMm) => (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+  const winding = Math.sign(signedArea(vertices.map(({ pointMm }) => pointMm)));
+  return winding * turn(before, from, to) > EPS && winding * turn(from, to, after) > EPS
+    ? { before, corner, after }
+    : null;
 }
 
 export function resizeDraftStraightEdgeV1(
@@ -92,8 +129,8 @@ function editExactOutlineVertex(
   pairedAllowance?: SavedDraftPairedAllowanceProofV1 | null,
 ): Result {
   const { sizeToken } = command.payload;
-  const contourId =
-    command.tool === 'edge-length' ? command.payload.edge.contourId : command.payload.contourId;
+  const hasEdge = command.tool === 'edge-length' || command.tool === 'sharpen-corner';
+  const contourId = hasEdge ? command.payload.edge.contourId : command.payload.contourId;
   if (source.sizeToken !== sizeToken || projection.sizeToken !== sizeToken)
     return { ok: false, detail: 'The outline edit belongs to a different selected size.' };
   const pieces = projection.pieces.filter(
@@ -125,16 +162,12 @@ function editExactOutlineVertex(
     !contour.vertices.every(({ vertexId }) => sampleIds.has(vertexId))
   )
     return { ok: false, detail: 'Choose a native outline with straight segments.' };
-  const fromId =
-    command.tool === 'edge-length'
-      ? command.payload.edge.boundaryVertexIds[0]
-      : command.payload.vertexId;
+  const fromId = hasEdge ? command.payload.edge.boundaryVertexIds[0] : command.payload.vertexId;
   const start = contour.vertices.findIndex(({ vertexId }) => vertexId === fromId);
   const next = (start + 1) % contour.vertices.length;
   if (
     start < 0 ||
-    (command.tool === 'edge-length' &&
-      contour.vertices[next]?.vertexId !== command.payload.edge.boundaryVertexIds[1])
+    (hasEdge && contour.vertices[next]?.vertexId !== command.payload.edge.boundaryVertexIds[1])
   )
     return { ok: false, detail: 'The selected original vertices no longer match the outline.' };
 
@@ -149,6 +182,8 @@ function editExactOutlineVertex(
   const cut = ring(source.cut);
   const separate =
     seam && (seam.length !== cut.length || seam.some((point, i) => !samePoint(point, cut[i]!)));
+  if (command.tool === 'sharpen-corner' && !seam)
+    return { ok: false, detail: 'Sharpening needs matching saved cut and sewing outlines.' };
   let allowanceWidthMm: number | null = null;
   if (separate) {
     const supportedCut =
@@ -222,6 +257,7 @@ function editExactOutlineVertex(
   const index = matching[0]!;
   let moving = index;
   let movedPoint: PtMm | null = null;
+  let sharpCorner: PtMm | null = null;
   if (command.tool === 'edge-length') {
     const { fixed, lengthMm } = command.payload;
     const resized = resizeDraftStraightEdgeV1(from, to, fixed, lengthMm);
@@ -237,6 +273,17 @@ function editExactOutlineVertex(
       samePoint(movedPoint, from)
     )
       return { ok: false, detail: 'Enter a different finite X and Y for the selected point.' };
+  }
+  if (command.tool === 'sharpen-corner') {
+    const candidate = selectDraftSharpCornerV1(contour, command.payload.edge.boundaryVertexIds);
+    if (!candidate)
+      return { ok: false, detail: 'Choose the bevel between two perpendicular straight sides.' };
+    const afterBevel = vertices[(index + 2) % vertices.length]!;
+    if (!samePoint(afterBevel, candidate.after))
+      return { ok: false, detail: 'The far side of the selected bevel no longer matches.' };
+    if (source.notches.some(({ at }) => footOnSegment(at, to, afterBevel).d <= EPS))
+      return { ok: false, detail: 'Rebind the notch on this bevel corner before sharpening.' };
+    sharpCorner = candidate.corner;
   }
   if (!movedPoint && vertices.length <= 3)
     return { ok: false, detail: 'Keep at least three vertices in a closed outline.' };
@@ -255,15 +302,19 @@ function editExactOutlineVertex(
       detail: 'A fold or attached notch must be rebound before changing this vertex.',
     };
 
-  const nextRing = movedPoint
-    ? vertices.map((point, i) => (i === moving ? movedPoint : point))
-    : vertices.filter((_, i) => i !== moving);
+  const bevelEnd = (index + 1) % vertices.length;
+  const nextRing = sharpCorner
+    ? vertices.flatMap((point, i) => (i === bevelEnd ? [] : [i === index ? sharpCorner : point]))
+    : movedPoint
+      ? vertices.map((point, i) => (i === moving ? movedPoint : point))
+      : vertices.filter((_, i) => i !== moving);
   const area = signedArea(nextRing);
   if (
     !Number.isFinite(area) ||
     Math.abs(area) <= EPS ||
     Math.sign(area) !== Math.sign(signedArea(vertices)) ||
     ringSelfIntersects(nextRing) ||
+    (sharpCorner && Math.abs(area) <= Math.abs(signedArea(vertices))) ||
     (movedPoint &&
       (vertices.some((point, i) => i !== moving && samePoint(point, movedPoint)) ||
         footOnSegment(movedPoint, before, after).d <= EPS))

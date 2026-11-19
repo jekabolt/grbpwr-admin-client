@@ -377,7 +377,8 @@ function createSavedDraftSourceReaderV1(deps: SavedDraftSourceReaderDepsV1) {
         (command?.tool === 'dart' && command.payload.savedTip) ||
         (command?.tool === 'fish-eye' && command.payload.savedMove) ||
         (command?.tool === 'french-curve' && command.payload.savedCurve) ||
-        command?.tool === 'cut'
+        command?.tool === 'cut' ||
+        command?.tool === 'sharpen-corner'
       )
     )
       throw new Error('Select the original saved geometry.');

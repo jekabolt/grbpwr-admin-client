@@ -46,6 +46,7 @@ export type PatternImportDxfPhaseECadWorkbenchIconV1 =
   | 'add-point'
   | 'move-point'
   | 'delete-point'
+  | 'sharpen-corner'
   | 'internal-line'
   | 'french-curve'
   | 'draft-point'
@@ -82,6 +83,7 @@ const ICONS: Readonly<Record<PatternImportDxfPhaseECadWorkbenchIconV1, ElementTy
     'add-point': PlusIcon,
     'move-point': Crosshair2Icon,
     'delete-point': MinusIcon,
+    'sharpen-corner': RulerSquareIcon,
     'internal-line': RulerHorizontalIcon,
     'french-curve': MagicWandIcon,
     'draft-point': Crosshair2Icon,

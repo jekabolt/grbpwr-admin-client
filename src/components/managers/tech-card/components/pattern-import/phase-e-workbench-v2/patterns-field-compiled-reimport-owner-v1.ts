@@ -63,7 +63,8 @@ export function registerPatternImportDxfPhaseEPatternsFieldCompiledReimportOwner
           output === 'moved-dart-tip' ||
           output === 'moved-fish-eye' ||
           output === 'moved-french-curve' ||
-          output === 'parallel-spread',
+          output === 'parallel-spread' ||
+          output === 'sharpened-corner',
       );
       const manualApply =
         savedGeometry ||

@@ -14,6 +14,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_TOOLS_V1 = Object.freeze([
   'add-point',
   'move-point',
   'delete-point',
+  'sharpen-corner',
   'edge-length',
   'internal-line',
   'french-curve',
@@ -55,6 +56,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_PRODUCTIVE_TOOLS_V1 = Object.f
   'add-point',
   'move-point',
   'delete-point',
+  'sharpen-corner',
   'edge-length',
   'dart',
   'fish-eye',
@@ -208,6 +210,10 @@ export type PatternImportDxfPhaseEDraftCadCommandV1 =
   | Command<
       'delete-point',
       { entityId: string; contourId: string; vertexId: string; sizeToken: string }
+    >
+  | Command<
+      'sharpen-corner',
+      { entityId: string; edge: PatternImportDxfPhaseEDraftCadBoundaryAnchorV1; sizeToken: string }
     >
   | Command<
       'edge-length',
@@ -559,6 +565,8 @@ function validCommand(value: unknown): value is PatternImportDxfPhaseEDraftCadCo
         (value.tool === 'delete-point' || point(payload.pointMm)) &&
         stableId(payload.sizeToken)
       );
+    case 'sharpen-corner':
+      return boundaryAnchor(payload.edge) && stableId(payload.sizeToken);
     case 'edge-length':
       return (
         boundaryAnchor(payload.edge) &&

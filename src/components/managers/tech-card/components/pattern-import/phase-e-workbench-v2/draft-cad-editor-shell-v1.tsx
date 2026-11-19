@@ -39,6 +39,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_TOOL_GROUPS_V1 = Object.freeze
       'add-point',
       'move-point',
       'delete-point',
+      'sharpen-corner',
       'edge-length',
     ] as const),
   }),
@@ -62,6 +63,7 @@ const TOOL_LABELS = Object.freeze({
   'add-point': 'Add point',
   'move-point': 'Move point',
   'delete-point': 'Delete point',
+  'sharpen-corner': 'Sharpen corner',
   'edge-length': 'Edge length',
   'internal-line': 'Internal line',
   'french-curve': 'French curve',
@@ -152,6 +154,7 @@ export type PatternImportDxfPhaseEDraftCadEditorShellPropsV1 = Readonly<{
   onTopologyToolChange?: (tool: PatternImportDxfPhaseEDraftCadTopologyToolV1 | null) => void;
   onUndo: () => void;
   onRedo: () => void;
+  canSharpenCorner?: boolean;
   canCompile?: boolean;
   compileState?: PatternImportDxfPhaseEDraftCadCompileUiStateV1 | null;
   compiledReimportAction?: Readonly<{
@@ -186,6 +189,7 @@ export function PatternImportDxfPhaseEDraftCadEditorShellV1({
   onTopologyToolChange,
   onUndo,
   onRedo,
+  canSharpenCorner = false,
   canCompile = false,
   compileState = null,
   compiledReimportAction,
@@ -572,26 +576,28 @@ export function PatternImportDxfPhaseEDraftCadEditorShellV1({
                 <Text component='p' size='micro' className='col-span-4 px-1 font-bold'>
                   {openProductiveToolGroup.label}
                 </Text>
-                {openProductiveToolGroup.tools.map((tool) => (
-                  <PatternImportDxfPhaseECadWorkbenchToolButtonV1
-                    key={tool}
-                    icon={tool === 'edge-length' ? 'measure-edge' : tool}
-                    label={TOOL_LABELS[tool]}
-                    active={
-                      !panActive && !arrangeActive && !activeTopologyTool && activeTool === tool
-                    }
-                    pressed={
-                      !panActive && !arrangeActive && !activeTopologyTool && activeTool === tool
-                    }
-                    dataAttributes={{ 'data-draft-cad-tool': tool }}
-                    onClick={() => {
-                      onArrangeChange?.(false);
-                      onPanChange?.(false);
-                      onToolChange(tool);
-                      setOpenToolGroupId(null);
-                    }}
-                  />
-                ))}
+                {openProductiveToolGroup.tools
+                  .filter((tool) => tool !== 'sharpen-corner' || canSharpenCorner)
+                  .map((tool) => (
+                    <PatternImportDxfPhaseECadWorkbenchToolButtonV1
+                      key={tool}
+                      icon={tool === 'edge-length' ? 'measure-edge' : tool}
+                      label={TOOL_LABELS[tool]}
+                      active={
+                        !panActive && !arrangeActive && !activeTopologyTool && activeTool === tool
+                      }
+                      pressed={
+                        !panActive && !arrangeActive && !activeTopologyTool && activeTool === tool
+                      }
+                      dataAttributes={{ 'data-draft-cad-tool': tool }}
+                      onClick={() => {
+                        onArrangeChange?.(false);
+                        onPanChange?.(false);
+                        onToolChange(tool);
+                        setOpenToolGroupId(null);
+                      }}
+                    />
+                  ))}
               </div>
             ) : null}
             {openToolGroupId === 'measure' && onTopologyToolChange ? (

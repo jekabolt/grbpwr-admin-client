@@ -5,7 +5,11 @@ type Verify = (draft: CardDraft, scope: Scope, isCurrent: () => boolean) => Prom
 const files = new WeakMap<File, Verify | null>();
 const scopes = new WeakMap<Scope, { file: File; text: string }>();
 
-type SavedGeometryReviewLabel = 'saved dart' | 'parallel opening' | 'saved French curve';
+type SavedGeometryReviewLabel =
+  | 'saved dart'
+  | 'parallel opening'
+  | 'saved French curve'
+  | 'saved corner';
 const labels = new WeakMap<File, SavedGeometryReviewLabel>();
 export const savedReviewLabelV1 = (file: File) => labels.get(file) ?? 'saved geometry';
 export function registerSavedDartTipFileV1(

@@ -1,3 +1,4 @@
+import { sameDraftAllowanceRingV1 } from './draft-cad-paired-allowance-authority-v1';
 import { transformSizeSpec } from 'lib/pattern-import/semantics/pairs';
 import type { PtMm } from 'lib/pattern-import/types';
 import { consumeDxfProductSavedNativeCompilerSourceV1 } from 'lib/pattern-import/dxf-product-saved-native-reprocess-owner-v1';
@@ -39,7 +40,7 @@ function requireSavedEdit(ok: unknown, detail: string): asserts ok {
 }
 const one = <T>(items: readonly T[]) => (items.length === 1 ? items[0] : undefined);
 type Review = {
-  kind: 'parallel opening' | 'saved dart' | 'saved French curve';
+  kind: 'parallel opening' | 'saved dart' | 'saved French curve' | 'saved corner';
   current: () => boolean;
   verifyCurrentRow: () => Promise<void>;
   manifest: ConversionManifest;
@@ -147,9 +148,10 @@ export async function compileSavedDraftGeometryReviewV1(
   const savedMove = command?.tool === 'fish-eye' ? command.payload.savedMove : undefined;
   const savedDart = savedTip ?? savedMove;
   const savedCurve = command?.tool === 'french-curve' ? command.payload.savedCurve : undefined;
+  const sharpen = command?.tool === 'sharpen-corner';
   requireSavedEdit(
-    command && (parallel || (commands.length === 1 && (savedDart || savedCurve))),
-    'Record a saved curve, dart or parallel opening edit.',
+    command && (parallel || (commands.length === 1 && (savedDart || savedCurve || sharpen))),
+    'Record a saved corner, curve, dart or parallel opening edit.',
   );
   const { pieceId, pieceLineKey } = command.target;
   let affectedBlockNames = [pieceId + '_' + sizeToken];
@@ -182,9 +184,11 @@ export async function compileSavedDraftGeometryReviewV1(
   };
   requireSavedEdit(
     current() && session.source.phaseD.sourceSha256 === row.sha256,
-    savedCurve
-      ? 'The saved French curve row, size or piece changed.'
-      : 'The saved dart or opening row, size or piece changed.',
+    sharpen
+      ? 'The saved bevel row, size or piece changed.'
+      : savedCurve
+        ? 'The saved French curve row, size or piece changed.'
+        : 'The saved dart or opening row, size or piece changed.',
   );
   const source = consumeDxfProductSavedNativeCompilerSourceV1(sourceOwner, sourceRequest);
   requireSavedEdit(
@@ -214,6 +218,104 @@ export async function compileSavedDraftGeometryReviewV1(
       .map((b) => b.block);
     requireSavedEdit(affectedBlockNames.length && current(), 'A graded piece alias changed.');
     await checkSavedParallelSpreadSourceV1(source.value, pieceId);
+  } else if (sharpen) {
+    const scope = one(draft.scopes.filter((s) => s.target.scopeKey === row.scopeKey));
+    const block = one(
+      scope?.manifest.blocks.filter((b) => b.identity === pieceId && b.sizeToken === sizeToken) ??
+        [],
+    );
+    const selectedCut = one(
+      selection.selection.phaseD.contours.filter(
+        (c) =>
+          c.contourId === command.payload.edge.contourId &&
+          c.pieceId === pieceId &&
+          c.sizeToken === sizeToken &&
+          c.role === 'cut-boundary',
+      ),
+    );
+    const cutId = one(selectedCut?.lineage.sourcePathIds ?? []);
+    const { read } = nativeRead;
+    const page = read.doc.pages[0];
+    const group =
+      block && one(read.meta.groups.filter((g) => g.kind === 'insert' && g.block === block.block));
+    requireSavedEdit(
+      command.payload.sizeToken === sizeToken &&
+        selectedCut?.closed &&
+        !selectedCut.lineage.mutations.length &&
+        selectedCut.lineage.uniformPositiveScale === 1 &&
+        block &&
+        group &&
+        page &&
+        cutId !== undefined &&
+        read.meta.units.mmPerUnit === 1,
+      'Sharpening requires the exact original saved cut and sewing block.',
+    );
+    const { a, b, c, d } = group.transform;
+    const pathById = new Map(page.paths.map((p) => [p.id, p]));
+    const closedLayer = (layer: string) =>
+      group.paths
+        .map((id) => pathById.get(id))
+        .filter(
+          (p) =>
+            p?.closed &&
+            page.styles[p.style]?.layer === layer &&
+            p.src.block === block.block &&
+            ['POLYLINE', 'LWPOLYLINE'].includes(read.meta.pathEntity[p.id]),
+        );
+    const cut = one(closedLayer('1').filter((p) => p?.id === cutId));
+    const seam = one(closedLayer('14'));
+    requireSavedEdit(
+      a === 1 &&
+        b === 0 &&
+        c === 0 &&
+        d === 1 &&
+        cut &&
+        seam &&
+        cut.id !== seam.id &&
+        sameDraftAllowanceRingV1(cut.pts, selectedCut.pointsMm) &&
+        sameDraftAllowanceRingV1(cut.pts, seam.pts),
+      'Sharpening requires coincident original L1 and L14 polylines.',
+    );
+    const edges = await projectDxfSourceNativeStraightEdgeSelectedPathsV1(nativeRead.owner, {
+      schemaVersion: DXF_SOURCE_NATIVE_STRAIGHT_EDGE_SELECTED_PATHS_REQUEST_V1,
+      sourceSha256: row.sha256,
+      sourceFileId: source.value.sourceFileId,
+      sourcePathIds: [cut.id, seam.id].sort((a, b) => a - b),
+    });
+    requireSavedEdit(
+      edges.ok &&
+        edges.projection.complete &&
+        [cut, seam].every((path) => {
+          const nativeEdges = edges.projection.descriptors.filter(
+            (edge) => edge.path.sourcePathId === path.id,
+          );
+          return (
+            nativeEdges.length === path.pts.length &&
+            path.pts.every((start, index) => {
+              const next = (index + 1) % path.pts.length;
+              const native = one(
+                nativeEdges.filter(
+                  (edge) =>
+                    edge.path.closed &&
+                    edge.path.startPointIndex === index &&
+                    edge.path.endPointIndex === next,
+                ),
+              );
+              return (
+                native &&
+                sameDartVertices(
+                  [
+                    { x: native.startMm[0], y: native.startMm[1] },
+                    { x: native.endMm[0], y: native.endMm[1] },
+                  ],
+                  [start, path.pts[next]!],
+                )
+              );
+            })
+          );
+        }),
+      'Sharpening needs both original closed outlines made entirely of straight native edges.',
+    );
   } else if (savedCurve && command.tool === 'french-curve') {
     const candidate = selectSavedFrenchCurveV1(compileInput, command.target);
     const sourcePathId = savedCurve.sourcePathId;
@@ -442,7 +544,13 @@ export async function compileSavedDraftGeometryReviewV1(
     if (result.ok)
       artifacts.set(result.artifact, {
         current,
-        kind: parallel ? 'parallel opening' : savedCurve ? 'saved French curve' : 'saved dart',
+        kind: parallel
+          ? 'parallel opening'
+          : sharpen
+            ? 'saved corner'
+            : savedCurve
+              ? 'saved French curve'
+              : 'saved dart',
         verifyCurrentRow,
         manifest: result.artifact.manifest,
         geometry: (parallel ? openingGeometry : geometry)(result.artifact.compiledJob),

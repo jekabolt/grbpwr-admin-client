@@ -76,6 +76,7 @@ export type PatternImportDxfPhaseEDraftCadGeometryCompileBlockerCodeV1 =
   | 'paired-allowance-authority-required'
   | 'move-point-geometry-blocked'
   | 'delete-point-geometry-blocked'
+  | 'sharpen-corner-geometry-blocked'
   | 'add-point-geometry-blocked'
   | 'rectangle-geometry-blocked'
   | 'pen-geometry-blocked'
@@ -112,6 +113,7 @@ export type PatternImportDxfPhaseEDraftCadCompiledFeatureV1 = Readonly<{
     | 'moved-french-curve'
     | 'moved-vertex'
     | 'deleted-vertex'
+    | 'sharpened-corner'
     | 'edge-length'
     | 'piece-create'
     | 'split'
@@ -283,7 +285,8 @@ function supported(command: PatternImportDxfPhaseEDraftCadCommandV1): boolean {
   if (
     command.tool === 'edge-length' ||
     command.tool === 'move-point' ||
-    command.tool === 'delete-point'
+    command.tool === 'delete-point' ||
+    command.tool === 'sharpen-corner'
   )
     return true;
   if (command.tool === 'cut') return command.payload.keepSide === 'both';
@@ -680,6 +683,7 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
   let job = structuredClone(replay.job);
   const createdTopologyIds = new Set(sourceIds);
   const compiledFeatures: PatternImportDxfPhaseEDraftCadCompiledFeatureV1[] = [];
+  let sharpenedRing: readonly PtMm[] | null = null;
   let pairedWrite: { commandId: string; cut: readonly PtMm[]; seam: readonly PtMm[] } | null = null;
   const createdPieceLineKeys = new Map<string, string>();
   for (const command of compileCommands) {
@@ -937,8 +941,18 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
     if (
       command.tool === 'edge-length' ||
       command.tool === 'move-point' ||
-      command.tool === 'delete-point'
+      command.tool === 'delete-point' ||
+      command.tool === 'sharpen-corner'
     ) {
+      if (
+        command.tool === 'sharpen-corner' &&
+        (!hasSavedDraftGeometrySourceV1(input) || commands.length !== 1)
+      )
+        return blocked(
+          'sharpen-corner-geometry-blocked',
+          'Review one corner from the exact current saved cut and sewing outlines.',
+          command,
+        );
       const edited =
         command.tool === 'edge-length'
           ? resizeDraftCadSelectedSizeEdgeV1(
@@ -970,6 +984,7 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
           seam: edited.size.seam,
         };
       }
+      if (command.tool === 'sharpen-corner') sharpenedRing = edited.size.cut;
       Object.assign(size, edited.size);
       compiledFeatures.push({
         commandId: command.commandId,
@@ -982,7 +997,9 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
             ? 'edge-length'
             : command.tool === 'move-point'
               ? 'moved-vertex'
-              : 'deleted-vertex',
+              : command.tool === 'sharpen-corner'
+                ? 'sharpened-corner'
+                : 'deleted-vertex',
       });
       continue;
     }
@@ -1289,7 +1306,8 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
     if (
       command.tool !== 'edge-length' &&
       command.tool !== 'move-point' &&
-      command.tool !== 'delete-point'
+      command.tool !== 'delete-point' &&
+      command.tool !== 'sharpen-corner'
     )
       continue;
     if (command.tool === 'edge-length' && pairedWrite?.commandId !== command.commandId) continue;
@@ -1320,6 +1338,21 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
         return blocked(
           'edge-length-geometry-blocked',
           'The DXF writer would change the verified cut or sewing outline.',
+          command,
+        );
+      continue;
+    }
+    if (command.tool === 'sharpen-corner') {
+      const expected = sharpenedRing?.map((point) => applyAffine(block.transform, point));
+      if (
+        !expected ||
+        !block.seam ||
+        !sameDraftAllowanceRingV1(block.cut, expected) ||
+        !sameDraftAllowanceRingV1(block.seam, expected)
+      )
+        return blocked(
+          'sharpen-corner-geometry-blocked',
+          'The DXF writer would change the sharp corner or another outline point.',
           command,
         );
       continue;

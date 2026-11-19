@@ -58,6 +58,7 @@ async function fixture(
   sourceDialect: 'r12' | 'r2000' = 'r12',
   spreadHoles = false,
   frenchCurve: 'exact' | 'legacy' | 'ambiguous' | undefined = undefined,
+  beveledOutline = false,
 ) {
   const seed = await createSavedThreePanelFixtureV1(2);
   if (stable) {
@@ -109,6 +110,22 @@ async function fixture(
         };
       });
     }
+  }
+  if (beveledOutline) {
+    const size = seed.job.pieces[0]!.sizes.find(({ sizeToken }) => sizeToken === 'M')!;
+    const bevel = (points: typeof size.cut) => {
+      const [a, b, ...remaining] = points;
+      const prior = remaining.at(-1)!;
+      const inward = (toward: typeof a) => ({
+        x: a.x + Math.sign(toward.x - a.x) * 2,
+        y: a.y + Math.sign(toward.y - a.y) * 2,
+      });
+      return [inward(prior), inward(b), b, ...remaining];
+    };
+    size.cut = bevel(size.cut);
+    size.seam = bevel(size.seam!);
+    size.areaMm2 = areaOf(size.cut);
+    size.bbox = bboxOf(size.cut);
   }
   if (spreadHoles) {
     for (const piece of seed.job.pieces)
@@ -2197,7 +2214,13 @@ it('reopens a native text mark without turning it into size, fold or quantity me
 });
 
 async function checkNativeOutlinePointEdit(
-  tool: 'move-point' | 'delete-point' | 'dart-tip' | 'fish-eye-move' | 'parallel-spread',
+  tool:
+    | 'move-point'
+    | 'delete-point'
+    | 'sharpen-corner'
+    | 'dart-tip'
+    | 'fish-eye-move'
+    | 'parallel-spread',
   fiveRanks = false,
   sourceDialect: 'r12' | 'r2000' = 'r12',
 ) {
@@ -2210,6 +2233,8 @@ async function checkNativeOutlinePointEdit(
     savedDartEdit,
     sourceDialect,
     tool === 'parallel-spread' || tool === 'fish-eye-move',
+    undefined,
+    tool === 'sharpen-corner',
   );
   const worker = new ImportWorkerClient();
   const reviewFiles: File[] = [];
@@ -2234,16 +2259,22 @@ async function checkNativeOutlinePointEdit(
   try {
     const {
       buildPatternImportDxfPhaseEDraftCadExactVertexOptionsV1,
+      buildPatternImportDxfPhaseEDraftCadCanvasDartBasesV1,
+      recordPatternImportDxfPhaseEDraftCadCanvasBoundaryPickV1,
       recordPatternImportDxfPhaseEDraftCadMovePointV1,
       recordPatternImportDxfPhaseEDraftCadDeletePointV1,
     } = await import('./draft-cad-canvas-v1');
     const { parseDxf } = await import('lib/nesting/dxf/parse');
     const { entityToChain } = await import('lib/nesting/dxf/entities');
     const { projection } = f.compileInput;
+    const pieceIndex =
+      tool === 'sharpen-corner'
+        ? projection.pieces.findIndex(({ pieceId }) => pieceId === 'FP')
+        : 0;
     const vertices = buildPatternImportDxfPhaseEDraftCadExactVertexOptionsV1(
       f.initial,
       projection,
-      0,
+      pieceIndex,
       true,
     );
     const [point, next] = vertices;
@@ -2257,11 +2288,11 @@ async function checkNativeOutlinePointEdit(
     const input = {
       session: f.initial,
       projection,
-      activePieceIndex: 0,
+      activePieceIndex: pieceIndex,
       sequence: 0,
       vertexKey: point.key,
     };
-    const targetPiece = projection.pieces[0]!;
+    const targetPiece = projection.pieces[pieceIndex]!;
     const emptyInput = { ...f.compileInput, session: f.initial };
     const savedDart = tool === 'dart-tip' ? selectSavedDartTipV1(emptyInput, targetPiece) : null;
     const nextTip = savedDart ? { x: savedDart.apexMm.x + 3, y: savedDart.apexMm.y - 4 } : null;
@@ -2302,8 +2333,54 @@ async function checkNativeOutlinePointEdit(
       if (!spread?.recorded.ok) throw Error('The selected Cut could not register the opening.');
       spreadSession = spread.recorded.session;
     }
-    const edit = spreadSession
-      ? { recorded: true, blocker: null, session: spreadSession }
+    let sharpenedSession: typeof f.initial | null = null;
+    let sharpenedOutline: (typeof vertices)[number]['pointMm'][] | null = null;
+    if (tool === 'sharpen-corner') {
+      const bevelEdges = buildPatternImportDxfPhaseEDraftCadCanvasDartBasesV1(
+        f.initial,
+        projection,
+        pieceIndex,
+      ).filter(({ anchor }) => anchor.contourId === selected.contourId);
+      const bevel = bevelEdges.find(
+        ({ fromMm, toMm }) => fromMm.x !== toMm.x && fromMm.y !== toMm.y,
+      );
+      if (!bevel) throw Error('The exact native bevel was not found.');
+      const pick = { ...input, activeTool: 'sharpen-corner' as const };
+      const unsupported = bevelEdges.find(({ key }) => key !== bevel.key)!;
+      expect(
+        recordPatternImportDxfPhaseEDraftCadCanvasBoundaryPickV1({
+          ...pick,
+          baseKey: unsupported.key,
+        }).recorded,
+      ).toBe(false);
+      expect(
+        recordPatternImportDxfPhaseEDraftCadCanvasBoundaryPickV1({ ...pick, baseKey: 'stale-id' })
+          .recorded,
+      ).toBe(false);
+      const sharp = recordPatternImportDxfPhaseEDraftCadCanvasBoundaryPickV1({
+        ...pick,
+        baseKey: bevel.key,
+      });
+      if (!sharp.recorded)
+        throw Error(sharp.blocker ?? 'The selected bevel could not be sharpened.');
+      const corner = { x: bounds.minX, y: bounds.minY };
+      sharpenedOutline = vertices.flatMap(({ anchor, pointMm }) => {
+        if (anchor.vertexId === bevel.anchor.boundaryVertexIds[0]) return [corner];
+        return anchor.vertexId === bevel.anchor.boundaryVertexIds[1] ? [] : [pointMm];
+      });
+      expect(sharpenedOutline).toHaveLength(vertices.length - 1);
+      expect(areaOf(sharpenedOutline) - areaOf(vertices.map(({ pointMm }) => pointMm))).toBe(2);
+      const undo = undoPatternImportDxfPhaseEDraftCadSessionV1(sharp.session);
+      if (!undo.ok) throw Error(undo.blocker.detail);
+      expect(undo.session.cursor).toBe(0);
+      const redo = redoPatternImportDxfPhaseEDraftCadSessionV1(undo.session);
+      if (!redo.ok) throw Error(redo.blocker.detail);
+      expect(redo.session.history).toEqual(sharp.session.history);
+      sharpenedSession = redo.session;
+    }
+    const shapeSession = spreadSession ?? sharpenedSession;
+    const edit = shapeSession
+      ? { recorded: true, blocker: null, session: shapeSession }
       : savedDartEdit
         ? {
             recorded: movedDart?.ok,
@@ -2316,11 +2393,15 @@ async function checkNativeOutlinePointEdit(
     expect(edit.recorded, edit.blocker ?? '').toBe(true);
     f.current.session = edit.session;
     const verifyRow = vi.fn(async () => {});
+    if (tool === 'sharpen-corner')
+      expect(
+        await compileDraftForOrdinaryReviewV1({ ...f.compileInput, session: edit.session }),
+      ).toMatchObject({ ok: false, blockers: [{ code: 'sharpen-corner-geometry-blocked' }] });
     const compiled = await compileDraftForOrdinaryReviewV1(
       { ...f.compileInput, session: edit.session },
       undefined,
       undefined,
-      savedDartEdit || tool === 'parallel-spread'
+      savedDartEdit || tool === 'parallel-spread' || tool === 'sharpen-corner'
         ? () => compileSavedDartTipReviewV1(f.request, verifyRow)
         : undefined,
     );
@@ -2348,11 +2429,20 @@ async function checkNativeOutlinePointEdit(
     const [file] = reviewFiles;
     if (!file) throw Error('The Patterns owner did not open the compiled DXF.');
     expect(await file.text()).toBe(compiled.artifact.dxfText);
-    const reviewed = await draftThroughWizardStages(file, f.current.card, worker);
+    const reviewed = await draftThroughWizardStages(
+      file,
+      f.current.card,
+      worker,
+      undefined,
+      undefined,
+      tool === 'sharpen-corner' ? sourceDialect : 'r12',
+    );
     const scope = reviewed.scopes[0]!;
+    if (tool === 'sharpen-corner')
+      expect(scope.dxfText).toContain(sourceDialect === 'r12' ? 'AC1009' : 'AC1015');
     expect(scope.manifest.gate?.passed).toBe(true);
     expect(upload).not.toHaveBeenCalled();
-    if (savedDartEdit || tool === 'parallel-spread') {
+    if (savedDartEdit || tool === 'parallel-spread' || tool === 'sharpen-corner') {
       const noWrite = vi.fn();
       await expect(
         applyDirectDxfReviewedDraftV1(reviewed, [file], 1, () => true, noWrite),
@@ -2370,7 +2460,13 @@ async function checkNativeOutlinePointEdit(
           noWrite,
           file,
         ),
-      ).rejects.toThrow(savedDartEdit ? 'original saved dart' : 'original parallel opening');
+      ).rejects.toThrow(
+        savedDartEdit
+          ? 'original saved dart'
+          : tool === 'sharpen-corner'
+            ? 'original saved corner'
+            : 'original parallel opening',
+      );
       const originalText = scope.dxfText;
       scope.dxfText += '\n';
       await expect(
@@ -2628,9 +2724,10 @@ async function checkNativeOutlinePointEdit(
           .sort();
       };
       const expected =
-        tool === 'move-point'
+        sharpenedOutline ??
+        (tool === 'move-point'
           ? vertices.map((vertex) => (vertex === point ? pointMm : vertex.pointMm))
-          : vertices.filter((vertex) => vertex !== point).map(({ pointMm }) => pointMm);
+          : vertices.filter((vertex) => vertex !== point).map(({ pointMm }) => pointMm));
       const block = scope.manifest.blocks.find(
         ({ identity, sizeToken }) => identity === point.anchor.pieceId && sizeToken === 'M',
       )!;
@@ -2725,6 +2822,54 @@ it.each(['move-point', 'delete-point'] as const)(
   'reopens %s from both native paths after ordinary Wizard Apply',
   (tool) => checkNativeOutlinePointEdit(tool),
 );
+
+it.each(['r12', 'r2000'] as const)(
+  'sharpens only the selected M native bevel from %s through ordinary Apply and independent cold replay',
+  (dialect) => checkNativeOutlinePointEdit('sharpen-corner', true, dialect),
+);
+
+it('refuses a native bevel when the saved cut and sewing allowance are separate', async () => {
+  vi.stubGlobal('Worker', InProcessTransport);
+  const f = await fixture(true, true, false, false, 'r12', false, undefined, true);
+  try {
+    const {
+      buildPatternImportDxfPhaseEDraftCadCanvasDartBasesV1,
+      recordPatternImportDxfPhaseEDraftCadCanvasBoundaryPickV1,
+    } = await import('./draft-cad-canvas-v1');
+    const { projection } = f.compileInput;
+    const activePieceIndex = projection.pieces.findIndex(({ pieceId }) => pieceId === 'FP');
+    const cut = projection.pieces[activePieceIndex]?.contours.find(
+      ({ role }) => role === 'cut-boundary',
+    );
+    const bevel = buildPatternImportDxfPhaseEDraftCadCanvasDartBasesV1(
+      f.initial,
+      projection,
+      activePieceIndex,
+    ).find(
+      ({ anchor, fromMm, toMm }) =>
+        anchor.contourId === cut?.contourId && fromMm.x !== toMm.x && fromMm.y !== toMm.y,
+    );
+    if (!bevel) throw Error('The saved allowance fixture lost its cut bevel.');
+    const edit = recordPatternImportDxfPhaseEDraftCadCanvasBoundaryPickV1({
+      session: f.initial,
+      projection,
+      activePieceIndex,
+      activeTool: 'sharpen-corner',
+      sequence: 0,
+      baseKey: bevel.key,
+    });
+    if (!edit.recorded) throw Error(edit.blocker ?? 'The source bevel could not be picked.');
+    f.current.session = edit.session;
+    const verify = vi.fn(async () => {});
+    await expect(compileSavedDartTipReviewV1(f.request, verify)).rejects.toThrow(
+      'coincident original L1 and L14',
+    );
+    expect(verify).not.toHaveBeenCalled();
+  } finally {
+    f.source.dispose();
+    vi.unstubAllGlobals();
+  }
+});
 
 it('reopens one M Move with all four other ranks and the sibling piece intact after one ordinary Apply', () =>
   checkNativeOutlinePointEdit('move-point', true));

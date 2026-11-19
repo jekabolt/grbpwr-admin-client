@@ -338,7 +338,8 @@ export async function compileDraftForOrdinaryReviewV1(
       (command.tool === 'dart' && command.payload.savedTip) ||
       (command.tool === 'fish-eye' && command.payload.savedMove) ||
       (command.tool === 'french-curve' && command.payload.savedCurve) ||
-      (command.tool === 'spread' && command.payload.mode === 'parallel'),
+      (command.tool === 'spread' && command.payload.mode === 'parallel') ||
+      command.tool === 'sharpen-corner',
   );
   if (savedEdit && prepareGeometry) {
     try {

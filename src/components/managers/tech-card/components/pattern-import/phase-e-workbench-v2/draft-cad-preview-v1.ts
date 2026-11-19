@@ -12,7 +12,10 @@ import type {
   PatternImportDxfPhaseEDraftCadToolV1,
 } from './draft-cad-session-v1';
 
-import { resizeDraftStraightEdgeV1 } from './draft-cad-edge-length-geometry-v1';
+import {
+  resizeDraftStraightEdgeV1,
+  selectDraftSharpCornerV1,
+} from './draft-cad-edge-length-geometry-v1';
 
 export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_PREVIEW_V1 =
   'pattern-import-dxf-phase-e-draft-cad-preview/1' as const;
@@ -597,6 +600,42 @@ export function buildPatternImportDxfPhaseEDraftCadPreviewV1(
           ...(destination ? [destination] : []),
           contour.vertices[(index + 1) % count]!.pointMm,
         ].map(clonePoint);
+        primitives.push(
+          deepFreeze({
+            ...base,
+            kind: 'path' as const,
+            pointsMm,
+            closed: false,
+            role: 'outline' as const,
+            stroke: 'solid' as const,
+          }),
+        );
+        bounds = extendPoints(bounds, pointsMm);
+        break;
+      }
+      case 'sharpen-corner': {
+        const { edge, sizeToken } = command.payload;
+        const piece = projection.pieces.find(
+          ({ pieceId, pieceLineKey }) =>
+            pieceId === command.target.pieceId && pieceLineKey === command.target.pieceLineKey,
+        );
+        const contour = piece?.contours.find(({ contourId }) => contourId === edge.contourId);
+        const candidate =
+          projection.sizeToken === sizeToken &&
+          exactAnchorSegment(session, projection, command.target, edge) &&
+          selectDraftSharpCornerV1(contour, edge.boundaryVertexIds);
+        if (!candidate) {
+          blockers.push(
+            commandBlocker(
+              command,
+              'anchor-unavailable',
+              'Choose an exact bevel between perpendicular straight sides in the current size.',
+            ),
+          );
+          break;
+        }
+        const { before, corner, after } = candidate;
+        const pointsMm = [before, corner, after].map(clonePoint);
         primitives.push(
           deepFreeze({
             ...base,

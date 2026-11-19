@@ -1,3 +1,4 @@
+import { selectDraftSharpCornerV1 } from './draft-cad-edge-length-geometry-v1';
 import { parallelOpeningAxisV1, validParallelDisplacementV1 } from './draft-cad-session-v1';
 import {
   useCallback,
@@ -92,6 +93,7 @@ const EXACT_EDGE_TOOLS = new Set<PatternImportDxfPhaseEDraftCadToolV1>([
   'dart',
   'add-point',
   'edge-length',
+  'sharpen-corner',
   'gather',
   'notch',
 ]);
@@ -582,6 +584,28 @@ export function recordPatternImportDxfPhaseEDraftCadCanvasBoundaryPickV1(
         lengthMm: resize.lengthMm,
         sizeToken: input.projection.sizeToken,
       },
+    };
+  } else if (input.activeTool === 'sharpen-corner') {
+    const contour = activeProjectedPiece(
+      input.session,
+      input.projection,
+      input.activePieceIndex,
+    )?.contours.find(({ contourId }) => contourId === base.anchor.contourId);
+    if (!selectDraftSharpCornerV1(contour, base.anchor.boundaryVertexIds))
+      return {
+        session: input.session,
+        pendingPoints: [],
+        pendingDartBase: null,
+        sequence: input.sequence,
+        recorded: false,
+        blocker: 'Choose the bevel between two perpendicular straight sides.',
+      };
+    label = 'Sharpen outline corner';
+    command = {
+      commandId: ids.commandId,
+      tool: 'sharpen-corner',
+      target,
+      payload: { entityId: ids.entityId, edge: base.anchor, sizeToken: input.projection.sizeToken },
     };
   } else if (input.activeTool === 'add-point') {
     label = 'Add exact boundary point intent';
@@ -1720,6 +1744,8 @@ function toolInstruction(tool: PatternImportDxfPhaseEDraftCadToolV1, sizeToken: 
     return `Choose an exact outline point in size ${sizeToken} and confirm Delete point.`;
   if (tool === 'move-point')
     return `Drag an exact outline point or click it to enter X and Y in millimetres for size ${sizeToken}.`;
+  if (tool === 'sharpen-corner')
+    return `Choose a highlighted bevel between perpendicular sides in size ${sizeToken}.`;
   if (tool === 'edge-length') return `Choose an exact edge to set its length in size ${sizeToken}.`;
   if (tool === 'add-point')
     return 'Select an exact edge to insert its midpoint across the piece’s grade.';
@@ -1845,11 +1871,21 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
   const sourceMismatch = preview.blockers.some(
     (blocker) => blocker.code === 'source-projection-mismatch',
   );
-  const dartBases = useMemo(
-    () =>
-      buildPatternImportDxfPhaseEDraftCadCanvasDartBasesV1(session, projection, activePieceIndex),
-    [activePieceIndex, projection, session],
-  );
+  const dartBases = useMemo(() => {
+    const bases = buildPatternImportDxfPhaseEDraftCadCanvasDartBasesV1(
+      session,
+      projection,
+      activePieceIndex,
+    );
+    if (activeTool !== 'sharpen-corner' || crossScopeConnectActive) return bases;
+    const piece = activeProjectedPiece(session, projection, activePieceIndex);
+    return bases.filter(({ anchor }) =>
+      selectDraftSharpCornerV1(
+        piece?.contours.find(({ contourId }) => contourId === anchor.contourId),
+        anchor.boundaryVertexIds,
+      ),
+    );
+  }, [activePieceIndex, activeTool, crossScopeConnectActive, projection, session]);
   const outlineEditActive =
     !crossScopeConnectActive &&
     !activeTopologyTool &&
