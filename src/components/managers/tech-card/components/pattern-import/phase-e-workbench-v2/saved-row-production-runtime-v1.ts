@@ -410,11 +410,51 @@ function createSavedDraftSourceReaderV1(deps: SavedDraftSourceReaderDepsV1) {
       },
     );
   };
+  const prepareSavedPairedAllowance: NonNullable<
+    PatternImportDxfPhaseESavedRowProductionRuntimeV1['prepareSavedPairedAllowance']
+  > = async (row, readCurrent) => {
+    const opening = readCurrent();
+    const command = opening?.session.history[0]?.commands[0];
+    if (
+      !opening ||
+      !sameSavedDraftRowV1(row, opening.row) ||
+      opening.session.cursor !== 1 ||
+      opening.session.history[0]?.commands.length !== 1 ||
+      (command?.tool !== 'edge-length' && command?.tool !== 'allowance-offset')
+    )
+      throw new Error('The current saved Draft must contain one edge length or allowance offset.');
+    return withSavedDraftSource(
+      row,
+      command.target.pieceId,
+      async (proof, card, readCurrentRow) => {
+        const { prepareSavedDraftPairedAllowanceAuthorityV1 } = await import(
+          './draft-cad-paired-allowance-authority-v1'
+        );
+        return prepareSavedDraftPairedAllowanceAuthorityV1({
+          ...proof,
+          readCurrent: () => {
+            const current = readCurrent();
+            return !disposed &&
+              current?.session === opening.session &&
+              current.generation === opening.generation &&
+              current.sizeToken === opening.sizeToken &&
+              sameSavedDraftRowV1(row, current.row)
+              ? { ...current, card }
+              : null;
+          },
+          verifyCurrentRow: async () => {
+            await readCurrentRow();
+          },
+        });
+      },
+    );
+  };
   return {
     createSavedReprocessHost,
     withSavedDraftSource,
     prepareSavedRankedPointReview,
     prepareSavedGeometryReview,
+    prepareSavedPairedAllowance,
     dispose() {
       if (disposed) return;
       disposed = true;
@@ -438,6 +478,12 @@ export function createSavedGeometryReviewRuntimeV1(deps: SavedDraftSourceReaderD
   return Object.freeze({ prepareSavedGeometryReview, dispose });
 }
 
+/** Verifies the same native allowance pair for a signed row opened from the saved table. */
+export function createSavedPairedAllowanceReviewRuntimeV1(deps: SavedDraftSourceReaderDepsV1) {
+  const { prepareSavedPairedAllowance, dispose } = createSavedDraftSourceReaderV1(deps);
+  return Object.freeze({ prepareSavedPairedAllowance, dispose });
+}
+
 /** Injectable composition used by the production factory and focused tests. */
 export function createPatternImportDxfPhaseESavedRowRuntimeV1(
   deps: PatternImportDxfPhaseESavedRowRuntimeDepsV1,
@@ -458,6 +504,7 @@ export function createPatternImportDxfPhaseESavedRowRuntimeV1(
     withSavedDraftSource,
     prepareSavedRankedPointReview,
     prepareSavedGeometryReview,
+    prepareSavedPairedAllowance,
     dispose: disposeDraftSource,
   } = createSavedDraftSourceReaderV1({
     resolveCard,
@@ -513,40 +560,7 @@ export function createPatternImportDxfPhaseESavedRowRuntimeV1(
     },
     prepareSavedGeometryReview,
     prepareSavedDartTip: prepareSavedGeometryReview,
-    async prepareSavedPairedAllowance(row, readCurrent) {
-      const opening = readCurrent();
-      const command = opening?.session.history[0]?.commands[0];
-      if (
-        !opening ||
-        opening.session.cursor !== 1 ||
-        opening.session.history[0]?.commands.length !== 1 ||
-        (command?.tool !== 'edge-length' && command?.tool !== 'allowance-offset')
-      )
-        throw new Error(
-          'The current saved Draft must contain one edge length or allowance offset.',
-        );
-      return withSavedDraftSource(
-        row,
-        command.target.pieceId,
-        async (proof, card, readCurrentRow) => {
-          const { prepareSavedDraftPairedAllowanceAuthorityV1 } = await import(
-            './draft-cad-paired-allowance-authority-v1'
-          );
-          return prepareSavedDraftPairedAllowanceAuthorityV1({
-            ...proof,
-            readCurrent: () => {
-              const current = readCurrent();
-              return !disposed && current?.session === opening.session
-                ? { ...current, card }
-                : null;
-            },
-            verifyCurrentRow: async () => {
-              await readCurrentRow();
-            },
-          });
-        },
-      );
-    },
+    prepareSavedPairedAllowance,
     async prepareSavedJoin(row, picks, readCurrent) {
       const opening = readCurrent();
       if (!opening || opening.session.cursor !== 0)

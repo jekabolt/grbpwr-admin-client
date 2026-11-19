@@ -46,6 +46,7 @@ import {
   resolveCadTableClothFocusScopeV1,
 } from './cad-table-accepted-cloth-focus-v1';
 import { sameSavedDraftRowV1 } from './draft-cad-saved-source-selection-v1';
+import { hasDraftCutAllowanceJoinsV1 } from './draft-cad-allowance-offset-geometry-v1';
 import { projectCadTablePieceFeatures } from './cad-table-piece-features-v1';
 import {
   planPatternImportDxfPhaseECadTablePressForProjectionV1,
@@ -114,6 +115,7 @@ import {
 const SavedGeneratedFusingView = lazy(() => import('./saved-generated-fusing-view'));
 const SavedRankedPointEdit = lazy(() => import('./cad-table-saved-ranked-point-edit-v1'));
 const SavedFrenchCurveEdit = lazy(() => import('./cad-table-saved-french-curve-edit-v1'));
+const SavedAllowanceEdit = lazy(() => import('./cad-table-saved-allowance-edit-v1'));
 const SavedPointClosurePanel = lazy(() => import('./cad-table-saved-point-closure-panel-v1'));
 const SavedSeamSubrangePanel = lazy(() => import('./cad-table-saved-seam-subrange-panel-v1'));
 
@@ -1103,7 +1105,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
     layout?.selectedPieceKeys.length === 1
       ? layout.pieces.find(({ identity }) => identity.key === layout.selectedPieceKeys[0])?.identity
       : undefined;
-  const frenchPrepared =
+  const nativeEditPrepared =
     !disabled &&
     !sourceSurface &&
     !generatedFusing &&
@@ -1119,14 +1121,44 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
     prepared.authoringAuthority.selectedRank.sizeId === selectedSize.sizeId
       ? prepared
       : null;
-  const frenchRow = frenchPrepared?.authoringAuthority?.row;
+  const frenchRow = nativeEditPrepared?.authoringAuthority?.row;
   const frenchCurve = useMemo(
     () =>
-      frenchPrepared && frenchRow && pickedPointPiece
-        ? selectSavedFrenchCurveTableEditV1(frenchPrepared, frenchRow, pickedPointPiece)
+      nativeEditPrepared && frenchRow && pickedPointPiece
+        ? selectSavedFrenchCurveTableEditV1(nativeEditPrepared, frenchRow, pickedPointPiece)
         : null,
-    [frenchPrepared, frenchRow, pickedPointPiece],
+    [nativeEditPrepared, frenchRow, pickedPointPiece],
   );
+  const allowancePieceIndex = useMemo(() => {
+    if (!nativeEditPrepared || !pickedPointPiece) return -1;
+    const matchesPiece = (piece: Pick<typeof pickedPointPiece, 'pieceId' | 'pieceLineKey'>) =>
+      piece.pieceId === pickedPointPiece.pieceId &&
+      piece.pieceLineKey === pickedPointPiece.pieceLineKey;
+    const index = nativeEditPrepared.catalog.pieces.findIndex(matchesPiece);
+    const piece = nativeEditPrepared.projection.pieces[index];
+    if (!piece || !matchesPiece(piece)) return -1;
+    const cuts = piece.contours.filter(({ role }) => role === 'cut-boundary');
+    const writerSizes = nativeEditPrepared.draftCadCompileSource.scopes
+      .filter(({ target }) => target.scopeKey === nativeEditPrepared.scopeKey)
+      .flatMap(({ writerReplay }) => writerReplay?.job.pieces ?? [])
+      .filter(({ identity }) => identity === piece.pieceId)
+      .flatMap(({ sizes }) => sizes)
+      .filter(
+        ({ sizeToken, sizeId }) =>
+          sizeToken === nativeEditPrepared.sizeToken &&
+          sizeId === nativeEditPrepared.authoringAuthority.selectedRank.sizeId,
+      );
+    if (cuts.length !== 1 || writerSizes.length !== 1 || !writerSizes[0].seam) return -1;
+    const [cut] = cuts;
+    return cut?.vertices.some(({ vertexId }, position, vertices) =>
+      hasDraftCutAllowanceJoinsV1(cut, [
+        vertexId,
+        vertices[(position + 1) % vertices.length].vertexId,
+      ]),
+    )
+      ? index
+      : -1;
+  }, [nativeEditPrepared, pickedPointPiece]);
   const [frenchEdit, setFrenchEdit] = useState<Readonly<{
     candidate: NonNullable<typeof frenchCurve>;
     generation: number;
@@ -1166,6 +1198,19 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
   useEffect(() => {
     if (pointEdit && !activePointEdit) setPointEdit(null);
   }, [activePointEdit, pointEdit]);
+  const [allowanceEdit, setAllowanceEdit] = useState<typeof pointEdit>(null);
+  const activeAllowanceEdit =
+    allowanceEdit &&
+    allowanceEdit.prepared === nativeEditPrepared &&
+    allowanceEdit.pieceIndex === allowancePieceIndex &&
+    allowanceEdit.generation === generation &&
+    allowanceEdit.operationNumber === selection.operationNumber
+      ? allowanceEdit
+      : null;
+  useEffect(() => {
+    if (allowanceEdit && !activeAllowanceEdit) setAllowanceEdit(null);
+  }, [activeAllowanceEdit, allowanceEdit]);
+  const editingSavedGeometry = Boolean(activePointEdit || activeFrenchEdit || activeAllowanceEdit);
   useLayoutEffect(() => {
     if (!clothFocus) return;
     if (!currentClothFocus) {
@@ -1677,7 +1722,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
                 <span className='text-micro text-labelColor'>opening exact saved geometry…</span>
               )}
               {pressControl}
-              {pointPrepared && !activePointEdit && !activeFrenchEdit && (
+              {pointPrepared && !editingSavedGeometry && (
                 <Button
                   type='button'
                   variant='secondary'
@@ -1695,7 +1740,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
                   Draft point
                 </Button>
               )}
-              {frenchCurve && !activePointEdit && !activeFrenchEdit && (
+              {frenchCurve && !editingSavedGeometry && (
                 <Button
                   type='button'
                   variant='secondary'
@@ -1709,6 +1754,23 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
                   }
                 >
                   Edit French curve
+                </Button>
+              )}
+              {nativeEditPrepared && allowancePieceIndex >= 0 && !editingSavedGeometry && (
+                <Button
+                  type='button'
+                  variant='secondary'
+                  size='xs'
+                  onClick={() =>
+                    setAllowanceEdit({
+                      prepared: nativeEditPrepared,
+                      pieceIndex: allowancePieceIndex,
+                      generation,
+                      operationNumber: selection.operationNumber,
+                    })
+                  }
+                >
+                  Edit seam allowance
                 </Button>
               )}
             </div>
@@ -1783,7 +1845,24 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
               />
             </Suspense>
           )}
-          {!activePointEdit && !activeFrenchEdit && prepared && tableSessionOwner && (
+          {activeAllowanceEdit && savedAuthority && (
+            <Suspense
+              fallback={
+                <Text component='p' size='micro' role='status'>
+                  Opening allowance editor…
+                </Text>
+              }
+            >
+              <SavedAllowanceEdit
+                prepared={activeAllowanceEdit.prepared}
+                pieceIndex={activeAllowanceEdit.pieceIndex}
+                generation={activeAllowanceEdit.generation}
+                authority={savedAuthority}
+                onClose={() => setAllowanceEdit(null)}
+              />
+            </Suspense>
+          )}
+          {!editingSavedGeometry && prepared && tableSessionOwner && (
             <PatternImportDxfPhaseECadTableZeroConnectCanvasV1
               catalog={prepared.catalog}
               projection={prepared.projection}
