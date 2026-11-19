@@ -1499,6 +1499,10 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
     resolvedSource === 'fresh' &&
     resolvedSavedChoices.ok &&
     resolvedSavedChoices.choices.length === 1;
+  const currentMannequinSavedAuthority =
+    resolvedSource === 'saved' && prepared && 'authoringAuthority' in prepared
+      ? prepared.authoringAuthority
+      : undefined;
   const mannequinStagingKey = currentMannequinSource
     ? stageFromSession && cardSession
       ? `fresh:${cardSession.techCardId}:${generation}:${currentMannequinSource.scopeKey}:${sizeToken}`
@@ -1542,6 +1546,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
         sizeNameById,
         sizeToken,
         current: currentMannequinSource,
+        currentAuthority: currentMannequinSavedAuthority,
         authority: savedAuthority,
         preparationKey: mannequinStagingKey,
         signal: controller.signal,
@@ -1565,6 +1570,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
   }, [
     cardSession,
     choices,
+    currentMannequinSavedAuthority,
     currentMannequinSource,
     generation,
     mannequinStagingKey,

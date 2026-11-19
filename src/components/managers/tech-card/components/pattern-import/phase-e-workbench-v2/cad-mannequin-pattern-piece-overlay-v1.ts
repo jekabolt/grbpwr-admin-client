@@ -10,6 +10,7 @@ import type {
   PatternImportDxfPhaseECadMannequinDxfStagingSelectionV1,
   PatternImportDxfPhaseECadMannequinDxfStagingSourceV1,
 } from './cad-mannequin-dxf-staging-v1';
+import { readSavedAllScopeStagingLaneOrdinalsV1 } from './cad-mannequin-saved-all-scope-staging-v1';
 import type { CadTableSavedTopstitchOverlayV1 } from './cad-table-saved-topstitch-overlay-v1';
 
 export const PATTERN_IMPORT_DXF_PHASE_E_CAD_MANNEQUIN_PATTERN_PIECE_OVERLAY_V1 =
@@ -98,6 +99,7 @@ export function buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1(
     sources: readonly PatternImportDxfPhaseECadMannequinDxfStagingSourceV1[];
     selection?: PatternImportDxfPhaseECadMannequinDxfStagingSelectionV1 | null;
     activeScopeKey?: string | null;
+    preserveLegacyMultiScopeLanes?: boolean;
     swatchesByScope?: Readonly<Record<string, string | null | undefined>>;
     transformsByPieceKey?: Readonly<Record<string, MeasurementSurfacePatternPieceTransformV1>>;
     decorations?: readonly PatternImportDxfPhaseECadMannequinPatternOverlayDecorationV1[];
@@ -171,7 +173,9 @@ export function buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1(
           input.sources[0].projection,
           input.sources[0].scopeKey,
         )
-      : null;
+      : input.preserveLegacyMultiScopeLanes
+        ? null
+        : readSavedAllScopeStagingLaneOrdinalsV1(input.sources);
   const overlayPieces: MeasurementSurfacePatternPieceOverlayV1['pieces'] = Object.freeze(
     pieces.map(({ source, piece }, index) => {
       const pieceKey = `${source.scopeKey}:${piece.pieceId}:${piece.pieceLineKey}`;

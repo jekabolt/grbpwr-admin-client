@@ -926,6 +926,7 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
       patternPieceScene
         ? buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1({
             ...patternPieceScene,
+            preserveLegacyMultiScopeLanes: Boolean(onReadMannequinArrangement || onSaveMannequinArrangement),
             decorations:
               patternPieceScene.sceneOverlay?.status === 'available'
                 ? patternPieceScene.sceneOverlay.bridge.decorations
@@ -945,6 +946,8 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
     [
       dragPlane,
       handlePatternTransform,
+      onReadMannequinArrangement,
+      onSaveMannequinArrangement,
       translationGroup,
       rotationGroup,
       patternPieceScene,
