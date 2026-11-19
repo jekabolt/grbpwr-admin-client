@@ -16132,6 +16132,8 @@ export type Workspace = {
   features: string[] | undefined;
   // read_only is true while the team is suspended.
   readOnly: boolean | undefined;
+  // logo_url is the absolute URL of the team's logo (changes when the logo does); empty when there is none.
+  logoUrl: string | undefined;
 };
 
 export type ListAccountSectionsRequest = {

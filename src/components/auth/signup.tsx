@@ -128,6 +128,7 @@ function SignUpForm({
         teamName: team.trim(),
         teamSlug: slug,
         termsAccepted: true,
+        logo: undefined,
       });
       onSent(slug);
     } catch (e) {

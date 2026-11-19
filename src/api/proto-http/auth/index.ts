@@ -78,6 +78,8 @@ export type TeamRef = {
   ready: boolean | undefined;
   // awaiting_approval is true while the team waits for an operator's approval; ready is false then.
   awaitingApproval: boolean | undefined;
+  // logo_url is the absolute URL of the team's logo (changes when the logo does); empty when there is none.
+  logoUrl: string | undefined;
 };
 
 export type SignUpRequest = {
@@ -87,6 +89,9 @@ export type SignUpRequest = {
   teamSlug: string | undefined;
   // terms_accepted must be true for a new account; the server refuses otherwise.
   termsAccepted: boolean | undefined;
+  // logo is an optional team logo, PNG or JPEG, at most 1 MB (JSON: base64); a bad image refuses
+  // the whole request with bad_logo.
+  logo: string | undefined;
 };
 
 export type SignUpResponse = {
@@ -198,6 +203,76 @@ export type AcceptInviteResponse = {
   handoffCode: string | undefined;
 };
 
+export type ListMyTeamsRequest = {
+};
+
+export type ListMyTeamsResponse = {
+  // teams are the account's teams, review and suspended included; deleted and pending are absent.
+  teams: TeamRef[] | undefined;
+  // email is the account's email.
+  email: string | undefined;
+  // can_create_team is false while the account already owns the most teams it may own.
+  canCreateTeam: boolean | undefined;
+  // terms_needed is true when CreateTeam must carry terms_accepted (the current terms are not accepted yet).
+  termsNeeded: boolean | undefined;
+};
+
+export type CreateTeamRequest = {
+  teamName: string | undefined;
+  teamSlug: string | undefined;
+  // terms_accepted is required while ListMyTeamsResponse.terms_needed is true.
+  termsAccepted: boolean | undefined;
+  // logo is an optional team logo, PNG or JPEG, at most 1 MB (JSON: base64); a bad image refuses
+  // the whole request with bad_logo.
+  logo: string | undefined;
+};
+
+export type CreateTeamResponse = {
+  // team is the new team; awaiting_approval is true while it waits for an operator's approval.
+  team: TeamRef | undefined;
+};
+
+export type GetSignInOptionsRequest = {
+};
+
+export type GetSignInOptionsResponse = {
+  // google is true when the sign in with Google button is shown.
+  google: boolean | undefined;
+  // apple is true when the sign in with Apple button is shown.
+  apple: boolean | undefined;
+};
+
+export type ExchangeSignInCodeRequest = {
+  // code is the one-time code from the #code= fragment of /auth/oauth (60 seconds, single use).
+  code: string | undefined;
+};
+
+export type ExchangeSignInCodeResponse = {
+  // token is a root token, valid for 30 days from sign-in.
+  token: string | undefined;
+  teams: TeamRef[] | undefined;
+  // enter_team_slug is set when an invite was accepted with a provider: IssueHandoff to that team.
+  enterTeamSlug: string | undefined;
+};
+
+export type SetTeamLogoRequest = {
+  // logo is a PNG or JPEG, at most 1 MB (JSON: base64); empty removes the logo.
+  logo: string | undefined;
+};
+
+export type SetTeamLogoResponse = {
+  // logo_url is the absolute URL of the new logo; empty after a removal.
+  logoUrl: string | undefined;
+};
+
+// AuthService. Plain HTTP routes of the same /api/auth mount that are not RPCs (no gateway, no session):
+// POST /api/auth/oauth/{google|apple}/start  (HTML form: target signin|invite; for an invite
+// invite_token and terms_accepted) starts a provider sign-in;
+// GET  /api/auth/oauth/google/callback and POST /api/auth/oauth/apple/callback end it with a 303 to
+// https://<base>/auth/oauth#code=<one-time code for ExchangeSignInCode> or #error=<fixed key>
+// (cancelled, expired, unverified, invite_mismatch, disabled, try_again);
+// GET  /api/auth/team-logo/{slug} serves a team's logo as PNG (public; 404 when there is none).
+// "root session" below = a Bearer token from SignIn target root or ExchangeSignInCode.
 export interface AuthService {
   // Authenticate a user. Returns a JWT token if the user is authenticated.
   Login(request: LoginRequest): Promise<LoginResponse>;
@@ -221,7 +296,8 @@ export interface AuthService {
   IssueHandoff(request: IssueHandoffRequest): Promise<IssueHandoffResponse>;
   // ExchangeHandoff swaps a hand-off code for a team token; the slug travels in Grpc-Metadata-X-Team.
   ExchangeHandoff(request: ExchangeHandoffRequest): Promise<ExchangeHandoffResponse>;
-  // SignOut revokes the session of the calling token.
+  // SignOut revokes the session of the calling token. A root token ends the root session and every
+  // team session opened from it; a team token ends only itself.
   SignOut(request: SignOutRequest): Promise<SignOutResponse>;
   // RequestPasswordReset sends a reset letter (generic response).
   RequestPasswordReset(request: RequestPasswordResetRequest): Promise<RequestPasswordResetResponse>;
@@ -231,6 +307,16 @@ export interface AuthService {
   GetInvite(request: GetInviteRequest): Promise<GetInviteResponse>;
   // AcceptInvite joins the invited team; a new user sets a password.
   AcceptInvite(request: AcceptInviteRequest): Promise<AcceptInviteResponse>;
+  // ListMyTeams lists the teams of the root session's account (root session).
+  ListMyTeams(request: ListMyTeamsRequest): Promise<ListMyTeamsResponse>;
+  // CreateTeam creates one more team owned by the root session's account (root session).
+  CreateTeam(request: CreateTeamRequest): Promise<CreateTeamResponse>;
+  // GetSignInOptions tells which provider sign-in buttons to show (public).
+  GetSignInOptions(request: GetSignInOptionsRequest): Promise<GetSignInOptionsResponse>;
+  // ExchangeSignInCode swaps the one-time code of a provider sign-in for a root token (public).
+  ExchangeSignInCode(request: ExchangeSignInCodeRequest): Promise<ExchangeSignInCodeResponse>;
+  // SetTeamLogo sets or removes the logo of the calling team (team session, owner only).
+  SetTeamLogo(request: SetTeamLogoRequest): Promise<SetTeamLogoResponse>;
 }
 
 type RequestType = {
@@ -522,6 +608,91 @@ export function createAuthServiceClient(
         service: "AuthService",
         method: "AcceptInvite",
       }) as Promise<AcceptInviteResponse>;
+    },
+    ListMyTeams(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/auth/list-my-teams`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AuthService",
+        method: "ListMyTeams",
+      }) as Promise<ListMyTeamsResponse>;
+    },
+    CreateTeam(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/auth/create-team`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AuthService",
+        method: "CreateTeam",
+      }) as Promise<CreateTeamResponse>;
+    },
+    GetSignInOptions(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/auth/get-sign-in-options`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AuthService",
+        method: "GetSignInOptions",
+      }) as Promise<GetSignInOptionsResponse>;
+    },
+    ExchangeSignInCode(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/auth/exchange-sign-in-code`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AuthService",
+        method: "ExchangeSignInCode",
+      }) as Promise<ExchangeSignInCodeResponse>;
+    },
+    SetTeamLogo(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/auth/set-team-logo`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AuthService",
+        method: "SetTeamLogo",
+      }) as Promise<SetTeamLogoResponse>;
     },
   };
 }
