@@ -3529,6 +3529,28 @@ export function operationWriteOrder(
     : sourceOperations.map((_, index) => index);
 }
 
+function operationSeamKeysForSave(
+  operation: { seamKeys?: readonly string[]; poseKeys?: readonly string[] },
+  previousKeys?: readonly string[],
+): string[] {
+  const unique = (keys: readonly string[] = []) => [
+    ...new Set(keys.map((key) => key.trim()).filter(Boolean)),
+  ];
+  const seams = unique(operation.seamKeys);
+  const seamSet = new Set(seams);
+  const poses = unique(operation.poseKeys).filter((key) => !seamSet.has(key));
+  const combined = [...seams, ...poses];
+  const previous = unique(previousKeys);
+  if (previous.length !== combined.length) return combined;
+
+  const sameOrder = (left: readonly string[], right: readonly string[]) =>
+    left.length === right.length && left.every((key, index) => key === right[index]);
+  // An untouched split in the form must round-trip the stored order across both row kinds.
+  const previousSeams = previous.filter((key) => seamSet.has(key));
+  const previousPoses = previous.filter((key) => !seamSet.has(key));
+  return sameOrder(previousSeams, seams) && sameOrder(previousPoses, poses) ? previous : combined;
+}
+
 export function mapFormToTechCardInsert(
   data: TechCardFormData,
   original?: common_TechCardInsert,
@@ -4286,13 +4308,12 @@ export function mapFormToTechCardInsert(
         labelKeys: [...new Set((o.labelKeys ?? []).map((k) => k.trim()).filter(Boolean))],
         outputUnitKey: (o.outputUnitKey ?? '').trim(),
         outputUnitName: (o.outputUnitName ?? '').trim(),
-        // Carried through unchanged (dedup only): the server refuses a key the card does not hold.
-        // The step's pose keys (P8) ride the same wire list, after its seams.
-        seamKeys: [
-          ...new Set(
-            [...(o.seamKeys ?? []), ...(o.poseKeys ?? [])].map((k) => k.trim()).filter(Boolean),
-          ),
-        ],
+        // Seam and pose keys use one ordered wire list. Keep its order on unrelated saves.
+        seamKeys: operationSeamKeysForSave(
+          o,
+          original?.operations?.find(({ operationNumber }) => operationNumber === o.operationNumber)
+            ?.seamKeys,
+        ),
         // Same: the server refuses a key the card does not hold and a repeat on one step.
         foldKeys: [...new Set((o.foldKeys ?? []).map((k) => k.trim()).filter(Boolean))],
         // The server refuses a repeat; a key no longer among the inputs is simply skipped.
