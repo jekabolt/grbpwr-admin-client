@@ -4,7 +4,7 @@ The linked source revisions are the tested local integration snapshot.
 
 | Repository | Code revision |
 | --- | --- |
-| Admin client | `573710c9fd620134ea45ff30c1d3bd0f38258fe1` |
+| Admin client | `c43bffa173b9b822604c99db4695bb6b94516b15` |
 | Products manager | `341297e6f87fd935d794445a872ef938821fe854` |
 | Protocol | `fcd245b2f607423181718048bdfc0b4387437df9` |
 
