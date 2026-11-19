@@ -73,7 +73,7 @@ function DeleteTeamSheet({
     >
       <div className='flex flex-col gap-3'>
         <div>
-          {addressOf(slug)} · {people} people
+          {slug} · {people} people
         </div>
         <div className='flex flex-col gap-1'>
           <Text
