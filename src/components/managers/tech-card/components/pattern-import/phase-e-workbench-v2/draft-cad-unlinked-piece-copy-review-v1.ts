@@ -186,7 +186,6 @@ export async function prepareUnlinkedDraftPieceCopyV1(input: {
       !piece.pairOf &&
       !piece.pairHand &&
       !piece.ungraded &&
-      (mode === 'duplicate' || piece.displayName === sourceIdentity) &&
       piece.sizes.length === job.sizes.length &&
       job.sizes.every(
         (s) =>
@@ -196,9 +195,9 @@ export async function prepareUnlinkedDraftPieceCopyV1(input: {
       ),
     'no independent stable source piece with all ranks',
   );
-  const headingDuplicate = mode === 'duplicate' && piece.displayName !== sourceIdentity;
+  const hasNativeHeading = piece.displayName !== sourceIdentity;
   requireCopy(
-    !headingDuplicate ||
+    !hasNativeHeading ||
       (piece.piecesPerGarment === 1 &&
         /^[A-Z][A-Z0-9_]*$/.test(piece.displayName) &&
         identitiesOf(piece.code, piece.mods, null)[0]?.identity === sourceIdentity),
@@ -213,26 +212,26 @@ export async function prepareUnlinkedDraftPieceCopyV1(input: {
         .map((a) => a.blockName),
     ].map((n) => n.trim().toUpperCase()),
   );
-  if (headingDuplicate)
+  if (hasNativeHeading)
     for (const { displayName } of job.pieces) names.add(displayName.trim().toUpperCase());
   // A named source may already have a numbered part. G11 permits one such modifier.
   const mods =
-    headingDuplicate && modStage(piece.mods.at(-1) ?? '') === 2
+    hasNativeHeading && modStage(piece.mods.at(-1) ?? '') === 2
       ? piece.mods.slice(0, -1)
       : piece.mods;
-  const prefix = headingDuplicate ? [piece.code, ...mods].join('_') : sourceIdentity;
+  const prefix = hasNativeHeading ? [piece.code, ...mods].join('_') : sourceIdentity;
   let suffix = 2;
   const isSizeToken = sizeTokenTest(job.sizes.map(({ token }) => token));
   while (
     names.has(`${prefix}_${suffix}`.toUpperCase()) ||
-    (headingDuplicate &&
+    (hasNativeHeading &&
       (names.has(`${piece.displayName}_${suffix}`) || isSizeToken(String(suffix))))
   )
     suffix++;
   const identity = `${prefix}_${suffix}`,
     copy = structuredClone(piece);
   requireCopy(
-    !headingDuplicate || identityProblem(identity, { isSizeToken }) === null,
+    !hasNativeHeading || identityProblem(identity, { isSizeToken }) === null,
     'the new native identity does not meet writer grammar',
   );
   if (mode === 'mirror-across-grain') {
@@ -252,7 +251,7 @@ export async function prepareUnlinkedDraftPieceCopyV1(input: {
     });
   }
   copy.identity = identity;
-  copy.displayName = headingDuplicate ? `${piece.displayName}_${suffix}` : identity;
+  copy.displayName = hasNativeHeading ? `${piece.displayName}_${suffix}` : identity;
   copy.mods = [...mods, String(suffix)];
   copy.seed = job.pieces.reduce((max, p) => Math.max(max, p.seed), 0) + 1;
   requireCopy(Number.isSafeInteger(copy.seed), 'no available piece seed');
@@ -263,7 +262,7 @@ export async function prepareUnlinkedDraftPieceCopyV1(input: {
     sourceIdentity,
     identity,
     mode,
-    headingDuplicate ? { source: piece.displayName, copy: copy.displayName } : undefined,
+    hasNativeHeading ? { source: piece.displayName, copy: copy.displayName } : undefined,
   );
   verifyGeometry(written.dxfText);
   const file = new File(
@@ -289,7 +288,7 @@ export async function prepareUnlinkedDraftPieceCopyV1(input: {
     sourceIdentity,
     sourceKey,
     identity,
-    ...(headingDuplicate ? { headingManifest: written.manifest } : {}),
+    ...(hasNativeHeading ? { headingManifest: written.manifest } : {}),
     check,
     revalidate: async () => {
       requireCopy(

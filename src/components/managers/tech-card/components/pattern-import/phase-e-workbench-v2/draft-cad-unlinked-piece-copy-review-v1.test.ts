@@ -481,39 +481,57 @@ it('requires the exact native hole and drill on every source and duplicate rank'
   }
 });
 
-it('allows only the reviewed manifest-bound R12 heading to differ on a duplicate', async () => {
-  const { job } = await seedCopy(2, true);
-  const original = job.pieces[0]!;
-  original.displayName = 'FRONT_PANEL';
-  const source = writeDxfDetailed(job);
-  const copy = structuredClone(original);
-  copy.identity = 'FP_2';
-  copy.displayName = 'FRONT_PANEL_2';
-  copy.mods = ['2'];
-  copy.seed = 3;
-  job.pieces.push(copy);
-  const verify = nativePieceCopyVerifier(source.dxfText, 'FP', 'FP_2', 'duplicate', {
-    source: 'FRONT_PANEL',
-    copy: 'FRONT_PANEL_2',
-  });
-  const written = writeDxfDetailed(job);
-  expect(() => verify(written.dxfText)).not.toThrow();
-  const substitute = written.dxfText.replace(/([\r\n])FRONT_PANEL_2([\r\n])/, '$1OPERATOR_MARK$2');
-  expect(substitute).not.toBe(written.dxfText);
-  expect(() => verify(substitute)).toThrow('exact R12 writer row');
-  const shiftedInsert = written.dxfText.replace(
-    /(\r?\nINSERT\r?\n\s*8\r?\n0\r?\n\s*2\r?\n[^\r\n]+\r?\n\s*10\r?\n)0\.000000/,
-    (_, prefix: string) => prefix + '1.000000',
-  );
-  expect(shiftedInsert).not.toBe(written.dxfText);
-  expect(() => verify(shiftedInsert)).toThrow('transformed or ambiguous native insertion');
-  const originalEdit = structuredClone(job);
-  originalEdit.pieces[0]!.displayName = 'FRONT_OTHER';
-  expect(() => verify(writeDxfDetailed(originalEdit).dxfText)).toThrow('changed on FP');
-  const geometryEdit = structuredClone(job);
-  geometryEdit.pieces.at(-1)!.sizes[0]!.drills[0]!.at.x += 0.000001;
-  expect(() => verify(writeDxfDetailed(geometryEdit).dxfText)).toThrow('changed a native layer');
-});
+it.each(['duplicate', 'mirror-across-grain'] as const)(
+  'only permits the reviewed manifest-bound R12 heading to be renamed for %s',
+  async (mode) => {
+    const reflected = mode === 'mirror-across-grain';
+    const { job } = await seedCopy(2, true, reflected);
+    const original = job.pieces[0]!;
+    original.displayName = 'FRONT_PANEL';
+    const source = writeDxfDetailed(job);
+    const copy = structuredClone(original);
+    copy.identity = 'FP_2';
+    copy.displayName = 'FRONT_PANEL_2';
+    copy.mods = ['2'];
+    copy.seed = 3;
+    if (reflected) copy.sizes = original.sizes.map((size) => mirrorSizeAcrossGrain(size)!.size);
+    job.pieces.push(copy);
+    const verify = nativePieceCopyVerifier(source.dxfText, 'FP', 'FP_2', mode, {
+      source: 'FRONT_PANEL',
+      copy: 'FRONT_PANEL_2',
+    });
+    const written = writeDxfDetailed(job);
+    expect(() => verify(written.dxfText)).not.toThrow();
+    if (reflected) {
+      expect(() => nativePieceCopyVerifier(source.dxfText, 'FP', 'FP_2', mode)).toThrow(
+        'unsupported native text mark',
+      );
+      const unreflected = structuredClone(job);
+      unreflected.pieces.at(-1)!.sizes = structuredClone(original.sizes);
+      expect(() => verify(writeDxfDetailed(unreflected).dxfText)).toThrow('exact reflected native');
+    }
+    const substitute = written.dxfText.replace(
+      /([\r\n])FRONT_PANEL_2([\r\n])/,
+      '$1OPERATOR_MARK$2',
+    );
+    expect(substitute).not.toBe(written.dxfText);
+    expect(() => verify(substitute)).toThrow('exact R12 writer row');
+    const shiftedInsert = written.dxfText.replace(
+      /(\r?\nINSERT\r?\n\s*8\r?\n0\r?\n\s*2\r?\n[^\r\n]+\r?\n\s*10\r?\n)0\.000000/,
+      (_, prefix: string) => prefix + '1.000000',
+    );
+    expect(shiftedInsert).not.toBe(written.dxfText);
+    expect(() => verify(shiftedInsert)).toThrow('transformed or ambiguous native insertion');
+    const originalEdit = structuredClone(job);
+    originalEdit.pieces[0]!.displayName = 'FRONT_OTHER';
+    expect(() => verify(writeDxfDetailed(originalEdit).dxfText)).toThrow('changed on FP');
+    const geometryEdit = structuredClone(job);
+    geometryEdit.pieces.at(-1)!.sizes[0]!.drills[0]!.at.x += 0.000001;
+    expect(() => verify(writeDxfDetailed(geometryEdit).dxfText)).toThrow(
+      reflected ? 'exact reflected native' : 'changed a native layer',
+    );
+  },
+);
 
 it('refuses mirror substitutes, modified rank geometry, missing grain, changed material and multi-instance pieces', async () => {
   const f = await seedCopy(2, true, true),

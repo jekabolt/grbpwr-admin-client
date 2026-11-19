@@ -119,7 +119,12 @@ function writerDisplayHeading(block: RawBlock, displayName: string): RawEntity {
 
 /** Coordinates relative to each block's directed, written grain. A reflection must land exactly
  * on the other block's six-decimal DXF grid. Winding carries the cut/hole distinction. */
-function grainFrame(block: RawBlock, record: ManifestBlock, reflect: boolean) {
+function grainFrame(
+  block: RawBlock,
+  record: ManifestBlock,
+  reflect: boolean,
+  displayHeading?: RawEntity,
+) {
   const { identity } = record;
   const axes = block.entities.filter((e) => e.type === 'LINE' && e.layer === '7');
   requireMatch(axes.length === 1, 'mirror requires one native grain axis per size');
@@ -153,12 +158,14 @@ function grainFrame(block: RawBlock, record: ManifestBlock, reflect: boolean) {
     );
     return e.tags
       .filter((t) => ![10, 20, 11, 21].includes(t.code))
-      .map(({ code, value }) => [
-        code,
-        e.type === 'TEXT' && code === 1 && value === `Piece Name: ${identity}`
-          ? { pieceName: true }
-          : value,
-      ]);
+      .map(({ code, value }) => {
+        if (code === 1) {
+          if (e === displayHeading) return [code, { displayHeading: true }];
+          if (e.type === 'TEXT' && value === `Piece Name: ${identity}`)
+            return [code, { pieceName: true }];
+        }
+        return [code, value];
+      });
   }
   const outer = block.entities.find((e) => e.type === 'POLYLINE' && e.layer === '1');
   requireMatch(
@@ -194,7 +201,7 @@ function grainFrame(block: RawBlock, record: ManifestBlock, reflect: boolean) {
           /^(Piece Name|Size|Quantity|Material|Category|Annotation): /.test(value);
         const foldLabel = e.layer === '15' && /^HALF - CUT [1-9]\d* ON FOLD$/.test(value);
         requireMatch(
-          read(e, 7) === 'STANDARD' && (attribute || foldLabel),
+          read(e, 7) === 'STANDARD' && (attribute || foldLabel || e === displayHeading),
           'unsupported native text mark in mirrored piece',
         );
         // R12 positions these upright labels from the grain midpoint. Geometry marks require their own reflected anchor.
@@ -344,11 +351,13 @@ function inventory(
     const ranks = shapes.get(b.identity) ?? new Map<string, string>();
     requireMatch(!ranks.has(key), 'duplicate native size rank');
     ranks.set(key, nativeBlock(native, b, undefined, !!displayHeading));
-    if (mirror?.id === b.identity) grainRanks.set(key, grainFrame(native, b, mirror.reflect));
-    if (displayHeading?.id === b.identity) {
-      const heading = writerDisplayHeading(native, displayHeading.label);
-      displayHeadingRanks.set(key, nativeBlock(native, b, heading));
-    }
+    const heading =
+      displayHeading?.id === b.identity
+        ? writerDisplayHeading(native, displayHeading.label)
+        : undefined;
+    if (mirror?.id === b.identity)
+      grainRanks.set(key, grainFrame(native, b, mirror.reflect, heading));
+    else if (heading) displayHeadingRanks.set(key, nativeBlock(native, b, heading));
     shapes.set(b.identity, ranks);
   }
   requireMatch(
@@ -372,8 +381,7 @@ export function nativePieceCopyVerifier(
   const mirror = mode === 'mirror-across-grain';
   requireMatch(
     !displayHeadings ||
-      (!mirror &&
-        /^[A-Z][A-Z0-9_]*$/.test(displayHeadings.source) &&
+      (/^[A-Z][A-Z0-9_]*$/.test(displayHeadings.source) &&
         /^[A-Z][A-Z0-9_]*$/.test(displayHeadings.copy) &&
         displayHeadings.source !== displayHeadings.copy),
     'unsupported reviewed display heading',
