@@ -2451,18 +2451,19 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
     selectedOperationNumber: savedProjection.ok ? savedProjection.selectedOperationNumber : 0,
     cardProjection: savedProjection.ok ? savedProjection.projection : null,
   });
+  const { savedDocumentRetired } = savedClothPhysicalHost;
   const arrangementSaveRef = useRef<AbortController | null>(null);
   useEffect(() => {
     return () => {
       arrangementSaveRef.current?.abort();
       arrangementSaveRef.current = null;
     };
-  }, [physicalRow]);
+  }, [physicalRow, savedDocumentRetired]);
   const saveMannequinArrangement = useCallback<
     NonNullable<CadWorkbenchPhysicalHostV1['onSaveMannequinArrangement']>
   >(
     async (input, signal) => {
-      if (frozen || !savedProjection.ok)
+      if (frozen || savedDocumentRetired || !savedProjection.ok)
         throw new Error('Save the Assembly Order before saving placement.');
       const row = savedProjection.row;
       if (input.scopeKey !== row.scopeKey)
@@ -2505,7 +2506,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
         if (arrangementSaveRef.current === controller) arrangementSaveRef.current = null;
       }
     },
-    [frozen, savedProjection, savedClothPhysicalHost.retry],
+    [frozen, savedDocumentRetired, savedProjection, savedClothPhysicalHost.retry],
   );
   const [crossMaterialReview, setCrossMaterialReview] =
     useState<SavedCrossMaterialReviewForPreviewV8 | null>(null);
@@ -2593,20 +2594,25 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
         ? acceptedCloth
         : savedPressOpen && pressOpenCloth?.isCurrent()
           ? pressOpenCloth
-          : registeredCutCloth?.isCurrent()
+          : !savedDocumentRetired && registeredCutCloth?.isCurrent()
             ? registeredCutCloth
             : undefined,
     savedReviewSize: activeCrossMaterialReview?.patternSize,
     panel: pressOpenControls ?? crossMaterialPreviewControls,
     arrangementSourceKey: JSON.stringify([
-      physicalRow,
+      savedDocumentRetired ? null : physicalRow,
       savedProjection.ok ? savedProjection.selectedOperationNumber : null,
       savedCrossMaterialModelId === undefined ? null : activeCrossMaterialReview?.sha256,
     ]),
     onReadSavedMannequinModelId: readActiveMannequinModelId,
-    onSaveMannequinArrangement: saveMannequinArrangement,
+    onSaveMannequinArrangement: savedDocumentRetired ? undefined : saveMannequinArrangement,
     onReadMannequinArrangement: async (input, signal) => {
-      if (!savedProjection.ok || input.scopeKey !== savedProjection.row.scopeKey) return null;
+      if (
+        savedDocumentRetired ||
+        !savedProjection.ok ||
+        input.scopeKey !== savedProjection.row.scopeKey
+      )
+        return null;
       return readSavedCadMannequinArrangementV1(
         {
           row: savedProjection.row,

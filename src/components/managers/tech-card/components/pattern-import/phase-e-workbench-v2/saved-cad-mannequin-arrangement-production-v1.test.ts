@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { adminService } from 'api/api';
+import type { common_TechCardInsert } from 'api/proto-http/admin';
+import { updateTechCardDocument } from 'components/managers/tech-cards/components/useTechCardQuery';
 
 const mocks = vi.hoisted(() => ({
   read: vi.fn(),
@@ -470,6 +473,62 @@ describe('saved arrangement hydration', () => {
     expect(mocks.read).toHaveBeenCalledTimes(1);
     expect(mocks.decodeV6).not.toHaveBeenCalled();
   });
+  it('rejects old V7 transforms and model hint when decoding crosses a guarded save acknowledgement', async () => {
+    const staleRow = { ...row, techCardId: 50158 };
+    const freshRow = { ...staleRow, cardLockVersion: 8, revision: 4, sha256: 'b'.repeat(64) };
+    const expected = hydration(staleRow).expected;
+    const oldInput = { row: staleRow, seedOperationNumber: 30, expected };
+    const started = Promise.withResolvers<void>();
+    const decoded = Promise.withResolvers<object>();
+    const oldDocument = await mocks.decodeV7(snapshot(7).outer.bytes);
+    mocks.decodeV7.mockClear().mockImplementation(() => {
+      if (mocks.decodeV7.mock.calls.length === 2) started.resolve();
+      return decoded.promise;
+    });
+    mocks.read.mockResolvedValue(snapshot(7));
+    const update = vi.spyOn(adminService, 'UpdateTechCard').mockResolvedValue({ lockVersion: 8 });
+    const controller = new AbortController();
+    try {
+      const arrangement = readSavedCadMannequinArrangementV1(oldInput, controller.signal);
+      const model = readSavedCadMannequinModelIdV1(oldInput, controller.signal);
+      await started.promise;
+      await updateTechCardDocument({
+        id: staleRow.techCardId,
+        expectedLockVersion: staleRow.cardLockVersion,
+        guardedAssemblyPatternUpdate: {
+          expectedServerAssemblyRevision: 'asm:v1:00000000000000000000000000000000:7',
+          techCard: {
+            patterns: [{ lineKey: freshRow.patternLineKey, sha256: freshRow.sha256 }],
+          } as unknown as common_TechCardInsert,
+        },
+        techCard: undefined,
+        snapshotReason: undefined,
+        saveSessionId: undefined,
+        guardedPieceJoin: undefined,
+        guardedPieceRename: undefined,
+      });
+      expect(controller.signal.aborted).toBe(false);
+      decoded.resolve(oldDocument);
+      await expect(arrangement).resolves.toBeNull();
+      await expect(model).resolves.toBeNull();
+      await expect(readSavedCadMannequinModelIdV1(oldInput, controller.signal)).resolves.toBeNull();
+      expect(mocks.read).toHaveBeenCalledTimes(2);
+      expect(mocks.dispose).toHaveBeenCalledTimes(2);
+      expect(mocks.saveV7).not.toHaveBeenCalled();
+
+      hydration(freshRow);
+      const freshInput = { ...oldInput, row: freshRow };
+      await expect(
+        readSavedCadMannequinArrangementV1(freshInput, controller.signal),
+      ).resolves.toEqual([
+        expect.objectContaining({ transform: { offsetM: [0.1, 0, 0], rotationRad: 0.4 } }),
+      ]);
+      await expect(readSavedCadMannequinModelIdV1(freshInput, controller.signal)).resolves.toBe(42);
+    } finally {
+      update.mockRestore();
+    }
+  });
+
   it('does not hydrate a different pose or piece set', async () => {
     const input = hydration();
     mocks.read.mockResolvedValue(snapshot(6));

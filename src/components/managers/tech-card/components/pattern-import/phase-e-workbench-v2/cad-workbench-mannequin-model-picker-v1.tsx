@@ -655,14 +655,16 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
   };
   const arrangementEdits = useRef(0);
   const arrangementSaveController = useRef<AbortController | null>(null);
-  useEffect(() => {
-    arrangementSaveController.current?.abort();
-    const controller = new AbortController();
-    const current = arrangementCurrent.current;
-    const edits = arrangementEdits.current;
+  useLayoutEffect(() => {
     publishTransforms({});
     setArrangementMessage(null);
     setArrangementSaving(false);
+    return () => arrangementSaveController.current?.abort();
+  }, [arrangementKey, publishTransforms]);
+  useEffect(() => {
+    const controller = new AbortController();
+    const current = arrangementCurrent.current;
+    const edits = arrangementEdits.current;
     if (current.expected && current.read) {
       void current
         .read(current.expected, controller.signal)
@@ -685,10 +687,7 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
             );
         });
     }
-    return () => {
-      controller.abort();
-      arrangementSaveController.current?.abort();
-    };
+    return () => controller.abort();
   }, [arrangementKey, publishTransforms]);
   const saveArrangement = async () => {
     const source = arrangementSource;

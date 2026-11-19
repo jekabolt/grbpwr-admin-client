@@ -31,6 +31,10 @@ import {
   readSavedFullAssemblyPhysicalSnapshotV1,
   SavedFullAssemblyPhysicalSnapshotErrorV1,
 } from './saved-full-assembly-physical-snapshot-production-v1';
+import {
+  isExactNSeamDocumentLockCurrent,
+  subscribeExactNSeamDocumentRetirement,
+} from './exact-n-seam-production-session-store-v2';
 import { prepareSavedFullAssemblyGenericNativeHandoffV1 } from './saved-full-assembly-generic-native-handoff-v1';
 import {
   buildSavedFullAssemblyGenericFirstCompileRequestV1,
@@ -170,23 +174,33 @@ export async function restoreSavedClothPhysicalHostV1(
   }>,
   signal: AbortSignal,
 ): Promise<SavedClothDurableHostV1> {
+  const { row } = input;
+  const assertCurrent = () => {
+    signal.throwIfAborted();
+    if (!isExactNSeamDocumentLockCurrent(row.techCardId, row.cardLockVersion))
+      throw new DOMException('The previous saved cloth source was retired.', 'AbortError');
+  };
   let receipt: Awaited<ReturnType<typeof readSavedFullAssemblyPhysicalSnapshotV1>> | null = null;
   let durable: SavedClothDurableHostV1 | null = null;
   try {
+    assertCurrent();
     receipt = await readSavedFullAssemblyPhysicalSnapshotV1(
-      { row: input.row, seedOperationNumber: input.selectedOperationNumber },
+      { row, seedOperationNumber: input.selectedOperationNumber },
       signal,
     );
+    assertCurrent();
     const handoff = await prepareSavedFullAssemblyGenericNativeHandoffV1(
       receipt,
       input.cardProjection,
       signal,
     );
+    assertCurrent();
     durable = createSavedGenericDurablePhysicalHostV1({
-      row: input.row,
+      row,
       bodySession: input.bodySession,
     });
     const restored = await durable.restore({ verifiedReceipt: receipt, ...handoff }, signal);
+    assertCurrent();
     if (!restored.ok) throw new Error(restored.detail);
     return durable;
   } catch (error) {
@@ -260,8 +274,29 @@ export function useSavedClothPhysicalHostV1({
   const url = row?.url ?? null;
   const sizeBytes = row?.sizeBytes ?? null;
   const sha256 = row?.sha256 ?? null;
+  const subscribeDocumentRetirement = useCallback(
+    (listener: () => void) =>
+      techCardId === null
+        ? noopSubscribe()
+        : subscribeExactNSeamDocumentRetirement(techCardId, listener),
+    [techCardId],
+  );
+  const readDocumentRetirement = useCallback(
+    () =>
+      techCardId !== null &&
+      cardLockVersion !== null &&
+      !isExactNSeamDocumentLockCurrent(techCardId, cardLockVersion),
+    [techCardId, cardLockVersion],
+  );
+  // The accepted write advances this floor before the card query can return its new row.
+  const savedDocumentRetired = useSyncExternalStore(
+    subscribeDocumentRetirement,
+    readDocumentRetirement,
+    readDocumentRetirement,
+  );
   const savedRow = useMemo<DxfProductSavedRowIdentityV1 | null>(() => {
     if (
+      savedDocumentRetired ||
       techCardId === null ||
       scopeKey === null ||
       patternLineKey === null ||
@@ -282,7 +317,17 @@ export function useSavedClothPhysicalHostV1({
       sizeBytes,
       sha256,
     });
-  }, [techCardId, scopeKey, patternLineKey, revision, cardLockVersion, url, sizeBytes, sha256]);
+  }, [
+    savedDocumentRetired,
+    techCardId,
+    scopeKey,
+    patternLineKey,
+    revision,
+    cardLockVersion,
+    url,
+    sizeBytes,
+    sha256,
+  ]);
   const [retryGeneration, setRetryGeneration] = useState(0);
   const sourceKey =
     savedRow && cardProjection && selectedOperationNumber > 0
@@ -345,6 +390,9 @@ export function useSavedClothPhysicalHostV1({
     }
     const controller = new AbortController();
     let durable: SavedClothDurableHostV1 | null = null;
+    const isCurrent = () =>
+      !controller.signal.aborted &&
+      isExactNSeamDocumentLockCurrent(savedRow.techCardId, savedRow.cardLockVersion);
     const base = { key: sourceKey, bodySession, cardProjection };
     setMounted({ ...base, host: null, status: 'loading', error: null });
     void (async () => {
@@ -358,14 +406,17 @@ export function useSavedClothPhysicalHostV1({
           },
           controller.signal,
         );
-        if (controller.signal.aborted) void durable.dispose();
-        else {
-          const initialBinding = durable.getSnapshot().binding;
-          if (!initialBinding) throw new Error('The restored V7 is no longer current.');
-          setMounted({ ...base, host: durable, initialBinding, status: 'ready', error: null });
+        if (!isCurrent()) {
+          const retired = durable;
+          durable = null;
+          void retired.dispose();
+          return;
         }
+        const initialBinding = durable.getSnapshot().binding;
+        if (!initialBinding) throw new Error('The restored V7 is no longer current.');
+        setMounted({ ...base, host: durable, initialBinding, status: 'ready', error: null });
       } catch (error) {
-        if (!controller.signal.aborted) {
+        if (isCurrent()) {
           const status = classifySavedClothPhysicalRestoreErrorV1(error);
           setMounted({ ...base, host: null, status, error: detail(error) });
         }
@@ -453,6 +504,7 @@ export function useSavedClothPhysicalHostV1({
       const numeric = host.getSnapshot();
       return (
         !controller.signal.aborted &&
+        isExactNSeamDocumentLockCurrent(savedRow.techCardId, savedRow.cardLockVersion) &&
         context.sourceKey === sourceKey &&
         context.cardProjection === cardProjection &&
         context.bodySession === bodySession &&
@@ -852,6 +904,7 @@ export function useSavedClothPhysicalHostV1({
     onDisplayedBodyInputV1,
     host,
     durableSnapshot,
+    savedDocumentRetired,
     sourceStatus,
     sourceError:
       sourceStatus === 'awaiting-mannequin'

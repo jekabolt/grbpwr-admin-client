@@ -1,5 +1,6 @@
 import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 import type { CadWorkbenchMannequinArrangementSaveV1 } from './cad-workbench-physical-host-v1';
+import { isExactNSeamDocumentLockCurrent } from './exact-n-seam-production-session-store-v2';
 import {
   buildPatternImportDxfProductCompositeSidecarV7,
   decodePatternImportDxfProductCompositeSidecarV7,
@@ -86,18 +87,27 @@ function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
   );
 }
 
+function isSavedArrangementCurrent(row: DxfProductSavedRowIdentityV1, signal: AbortSignal) {
+  return !signal.aborted && isExactNSeamDocumentLockCurrent(row.techCardId, row.cardLockVersion);
+}
+
 async function readCurrentArrangement(
   request: SavedCadMannequinArrangementReadRequestV1,
   signal: AbortSignal,
 ) {
-  if (signal.aborted) return null;
   const row = { ...request.row };
+  if (!isSavedArrangementCurrent(row, signal)) return null;
   const snapshot = await readCurrent(
     { row, seedOperationNumber: request.seedOperationNumber },
     signal,
   );
   const outer = snapshot.outer;
-  if (signal.aborted || outer.status !== 'present' || !outer.currentRowBound) return null;
+  if (
+    !isSavedArrangementCurrent(row, signal) ||
+    outer.status !== 'present' ||
+    !outer.currentRowBound
+  )
+    return null;
   let decoded;
   if (outer.mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7) {
     const v7 = await decodePatternImportDxfProductCompositeSidecarV7(outer.bytes);
@@ -113,7 +123,7 @@ async function readCurrentArrangement(
   const savedRow = document.bindings.row;
   // V6 decoding has already bound the arrangement to this envelope's exact row.
   if (
-    signal.aborted ||
+    !isSavedArrangementCurrent(row, signal) ||
     document.bindings.serverAssemblyRevision !== snapshot.serverAssemblyRevision ||
     savedRow.techCardId !== row.techCardId ||
     savedRow.cardLockVersion !== row.cardLockVersion ||
@@ -134,7 +144,9 @@ export async function readSavedCadMannequinModelIdV1(
   signal: AbortSignal,
 ): Promise<number | null> {
   const arrangement = await readCurrentArrangement(request, signal);
-  return signal.aborted ? null : arrangement?.bindings.mannequin.baseModelId ?? null;
+  return isSavedArrangementCurrent(request.row, signal)
+    ? arrangement?.bindings.mannequin.baseModelId ?? null
+    : null;
 }
 
 /** Read-only hydration. A different source, model or pose never receives stale transforms. */
@@ -144,7 +156,7 @@ export async function readSavedCadMannequinArrangementV1(
   signal: AbortSignal,
 ) {
   const arrangement = await readCurrentArrangement(request, signal);
-  if (!arrangement || signal.aborted) return null;
+  if (!arrangement || !isSavedArrangementCurrent(request.row, signal)) return null;
   const { bindings } = arrangement;
   const { expected } = request;
   if (
@@ -198,6 +210,12 @@ export async function saveSavedCadMannequinArrangementV1(
         }
       : undefined,
   };
+  const assertCurrent = () => {
+    signal.throwIfAborted();
+    if (!isExactNSeamDocumentLockCurrent(request.row.techCardId, request.row.cardLockVersion))
+      throw new DOMException('The previous saved arrangement source was retired.', 'AbortError');
+  };
+  assertCurrent();
   const { bindings } = arrangement;
   if (
     bindings.card.techCardId !== request.row.techCardId ||
@@ -239,6 +257,7 @@ export async function saveSavedCadMannequinArrangementV1(
       topologyAnnotationsBytes: annotations.bytes,
     });
     if (!next.ok) throw new Error(next.blockers[0].detail);
+    assertCurrent();
     const saved =
       await createPatternImportDxfProductCompositeSidecarProductionPersistenceV5().adapter.persist(
         {
@@ -312,6 +331,7 @@ export async function saveSavedCadMannequinArrangementV1(
     });
     if (!nextV7.ok) throw new Error(nextV7.blockers[0].detail);
     const anchor = requireSavedCompositeSidecarTransportAnchorV7(currentV7, snapshot);
+    assertCurrent();
     const saved =
       await createPatternImportDxfProductCompositeSidecarProductionArrangementStorageAdapterV7().persist(
         {
@@ -363,9 +383,11 @@ export async function saveSavedCadMannequinArrangementV1(
       throw new Error(
         'Fresh Composite V7 readback differs from the saved presentation arrangement.',
       );
+    assertCurrent();
     return saved;
   }
   const { source, scope, mannequin } = arrangement.bindings;
+  assertCurrent();
   const saved = await createPatternImportDxfProductCompositeSidecarProductionPersistenceV6().save(
     {
       schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_REQUEST_V6,
@@ -384,5 +406,6 @@ export async function saveSavedCadMannequinArrangementV1(
     signal,
   );
   if (!saved.ok) throw new Error(saved.blockers[0].detail);
+  assertCurrent();
   return saved;
 }

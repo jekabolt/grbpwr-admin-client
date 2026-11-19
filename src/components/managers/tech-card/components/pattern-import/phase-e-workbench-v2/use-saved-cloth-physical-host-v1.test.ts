@@ -1,6 +1,9 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
+import { adminService } from 'api/api';
+import type { common_TechCardInsert } from 'api/proto-http/admin';
+import { updateTechCardDocument } from 'components/managers/tech-cards/components/useTechCardQuery';
 import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 
 const mocks = vi.hoisted(() => ({
@@ -258,6 +261,78 @@ function reactContainer() {
     ...listeners,
   };
 }
+
+it.each(['already ready', 'still restoring'] as const)(
+  'retires a V7 that is %s on guarded save success before the card GET moves',
+  async (status) => {
+    const staleRow = { ...row, techCardId: status === 'already ready' ? 50156 : 50157 };
+    const freshRow = { ...staleRow, cardLockVersion: 9, revision: 5, sha256: 'b'.repeat(64) };
+    const staleCard = { ...cardProjection, card: { techCardId: staleRow.techCardId } };
+    const freshCard = { ...staleCard, cardLockVersion: freshRow.cardLockVersion };
+    const staleRestore = Promise.withResolvers<{ ok: true; binding: object }>();
+    const stale = {
+      restore: vi.fn((_request: unknown, _signal: AbortSignal) =>
+        status === 'still restoring' ? staleRestore.promise : Promise.resolve({ ok: true }),
+      ),
+      dispose: vi.fn().mockResolvedValue(true),
+      getSnapshot: () => ready,
+      subscribe: () => () => undefined,
+    };
+    const fresh = { ...stale, restore: mocks.restore, dispose: vi.fn().mockResolvedValue(true) };
+    const ready = { status: 'ready', binding: {}, numeric: { cleanupPending: false } };
+    mocks.createHost.mockReset().mockReturnValueOnce(stale).mockReturnValueOnce(fresh);
+    const update = vi.spyOn(adminService, 'UpdateTechCard').mockResolvedValue({ lockVersion: 9 });
+    const root = createRoot(reactContainer() as never);
+    let latest: ReturnType<typeof useSavedClothPhysicalHostV1>;
+    function Harness({ current = false }: { current?: boolean }) {
+      latest = useSavedClothPhysicalHostV1({
+        row: current ? freshRow : staleRow,
+        selectedOperationNumber: 10,
+        cardProjection: (current ? freshCard : staleCard) as never,
+      });
+      return null;
+    }
+    try {
+      await act(async () => root.render(createElement(Harness, {})));
+      expect(stale.restore).toHaveBeenCalledOnce();
+      expect(latest!.sourceStatus).toBe(status === 'already ready' ? 'ready' : 'loading');
+      await act(async () => {
+        await updateTechCardDocument({
+          id: staleRow.techCardId,
+          expectedLockVersion: staleRow.cardLockVersion,
+          guardedAssemblyPatternUpdate: {
+            expectedServerAssemblyRevision: 'asm:v1:00000000000000000000000000000000:7',
+            techCard: {
+              patterns: [{ lineKey: freshRow.patternLineKey, sha256: freshRow.sha256 }],
+            } as unknown as common_TechCardInsert,
+          },
+          techCard: undefined,
+          snapshotReason: undefined,
+          saveSessionId: undefined,
+          guardedPieceJoin: undefined,
+          guardedPieceRename: undefined,
+        });
+      });
+      // The saved card query is still held at the old row. Returning from restore cannot resurrect it.
+      await act(async () => staleRestore.resolve({ ok: true, binding: {} }));
+      expect(latest!.host).toBeNull();
+      expect(latest!.savedDocumentRetired).toBe(true);
+      expect(latest!.canEditSavedPlacement).toBe(false);
+      expect(stale.restore.mock.calls[0][1].aborted).toBe(true);
+      expect(stale.dispose).toHaveBeenCalledOnce();
+      expect(mocks.createHost).toHaveBeenCalledOnce();
+
+      await act(async () => root.render(createElement(Harness, { current: true })));
+      expect(latest!.savedDocumentRetired).toBe(false);
+      expect(latest!.host).toBe(fresh);
+      expect(latest!.sourceStatus).toBe('ready');
+      expect(mocks.createHost).toHaveBeenCalledTimes(2);
+    } finally {
+      update.mockRestore();
+      await act(async () => root.unmount());
+    }
+  },
+);
 
 it('edits only a current idle or failed V7 and reloads after one explicit save', async () => {
   const root = createRoot(reactContainer() as never);
