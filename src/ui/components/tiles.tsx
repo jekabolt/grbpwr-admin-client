@@ -44,6 +44,7 @@ export function Tile({
   title,
   className,
   children,
+  lowercase,
 }: {
   media?: React.ReactNode;
   name?: React.ReactNode;
@@ -68,6 +69,11 @@ export function Tile({
   title?: string;
   className?: string;
   children?: React.ReactNode;
+  /**
+   * The quiet caption: the name as written (lowercase), body size, regular weight, 6px under the
+   * media. Absent — the bold uppercase micro caption as before.
+   */
+  lowercase?: boolean;
 }) {
   const Component = onClick ? 'button' : 'div';
   return (
@@ -112,11 +118,14 @@ export function Tile({
       )}
     >
       {media}
-      {name && (
-        <Text size='micro' className='mt-1 truncate font-bold uppercase'>
-          {name}
-        </Text>
-      )}
+      {name &&
+        (lowercase ? (
+          <Text className='mt-1.5 truncate'>{name}</Text>
+        ) : (
+          <Text size='micro' className='mt-1 truncate font-bold uppercase'>
+            {name}
+          </Text>
+        ))}
       {sub && (
         <Text size='micro' variant='label' className='truncate'>
           {sub}
