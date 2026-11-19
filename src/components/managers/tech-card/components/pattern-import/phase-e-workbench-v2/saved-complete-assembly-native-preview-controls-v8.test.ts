@@ -5,6 +5,7 @@ import type { XpbdDeviceLease } from 'lib/cloth/runtime/webgpu/xpbd-device-sessi
 import type { MeasurementSurfaceAcceptedClothV1 } from 'components/shared/measurement-watertight-surface-v1-stage';
 import type { SourceCutPrincipalStrainV1 } from 'lib/cloth/runtime/cpu/source-cut-principal-strain-v1';
 import { resolveCadTableSavedReviewSizeV1 } from './cad-table-zero-operation-production-mount-v1';
+import { PatternImportDxfPhaseECadWorkbenchSplitShellV1 } from './cad-workbench-split-shell-v1';
 import type { CadWorkbenchBoundedClothPreviewHostV1 } from './cad-workbench-preview-lifecycle-v1';
 import SavedCompleteAssemblyNativePreviewControlsV8 from './saved-complete-assembly-native-preview-controls-v8';
 import type { SavedWholeAssemblyPreviewProgressV1 } from './saved-whole-assembly-staged-preview-v1';
@@ -423,7 +424,15 @@ it('keeps the displayed frame and tape point owner through backside toggles, the
   }
 });
 
-it('resumes on a fresh lease and permanently retires the accepted source when Pattern set size is changed and restored', async () => {
+const sourceRevisionChanges = [
+  'Pattern set size',
+  'saved Assembly Order review',
+  'saved pattern row',
+  'saved placement digest',
+  'rejected fresh Complete source revision',
+] as const;
+
+async function replayWithSourceRevisionChange(change: (typeof sourceRevisionChanges)[number]) {
   const { createCadWorkbenchPreviewLifecycleV1 } = await vi.importActual<
     typeof import('./cad-workbench-preview-lifecycle-v1')
   >('./cad-workbench-preview-lifecycle-v1');
@@ -444,10 +453,12 @@ it('resumes on a fresh lease and permanently retires the accepted source when Pa
   }
   const firstDevice = device();
   const nextDevice = device();
+  const verificationDevice = device();
   const openDevice = vi
     .fn<() => Promise<ReturnType<typeof device>>>()
     .mockResolvedValueOnce(firstDevice)
-    .mockResolvedValueOnce(nextDevice);
+    .mockResolvedValueOnce(nextDevice)
+    .mockResolvedValueOnce(verificationDevice);
   mocks.createLifecycle.mockReturnValueOnce(createCadWorkbenchPreviewLifecycleV1(openDevice));
 
   type Props = ComponentProps<typeof SavedCompleteAssemblyNativePreviewControlsV8>;
@@ -508,6 +519,10 @@ it('resumes on a fresh lease and permanently retires the accepted source when Pa
   const releaseFirstPause = Promise.withResolvers<void>();
   const releaseNextPause = Promise.withResolvers<void>();
   const strain = Promise.withResolvers<SourceCutPrincipalStrainV1 | null>();
+  const lines = Promise.withResolvers<{ count: number; segmentsM: Float32Array }>();
+  const readNativeInternalLines = vi.fn<
+    SavedWholeAssemblyPreviewProgressV1['readNativeInternalLines']
+  >(() => lines.promise);
   const readStrain = vi.fn<(signal: AbortSignal) => Promise<SourceCutPrincipalStrainV1 | null>>(
     () => strain.promise,
   );
@@ -528,6 +543,8 @@ it('resumes on a fresh lease and permanently retires the accepted source when Pa
         ...progress,
         cloth: { ...progress.cloth, positionsM },
         readPrincipalStrain: readStrain,
+        nativeInternalLineCount: 1,
+        readNativeInternalLines,
       };
       onAccepted(exact);
       await pauseBoundary;
@@ -539,24 +556,80 @@ it('resumes on a fresh lease and permanently retires the accepted source when Pa
     .mockImplementationOnce(replay(pausedOne, f1, releaseFirstPause.promise))
     .mockImplementationOnce(replay(pausedNext, f29, releaseNextPause.promise));
 
-  const selectSize = (sizeId: number) => {
-    const choice = { sizeId, review: patternSize };
-    const { matchesReview } = resolveCadTableSavedReviewSizeV1([m, l], choice, patternSize);
+  const render = (
+    sizeId = m.sizeId,
+    displayedReview: Props['review'] | null = review,
+    pieceId = 'FLAP_L',
+  ) => {
+    const reviewed = displayedReview?.patternSize ?? null;
+    const { matchesReview } = resolveCadTableSavedReviewSizeV1(
+      [m, l],
+      { sizeId, review: reviewed },
+      reviewed,
+    );
     return act(async () =>
       page.root.render(
-        createElement(SavedCompleteAssemblyNativePreviewControlsV8, {
-          review,
-          body,
-          disabled: !matchesReview,
-          onAcceptedCloth,
+        createElement(PatternImportDxfPhaseECadWorkbenchSplitShellV1, {
+          desktop: createElement('div'),
+          operationsPanel: null,
+          selection: { operationNumber: patternSize.operationNumber, pieceId },
+          mannequin:
+            displayedReview &&
+            createElement(SavedCompleteAssemblyNativePreviewControlsV8, {
+              // The ordinary route remounts if its current verified review SHA changes.
+              key: displayedReview.sha256,
+              review: displayedReview,
+              body,
+              disabled: !matchesReview,
+              onAcceptedCloth,
+            }),
         }),
       ),
     );
   };
+
+  function replaceSource() {
+    switch (change) {
+      case 'Pattern set size':
+        return render(l.sizeId);
+      case 'saved Assembly Order review':
+        // After an accepted AO change, the entry no longer supplies a review from the old lock.
+        return render(m.sizeId, null);
+      case 'saved pattern row': {
+        const row = { ...patternSize.row, revision: patternSize.row.revision + 1 };
+        return render(m.sizeId, { ...review, patternSize: { ...patternSize, row } });
+      }
+      case 'saved placement digest':
+        // Real Card11 V10 from 4192/64197 with its ordinary saved and cold read receipt.
+        return render(m.sizeId, {
+          ...review,
+          sha256: '1cfe6c7fb00d58fd0e883c350cf07ac4cd7cd7b6608ee3801ded4e9038dd1bad',
+        });
+      case 'rejected fresh Complete source revision': {
+        const verify = vi.mocked(review.verify);
+        verify.mockRejectedValueOnce(
+          new Error('The current complete saved Assembly source is unavailable.'),
+        );
+        mocks.run.mockImplementationOnce(
+          async (request: Parameters<Run>[0], active: AbortSignal) => {
+            const captured = {
+              cardId: review.cardId,
+              cardLockVersion: review.lockVersion,
+              savedCarrier: { sidecarSha256: review.sha256 },
+            } as Parameters<Parameters<Run>[0]['verifySource']>[0];
+            // Resume in the real staged runner also re-verifies the captured source.
+            await request.verifySource(captured, active);
+            return frame(30, request.isCurrent).progress;
+          },
+        );
+        return act(async () => page.click('Resume full layout'));
+      }
+    }
+  }
   const frameStatus = () => page.element('data-whole-assembly-frame');
 
   try {
-    await selectSize(m.sizeId);
+    await render();
     await act(async () => page.click('Preview full layout'));
     const first = accepted;
     const retainedStatus = frameStatus();
@@ -574,7 +647,10 @@ it('resumes on a fresh lease and permanently retires the accepted source when Pa
     expect(runSignal.aborted).toBe(false);
     expect(first?.isCurrent()).toBe(true);
 
-    await selectSize(m.sizeId);
+    await act(async () => page.click('cm'));
+    expect(page.button('cm')?.attrs.get('aria-pressed')).toBe('true');
+    await render(m.sizeId, review, 'PCK_L');
+    expect(page.element('data-selected-piece')?.attrs.get('data-selected-piece')).toBe('PCK_L');
     expect(accepted).toBe(first);
     expect(frameStatus()).toBe(retainedStatus);
     expect(page.text()).toContain('Resume full layout');
@@ -596,26 +672,31 @@ it('resumes on a fresh lease and permanently retires the accepted source when Pa
     expect(nextDevice.dispose).toHaveBeenCalledOnce();
     expect(resumed?.isCurrent()).toBe(true);
     await act(async () => page.click('Principal strain'));
+    await act(async () => page.click('Show internal stitch lines'));
     const [[strainSignal]] = readStrain.mock.calls;
-    expect(strainSignal.aborted).toBe(false);
+    const [[lineSignal]] = readNativeInternalLines.mock.calls;
+    expect(strainSignal.aborted || lineSignal.aborted).toBe(false);
 
-    await selectSize(l.sizeId);
+    await replaceSource();
     expect(body.isCurrent()).toBe(true);
     expect(runSignal.aborted).toBe(true);
     expect(resumed?.isCurrent()).toBe(false);
-    expect(strainSignal.aborted).toBe(true);
+    expect(strainSignal.aborted && lineSignal.aborted).toBe(true);
     expect(accepted).toBeUndefined();
     expect(frameStatus()).toBeUndefined();
     expect(page.text()).not.toContain('Resume full layout');
-    expect(page.button('Step one frame')?.attrs.get('disabled')).toBe('');
+    if (change === 'Pattern set size') {
+      expect(page.button('Step one frame')?.attrs.get('disabled')).toBe('');
+    }
 
-    await selectSize(m.sizeId);
-    await act(async () =>
+    await render();
+    await act(async () => {
       strain.resolve({
         valuesInDrawOrder: Float32Array.of(0.1),
         summary: { minimum: 0.1, maximum: 0.1, triangleCount: 1, carrierFaceCount: 1 },
-      }),
-    );
+      });
+      lines.resolve({ count: 1, segmentsM: Float32Array.of(0, 0, 0, 0, 1, 0) });
+    });
     expect(accepted).toBeUndefined();
     expect(frameStatus()).toBeUndefined();
     expect(page.element('data-whole-assembly-strain-frame')).toBeUndefined();
@@ -623,9 +704,15 @@ it('resumes on a fresh lease and permanently retires the accepted source when Pa
     expect(page.text()).not.toContain('Resume full layout');
     expect(first?.isCurrent()).toBe(false);
     expect(resumed?.isCurrent()).toBe(false);
-    expect(openDevice).toHaveBeenCalledTimes(2);
-    expect(mocks.run).toHaveBeenCalledTimes(2);
-    for (const current of [firstDevice, nextDevice]) {
+    const verifiedAgain = change === 'rejected fresh Complete source revision';
+    expect(review.verify).toHaveBeenCalledTimes(verifiedAgain ? 1 : 0);
+    expect(openDevice).toHaveBeenCalledTimes(verifiedAgain ? 3 : 2);
+    expect(mocks.run).toHaveBeenCalledTimes(verifiedAgain ? 3 : 2);
+    for (const current of [
+      firstDevice,
+      nextDevice,
+      ...(verifiedAgain ? [verificationDevice] : []),
+    ]) {
       expect(current.release).toHaveBeenCalledOnce();
       expect(current.dispose).toHaveBeenCalledOnce();
     }
@@ -633,6 +720,12 @@ it('resumes on a fresh lease and permanently retires the accepted source when Pa
     releaseFirstPause.resolve();
     releaseNextPause.resolve();
     strain.resolve(null);
+    lines.resolve({ count: 0, segmentsM: new Float32Array() });
     await act(async () => page.root.unmount());
   }
-});
+}
+
+it.each(sourceRevisionChanges)(
+  'resumes on a fresh lease and retires the accepted f29 after a %s change',
+  replayWithSourceRevisionChange,
+);
