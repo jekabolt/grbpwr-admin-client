@@ -151,7 +151,7 @@ describe('V1 selected durable physical source handoff', () => {
     expect(create(true, null)).toBeNull();
   });
 
-  it('forwards the same borrowed host to V2 and the beta nested zero-operation fallback', () => {
+  it('forwards the borrowed host only to routes with physical authority', () => {
     const host = variable('physicalHost');
     expect(ts.isObjectLiteralExpression(host)).toBe(true);
     if (!ts.isObjectLiteralExpression(host)) throw new Error('Expected shared host input.');
@@ -191,7 +191,11 @@ describe('V1 selected durable physical source handoff', () => {
     ]) {
       const routes = elements(name);
       expect(routes).toHaveLength(1);
-      expect(attribute(routes[0], 'physicalHost')).toBe('physicalHost');
+      expect(attribute(routes[0], 'physicalHost')).toBe(
+        name === 'PatternImportDxfPhaseECadTableZeroOperationProductionMountV1'
+          ? 'exactSavedCompoundOperation ? undefined : physicalHost'
+          : 'physicalHost',
+      );
     }
     expect(variable('physicalHost').pos).toBeLessThan(
       elements('PatternImportDxfPhaseECadTableZeroOperationProductionMountV1')[0].pos,

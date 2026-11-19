@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
+  isPatternImportDxfPhaseEExactSavedCompoundOperationV1,
   isPatternImportDxfPhaseEExactSavedEmptyOperationV1,
   isPatternImportDxfPhaseEExactSavedStaleOperationV1,
   resolvePatternImportDxfPhaseEWorkbenchRequestedV1,
@@ -178,6 +179,47 @@ describe('saved Assembly Order workbench routing', () => {
       savedOrderedSeamKeys: null,
       exactSavedEmptyOperation: false,
       exactSavedStaleOperation: true,
+    };
+    expect(shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1(fallback)).toBe(true);
+    expect(
+      shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
+        ...fallback,
+        exactNSessionAvailable: true,
+      }),
+    ).toBe(false);
+  });
+
+  it('opens the saved 2D workbench for current compound seams without admitting a physical owner', () => {
+    const confirmed = { status: 'TECH_CARD_SEAM_STATUS_CONFIRMED', stale: false };
+    const seamKeys = ['seam-a', 'seam-b'];
+    const savedSeams = [
+      { ...confirmed, seamKey: 'seam-a', kind: 'TECH_CARD_SEAM_KIND_PARTIAL' },
+      { ...confirmed, seamKey: 'seam-b', kind: 'TECH_CARD_SEAM_KIND_COMPOSITE' },
+    ];
+    const input = {
+      liveOperationNumber: 10,
+      liveSeamKeys: seamKeys,
+      savedOperations: [{ operationNumber: 10, seamKeys }],
+      savedSeams,
+    };
+    expect(isPatternImportDxfPhaseEExactSavedCompoundOperationV1(input)).toBe(true);
+    for (const overrides of [
+      { liveSeamKeys: [...seamKeys].reverse() },
+      { savedSeams: [...savedSeams, savedSeams[1]!] },
+      { savedSeams: [savedSeams[0]!, { ...savedSeams[1]!, stale: true }] },
+    ]) {
+      expect(
+        isPatternImportDxfPhaseEExactSavedCompoundOperationV1({ ...input, ...overrides }),
+      ).toBe(false);
+    }
+    const fallback = {
+      workbenchOpen: true,
+      exactNSessionAvailable: false,
+      savedProjectionBlockerCode: 'saved-seam-not-exact',
+      selectedSeamKeys: seamKeys,
+      savedOrderedSeamKeys: null,
+      exactSavedEmptyOperation: false,
+      exactSavedCompoundOperation: true,
     };
     expect(shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1(fallback)).toBe(true);
     expect(

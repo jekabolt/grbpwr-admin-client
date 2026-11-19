@@ -192,6 +192,7 @@ export function shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
   exactSavedEmptyOperation,
   exactSavedLinkedN1Target = false,
   exactSavedStaleOperation = false,
+  exactSavedCompoundOperation = false,
 }: Readonly<{
   workbenchOpen: boolean;
   exactNSessionAvailable: boolean;
@@ -201,6 +202,7 @@ export function shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
   exactSavedEmptyOperation: boolean;
   exactSavedLinkedN1Target?: boolean;
   exactSavedStaleOperation?: boolean;
+  exactSavedCompoundOperation?: boolean;
 }>): boolean {
   const exactSavedLegacyN1 =
     savedProjectionBlockerCode === null &&
@@ -212,9 +214,9 @@ export function shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
     exactSavedEmptyOperation &&
     selectedSeamKeys.length === 0 &&
     savedOrderedSeamKeys === null;
-  const exactStaleFallback =
+  const exactSavedSpanFallback =
     savedProjectionBlockerCode === 'saved-seam-not-exact' &&
-    exactSavedStaleOperation &&
+    (exactSavedStaleOperation || exactSavedCompoundOperation) &&
     selectedSeamKeys.length > 0 &&
     savedOrderedSeamKeys === null;
   return (
@@ -223,7 +225,7 @@ export function shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
     (exactSavedLinkedN1Target ||
       exactSavedLegacyN1 ||
       exactSavedEmptyFallback ||
-      exactStaleFallback)
+      exactSavedSpanFallback)
   );
 }
 
@@ -247,35 +249,59 @@ export function isPatternImportDxfPhaseEExactSavedEmptyOperationV1({
   );
 }
 
-export function isPatternImportDxfPhaseEExactSavedStaleOperationV1({
+type SavedOperationSeam = Readonly<{
+  seamKey?: string;
+  status?: string;
+  stale?: boolean;
+  kind?: string;
+}>;
+
+type SavedOperationSeams = Readonly<{
+  liveOperationNumber: number;
+  liveSeamKeys: readonly string[];
+  savedOperations: readonly Readonly<{ operationNumber?: number; seamKeys?: readonly string[] }>[];
+  savedSeams: readonly SavedOperationSeam[];
+}>;
+
+function exactSelectedOperationSeams({
   liveOperationNumber,
   liveSeamKeys,
   savedOperations,
   savedSeams,
-}: Readonly<{
-  liveOperationNumber: number;
-  liveSeamKeys: readonly string[];
-  savedOperations: readonly Readonly<{ operationNumber?: number; seamKeys?: readonly string[] }>[];
-  savedSeams: readonly Readonly<{ seamKey?: string; status?: string; stale?: boolean }>[];
-}>): boolean {
+}: SavedOperationSeams) {
   const owners = savedOperations.filter(
     ({ operationNumber }) => operationNumber === liveOperationNumber,
   );
   const savedKeys = owners[0]?.seamKeys;
+  if (
+    owners.length !== 1 ||
+    !liveSeamKeys.length ||
+    new Set(liveSeamKeys).size !== liveSeamKeys.length ||
+    savedKeys?.length !== liveSeamKeys.length
+  )
+    return null;
+
+  const seams: SavedOperationSeam[] = [];
+  for (const [index, key] of liveSeamKeys.entries()) {
+    if (!key || key !== key.trim() || key !== savedKeys[index]) return null;
+    const matches = savedSeams.filter(({ seamKey }) => seamKey === key);
+    const seam = matches[0];
+    if (matches.length !== 1 || seam?.status !== 'TECH_CARD_SEAM_STATUS_CONFIRMED') return null;
+    seams.push(seam);
+  }
+  return seams;
+}
+
+export function isPatternImportDxfPhaseEExactSavedStaleOperationV1(input: SavedOperationSeams) {
+  return exactSelectedOperationSeams(input)?.every(({ stale }) => stale === true) ?? false;
+}
+
+export function isPatternImportDxfPhaseEExactSavedCompoundOperationV1(input: SavedOperationSeams) {
+  const seams = exactSelectedOperationSeams(input);
   return (
-    owners.length === 1 &&
-    liveSeamKeys.length > 0 &&
-    new Set(liveSeamKeys).size === liveSeamKeys.length &&
-    savedKeys?.length === liveSeamKeys.length &&
-    liveSeamKeys.every((key, index) => {
-      if (!key || key !== key.trim() || key !== savedKeys[index]) return false;
-      const matches = savedSeams.filter(({ seamKey }) => seamKey === key);
-      return (
-        matches.length === 1 &&
-        matches[0]?.stale === true &&
-        matches[0].status === 'TECH_CARD_SEAM_STATUS_CONFIRMED'
-      );
-    })
+    seams !== null &&
+    seams.every(({ stale }) => stale !== true) &&
+    seams.some(({ kind }) => kind === 'TECH_CARD_SEAM_KIND_COMPOSITE')
   );
 }
 
@@ -2727,18 +2753,25 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
     workbenchOpen,
     autoOpen,
   );
-  const exactSavedStaleOperation =
+  const selectedSavedSeams =
     !savedProjection.ok &&
     savedProjection.blockers[0]?.code === 'saved-seam-not-exact' &&
-    !!savedCard.data &&
+    savedCard.data &&
     savedCard.data.id === techCardId &&
-    !!selected &&
-    isPatternImportDxfPhaseEExactSavedStaleOperationV1({
-      liveOperationNumber: selectedOperationNumber,
-      liveSeamKeys: selected.seamKeys ?? [],
-      savedOperations: savedCard.data.techCard?.operations ?? [],
-      savedSeams: savedCard.data.seams ?? [],
-    });
+    selected
+      ? {
+          liveOperationNumber: selectedOperationNumber,
+          liveSeamKeys: selected.seamKeys ?? [],
+          savedOperations: savedCard.data.techCard?.operations ?? [],
+          savedSeams: savedCard.data.seams ?? [],
+        }
+      : null;
+  const exactSavedStaleOperation =
+    selectedSavedSeams !== null &&
+    isPatternImportDxfPhaseEExactSavedStaleOperationV1(selectedSavedSeams);
+  const exactSavedCompoundOperation =
+    selectedSavedSeams !== null &&
+    isPatternImportDxfPhaseEExactSavedCompoundOperationV1(selectedSavedSeams);
   const savedBrowseFallback = shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
     workbenchOpen: workbenchRequested,
     exactNSessionAvailable: exactNBoundarySession !== null,
@@ -2746,6 +2779,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
     savedOrderedSeamKeys: savedProjection.ok ? savedProjection.orderedSeamKeys : null,
     exactSavedEmptyOperation,
     exactSavedStaleOperation,
+    exactSavedCompoundOperation,
     exactSavedLinkedN1Target: exactSavedLinkedN1Target.ok,
     savedProjectionBlockerCode: savedProjection.ok
       ? null
@@ -2917,6 +2951,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
     const emptyOperationSewingSource =
       savedEmptyOperation && emptyOperationSewingSourceKey === emptyOperationKey;
     const useSavedSewingEdges = savedLinkedN1 || emptyOperationSewingSource || inspectSavedSubrange;
+    const savedDraftSourceOnly = exactSavedStaleOperation || exactSavedCompoundOperation;
     const fallbackResult: PatternImportDxfPhaseECadTableDraftOperationSessionBridgeResultV1 | null =
       inspectSavedSubrange
         ? null
@@ -2931,7 +2966,9 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
                   ? 'Choose two exact edges and confirm their direction to update this seam. Its placement and Assembly Order stay unchanged.'
                   : exactSavedStaleOperation
                     ? 'The saved pattern changed. This operation needs current seam anchors before physical assembly can resume.'
-                    : 'This legacy one-seam operation is available for inspection only. Remove it and rebuild it from the 2D table before using Direct Connect.',
+                    : exactSavedCompoundOperation
+                      ? 'Open the saved seam in the operation editor to inspect its individual spans.'
+                      : 'This legacy one-seam operation is available for inspection only. Remove it and rebuild it from the 2D table before using Direct Connect.',
               operationNumber: source.selectedOperationNumber,
               processKind: 'connect',
             },
@@ -2939,9 +2976,9 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
     return (
       <PatternImportDxfPhaseECadTableZeroOperationProductionMountV1
         techCardId={techCardId}
-        physicalHost={physicalHost}
-        pressAuthoringHandoff={exactSavedStaleOperation ? undefined : pressAuthoringHandoff}
-        savedDraftSourceOnly={exactSavedStaleOperation}
+        physicalHost={exactSavedCompoundOperation ? undefined : physicalHost}
+        pressAuthoringHandoff={savedDraftSourceOnly ? undefined : pressAuthoringHandoff}
+        savedDraftSourceOnly={savedDraftSourceOnly}
         sourceSurface={useSavedSewingEdges ? 'explicit-native-drawn-sewing' : undefined}
         zeroConnectAuthoringHandoff={
           (savedEmptyOperation || savedLinkedN1) && zeroConnectAuthoringHandoff
@@ -2984,7 +3021,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
             !savedEmptyOperation &&
             !savedLinkedN1 &&
             !savedSeamSubrangeTarget &&
-            !exactSavedStaleOperation ? (
+            !savedDraftSourceOnly ? (
               <CalloutBox
                 tone='note'
                 className='mb-2'
