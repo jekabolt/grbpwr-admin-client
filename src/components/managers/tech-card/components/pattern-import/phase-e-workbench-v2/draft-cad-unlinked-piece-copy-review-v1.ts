@@ -4,7 +4,7 @@ import {
   type DxfProductSavedNativeCompilerSourceOwnerV1,
   type DxfProductSavedNativeCompilerSourceRequestV1,
 } from 'lib/pattern-import/dxf-product-saved-native-reprocess-owner-v1';
-import { mirrorSizeAcrossGrain } from 'lib/pattern-import/semantics/pairs';
+import { mirrorSizeAcrossGrain, transformSizeSpec } from 'lib/pattern-import/semantics/pairs';
 import {
   nativePieceCopyVerifier,
   type NativePieceCopyMode,
@@ -18,7 +18,8 @@ import {
   sizeTokenTest,
 } from 'lib/pattern-import/manifest/identity';
 import type { CardDraft, ConversionManifest } from 'lib/pattern-import/types';
-import { writeDxfDetailed } from 'lib/pattern-import/write';
+import { LAYOUT_GAP_MM, pieceSizeCutBounds, writeDxfDetailed } from 'lib/pattern-import/write';
+import { translation } from 'lib/pattern-import/write/geom';
 import {
   PATTERN_IMPORT_DXF_PRODUCT_WRITER_REPLAY_V1,
   replayPatternImportDxfProductWriterV1,
@@ -255,6 +256,15 @@ export async function prepareUnlinkedDraftPieceCopyV1(input: {
   copy.mods = [...mods, String(suffix)];
   copy.seed = job.pieces.reduce((max, p) => Math.max(max, p.seed), 0) + 1;
   requireCopy(Number.isSafeInteger(copy.seed), 'no available piece seed');
+  if (job.preserveNativeLayout) {
+    const rightmost = Math.max(
+      ...job.pieces.flatMap(({ sizes }) => sizes.map((size) => pieceSizeCutBounds(size).maxX)),
+    );
+    const copyLeft = Math.min(...copy.sizes.map((size) => pieceSizeCutBounds(size).minX));
+    const moveX = rightmost + LAYOUT_GAP_MM - copyLeft;
+    const move = translation(moveX, 0);
+    copy.sizes = copy.sizes.map((size) => transformSizeSpec(size, move));
+  }
   job.pieces.push(copy);
   const written = writeDxfDetailed(job, { now: () => new Date(replay.createdAt) });
   const verifyGeometry = nativePieceCopyVerifier(

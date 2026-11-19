@@ -1,4 +1,4 @@
-import { mirrorSizeAcrossGrain } from 'lib/pattern-import/semantics/pairs';
+import { mirrorSizeAcrossGrain, transformSizeSpec } from 'lib/pattern-import/semantics/pairs';
 import { createPatternImportDxfPhaseEDraftCadCompileSourceV1 } from './draft-cad-compile-source-v1';
 import { readDxf } from 'lib/pattern-import/adapters/dxf/extract';
 import { segmentDxf } from 'lib/pattern-import/adapters/dxf/segment';
@@ -10,7 +10,8 @@ import type { DxfPieceCandidate } from 'lib/pattern-import/adapters/dxf/dxf-type
 import { signedArea } from 'lib/pattern-import/adapters/dxf/geometry';
 import { it, expect, vi } from 'vitest';
 import { adminService } from 'api/api';
-import { writeDxfDetailed } from 'lib/pattern-import/write';
+import { LAYOUT_GAP_MM, pieceSizeCutBounds, writeDxfDetailed } from 'lib/pattern-import/write';
+import { translation } from 'lib/pattern-import/write/geom';
 import { embedManifest, readManifest } from 'lib/pattern-import/manifest';
 import type { LiveCard } from 'lib/pattern-import/fabrics/apply';
 import { nativePieceCopyVerifier } from 'lib/pattern-import/fabrics/native-piece-copy-review';
@@ -32,7 +33,7 @@ import {
   acknowledgeUnlinkedDraftPieceCopyV1,
 } from './draft-cad-unlinked-piece-copy-review-v1';
 
-async function seedCopy(ranks = 1, hole = false, mirror = false) {
+async function seedCopy(ranks = 1, hole = false, mirror = false, retainedLayout = false) {
   const f = await createSavedThreePanelFixtureV1(2);
   const tokens = ranks === 1 ? ['M'] : ['S', 'M'];
   f.job.sizes = tokens.map((token, rank) => ({
@@ -146,15 +147,23 @@ async function seedCopy(ranks = 1, hole = false, mirror = false) {
       };
     });
   });
-  f.written = writeDxfDetailed(f.job, { now: () => new Date('2026-11-17T00:00:00.000Z') });
+  const clock = { now: () => new Date('2026-11-17T00:00:00.000Z') };
+  if (retainedLayout) {
+    f.job.pieces = writeDxfDetailed(f.job, clock).plan.specs.map((piece) => ({
+      ...piece,
+      sizes: piece.sizes.map((size) => transformSizeSpec(size, translation(15, -20))),
+    }));
+    f.job.preserveNativeLayout = true;
+  }
+  f.written = writeDxfDetailed(f.job, clock);
   f.bytes = new TextEncoder().encode(f.written.dxfText);
   f.row = { ...f.row, sha256: await digestFullAssemblyFixture(f.bytes), sizeBytes: f.bytes.length };
   f.card.existingPatterns![0]!.manifest = f.written.manifest;
   return f;
 }
 
-async function chosen(ranks: number, mirror = false) {
-  const f = await seedCopy(ranks, true, mirror);
+async function chosen(ranks: number, mirror = false, retainedLayout = false) {
+  const f = await seedCopy(ranks, true, mirror, retainedLayout);
   const ordinary = await draftThroughWizardStages(
     new File([f.written.dxfText], 'original.dxf'),
     f.card,
@@ -208,13 +217,21 @@ async function chosen(ranks: number, mirror = false) {
 }
 
 it.each(
-  [1, 2].flatMap((ranks) =>
-    (['duplicate', 'mirror-across-grain'] as const).map((mode) => ({ ranks, mode })),
+  [
+    { ranks: 1, retainedLayout: false },
+    { ranks: 2, retainedLayout: false },
+    { ranks: 2, retainedLayout: true },
+  ].flatMap((configuration) =>
+    (['duplicate', 'mirror-across-grain'] as const).map((mode) => ({ ...configuration, mode })),
   ),
 )(
-  'verifies explicit $mode on $ranks ranks through manual Apply and fresh reopen',
-  async ({ ranks, mode }) => {
-    const { f, source, current, input } = await chosen(ranks, mode === 'mirror-across-grain');
+  'verifies explicit $mode on $ranks ranks with retained layout $retainedLayout through manual Apply and fresh reopen',
+  async ({ ranks, mode, retainedLayout }) => {
+    const { f, source, current, input } = await chosen(
+      ranks,
+      mode === 'mirror-across-grain',
+      retainedLayout,
+    );
     const uploaded: { bytes: Uint8Array<ArrayBuffer> | null } = { bytes: null };
     const url = 'https://saved-full-assembly.invalid/new-copy.dxf';
     const upload = vi
@@ -355,6 +372,19 @@ it.each(
       const readback = await createSavedThreePanelSourceV1(f);
       try {
         expect(readback.native.row).toEqual(f.row);
+        if (retainedLayout) {
+          const job = readback.native.draft.scopes[0]!.writerReplay!.job;
+          expect(job.preserveNativeLayout).toBe(true);
+          const originalRight = Math.max(
+            ...job.pieces
+              .filter((piece) => piece.identity !== identity)
+              .flatMap(({ sizes }) => sizes.map((size) => pieceSizeCutBounds(size).maxX)),
+          );
+          const copied = job.pieces.find((piece) => piece.identity === identity)!;
+          expect(
+            Math.min(...copied.sizes.map((size) => pieceSizeCutBounds(size).minX)),
+          ).toBeCloseTo(originalRight + LAYOUT_GAP_MM, 6);
+        }
         const aliases = readback.native.draft.aliases;
         expect(aliases.find((a) => a.blockName === 'FP')?.pieceLineKey).toBe(sourceKey);
         expect(aliases.find((a) => a.blockName === identity)?.pieceLineKey).toBe(newKey);

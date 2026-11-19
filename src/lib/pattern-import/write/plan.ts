@@ -243,7 +243,7 @@ const ccw = (pts: PtMm[]) => (signedArea(pts) < 0 ? [...pts].reverse() : pts);
 const preserveWinding = (before: readonly PtMm[], after: PtMm[]) =>
   signedArea(before) < 0 === signedArea(after) < 0 ? after : [...after].reverse();
 
-const cutBox = (s: PieceSizeSpec) => {
+export const pieceSizeCutBounds = (s: PieceSizeSpec) => {
   let box = bboxOf(s.cut);
   for (const loop of s.cutLoops ?? []) box = unionBox(box, bboxOf(loop));
   return box;
@@ -460,7 +460,7 @@ export function planBlocks(
       continue;
     }
     let box = bboxOf(w.sizes[0].cut);
-    for (const s of w.sizes) box = unionBox(box, cutBox(s)); // srcT already applied in derived sizes
+    for (const s of w.sizes) box = unionBox(box, pieceSizeCutBounds(s)); // srcT already applied
     const W = box.maxX - box.minX;
     const H = box.maxY - box.minY;
     if (cx > 0 && cx + W > LAYOUT_ROW_MAX_MM) {
@@ -664,7 +664,7 @@ export function planBlocks(
               }
             : feature;
         }),
-        bbox: cutBox({ ...s, cut, cutLoops }),
+        bbox: pieceSizeCutBounds({ ...s, cut, cutLoops }),
         areaMm2: cutArea(cut, cutLoops),
       };
       outSizes.push(size);

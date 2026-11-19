@@ -28,7 +28,7 @@ import type { AuthoredLineSplitInput } from './protected-line-split';
 import { writeR12 } from './r12';
 import { writeR2000 } from './r2000';
 
-export { blockNameOf, pieceInScope, UNI_TOKEN } from './plan';
+export { blockNameOf, LAYOUT_GAP_MM, pieceInScope, pieceSizeCutBounds, UNI_TOKEN } from './plan';
 export type { Plan, PlannedBlock } from './plan';
 export {
   RetainedRankedDraftPointErrorV1,
