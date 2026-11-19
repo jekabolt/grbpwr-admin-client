@@ -537,14 +537,18 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
           Paused after accepted frame {wholeProgress.paused.lastAcceptedFrame}.
         </Text>
       )}
-      {wholeProgress && (
+      {wholeProgress?.cloth.isCurrent() && (
         <div
           className='space-y-1'
           data-whole-assembly-frame={wholeProgress.cloth.frameNumber}
           data-whole-assembly-action={wholeProgress.action}
           data-whole-assembly-seams={JSON.stringify(wholeProgress.activeSeams)}
           data-whole-assembly-frame-work={JSON.stringify(wholeProgress.frameWork)}
-          data-whole-assembly-maximum-gap-mm={wholeProgress.maximumGapMm}
+          data-whole-assembly-maximum-gap-mm={
+            wholeProgress.rmsGapMm !== null ? wholeProgress.maximumGapMm : undefined
+          }
+          data-whole-assembly-rms-gap-mm={wholeProgress.rmsGapMm ?? undefined}
+          data-whole-assembly-contact={JSON.stringify(wholeProgress.contact)}
           data-whole-assembly-maximum-gap-operation={
             wholeProgress.maximumGapOperationNumber ?? undefined
           }
@@ -553,10 +557,25 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
           <Text component='p' size='micro' role='status'>
             {wholeProgress.action === 'activate' ? 'Activation' : 'Stitch contraction'} · frame{' '}
             {wholeProgress.cloth.frameNumber} · {wholeProgress.activeSeams.length} of{' '}
-            {wholeProgress.totalStages} stages active · maximum gap{' '}
-            {wholeProgress.maximumGapMm.toFixed(2)} mm
-            {wholeProgress.maximumGapOperationNumber !== null &&
-              ` at operation ${wholeProgress.maximumGapOperationNumber}`}
+            {wholeProgress.totalStages} stages active
+            {wholeProgress.rmsGapMm === null ? (
+              ' · No active stitch stations'
+            ) : (
+              <>
+                {' · Maximum gap '}
+                {wholeProgress.maximumGapMm.toFixed(2)} mm
+                {wholeProgress.maximumGapOperationNumber !== null &&
+                  ` at operation ${wholeProgress.maximumGapOperationNumber}`}
+                {' · RMS gap '}
+                {wholeProgress.rmsGapMm.toFixed(2)} mm
+              </>
+            )}
+          </Text>
+          <Text component='p' size='micro'>
+            Contact check passed · Cloth self-intersections{' '}
+            {wholeProgress.contact.clothIntersections} · Cloth–mannequin intersections{' '}
+            {wholeProgress.contact.bodyIntersections} · Pairs with unproved body clearance{' '}
+            {wholeProgress.contact.bodyPairsWithoutClearance}
           </Text>
           {wholeProgress.stopped && (
             <>

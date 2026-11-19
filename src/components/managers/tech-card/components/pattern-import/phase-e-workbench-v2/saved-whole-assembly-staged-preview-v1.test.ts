@@ -36,9 +36,25 @@ const frame = (number: number) => ({
   validated: [
     {
       frame: number,
+      contact: {
+        passed: true,
+        bodyIntersections: 0,
+        clothIntersections: 0,
+        bodyPairsWithoutClearance: 0,
+      },
       activeSeams: [
-        { maximumGapM: number / 1000, operationOrder: 80 },
-        { maximumGapM: number / 2000, operationOrder: 30 },
+        {
+          constraintCount: 1,
+          maximumGapM: number / 1000,
+          rmsGapM: number / 1000,
+          operationOrder: 80,
+        },
+        {
+          constraintCount: 3,
+          maximumGapM: number / 2000,
+          rmsGapM: number / 3000,
+          operationOrder: 30,
+        },
       ],
     },
   ],
@@ -221,6 +237,14 @@ describe('same Workbench staged checkpoint', () => {
     expect(final.action).toBe('contract-active');
     expect(final.maximumGapMm).toBe(3);
     expect(final.maximumGapOperationNumber).toBe(80);
+    expect(final.rmsGapMm).toBeCloseTo(Math.sqrt(3));
+    expect(paused.rmsGapMm).toBeCloseTo(Math.sqrt(1 / 3));
+    expect(final.contact).toEqual({
+      passed: true,
+      bodyIntersections: 0,
+      clothIntersections: 0,
+      bodyPairsWithoutClearance: 0,
+    });
     expect(final.frameWork).toEqual({
       safeguard: {
         scale: 0.5,
@@ -243,6 +267,25 @@ describe('same Workbench staged checkpoint', () => {
         resumed.signal,
       ),
     ).rejects.toThrow('no longer resumable');
+  });
+
+  it('publishes accepted contact with no seam gap before any stitch station is active', async () => {
+    const accepted = frame(1);
+    accepted.validated[0]!.activeSeams = [];
+    calls.start.mockResolvedValue(accepted);
+    const { request } = fixture();
+
+    const paused = await runSavedWholeAssemblyStagedPreviewV1(
+      { ...request, pauseAfterAccepted: () => true },
+      new AbortController().signal,
+    );
+
+    expect(paused.activeSeams).toEqual([]);
+    expect(paused.maximumGapOperationNumber).toBeNull();
+    expect(paused.rmsGapMm).toBeNull();
+    expect(paused.contact).toEqual(accepted.validated[0]!.contact);
+    expect(paused.contact.clothIntersections).toBe(0);
+    expect(paused.frameWork.safeguard?.firstCappedTrial?.clothIntersections).toBe(1);
   });
 
   it('rechecks current saved authority before resuming from the retained native source', async () => {

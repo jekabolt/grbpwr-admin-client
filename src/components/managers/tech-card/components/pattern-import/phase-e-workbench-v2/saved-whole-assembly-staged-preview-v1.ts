@@ -18,7 +18,8 @@ import { canonicalizePatternImportDxfPhaseESavedAssemblyValueV1 as canonical } f
 type Run = Parameters<typeof runStagedSourceCutFramesV1>[0];
 type Command = Parameters<typeof continueStagedSourceCutFramesV1>[1];
 type Receipt = Awaited<ReturnType<typeof runStagedSourceCutFramesV1>>;
-type ActiveSeams = Receipt['validated'][number]['activeSeams'];
+type AcceptedFrame = Receipt['validated'][number];
+type ActiveSeams = AcceptedFrame['activeSeams'];
 type SafeguardedStep = Receipt['safeguardedSteps'][number];
 type FrameWork = Readonly<{
   safeguard?: Readonly<
@@ -72,7 +73,9 @@ export type SavedWholeAssemblyPreviewProgressV1 = Readonly<{
   cloth: MeasurementSurfaceAcceptedClothV1;
   action: Command['action'];
   activeSeams: ActiveSeams;
+  contact: AcceptedFrame['contact'];
   maximumGapMm: number;
+  rmsGapMm: number | null;
   maximumGapOperationNumber: number | null;
   totalStages: number;
   frameWork: FrameWork;
@@ -390,12 +393,20 @@ export async function runSavedWholeAssemblyStagedPreviewV1(
       (maximum, seam) => (!maximum || seam.maximumGapM > maximum.maximumGapM ? seam : maximum),
       null,
     );
+    let stitchStations = 0;
+    let squaredGapSumM2 = 0;
+    for (const seam of frame.activeSeams) {
+      stitchStations += seam.constraintCount;
+      squaredGapSumM2 += seam.constraintCount * seam.rmsGapM ** 2;
+    }
     last = Object.freeze({
       cloth: Object.freeze({ positionsM, frameNumber: frame.frame, ranges, isCurrent }),
       frameWork,
       action: command.action,
       activeSeams: frame.activeSeams,
+      contact: frame.contact,
       maximumGapMm: (worst?.maximumGapM ?? 0) * 1000,
+      rmsGapMm: stitchStations > 0 ? 1000 * Math.sqrt(squaredGapSumM2 / stitchStations) : null,
       maximumGapOperationNumber: worst?.operationOrder ?? null,
       totalStages,
     });

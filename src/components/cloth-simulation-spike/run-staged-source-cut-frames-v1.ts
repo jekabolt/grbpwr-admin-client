@@ -90,6 +90,12 @@ type PhysicalFrame = {
   components: number;
   referenceCandidatePairs: number;
   selfCandidatePairs: number;
+  contact: Readonly<{
+    passed: true;
+    bodyIntersections: number;
+    clothIntersections: number;
+    bodyPairsWithoutClearance: number;
+  }>;
 };
 type Motion = Pick<
   NonNullable<FrameInput['start']>,
@@ -691,8 +697,26 @@ async function executeWindow(program: Program, input: FrameInput, signal?: Abort
           ].join(' '),
         );
       }
-      const { components, referenceCandidatePairs, selfCandidatePairs } = result;
-      return { frame: step, components, referenceCandidatePairs, selfCandidatePairs };
+      const {
+        components,
+        referenceCandidatePairs,
+        selfCandidatePairs,
+        bodyIntersections,
+        clothIntersections,
+        bodyPairsWithoutClearance,
+      } = result;
+      return {
+        frame: step,
+        components,
+        referenceCandidatePairs,
+        selfCandidatePairs,
+        contact: Object.freeze({
+          passed: true,
+          bodyIntersections,
+          clothIntersections,
+          bodyPairsWithoutClearance,
+        }),
+      };
     };
     const measure = (physical: PhysicalFrame, positions: Float32Array) => ({
       ...physical,
