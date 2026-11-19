@@ -61,7 +61,12 @@ import {
   isPlacedSurfaceDirectionSeam,
   samePlacedSurfaceSeam,
   SavedSurfaceDirection,
+  type SavedSurfaceDirectionCapture,
 } from './saved-surface-direction';
+import {
+  canReviewSavedSurfaceStations,
+  SavedSurfaceStationReview,
+} from './saved-surface-station-review';
 import { recordSeamDecision } from './seam-decisions';
 import { NO_STEP_EDGES, NO_STEP_PARTS } from './step-highlight';
 import {
@@ -1142,15 +1147,33 @@ export function SeamPickerBody({
   const savedDirectionPending = useSeamsStore(
     (state) => !!(activeSeam && state.pending[activeSeam]),
   );
-  const canEditSavedDirection =
-    !frozen &&
-    !scene.ctx?.writes.frozen &&
+  const savedSurfaceLock = useSeamsStore((state) => state.serverVersion);
+  const canReviewSavedSurface =
+    !surface &&
     !topstitchMode &&
     !bindingMode &&
     !busy &&
     !posePending &&
     !clearingSeams &&
-    (autosave.status === 'idle' || autosave.status === 'saved');
+    (frozen || autosave.status === 'idle' || autosave.status === 'saved');
+  const canEditSavedDirection = canReviewSavedSurface && !frozen && !scene.ctx?.writes.frozen;
+  function isCurrentSavedSurface(
+    { rows: [expected], operationNumber, seam }: SavedSurfaceDirectionCapture,
+    allowPending = false,
+  ) {
+    const store = useSeamsStore.getState();
+    const currentOperation = form.getValues(`operations.${index}`);
+    const currentRow = store.server.find(({ seamKey }) => seamKey === seam.seamKey);
+    return (
+      activeSeam === seam.seamKey &&
+      currentOperation?.operationNumber === operationNumber &&
+      !!currentOperation.seamKeys?.includes(seam.seamKey) &&
+      store.cardId === expected.techCardId &&
+      store.serverVersion === expected.cardLockVersion &&
+      (allowPending || !store.pending[seam.seamKey]) &&
+      samePlacedSurfaceSeam(seam, currentRow)
+    );
+  }
   const activeLine = topstitchMode
     ? topstitchLines.find((line) => line.lineKey === activeSeam)
     : undefined;
@@ -1517,22 +1540,34 @@ export function SeamPickerBody({
               capture={savedDirectionCapture}
               disabled={!canEditSavedDirection || savedDirectionPending}
               change={scene.ctx.writes.change}
-              canWrite={({ rows: [expected], operationNumber, seam }, pending) => {
-                const store = useSeamsStore.getState();
-                const currentOperation = form.getValues(`operations.${index}`);
-                const currentRow = store.server.find(({ seamKey }) => seamKey === seam.seamKey);
-                return (
-                  canEditSavedDirection &&
-                  activeSeam === seam.seamKey &&
-                  currentOperation?.operationNumber === operationNumber &&
-                  !!currentOperation.seamKeys?.includes(seam.seamKey) &&
-                  store.cardId === expected.techCardId &&
-                  store.serverVersion === expected.cardLockVersion &&
-                  autosave.getBaseLockVersion() === expected.cardLockVersion &&
-                  (pending || !store.pending[seam.seamKey]) &&
-                  samePlacedSurfaceSeam(seam, currentRow)
-                );
-              }}
+              canWrite={(capture, pending) =>
+                canEditSavedDirection &&
+                autosave.getBaseLockVersion() === capture.rows[0].cardLockVersion &&
+                isCurrentSavedSurface(capture, pending)
+              }
+            />
+          )}
+
+        {!surface &&
+          !topstitchMode &&
+          !bindingMode &&
+          shownActive &&
+          savedDirectionCard &&
+          savedDirectionCapture &&
+          canReviewSavedSurfaceStations(savedDirectionCapture, savedDirectionCard) && (
+            <SavedSurfaceStationReview
+              key={`${cardId}:${operationNumber}:${savedDirectionCapture.seam.seamKey}`}
+              capture={savedDirectionCapture}
+              card={savedDirectionCard}
+              disabled={
+                !canReviewSavedSurface ||
+                savedDirectionPending ||
+                savedSurfaceLock !== savedDirectionCard.lockVersion ||
+                !isCurrentSavedSurface(savedDirectionCapture)
+              }
+              isCurrent={() =>
+                canReviewSavedSurface && isCurrentSavedSurface(savedDirectionCapture)
+              }
             />
           )}
 

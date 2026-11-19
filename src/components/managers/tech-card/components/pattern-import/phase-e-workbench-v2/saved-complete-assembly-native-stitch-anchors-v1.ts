@@ -20,6 +20,7 @@ import {
   prepareSavedTaggedNativeStitchRangeV1,
   readSavedNativeStraightStitchPathsV1,
   resolveSavedLegacyNativeStitchRangeV1,
+  savedLegacyDxfRoundingMmV1,
   savedNativeStitchRawBlockV1,
   type SavedNativeStitchCompilerSourceV1,
 } from './saved-legacy-native-stitch-run-v8';
@@ -39,6 +40,7 @@ import {
   bindSavedNativePointFasteningV1,
   savedNativeFasteningApertureV1,
 } from './saved-native-point-fastening-v1';
+import { projectSavedNativeStitchRegistrationV1 } from './saved-native-stitch-registration-v1';
 import type { PatternImportDxfPhaseESavedRowCardProjectionV1 } from './saved-row-production-runtime-v1';
 
 type OperationAnchorIdentity = Readonly<{
@@ -157,12 +159,162 @@ function recordSavedNativeNotchPoints(
   }
 }
 
+type PlacedSurfaceTarget = Readonly<{ operationNumber: number; seamKey: string }>;
+
+function readPlacedSurface(
+  source: CompleteSavedAssemblySourceV1,
+  target: PlacedSurfaceTarget,
+  sizeToken: string,
+) {
+  const operations = source.operations.filter(
+    ({ operationNumber }) => operationNumber === target.operationNumber,
+  );
+  const [operation] = operations;
+  const seams = source.ownedSeams.filter(({ seamKey }) => seamKey === target.seamKey);
+  const [seam] = seams;
+  if (
+    !source.sourceOnly ||
+    source.authoredFolds ||
+    operations.length !== 1 ||
+    operation.seamKeys?.length !== 1 ||
+    operation.seamKeys[0] !== target.seamKey ||
+    seams.length !== 1 ||
+    seam.kind !== 'TECH_CARD_SEAM_KIND_SURFACE' ||
+    seam.status !== 'TECH_CARD_SEAM_STATUS_CONFIRMED' ||
+    seam.stale ||
+    (seam.direction !== 'TECH_CARD_SEAM_DIRECTION_SAME' &&
+      seam.direction !== 'TECH_CARD_SEAM_DIRECTION_REVERSED') ||
+    (seam.anchoredSize && seam.anchoredSize !== sizeToken) ||
+    seam.sideA?.parts?.length !== 1 ||
+    seam.sideB?.parts?.length !== 1
+  )
+    throw new Error(
+      'A placed surface review needs one current, explicitly directed SURFACE on the selected operation.',
+    );
+
+  const [a] = seam.sideA.parts;
+  const [b] = seam.sideB.parts;
+  const placed = a.placement;
+  const peer = b.placement;
+  const inputs = operation.inputKeys ?? [];
+  if (
+    !a.pieceLineKey ||
+    !b.pieceLineKey ||
+    a.pieceLineKey === b.pieceLineKey ||
+    inputs.length !== 2 ||
+    !inputs.includes(a.pieceLineKey) ||
+    !inputs.includes(b.pieceLineKey) ||
+    savedNativeInternalAnchorIndexV1(a) === null ||
+    !b.edgeHint?.startsWith(`${b.pieceLineKey}#`) ||
+    b.edgeHint.includes('#dxf:') ||
+    [a, b].some(
+      (anchor) =>
+        anchor.pointClosure ||
+        (anchor.rangeFrom ?? 0) !== 0 ||
+        ![0, 1].includes(anchor.rangeTo ?? 0),
+    ) ||
+    !placed ||
+    !peer ||
+    !Number.isFinite(placed.xMm) ||
+    !Number.isFinite(placed.yMm) ||
+    !Number.isFinite(placed.rotDeg) ||
+    typeof placed.flip !== 'boolean' ||
+    placed.xMm !== peer.xMm ||
+    placed.yMm !== peer.yMm ||
+    placed.rotDeg !== peer.rotDeg ||
+    placed.flip !== peer.flip
+  )
+    throw new Error(
+      'A placed surface review needs whole native L8/L14 parts and one identical recorded placement.',
+    );
+
+  return {
+    direction: seam.direction,
+    placement: Object.freeze({
+      hostPieceLineKey: a.pieceLineKey,
+      placedPieceLineKey: b.pieceLineKey,
+      ...placed,
+    }),
+  };
+}
+
 /** Reads native physical anchors in saved operation, seam, side and part order for one exact size. */
 export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
   source: CompleteSavedAssemblySourceV1,
   projection: PatternImportDxfPhaseESavedRowCardProjectionV1,
   input: WholeAnchorInputs,
   signal: AbortSignal,
+) {
+  return (await readNativeStitchAnchors(source, projection, input, signal)).anchors;
+}
+
+/** Replay one reviewed placed surface in its native material frames. The saved rigid placement is metadata. */
+export async function readSavedPlacedSurfaceStitchRegistrationV1(
+  source: CompleteSavedAssemblySourceV1,
+  projection: PatternImportDxfPhaseESavedRowCardProjectionV1,
+  input: WholeAnchorInputs,
+  target: PlacedSurfaceTarget,
+  signal: AbortSignal,
+) {
+  const { anchors, reviewed } = await readNativeStitchAnchors(
+    source,
+    projection,
+    input,
+    signal,
+    Object.freeze({ ...target }),
+  );
+  const [a, b] = anchors.spans;
+  if (
+    !reviewed ||
+    anchors.spans.length !== 2 ||
+    a?.kind !== 'native-internal-l8' ||
+    b?.kind !== 'native-directed-l14' ||
+    a.sideIndex !== 0 ||
+    b.sideIndex !== 1 ||
+    a.partOrdinal !== 0 ||
+    b.partOrdinal !== 0 ||
+    a.pieceLineKey !== reviewed.placement.hostPieceLineKey ||
+    b.pieceLineKey !== reviewed.placement.placedPieceLineKey ||
+    Math.abs(a.span.lengthMm - b.span.nativeLengthMm) > savedLegacyDxfRoundingMmV1
+  )
+    throw new Error(
+      'The placed surface review needs two exact complete native runs of matched length.',
+    );
+
+  const reversed = reviewed.direction === 'TECH_CARD_SEAM_DIRECTION_REVERSED';
+  const stitch = projectSavedNativeStitchRegistrationV1(anchors.spans, {
+    operationNumber: a.operationNumber,
+    seamKey: a.seamKey,
+    sections: [
+      {
+        sideA: { partOrdinal: 0, direction: 'native-forward' },
+        sideB: { partOrdinal: 0, direction: reversed ? 'native-reversed' : 'native-forward' },
+      },
+    ],
+  });
+  return Object.freeze({
+    schemaVersion: 'saved-placed-surface-stitch-registration/1' as const,
+    cardId: anchors.cardId,
+    cardLockVersion: anchors.cardLockVersion,
+    serverAssemblyRevision: anchors.serverAssemblyRevision,
+    sourceSha256: anchors.sourceSha256,
+    sizeId: anchors.sizeId,
+    sizeToken: anchors.sizeToken,
+    operationNumber: a.operationNumber,
+    seamKey: a.seamKey,
+    direction: reviewed.direction,
+    placement: reviewed.placement,
+    parts: Object.freeze([a, b] as const),
+    stitch,
+  });
+}
+
+async function readNativeStitchAnchors(
+  source: CompleteSavedAssemblySourceV1,
+  projection: PatternImportDxfPhaseESavedRowCardProjectionV1,
+  input: WholeAnchorInputs,
+  signal: AbortSignal,
+  placedTarget?: PlacedSurfaceTarget,
 ) {
   signal.throwIfAborted();
   if (!isVerifiedCompleteSavedAssemblySourceV1(source))
@@ -188,6 +340,7 @@ export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
     throw new TypeError(
       'Whole native stitch anchors require a verified current card and exact size.',
     );
+  const reviewed = placedTarget ? readPlacedSurface(source, placedTarget, size.token) : null;
   const built = await prepareSavedFullAssemblyCompleteNativeRowsV1(source, projection, signal, {
     card,
     sizeDictionary,
@@ -202,7 +355,12 @@ export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
     source.operations.map(({ operationNumber }, index) => [operationNumber, index]),
   );
   let nextIndex = 0;
-  for (const { seam, anchors } of built.operationAnchors.physical) {
+  for (const { seam, anchors, operationNumber, seamKey } of built.operationAnchors.physical) {
+    if (
+      placedTarget &&
+      (operationNumber !== placedTarget.operationNumber || seamKey !== placedTarget.seamKey)
+    )
+      continue;
     if (seam.anchoredSize && seam.anchoredSize !== size.token)
       throw new Error(`Saved seam ${seam.seamKey} is anchored to a different size.`);
     for (const bound of anchors) {
@@ -265,7 +423,9 @@ export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
         throw new Error(`Saved seam ${seamKey} has an internal anchor outside a surface seam.`);
       const job = {
         identity: { ...identity, row: path.row, blockName: path.blockName },
-        anchor,
+        // The sealed placement stays in storedAnchor. Its rigid transform is distinct from the
+        // material run, whose unchanged L8/L14 fingerprint is checked by the existing readers.
+        anchor: reviewed ? { ...anchor, placement: undefined } : anchor,
         path,
         index: nextIndex++,
         internalIndex,
@@ -276,6 +436,9 @@ export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
       else jobsByRow.set(key, [job]);
     }
   }
+
+  if (reviewed && nextIndex !== 2)
+    throw new Error('The placed surface review has no two exact saved native parts.');
 
   const foldJobsByRow = new Map<string, AuthoredFoldJob[]>();
   for (const fold of authored?.folds ?? []) {
@@ -295,11 +458,15 @@ export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
     string,
     Awaited<ReturnType<typeof resolveSavedNativeAuthoredFoldGeometryV1>>
   >();
-  const ownedClosures = [
-    ...new Set(built.operationAnchors.pointClosures?.map(({ operationNumber }) => operationNumber)),
-  ].flatMap((operationNumber) =>
-    savedPointClosures(source, operationNumber, selectedSizeId).filter(({ stale }) => !stale),
-  );
+  const ownedClosures = placedTarget
+    ? []
+    : [
+        ...new Set(
+          built.operationAnchors.pointClosures?.map(({ operationNumber }) => operationNumber),
+        ),
+      ].flatMap((operationNumber) =>
+        savedPointClosures(source, operationNumber, selectedSizeId).filter(({ stale }) => !stale),
+      );
   type ClosureJob = Readonly<{
     key: string;
     buttonOperation: number;
@@ -344,11 +511,12 @@ export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
       );
       if (!native.ok)
         throw new Error(native.blockers[0]?.detail ?? 'The native compiler source is unavailable.');
-      recordSavedNativeNotchPoints(
-        native.value,
-        built.originalCutPaths.filter(({ row }) => row.patternLineKey === lineKey),
-        nativeNotchesByPiece,
-      );
+      if (!placedTarget)
+        recordSavedNativeNotchPoints(
+          native.value,
+          built.originalCutPaths.filter(({ row }) => row.patternLineKey === lineKey),
+          nativeNotchesByPiece,
+        );
       const { bytes } = await host.readAuthoritativeRow(member.row, signal, () => {});
       const file = new Uint8Array(bytes);
       try {
@@ -523,7 +691,7 @@ export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
     }),
   );
   const ownedSeamKeys = new Set(source.ownedSeams.map(({ seamKey }) => seamKey));
-  return Object.freeze({
+  const anchors = Object.freeze({
     schemaVersion: 'saved-complete-assembly-native-stitch-anchors/1' as const,
     cardId: anchorRow.techCardId,
     cardLockVersion: anchorRow.cardLockVersion,
@@ -583,6 +751,7 @@ export async function readSavedCompleteAssemblyNativeStitchAnchorsV1(
     ),
     unavailable: built.operationAnchors.unavailable,
   });
+  return { reviewed, anchors };
 }
 
 export type SavedCompleteAssemblyNativeStitchAnchorsV1 = Awaited<

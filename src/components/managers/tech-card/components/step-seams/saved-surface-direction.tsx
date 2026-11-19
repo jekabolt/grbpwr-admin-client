@@ -21,14 +21,14 @@ const directions = [
 ] as const;
 
 type Direction = (typeof directions)[number]['value'];
-type Capture = Readonly<{
+export type SavedSurfaceDirectionCapture = Readonly<{
   operationNumber: number;
   seam: StoredSeam;
   rows: readonly [DxfProductSavedRowIdentityV1, DxfProductSavedRowIdentityV1];
   aliases: readonly { scopeKey: string; blockName: string; pieceLineKey: string }[];
 }>;
 
-const changed = 'The saved surface seam changed. Reopen it before editing its direction.';
+const changed = 'The saved surface seam changed. Reopen it and try again.';
 
 export function isPlacedSurfaceDirectionSeam(row: StoredSeam | undefined): row is StoredSeam {
   if (
@@ -83,7 +83,7 @@ export function captureSavedSurfaceDirection(
   card: common_TechCard,
   operationNumber: number,
   seam: StoredSeam,
-): Capture {
+): SavedSurfaceDirectionCapture {
   const { id, lockVersion, techCard: body } = card;
   if (
     !id ||
@@ -170,15 +170,15 @@ function readLosslessSurface(wire: TechCardSeamWire): StoredSeam | null {
     : null;
 }
 
-export async function writeSavedSurfaceDirection(
-  capture: Capture,
-  direction: Direction,
-  change: SeamWrites['change'],
-  isCurrent: (pending: boolean) => boolean,
+/** The persisted row, saved operation and both DXF bindings shared by direction and station review. */
+export async function readCurrentSavedSurfaceDirectionSource(
+  capture: SavedSurfaceDirectionCapture,
+  isCurrent: () => boolean,
   signal: AbortSignal,
 ) {
   const { seam, operationNumber, rows, aliases } = capture;
-  if (!isCurrent(false) || signal.aborted || seam.direction === direction) throw new Error(changed);
+  signal.throwIfAborted();
+  if (!isCurrent()) throw new Error(changed);
   const [anchor] = rows;
   const source = await readCompleteSavedAssemblySourceV1(
     abortableAdminService(signal),
@@ -190,7 +190,7 @@ export async function writeSavedSurfaceDirection(
   const stored = source.ownedSeams.filter(({ seamKey }) => seamKey === seam.seamKey);
   const saved = stored.length === 1 ? readLosslessSurface(stored[0]!) : undefined;
   if (
-    !isCurrent(false) ||
+    !isCurrent() ||
     !saved ||
     !samePlacedSurfaceSeam(seam, saved) ||
     !savedOwner(source.operations, operationNumber, seam.seamKey) ||
@@ -214,6 +214,26 @@ export async function writeSavedSurfaceDirection(
   )
     throw new Error(changed);
 
+  return { source, saved };
+}
+
+export async function writeSavedSurfaceDirection(
+  capture: SavedSurfaceDirectionCapture,
+  direction: Direction,
+  change: SeamWrites['change'],
+  isCurrent: (pending: boolean) => boolean,
+  signal: AbortSignal,
+) {
+  const {
+    seam,
+    rows: [anchor],
+  } = capture;
+  if (seam.direction === direction) throw new Error(changed);
+  const { source, saved } = await readCurrentSavedSurfaceDirectionSource(
+    capture,
+    () => isCurrent(false),
+    signal,
+  );
   const next = { ...saved, direction };
   const result = await change(
     { upsert: [next], expectedServerAssemblyRevision: source.serverAssemblyRevision },
@@ -246,10 +266,10 @@ export function SavedSurfaceDirection({
   change,
   canWrite,
 }: Readonly<{
-  capture: Capture;
+  capture: SavedSurfaceDirectionCapture;
   disabled: boolean;
   change: SeamWrites['change'];
-  canWrite: (capture: Capture, pending: boolean) => boolean;
+  canWrite: (capture: SavedSurfaceDirectionCapture, pending: boolean) => boolean;
 }>) {
   const { seam } = capture;
   const [choice, setChoice] = useState<Direction | null>(null);

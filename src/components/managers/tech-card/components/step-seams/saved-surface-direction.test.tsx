@@ -1,9 +1,14 @@
-import type { ChangeTechCardSeamsRequest, common_TechCard } from 'api/proto-http/admin';
+import type {
+  ChangeTechCardSeamsRequest,
+  common_Size,
+  common_TechCard,
+} from 'api/proto-http/admin';
 import { toWire, type StoredSeam } from 'lib/seams';
 import { Buffer } from 'node:buffer';
 import { createHash } from 'node:crypto';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, expect, it, vi } from 'vitest';
+import { buildPatternImportDxfPhaseESavedCardContextV1 } from '../pattern-import/phase-e-workbench-v2/saved-card-production-projection-v1';
 import { runSeamChange } from '../assembly-seams/seam-change';
 import type { SeamFormBridge } from '../assembly-seams/seam-form-bridge';
 import { hydrateSeams, resetSeams } from '../assembly-seams/seams-store';
@@ -14,12 +19,32 @@ import {
   SavedSurfaceDirection,
   writeSavedSurfaceDirection,
 } from './saved-surface-direction';
+import {
+  canReviewSavedSurfaceStations,
+  SavedSurfaceStationReview,
+  verifySavedSurfaceStations,
+} from './saved-surface-station-review';
 
-const io = vi.hoisted(() => ({ snapshot: vi.fn() }));
+const io = vi.hoisted(() => ({ snapshot: vi.fn(), native: vi.fn() }));
 vi.mock('api/api', () => ({
   adminService: {},
   abortableAdminService: () => ({ GetTechCardSavedAssemblySnapshot: io.snapshot }),
 }));
+
+vi.mock(
+  '../pattern-import/phase-e-workbench-v2/saved-complete-assembly-native-stitch-anchors-v1',
+  () => ({
+    readSavedPlacedSurfaceStitchRegistrationV1: io.native,
+  }),
+);
+vi.mock('lib/providers/dictionary-provider', () => ({
+  useDictionary: () => ({ loading: false, dictionary: { sizes: dictionary } }),
+}));
+
+const dictionary: common_Size[] = [
+  { id: 4, name: 'm', countMen: 0, countWomen: 0, skuOrd: 4, skuSystem: undefined },
+  { id: 5, name: 'l', countMen: 0, countWomen: 0, skuOrd: 5, skuSystem: undefined },
+];
 
 const KEYS = {
   seam: '01M670HJDTKYTHVGYK5G019YD3',
@@ -78,7 +103,7 @@ const seam: StoredSeam = {
 };
 const operations = [
   { operationNumber: 540, seamKeys: ['unrelated'] },
-  { operationNumber: 570, seamKeys: [seam.seamKey] },
+  { operationNumber: 570, seamKeys: [seam.seamKey], inputKeys: [KEYS.b, KEYS.a] },
 ];
 const sheets = [
   {
@@ -103,6 +128,7 @@ const card = {
   lockVersion: 334,
   techCard: {
     operations,
+    sizeIds: [4, 5],
     bomItems: sheets.map(({ bomLineKey, fabricPurpose }) => ({
       lineKey: bomLineKey,
       section: 'TECH_CARD_BOM_SECTION_FABRIC',
@@ -130,8 +156,8 @@ const card = {
   },
 } as unknown as common_TechCard;
 
-function fixture() {
-  const capture = captureSavedSurfaceDirection(card, 570, seam);
+function fixture(selected = seam) {
+  const capture = captureSavedSurfaceDirection(card, 570, selected);
   const snapshot = {
     serverAssemblyRevision: clock,
     rows: capture.rows.toReversed().map(({ revision: savedRowRevision, ...row }) => ({
@@ -140,7 +166,7 @@ function fixture() {
       savedRowRevision,
     })),
     operations: structuredClone(operations),
-    ownedSeams: [{ ...toWire(seam), stale: false }],
+    ownedSeams: [{ ...toWire(selected), stale: false }],
     aliases: capture.aliases.map((alias) => ({ ...alias })),
     garmentLabels: [],
   };
@@ -200,6 +226,7 @@ beforeEach(() => {
   resetSeams();
   hydrateSeams(6, [toWire(seam)], 334);
   io.snapshot.mockReset();
+  io.native.mockReset();
 });
 
 it('shows the persisted unknown direction and requires an explicit choice before Save', () => {
@@ -347,4 +374,143 @@ it('requires the same key, anchors and direction in the strict writer echo', asy
   ).rejects.toThrow('The saved direction could not be verified');
   expect(f.call).toHaveBeenCalledTimes(1);
   expect(f.bridge.reread).not.toHaveBeenCalled();
+});
+
+const registeredSeam: StoredSeam = {
+  ...seam,
+  direction: 'reversed',
+  sideB: [{ ...seam.sideB[0]!, range: [0, 1] }],
+};
+const projected = buildPatternImportDxfPhaseESavedCardContextV1(
+  card,
+  (ids) => ids,
+  new Map([
+    [4, 'm'],
+    [5, 'l'],
+  ]),
+);
+
+it('mounts a no-preset saved-size control and requires an explicit size before Verify', () => {
+  const f = fixture(registeredSeam);
+  const html = renderToStaticMarkup(
+    <SavedSurfaceStationReview
+      capture={f.capture}
+      card={card}
+      disabled={false}
+      isCurrent={() => true}
+    />,
+  );
+  expect(html).toContain('aria-label="Saved size"');
+  expect(html).toContain('Saved size');
+  expect(html).toMatch(/<button[^>]+disabled=""[^>]*>Verify stitch stations/);
+  expect(io.snapshot).not.toHaveBeenCalled();
+  expect(io.native).not.toHaveBeenCalled();
+});
+
+it('sends an explicit authoritative size to the native reader and counts its real CPU stations', async () => {
+  const f = fixture(registeredSeam);
+  f.serve();
+  io.native.mockResolvedValue({
+    sizeToken: 'M',
+    stitch: {
+      operationOrder: 1,
+      seamId: KEYS.seam,
+      sections: [
+        {
+          sideA: { pieceId: KEYS.a, intervals: [{ startMm: [0, 0], endMm: [10, 0] }] },
+          sideB: { pieceId: KEYS.b, intervals: [{ startMm: [12, 0], endMm: [2, 0] }] },
+        },
+      ],
+    },
+  });
+  await expect(
+    verifySavedSurfaceStations(
+      f.capture,
+      card,
+      projected,
+      dictionary,
+      4,
+      () => true,
+      f.controller.signal,
+    ),
+  ).resolves.toEqual({ count: 2, sizeToken: 'M' });
+  expect(io.snapshot).toHaveBeenCalledOnce();
+  expect(io.snapshot).toHaveBeenCalledWith(
+    expect.objectContaining({
+      sourceOnly: true,
+      expectedCardLockVersion: 334,
+      expectedSavedRowRevision: 7,
+    }),
+  );
+  expect(io.native).toHaveBeenCalledWith(
+    expect.objectContaining({ sourceOnly: true, serverAssemblyRevision: clock }),
+    expect.objectContaining({ cardLockVersion: 334 }),
+    { card, sizeDictionary: dictionary, selectedSizeId: 4 },
+    { operationNumber: 570, seamKey: KEYS.seam },
+    f.controller.signal,
+  );
+  expect(f.call).not.toHaveBeenCalled();
+});
+
+it('refuses a selected size outside the saved seam or a non-whole/unknown draft', async () => {
+  const f = fixture(registeredSeam);
+  await expect(
+    verifySavedSurfaceStations(
+      f.capture,
+      card,
+      projected,
+      dictionary,
+      5,
+      () => true,
+      f.controller.signal,
+    ),
+  ).rejects.toThrow('Choose an exact saved size');
+  expect(canReviewSavedSurfaceStations(fixture().capture, card)).toBe(false);
+  expect(canReviewSavedSurfaceStations(fixture({ ...seam, direction: 'same' }).capture, card)).toBe(
+    false,
+  );
+  expect(io.snapshot).not.toHaveBeenCalled();
+  expect(io.native).not.toHaveBeenCalled();
+});
+
+it('refuses late native completion when a newer selection revokes the current verification', async () => {
+  const f = fixture(registeredSeam);
+  f.serve();
+  let current = true;
+  io.native.mockImplementationOnce(async () => {
+    current = false;
+    return { sizeToken: 'M', stitch: {} };
+  });
+  await expect(
+    verifySavedSurfaceStations(
+      f.capture,
+      card,
+      projected,
+      dictionary,
+      4,
+      () => current,
+      f.controller.signal,
+    ),
+  ).rejects.toThrow('The saved surface seam changed');
+  expect(io.native).toHaveBeenCalledOnce();
+  expect(f.call).not.toHaveBeenCalled();
+});
+
+it('refuses moved persisted direction at the shared Complete read before native verification', async () => {
+  const f = fixture(registeredSeam);
+  f.snapshot.ownedSeams[0]!.direction = 'TECH_CARD_SEAM_DIRECTION_SAME';
+  f.serve();
+  await expect(
+    verifySavedSurfaceStations(
+      f.capture,
+      card,
+      projected,
+      dictionary,
+      4,
+      () => true,
+      f.controller.signal,
+    ),
+  ).rejects.toThrow('The saved surface seam changed');
+  expect(io.native).not.toHaveBeenCalled();
+  expect(f.call).not.toHaveBeenCalled();
 });
