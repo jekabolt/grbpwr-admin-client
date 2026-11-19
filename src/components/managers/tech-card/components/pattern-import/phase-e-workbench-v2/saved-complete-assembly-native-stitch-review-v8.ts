@@ -281,6 +281,8 @@ export async function prepareSavedCompleteAssemblyNativeStitchReviewV8(
     throw new Error(
       'This review requires one owned physical seam with its current recorded links.',
     );
+  if (includePhysicalCuts && ownedSeamKeys.length !== 2)
+    throw new Error('Physical preparation requires the recorded pose for this sewing operation.');
   const complete = await prepareSavedFullAssemblyCompleteNativeRowsV1(source, projection, signal, {
     ...dictionary,
     includeGeneratedCutGeometry: false,
