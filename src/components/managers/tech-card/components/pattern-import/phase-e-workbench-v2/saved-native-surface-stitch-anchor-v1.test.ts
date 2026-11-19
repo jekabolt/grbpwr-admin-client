@@ -6,13 +6,18 @@ import { segmentPiece } from 'lib/assembly-skeleton/geometry/segment';
 import { grainRotation } from 'lib/pom/upright';
 import { anchorOf } from 'lib/seams/anchor';
 import { runsOfPiece } from 'lib/seams/frame';
-import { readDxf } from 'lib/pattern-import/adapters/dxf/extract';
+import { readDxf, readDxfWithPathProvenanceV1 } from 'lib/pattern-import/adapters/dxf/extract';
+import { computeDxfProductSavedSourceFileIdV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 import { anchorToWire } from 'lib/seams/wire';
 import {
   parseSavedNativeStitchRowV1,
   readSavedNativeStraightStitchPathsV1,
   resolveSavedLegacyNativeStitchRangeV1,
 } from './saved-legacy-native-stitch-run-v8';
+import {
+  resolveSavedNativePointClosureMarkV1,
+  type SavedNativePointClosureMarkRequestV1,
+} from './saved-native-point-closure-mark-v1';
 import { resolveSavedNativeSurfaceStitchAnchorV1 as resolve } from './saved-native-surface-stitch-anchor-v1';
 
 type Input = Parameters<typeof resolve>[0];
@@ -54,8 +59,8 @@ function polyline(layer: string, points: number[][], closed: boolean) {
     layer,
   ];
 }
-async function fixture(reverse = false, innerPath = line) {
-  const file = new TextEncoder().encode(
+function fixtureFile(innerPath: number[][], closed = false, rankLabels = false) {
+  return new TextEncoder().encode(
     [
       0,
       'SECTION',
@@ -107,7 +112,23 @@ async function fixture(reverse = false, innerPath = line) {
         ],
         true,
       ),
-      ...polyline('8', innerPath, false),
+      ...polyline('8', innerPath, closed),
+      ...(rankLabels
+        ? ['PIECE NAME: POCKET', 'SIZE: M'].flatMap((label) => [
+            0,
+            'TEXT',
+            8,
+            0,
+            10,
+            5,
+            20,
+            5,
+            40,
+            1,
+            1,
+            label,
+          ])
+        : []),
       0,
       'ENDBLK',
       0,
@@ -133,6 +154,9 @@ async function fixture(reverse = false, innerPath = line) {
       '',
     ].join('\n'),
   );
+}
+async function fixture(reverse = false, innerPath = line) {
+  const file = fixtureFile(innerPath);
   const fileName = blockName + '.dxf';
   const read = await readDxf(
     { id: sourceFileId, name: fileName, bytes: file.buffer },
@@ -204,6 +228,85 @@ async function fixture(reverse = false, innerPath = line) {
     index: 0,
   };
 }
+
+async function pointMark(innerPath: number[][], closed = false) {
+  const file = fixtureFile(innerPath, closed, true);
+  const row = {
+    techCardId: 1,
+    scopeKey: 'main',
+    patternLineKey: 'test-pattern',
+    revision: 2,
+    cardLockVersion: 3,
+    url: '/fixture.dxf',
+    sizeBytes: file.byteLength,
+    sha256: createHash('sha256').update(file).digest('hex'),
+  };
+  const id = computeDxfProductSavedSourceFileIdV1(row);
+  const read = await readDxfWithPathProvenanceV1(
+    { id, name: 'fixture.dxf', bytes: file.buffer },
+    { sagittaMm: 0.1, keepFills: true },
+    { sourceFileId: id },
+  );
+  if (!read.ok) throw Error('Unable to read fixture DXF');
+  const { paths, styles } = read.value.read.doc.pages[0]!;
+  const path = paths.find(({ style }) => styles.find(({ id }) => id === style)?.layer === '8')!;
+  const provenance = read.value.provenance.paths.find(({ pathId }) => pathId === path.id)!;
+  return {
+    source: {
+      row,
+      bytes: file.buffer,
+      aliases: [{ scopeKey: row.scopeKey, blockName: 'POCKET', pieceLineKey: pieceKey }],
+      size: { sizeId: 58, sizeToken: 'M' },
+    },
+    request: {
+      pieceLineKey: pieceKey,
+      patternLineKey: row.patternLineKey,
+      dxfSha256: row.sha256,
+      sizeId: 58,
+      aliasBlockName: 'POCKET',
+      nativeBlockName: blockName,
+      sourceInstancePath: provenance.provenance.instancePath,
+      sourceEntityOp: path.src.op,
+      role: closed ? 'BUTTON_MARK_CENTER' : 'BUTTONHOLE_MIDPOINT',
+    } satisfies SavedNativePointClosureMarkRequestV1,
+    nativePathId: path.id,
+  };
+}
+
+describe('saved native point closure marks', () => {
+  it.each([false, true])('resolves one exact original L8 mark (closed %s)', async (closed) => {
+    const { source, request, nativePathId } = await pointMark(
+      line.slice(0, 2).concat(
+        closed
+          ? [
+              [31, 32],
+              [15, 32],
+            ]
+          : [],
+      ),
+      closed,
+    );
+    expect(await resolveSavedNativePointClosureMarkV1(source, request)).toEqual({
+      ...request,
+      sourceFileId: computeDxfProductSavedSourceFileIdV1(source.row),
+      nativePathId,
+      pointMm: [23, closed ? 26 : 20],
+    });
+  });
+
+  it('refuses an open chain, an ambiguous alias and a stale SHA', async () => {
+    const { source, request } = await pointMark(line);
+    const resolve = resolveSavedNativePointClosureMarkV1;
+    await expect(resolve(source, request)).rejects.toThrow('single open segment');
+    await expect(
+      resolve({ ...source, aliases: [...source.aliases, ...source.aliases] }, request),
+    ).rejects.toThrow('unique matching piece alias');
+    await expect(resolve(source, { ...request, dxfSha256: '0'.repeat(64) })).rejects.toThrow(
+      'selected row or its bytes changed',
+    );
+  });
+});
+
 describe('saved native open L8 arclength', () => {
   it.each([false, true])(
     'recovers a sliced original straight chain (ordinary traversal reversed %s)',
