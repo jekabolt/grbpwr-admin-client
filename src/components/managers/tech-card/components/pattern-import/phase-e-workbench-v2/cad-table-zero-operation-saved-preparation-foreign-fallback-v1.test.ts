@@ -240,6 +240,7 @@ describe('zero-operation saved preparation foreign fallback', () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
+    expect(result.foreignSavedDxf).toBeUndefined();
     expect(result.selection.selection.scopeKey).toBe('main');
     expect(result.draftCadCompileSource).toMatchObject({ techCardId: 156 });
     expect(mocks.createForeignHost).not.toHaveBeenCalled();
@@ -257,6 +258,7 @@ describe('zero-operation saved preparation foreign fallback', () => {
     const result = await preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(request());
 
     expect(result.ok).toBe(true);
+    expect(result).toMatchObject({ foreignSavedDxf: true });
     expect(mocks.createForeignHost).toHaveBeenCalledOnce();
     expect(mocks.foreignRun).toHaveBeenCalledWith({
       schemaVersion: 'dxf-product-saved-foreign-reprocess-request/1',

@@ -122,6 +122,7 @@ export type PatternImportDxfPhaseECadTableZeroOperationSavedPreparationResultV1 
       importGeneration: number;
       choices: readonly PatternImportDxfPhaseECadTableZeroOperationFreshChoiceV1[];
       sourceSurface?: 'explicit-native-drawn-sewing';
+      foreignSavedDxf?: true;
       selection: SuccessfulSelection;
       catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1;
       projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
@@ -646,6 +647,7 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
       importGeneration: request.generation.importGeneration,
       choices: choices.choices,
       ...(request.sourceSurface ? { sourceSurface: request.sourceSurface } : {}),
+      ...(reprocessed.ok ? {} : { foreignSavedDxf: true as const }),
       selection: selection.selection,
       catalog: catalogResult.catalog,
       projection: projection.projection,

@@ -17,7 +17,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from 'react';
-import { CalloutBox, Select, Text } from 'ui';
+import { Button, CalloutBox, Select, Text } from 'ui';
 
 import {
   readPatternImportDxfPhaseECardSessionV1,
@@ -105,6 +105,7 @@ import {
 } from './zero-operation-saved-card-authority-v1';
 
 const SavedGeneratedFusingView = lazy(() => import('./saved-generated-fusing-view'));
+const SavedRankedPointEdit = lazy(() => import('./cad-table-saved-ranked-point-edit-v1'));
 
 export const PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_OPERATION_PRODUCTION_MOUNT_V1 =
   'pattern-import-dxf-phase-e-cad-table-zero-operation-production-mount/1' as const;
@@ -1013,6 +1014,53 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
       : null;
   const tableSessionOwner = useCadTableZeroCanvasOwner(prepared?.projection ?? null);
   const resolvedSource = currentPreparation?.resolvedSource ?? null;
+  const pointPrepared =
+    !disabled &&
+    !sourceSurface &&
+    !generatedFusing &&
+    savedAuthority &&
+    resolvedSource === 'saved' &&
+    prepared &&
+    'foreignSavedDxf' in prepared &&
+    prepared.foreignSavedDxf &&
+    isPatternImportDxfPhaseEZeroConnectPreparedAuthorityV1(prepared.authoringAuthority) &&
+    prepared.scopeKey === scopeKey &&
+    prepared.sizeToken === sizeToken &&
+    selectedSize &&
+    prepared.authoringAuthority.selectedRank.sizeId === selectedSize.sizeId &&
+    selectedScope &&
+    selectedScope.sizes.length > 1
+      ? prepared
+      : null;
+  const layout = tableSessionOwner?.session.layout;
+  const pickedPointPiece =
+    layout?.selectedPieceKeys.length === 1
+      ? layout.pieces.find(({ identity }) => identity.key === layout.selectedPieceKeys[0])?.identity
+      : undefined;
+  const pointPieceIndex =
+    pickedPointPiece && pointPrepared
+      ? pointPrepared.catalog.pieces.findIndex(
+          ({ pieceId, pieceLineKey }) =>
+            pieceId === pickedPointPiece.pieceId && pieceLineKey === pickedPointPiece.pieceLineKey,
+        )
+      : -1;
+  const [pointEdit, setPointEdit] = useState<Readonly<{
+    prepared: SavedPrepared;
+    pieceIndex: number;
+    generation: number;
+    operationNumber: typeof selection.operationNumber;
+  }> | null>(null);
+  const activePointEdit =
+    pointEdit &&
+    pointEdit.prepared === pointPrepared &&
+    pointEdit.pieceIndex === pointPieceIndex &&
+    pointEdit.generation === generation &&
+    pointEdit.operationNumber === selection.operationNumber
+      ? pointEdit
+      : null;
+  useEffect(() => {
+    if (pointEdit && !activePointEdit) setPointEdit(null);
+  }, [activePointEdit, pointEdit]);
   type SelectClothPiece = NonNullable<
     NonNullable<CadWorkbenchPhysicalHostV1['acceptedCloth']>['onSelectPiece']
   >;
@@ -1424,6 +1472,24 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
                 <span className='text-micro text-labelColor'>opening exact saved geometry…</span>
               )}
               {pressControl}
+              {pointPrepared && !activePointEdit && (
+                <Button
+                  type='button'
+                  variant='secondary'
+                  size='xs'
+                  disabled={pointPieceIndex < 0}
+                  onClick={() =>
+                    setPointEdit({
+                      prepared: pointPrepared,
+                      pieceIndex: pointPieceIndex,
+                      generation,
+                      operationNumber: selection.operationNumber,
+                    })
+                  }
+                >
+                  Draft point
+                </Button>
+              )}
             </div>
           )}
 
@@ -1463,7 +1529,24 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
             </div>
           )}
 
-          {prepared && tableSessionOwner && (
+          {activePointEdit && savedAuthority && (
+            <Suspense
+              fallback={
+                <Text component='p' size='micro' role='status'>
+                  Opening point editor…
+                </Text>
+              }
+            >
+              <SavedRankedPointEdit
+                prepared={activePointEdit.prepared}
+                pieceIndex={activePointEdit.pieceIndex}
+                generation={activePointEdit.generation}
+                authority={savedAuthority}
+                onClose={() => setPointEdit(null)}
+              />
+            </Suspense>
+          )}
+          {!activePointEdit && prepared && tableSessionOwner && (
             <PatternImportDxfPhaseECadTableZeroConnectCanvasV1
               catalog={prepared.catalog}
               projection={prepared.projection}
