@@ -109,6 +109,7 @@ export type PatternImportDxfPhaseEDraftCadCompiledFeatureV1 = Readonly<{
     | 'notch'
     | 'boundary-point'
     | 'moved-dart-tip'
+    | 'adjusted-dart-intake'
     | 'moved-fish-eye'
     | 'moved-french-curve'
     | 'moved-vertex'
@@ -1069,15 +1070,35 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
             'Review the original saved dart on its exact piece and size.',
             command,
           );
-        const feet = [dart.pts[0]!, dart.pts[2]!],
-          previewFeet = [internal.pts[0]!, internal.pts[2]!];
-        if (
-          !sameDartVertices(feet, previewFeet) &&
-          !sameDartVertices(feet, [...previewFeet].reverse())
-        )
-          return blocked('source-binding-mismatch', 'The original dart feet changed.', command);
-        dart.pts[1] = { ...command.payload.apexMm };
-        output = 'moved-dart-tip';
+        const { savedIntakeSourcePathId } = command.payload;
+        if (savedIntakeSourcePathId !== undefined) {
+          if (
+            dart.ranges.length !== 1 ||
+            dart.ranges[0]?.path !== savedIntakeSourcePathId ||
+            dart.ranges[0].from !== 0 ||
+            dart.ranges[0].to !== dart.pts.length - 1 ||
+            dart.pts[1]?.x !== internal.pts[1]?.x ||
+            dart.pts[1]?.y !== internal.pts[1]?.y
+          )
+            return blocked(
+              'source-binding-mismatch',
+              'The original dart path or apex changed.',
+              command,
+            );
+          dart.pts[0] = internal.pts[0]!;
+          dart.pts[2] = internal.pts[2]!;
+          output = 'adjusted-dart-intake';
+        } else {
+          const feet = [dart.pts[0]!, dart.pts[2]!],
+            previewFeet = [internal.pts[0]!, internal.pts[2]!];
+          if (
+            !sameDartVertices(feet, previewFeet) &&
+            !sameDartVertices(feet, [...previewFeet].reverse())
+          )
+            return blocked('source-binding-mismatch', 'The original dart feet changed.', command);
+          dart.pts[1] = { ...command.payload.apexMm };
+          output = 'moved-dart-tip';
+        }
       } else if (command.tool === 'fish-eye' && command.payload.savedMove) {
         const source = command.payload.savedMove;
         const dart = size.internal[source.index];

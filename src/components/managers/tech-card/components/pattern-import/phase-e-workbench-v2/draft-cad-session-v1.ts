@@ -244,6 +244,7 @@ export type PatternImportDxfPhaseEDraftCadCommandV1 =
         entityId: string;
         base: PatternImportDxfPhaseEDraftCadBoundaryAnchorV1;
         savedTip?: SavedDraftDartPathBindingV1;
+        savedIntakeSourcePathId?: number;
         apexMm: PtMm;
         intakeMm: number;
       }
@@ -593,7 +594,12 @@ function validCommand(value: unknown): value is PatternImportDxfPhaseEDraftCadCo
         boundaryAnchor(payload.base) &&
         point(payload.apexMm) &&
         finitePositive(payload.intakeMm) &&
-        (payload.savedTip === undefined || validSavedInternalPath(payload.savedTip, 3))
+        (payload.savedTip === undefined || validSavedInternalPath(payload.savedTip, 3)) &&
+        (payload.savedIntakeSourcePathId === undefined ||
+          (payload.savedTip !== undefined &&
+            typeof payload.savedIntakeSourcePathId === 'number' &&
+            Number.isSafeInteger(payload.savedIntakeSourcePathId) &&
+            payload.savedIntakeSourcePathId >= 0))
       );
     case 'fish-eye':
       return (

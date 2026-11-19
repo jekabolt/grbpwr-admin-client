@@ -4,8 +4,13 @@ import {
   selectSavedFrenchCurveV1,
 } from './draft-cad-saved-french-curve-v1';
 import { SavedJoinControl, type PrepareJoin } from './draft-cad-saved-join-control';
-import { SavedDartTipControlV1 } from './draft-cad-saved-dart-tip-control-v1';
 import {
+  SavedDartIntakeControlV1,
+  SavedDartTipControlV1,
+} from './draft-cad-saved-dart-tip-control-v1';
+import {
+  adjustedSavedDartFeetV1,
+  recordSavedDartIntakeV1,
   recordSavedDartTipV1,
   recordSavedFishEyeMoveV1,
   selectSavedDartTipV1,
@@ -751,6 +756,27 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
                 positionMm={savedDart.apexMm}
                 onMove={(point) => {
                   const edit = recordSavedDartTipV1(dartInput, selectedForCopy, point);
+                  if (edit?.ok) publishSession(edit.session);
+                }}
+              />
+            )}
+            {savedDart && savedDart.intakeSourcePathId !== undefined && selectedForCopy && (
+              <SavedDartIntakeControlV1
+                key={JSON.stringify([
+                  savedDart.savedTip.sourceSha256,
+                  savedDart.savedTip.scopeKey,
+                  savedDart.savedTip.sizeToken,
+                  selectedForCopy.pieceLineKey,
+                  savedDart.intakeSourcePathId,
+                  confirmedImportGeneration,
+                ])}
+                intakeMm={savedDart.intakeMm}
+                canAdjust={(value) =>
+                  adjustedSavedDartFeetV1(savedDart.edge, savedDart.savedTip.original, value) !==
+                  null
+                }
+                onAdjust={(value) => {
+                  const edit = recordSavedDartIntakeV1(dartInput, selectedForCopy, value);
                   if (edit?.ok) publishSession(edit.session);
                 }}
               />

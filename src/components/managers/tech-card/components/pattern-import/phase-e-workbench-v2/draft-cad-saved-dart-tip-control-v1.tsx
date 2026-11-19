@@ -39,3 +39,35 @@ export function SavedDartTipControlV1({ kind = 'dart-tip', positionMm, onMove }:
     </details>
   );
 }
+export function SavedDartIntakeControlV1({
+  intakeMm,
+  canAdjust,
+  onAdjust,
+}: {
+  intakeMm: number;
+  canAdjust: (intakeMm: number) => boolean;
+  onAdjust: (intakeMm: number) => void;
+}) {
+  const [width, setWidth] = useState(() => String(Number(intakeMm.toFixed(6))));
+  const next = Number(width);
+  return (
+    <details>
+      <summary className='cursor-pointer text-micro'>Adjust dart intake</summary>
+      <div className='flex items-end gap-2'>
+        <label className='text-micro'>
+          Intake (mm)
+          <Input
+            type='number'
+            min={0.000001}
+            step='0.000001'
+            value={width}
+            onChange={(event: ChangeEvent<HTMLInputElement>) => setWidth(event.target.value)}
+          />
+        </label>
+        <Button type='button' size='xs' disabled={!canAdjust(next)} onClick={() => onAdjust(next)}>
+          Record intake
+        </Button>
+      </div>
+    </details>
+  );
+}

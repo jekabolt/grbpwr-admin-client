@@ -24,6 +24,7 @@ import {
 import { activeDraftCadTransactionsV1, isRecordedDraftCadSessionV1 } from './draft-cad-session-v1';
 import { registerSavedDartTipFileV1 } from './draft-cad-saved-dart-tip-file-v1';
 import {
+  adjustedSavedDartFeetV1,
   canMoveSavedDartTipV1,
   movedSavedFishEyePointsV1,
   selectSavedDartTipV1,
@@ -399,18 +400,29 @@ export async function compileSavedDraftGeometryReviewV1(
       candidate.rank === savedDart.rank &&
       candidate.sizeId === savedDart.sizeId &&
       sameDartVertices(candidate.original, savedDart.original);
+    const intakePathId =
+      command.tool === 'dart' ? command.payload.savedIntakeSourcePathId : undefined;
+    const candidate =
+      command.tool === 'dart' ? selectSavedDartTipV1(compileInput, command.target) : null;
     if (command.tool === 'dart') {
-      const candidate = selectSavedDartTipV1(compileInput, command.target);
       requireSavedEdit(
         candidate &&
           base &&
           sameBinding(candidate.savedTip) &&
-          canMoveSavedDartTipV1(candidate.apexMm, command.payload.apexMm) &&
           candidate.base.contourId === base.contourId &&
           candidate.base.boundaryVertexIds.every((id, i) => id === base.boundaryVertexIds[i]) &&
-          candidate.base.progress === base.progress &&
-          candidate.intakeMm === command.payload.intakeMm,
+          candidate.base.progress === base.progress,
         'The saved dart or its two original feet changed.',
+      );
+      const { apexMm, intakeMm } = command.payload;
+      requireSavedEdit(
+        intakePathId === undefined
+          ? canMoveSavedDartTipV1(candidate.apexMm, apexMm) && candidate.intakeMm === intakeMm
+          : candidate.intakeSourcePathId === intakePathId &&
+              candidate.apexMm.x === apexMm.x &&
+              candidate.apexMm.y === apexMm.y &&
+              adjustedSavedDartFeetV1(candidate.edge, candidate.savedTip.original, intakeMm),
+        'The saved dart edit no longer matches its original path, apex or intake.',
       );
     } else {
       const candidate = selectSavedFishEyeMoveV1(compileInput, command.target);
@@ -476,6 +488,7 @@ export async function compileSavedDraftGeometryReviewV1(
         dart &&
         dart.closed === closed &&
         (!savedMove || dart.id === savedMove.sourcePathId) &&
+        (intakePathId === undefined || dart.id === intakePathId) &&
         dart.src.block === block.block &&
         sameDartVertices(dart.pts, savedDart.original) &&
         JSON.stringify(authoredInternalVertices(dart.pts, { x: e, y: f })) ===
@@ -493,15 +506,25 @@ export async function compileSavedDraftGeometryReviewV1(
       'The saved dart needs original native straight geometry.',
     );
     if (base) {
-      requireSavedEdit(
-        one(
-          edges.projection.descriptors.filter(
-            (edge) =>
-              edge.path.sourcePathId === pathId &&
-              edge.startVertexId === base.boundaryVertexIds[0] &&
-              edge.endVertexId === base.boundaryVertexIds[1],
-          ),
+      const cutEdge = one(
+        edges.projection.descriptors.filter(
+          (edge) =>
+            edge.path.sourcePathId === pathId &&
+            edge.startVertexId === base.boundaryVertexIds[0] &&
+            edge.endVertexId === base.boundaryVertexIds[1],
         ),
+      );
+      requireSavedEdit(
+        cutEdge &&
+          (intakePathId === undefined ||
+            (candidate &&
+              sameDartVertices(
+                [
+                  { x: cutEdge.startMm[0], y: cutEdge.startMm[1] },
+                  { x: cutEdge.endMm[0], y: cutEdge.endMm[1] },
+                ],
+                candidate.edge,
+              ))),
         'The dart feet need one original straight cut edge.',
       );
     }

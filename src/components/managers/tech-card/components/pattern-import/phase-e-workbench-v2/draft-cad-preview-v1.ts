@@ -1,4 +1,4 @@
-import { movedSavedFishEyePointsV1 } from './draft-cad-saved-dart-tip-v1';
+import { adjustedSavedDartFeetV1, movedSavedFishEyePointsV1 } from './draft-cad-saved-dart-tip-v1';
 import { activeDraftCadTransactionsV1, parallelOpeningAxisV1 } from './draft-cad-session-v1';
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 import { signedArea } from 'lib/pattern-import/semantics/geom';
@@ -542,17 +542,41 @@ export function buildPatternImportDxfPhaseEDraftCadPreviewV1(
           );
           break;
         }
+        const { savedTip, savedIntakeSourcePathId, intakeMm } = command.payload;
+        const adjusted =
+          savedIntakeSourcePathId !== undefined && savedTip
+            ? adjustedSavedDartFeetV1([segment.fromMm, segment.toMm], savedTip.original, intakeMm)
+            : null;
+        if (
+          savedIntakeSourcePathId !== undefined &&
+          (!adjusted ||
+            savedTip?.original[1]?.x !== command.payload.apexMm.x ||
+            savedTip?.original[1]?.y !== command.payload.apexMm.y)
+        ) {
+          blockers.push(
+            commandBlocker(
+              command,
+              'invalid-command-geometry',
+              'The new intake must keep the saved apex and center on the original cut edge.',
+            ),
+          );
+          break;
+        }
         const ux = dx / edgeLengthMm;
         const uy = dy / edgeLengthMm;
-        const half = command.payload.intakeMm / 2;
-        const baseLeftMm = clonePoint({
-          x: segment.pointMm.x - ux * half,
-          y: segment.pointMm.y - uy * half,
-        });
-        const baseRightMm = clonePoint({
-          x: segment.pointMm.x + ux * half,
-          y: segment.pointMm.y + uy * half,
-        });
+        const half = intakeMm / 2;
+        const baseLeftMm = clonePoint(
+          adjusted?.[0] ?? {
+            x: segment.pointMm.x - ux * half,
+            y: segment.pointMm.y - uy * half,
+          },
+        );
+        const baseRightMm = clonePoint(
+          adjusted?.[1] ?? {
+            x: segment.pointMm.x + ux * half,
+            y: segment.pointMm.y + uy * half,
+          },
+        );
         const apexMm = clonePoint(command.payload.apexMm);
         primitives.push(
           deepFreeze({

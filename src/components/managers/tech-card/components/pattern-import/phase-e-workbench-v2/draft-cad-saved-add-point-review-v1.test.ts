@@ -13,6 +13,8 @@ import {
   openSavedDraftGeometryFileV1,
 } from './draft-cad-saved-dart-tip-review-v1';
 import {
+  adjustedSavedDartFeetV1,
+  recordSavedDartIntakeV1,
   recordSavedDartTipV1,
   recordSavedFishEyeMoveV1,
   selectSavedDartTipV1,
@@ -2219,12 +2221,14 @@ async function checkNativeOutlinePointEdit(
     | 'delete-point'
     | 'sharpen-corner'
     | 'dart-tip'
+    | 'dart-intake'
     | 'fish-eye-move'
     | 'parallel-spread',
   fiveRanks = false,
   sourceDialect: 'r12' | 'r2000' = 'r12',
 ) {
-  const savedDartEdit = tool === 'dart-tip' || tool === 'fish-eye-move';
+  const savedIntake = tool === 'dart-intake';
+  const savedDartEdit = tool === 'dart-tip' || savedIntake || tool === 'fish-eye-move';
   vi.stubGlobal('Worker', InProcessTransport);
   const f = await fixture(
     true,
@@ -2232,7 +2236,7 @@ async function checkNativeOutlinePointEdit(
     fiveRanks,
     savedDartEdit,
     sourceDialect,
-    tool === 'parallel-spread' || tool === 'fish-eye-move',
+    tool === 'parallel-spread' || tool === 'fish-eye-move' || savedIntake,
     undefined,
     tool === 'sharpen-corner',
   );
@@ -2294,14 +2298,34 @@ async function checkNativeOutlinePointEdit(
     };
     const targetPiece = projection.pieces[pieceIndex]!;
     const emptyInput = { ...f.compileInput, session: f.initial };
-    const savedDart = tool === 'dart-tip' ? selectSavedDartTipV1(emptyInput, targetPiece) : null;
-    const nextTip = savedDart ? { x: savedDart.apexMm.x + 3, y: savedDart.apexMm.y - 4 } : null;
+    const savedDart =
+      tool === 'dart-tip' || savedIntake ? selectSavedDartTipV1(emptyInput, targetPiece) : null;
+    const nextTip =
+      savedDart && tool === 'dart-tip'
+        ? { x: savedDart.apexMm.x + 3, y: savedDart.apexMm.y - 4 }
+        : null;
+    const left = savedDart?.savedTip.original[0];
+    const right = savedDart?.savedTip.original[2];
+    if (savedIntake) {
+      expect(savedDart?.intakeSourcePathId).toBeTypeOf('number');
+      expect(left?.y).toBe(right?.y);
+      expect(left?.x).toBeLessThan(right!.x);
+    }
+    // On this horizontal native edge the 8 mm increase moves each original foot 4 mm.
+    const deltaFor = (i: number) => (savedIntake ? { x: i === 0 ? -4 : 4, y: 0 } : { x: 3, y: -4 });
     const fishEye =
       tool === 'fish-eye-move' ? selectSavedFishEyeMoveV1(emptyInput, targetPiece) : null;
     const nextCenter = fishEye ? { x: fishEye.centerMm.x + 3, y: fishEye.centerMm.y - 4 } : null;
-    const movedDart = nextTip
-      ? recordSavedDartTipV1(emptyInput, targetPiece, nextTip)
-      : nextCenter && recordSavedFishEyeMoveV1(emptyInput, targetPiece, nextCenter);
+    const movedDart =
+      savedIntake && savedDart
+        ? recordSavedDartIntakeV1(
+            emptyInput,
+            targetPiece,
+            Number((savedDart.intakeMm + 8).toFixed(6)),
+          )
+        : nextTip
+          ? recordSavedDartTipV1(emptyInput, targetPiece, nextTip)
+          : nextCenter && recordSavedFishEyeMoveV1(emptyInput, targetPiece, nextCenter);
     const selected = targetPiece.contours.find((c) => c.role === 'cut-boundary')!;
     const bounds = bboxOf(selected.vertices.map((v) => v.pointMm)),
       slashX = bounds.minX + 38;
@@ -2391,6 +2415,18 @@ async function checkNativeOutlinePointEdit(
           ? recordPatternImportDxfPhaseEDraftCadMovePointV1({ ...input, pointMm })
           : recordPatternImportDxfPhaseEDraftCadDeletePointV1(input);
     expect(edit.recorded, edit.blocker ?? '').toBe(true);
+    if (savedIntake) {
+      const undo = undoPatternImportDxfPhaseEDraftCadSessionV1(edit.session);
+      if (!undo.ok) throw Error(undo.blocker.detail);
+      expect(selectSavedDartTipV1({ ...emptyInput, session: undo.session }, targetPiece)).toEqual(
+        savedDart,
+      );
+      const redo = redoPatternImportDxfPhaseEDraftCadSessionV1(undo.session);
+      if (!redo.ok) throw Error(redo.blocker.detail);
+      expect(activeDraftCadTransactionsV1(redo.session)).toEqual(
+        activeDraftCadTransactionsV1(edit.session),
+      );
+    }
     f.current.session = edit.session;
     const verifyRow = vi.fn(async () => {});
     if (tool === 'sharpen-corner')
@@ -2406,6 +2442,10 @@ async function checkNativeOutlinePointEdit(
         : undefined,
     );
     if (!compiled.ok) throw Error(JSON.stringify(compiled.blockers));
+    if (savedIntake)
+      expect(compiled.artifact.compiledFeatures).toMatchObject([
+        { output: 'adjusted-dart-intake' },
+      ]);
     expect(
       await stagePatternImportDxfPhaseECadSemanticCompiledArtifactV1(compiled.artifact, {
         confirmedImportGenerationAtCompile: f.current.generation,
@@ -2435,7 +2475,7 @@ async function checkNativeOutlinePointEdit(
       worker,
       undefined,
       undefined,
-      tool === 'sharpen-corner' ? sourceDialect : 'r12',
+      tool === 'sharpen-corner' || savedIntake ? sourceDialect : 'r12',
     );
     const scope = reviewed.scopes[0]!;
     if (tool === 'sharpen-corner')
@@ -2632,12 +2672,12 @@ async function checkNativeOutlinePointEdit(
         const changed = expected.find(
           (b) => b.identity === targetPiece.pieceId && b.sizeToken === 'M',
         )!;
-        const label = tool === 'dart-tip' ? 'draft-cad:dart' : 'draft-cad:fish-eye';
+        const label = tool === 'fish-eye-move' ? 'draft-cad:fish-eye' : 'draft-cad:dart';
         const marker = changed.authoredInternal!.find((m) => m.label === label)!;
-        const movedIndices = tool === 'dart-tip' ? [1] : [0, 1, 2, 3];
+        const movedIndices = savedIntake ? [0, 2] : tool === 'dart-tip' ? [1] : [0, 1, 2, 3];
         for (const index of movedIndices) {
-          marker.vertices[index * 2]! += 3_000_000;
-          marker.vertices[index * 2 + 1]! -= 4_000_000;
+          marker.vertices[index * 2]! += deltaFor(index).x * 1_000_000;
+          marker.vertices[index * 2 + 1]! += deltaFor(index).y * 1_000_000;
         }
         const initialRaw = parseDxf(f.request.savedBytes, 'mm').dxf;
         const savedRaw = parseDxf(bytes.buffer, 'mm').dxf;
@@ -2653,8 +2693,8 @@ async function checkNativeOutlinePointEdit(
             expect(original.closed).toBe(tool === 'fish-eye-move');
             expect(restoredInternal[marker.index]!.closed).toBe(original.closed);
             for (const index of movedIndices) {
-              original.pts[index]!.x += 3;
-              original.pts[index]!.y -= 4;
+              original.pts[index]!.x += deltaFor(index).x;
+              original.pts[index]!.y += deltaFor(index).y;
             }
           }
           expect(restoredInternal).toEqual(originalInternal);
@@ -2662,8 +2702,12 @@ async function checkNativeOutlinePointEdit(
             file.blocks[block.block]!.entities.filter(
               ({ layer, type }) => layer === '13' && type === 'POINT',
             );
-          expect(drillPoints(initialRaw)).toHaveLength(fishEye && sourceDialect === 'r12' ? 1 : 0);
-          expect(drillPoints(savedRaw)).toHaveLength(fishEye ? 1 : 0);
+          expect(drillPoints(initialRaw)).toHaveLength(
+            (fishEye || savedIntake) && sourceDialect === 'r12' ? 1 : 0,
+          );
+          expect(drillPoints(savedRaw)).toHaveLength(
+            fishEye || (savedIntake && sourceDialect === 'r12') ? 1 : 0,
+          );
           for (const layer of ['1', '14'])
             expect(rawLayers(savedRaw, layer)).toEqual(rawLayers(initialRaw, layer));
         }
@@ -2682,8 +2726,8 @@ async function checkNativeOutlinePointEdit(
             if (p.identity === targetPiece.pieceId && size.sizeToken === 'M') {
               const feature = previous.find((entry) => entry.label === label)!;
               for (const index of movedIndices) {
-                feature.pts[index]!.x += 3;
-                feature.pts[index]!.y -= 4;
+                feature.pts[index]!.x += deltaFor(index).x;
+                feature.pts[index]!.y += deltaFor(index).y;
               }
               if (fishEye)
                 expect(size.internal[fishEye.savedMove.index]?.ranges[0]?.path).toBe(
@@ -2700,6 +2744,14 @@ async function checkNativeOutlinePointEdit(
             expect(decoded.cut).toEqual(size.cut);
             expect(decoded.seam).toEqual(size.seam);
             expect(decoded.cutLoops).toEqual(size.cutLoops);
+            if (savedIntake) {
+              expect(decoded.cutLoops).toHaveLength(2);
+              expect(decoded.drills).toHaveLength(1);
+              expect(decoded.drills.map(({ at, form }) => ({ at, form }))).toEqual(
+                size.drills.map(({ at, form }) => ({ at, form })),
+              );
+              expect(decoded.grain).toEqual(size.grain);
+            }
             if (fishEye) {
               expect(decoded.cutLoops).toHaveLength(2);
               expect(decoded.drills).toHaveLength(1);
@@ -2880,6 +2932,32 @@ it.each(['r12', 'r2000'] as const)(
 );
 
 it.each(['r12', 'r2000'] as const)(
+  'adjusts the saved %s M dart intake through manual Apply and fresh native replay',
+  (dialect) => checkNativeOutlinePointEdit('dart-intake', true, dialect),
+);
+
+it('keeps exact ordered diagonal feet on the writer grid and refuses off-edge or collapsed intake', () => {
+  const edge = [
+    { x: 0, y: 0 },
+    { x: 3, y: 4 },
+  ] as const;
+  const apex = { x: 2, y: 0.5 };
+  const first = { x: 0.6, y: 0.8 },
+    last = { x: 1.8, y: 2.4 };
+  expect(adjustedSavedDartFeetV1(edge, [first, apex, last], 3)).toEqual([
+    { x: 0.3, y: 0.4 },
+    { x: 2.1, y: 2.8 },
+  ]);
+  expect(adjustedSavedDartFeetV1(edge, [last, apex, first], 3)).toEqual([
+    { x: 2.1, y: 2.8 },
+    { x: 0.3, y: 0.4 },
+  ]);
+  expect(adjustedSavedDartFeetV1(edge, [{ ...first, y: 0.800001 }, apex, last], 3)).toBeNull();
+  for (const invalid of [0, 2, 3.000001, 3.000005, 4])
+    expect(adjustedSavedDartFeetV1(edge, [first, apex, last], invalid)).toBeNull();
+});
+
+it.each(['r12', 'r2000'] as const)(
   'moves only the saved %s M fish-eye through manual Apply and fresh native replay across five ranks',
   (dialect) => checkNativeOutlinePointEdit('fish-eye-move', true, dialect),
 );
@@ -3051,6 +3129,63 @@ it.each(['orphan', 'ambiguous'] as const)(
     }
   },
 );
+
+it('rejects a saved intake with a foreign L8 path, shifted edge centre or apex, or feet past the edge', async () => {
+  vi.stubGlobal('Worker', InProcessTransport);
+  const f = await fixture(true, false, true, true);
+  try {
+    const input = { ...f.compileInput, session: f.initial },
+      piece = input.projection.pieces[0]!;
+    const dart = selectSavedDartTipV1(input, piece);
+    const fishEye = selectSavedFishEyeMoveV1(input, piece);
+    if (!dart || !fishEye) throw Error('The two signed L8 fixture paths are unavailable.');
+    const width = Number((dart.intakeMm + 8).toFixed(6));
+    const [from, to] = dart.edge;
+    const tooWide = Math.ceil(Math.hypot(to.x - from.x, to.y - from.y)) + 1;
+    expect(recordSavedDartIntakeV1(input, piece, tooWide)).toBeNull();
+    const edit = recordSavedDartIntakeV1(input, piece, width);
+    if (!edit?.ok) throw Error('Fixture intake unavailable.');
+    const command = edit.session.history[0]!.commands[0]!;
+    if (command.tool !== 'dart') throw Error('The fixture did not record a dart.');
+    expect(command.payload.savedIntakeSourcePathId).toBe(dart.intakeSourcePathId);
+    expect(command.payload.savedIntakeSourcePathId).not.toBe(fishEye.savedMove.sourcePathId);
+    const invalid = [
+      { savedIntakeSourcePathId: fishEye.savedMove.sourcePathId },
+      { base: { ...dart.base, progress: dart.base.progress + 0.01 } },
+      { apexMm: { ...dart.apexMm, x: dart.apexMm.x + 1 } },
+      { intakeMm: tooWide },
+    ];
+    for (const payload of invalid) {
+      const corrupt = recordPatternImportDxfPhaseEDraftCadTransactionV1(f.initial, {
+        transactionId: 'changed-intake',
+        label: 'Adjust saved dart intake',
+        commands: [{ ...command, payload: { ...command.payload, ...payload } }],
+      });
+      if (!corrupt.ok) throw Error(corrupt.blocker.detail);
+      f.current.session = corrupt.session;
+      const verify = vi.fn(async () => {});
+      const fresh = await createSavedThreePanelSourceV1(f.seed);
+      try {
+        await expect(
+          compileSavedDartTipReviewV1(
+            {
+              ...f.request,
+              sourceOwner: fresh.native.sourceOwner,
+              sourceRequest: { ...f.request.sourceRequest, draft: fresh.native.draft },
+            },
+            verify,
+          ),
+        ).rejects.toThrow(/saved dart/i);
+        expect(verify).not.toHaveBeenCalled();
+      } finally {
+        fresh.dispose();
+      }
+    }
+  } finally {
+    f.source.dispose();
+    vi.unstubAllGlobals();
+  }
+});
 
 it.each(['r12', 'r2000'] as const)(
   'applies a parallel opening to the saved %s piece and keeps ten graded blocks with their holes',

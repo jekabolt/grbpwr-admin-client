@@ -61,6 +61,7 @@ export function registerPatternImportDxfPhaseEPatternsFieldCompiledReimportOwner
       const savedGeometry = artifact.compiledFeatures.some(
         ({ output }) =>
           output === 'moved-dart-tip' ||
+          output === 'adjusted-dart-intake' ||
           output === 'moved-fish-eye' ||
           output === 'moved-french-curve' ||
           output === 'parallel-spread' ||

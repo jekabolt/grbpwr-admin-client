@@ -9,6 +9,63 @@ import {
 } from './draft-cad-session-v1';
 
 const one = <T>(items: readonly T[]) => (items.length === 1 ? items[0] : undefined);
+const DXF_GRID_PER_MM = 1_000_000;
+
+function greatestCommonDivisor(a: bigint, b: bigint): bigint {
+  while (b) [a, b] = [b, a % b];
+  return a < 0n ? -a : a;
+}
+
+/** Along one original cut edge the 6-decimal DXF grid has equally spaced exact points. */
+function savedDartEdgeGrid(edge: readonly [PtMm, PtMm], original: readonly PtMm[]) {
+  if (original.length !== 3) return null;
+  const coordinates = authoredInternalVertices([...edge, original[0]!, original[2]!]);
+  if (!coordinates.every(Number.isSafeInteger)) return null;
+  const [x, y, bx, by, lx, ly, rx, ry] = coordinates.map(BigInt);
+  const dx = bx! - x!,
+    dy = by! - y!;
+  const count = greatestCommonDivisor(dx, dy);
+  if (!count) return null;
+  const stepX = dx / count,
+    stepY = dy / count;
+  const alongEdge = (px: bigint, py: bigint) => {
+    const t = stepX ? (px - x!) / stepX : (py - y!) / stepY;
+    return t > 0n && t < count && x! + t * stepX === px && y! + t * stepY === py ? t : null;
+  };
+  const left = alongEdge(lx!, ly!),
+    right = alongEdge(rx!, ry!);
+  return left !== null && right !== null && left !== right
+    ? { x: x!, y: y!, stepX, stepY, count, left, right }
+    : null;
+}
+
+/** Rebuild both ordered feet with the same grid midpoint. Never snap off the native edge. */
+export function adjustedSavedDartFeetV1(
+  edge: readonly [PtMm, PtMm],
+  original: readonly PtMm[],
+  intakeMm: number,
+): readonly [PtMm, PtMm] | null {
+  if (!Number.isFinite(intakeMm) || intakeMm <= 0) return null;
+  const grid = savedDartEdgeGrid(edge, original);
+  if (!grid) return null;
+  const { x, y, stepX, stepY, count, left, right } = grid;
+  const stepMm = Math.hypot(Number(stepX), Number(stepY)) / DXF_GRID_PER_MM;
+  const span = Math.round(intakeMm / stepMm);
+  if (!Number.isSafeInteger(span) || span <= 0 || Number((span * stepMm).toFixed(6)) !== intakeMm)
+    return null;
+  const delta = BigInt(span) * (right > left ? 1n : -1n);
+  const doubledLeft = left + right - delta;
+  if (delta === right - left || doubledLeft % 2n) return null;
+  const newLeft = doubledLeft / 2n,
+    newRight = newLeft + delta;
+  if ([newLeft, newRight].some((n) => n <= 0n || n >= count)) return null;
+  const mm = (n: bigint) => ({
+    x: Number(x + n * stepX) / DXF_GRID_PER_MM,
+    y: Number(y + n * stepY) / DXF_GRID_PER_MM,
+  });
+  return [mm(newLeft), mm(newRight)];
+}
+
 export function sameDartVertices(a: readonly PtMm[], b: readonly PtMm[]) {
   if (a.length !== b.length) return false;
   const other = authoredInternalVertices(b);
@@ -51,7 +108,10 @@ export function selectSavedDartTipV1(
   const dart = one(size.internal.filter((p) => p.label === 'draft-cad:dart'));
   if (!dart || dart.graded || dart.closed || dart.pts.length !== 3) return null;
   const [left, apex, right] = dart.pts;
-  const anchors: PatternImportDxfPhaseEDraftCadBoundaryAnchorV1[] = [];
+  const anchors: {
+    base: PatternImportDxfPhaseEDraftCadBoundaryAnchorV1;
+    edge: readonly [PtMm, PtMm];
+  }[] = [];
   for (const contour of projected.contours.filter((c) => c.closed && c.role === 'cut-boundary')) {
     for (const [i, start] of contour.vertices.entries()) {
       const end = contour.vertices[(i + 1) % contour.vertices.length]!;
@@ -68,16 +128,28 @@ export function selectSavedDartTipV1(
         Math.hypot(a.x + t(p) * dx - p.x, a.y + t(p) * dy - p.y) <= 0.000001;
       if (onEdge(left!) && onEdge(right!) && t(left!) !== t(right!))
         anchors.push({
-          contourId: contour.contourId,
-          boundaryVertexIds: [start.vertexId, end.vertexId],
-          progress: (t(left!) + t(right!)) / 2,
+          base: {
+            contourId: contour.contourId,
+            boundaryVertexIds: [start.vertexId, end.vertexId],
+            progress: (t(left!) + t(right!)) / 2,
+          },
+          edge: [a, b],
         });
     }
   }
-  const base = one(anchors);
-  return base
+  const anchor = one(anchors);
+  const range = one(dart.ranges);
+  return anchor
     ? {
-        base,
+        ...anchor,
+        intakeSourcePathId:
+          range?.from === 0 &&
+          range.to === dart.pts.length - 1 &&
+          Number.isSafeInteger(range.path) &&
+          range.path >= 0 &&
+          savedDartEdgeGrid(anchor.edge, dart.pts)
+            ? range.path
+            : undefined,
         apexMm: apex!,
         intakeMm: Math.hypot(left!.x - right!.x, left!.y - right!.y),
         savedTip: {
@@ -108,7 +180,53 @@ export function recordSavedDartTipV1(
     transactionId: id,
     label: 'Move saved dart tip',
     commands: [
-      { tool: 'dart', commandId: id, target, payload: { entityId: id, ...candidate, apexMm } },
+      {
+        tool: 'dart',
+        commandId: id,
+        target,
+        payload: {
+          entityId: id,
+          base: candidate.base,
+          savedTip: candidate.savedTip,
+          intakeMm: candidate.intakeMm,
+          apexMm,
+        },
+      },
+    ],
+  });
+}
+
+export function recordSavedDartIntakeV1(
+  input: CompileInput,
+  target: PatternImportDxfPhaseEDraftCadTargetV1,
+  intakeMm: number,
+) {
+  const candidate = selectSavedDartTipV1(input, target);
+  if (
+    input.session.cursor !== 0 ||
+    !candidate ||
+    candidate.intakeSourcePathId === undefined ||
+    !adjustedSavedDartFeetV1(candidate.edge, candidate.savedTip.original, intakeMm)
+  )
+    return null;
+  const id = 'saved-dart-intake';
+  return recordPatternImportDxfPhaseEDraftCadTransactionV1(input.session, {
+    transactionId: id,
+    label: 'Adjust saved dart intake',
+    commands: [
+      {
+        tool: 'dart',
+        commandId: id,
+        target,
+        payload: {
+          entityId: id,
+          base: candidate.base,
+          savedTip: candidate.savedTip,
+          savedIntakeSourcePathId: candidate.intakeSourcePathId,
+          apexMm: candidate.apexMm,
+          intakeMm,
+        },
+      },
     ],
   });
 }
