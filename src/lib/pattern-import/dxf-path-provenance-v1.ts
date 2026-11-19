@@ -632,6 +632,23 @@ export function createDxfInsertInstancePathV1(
   }
 }
 
+/** Returns the raw block name recorded by one canonical INSERT occurrence token. */
+export function readDxfInsertInstanceBlockNameV1(token: unknown): string | null {
+  if (
+    typeof token !== 'string' ||
+    token.length > MAX_INSTANCE_TOKEN_LENGTH ||
+    !canonicalInstanceToken(token)
+  )
+    return null;
+  const hex = token.split('/')[1];
+  const bytes = Uint8Array.from(hex.match(/../g)!, (pair) => Number.parseInt(pair, 16));
+  try {
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch {
+    return null;
+  }
+}
+
 export function createDxfSourceCurveIdV1(input: unknown): DxfProvenanceResultV1<string> {
   try {
     const record = exactRecord(
