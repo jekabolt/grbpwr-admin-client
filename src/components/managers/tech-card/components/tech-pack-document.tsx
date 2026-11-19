@@ -137,7 +137,7 @@ import type { SizeChartPictureDraft } from 'lib/pom/size-chart-picture';
 // «не бери window.location.origin», из которых одну однажды поправят, а другую нет.
 import { viewerOrigin } from 'utils/viewer-origin';
 import { PatternQR } from 'components/managers/tech-card/patterns/pattern-qr';
-import { GrbpwrMark } from 'ui';
+import { PaperMark, usePaperBrand } from 'lib/workspace/paper-brand-context';
 import { SizeChartPictureGraphic } from './size-chart-picture';
 import { bomLinesOfStep, cutStripsOfCard, stripRefsOf } from './cut-strips/strip-pieces';
 import { isAttachStep, isCountedLine, qtyStepFromOperation } from './button-qty';
@@ -708,6 +708,7 @@ export function TechPackDocument({
    */
   cutPlan?: GetProductionRunCutPlanResponse;
 }) {
+  const paper = usePaperBrand();
   const tc = techCard.techCard;
   // Скоуп по умолчанию: тот же документ, что печатался до появления скоупа. Так у каждой секции
   // ниже ровно один источник правды о том, что ей печатать, — даже когда скоупа не передали.
@@ -2018,10 +2019,10 @@ export function TechPackDocument({
       <header className='mb-5 border-b-2 border-black pb-3'>
         <div className='flex items-start justify-between gap-4'>
           <div className='flex items-start gap-3'>
-            <GrbpwrMark className='mt-0.5 h-10 w-10 shrink-0 text-black' />
+            <PaperMark brand={paper} className='mt-0.5 h-10 w-10 shrink-0 text-black' />
             <div>
               <div className='text-micro uppercase tracking-[0.2em] text-labelColor'>
-                {tc.brand || 'GRBPWR'} · tech pack
+                {(tc.brand || paper.name) ? <>{tc.brand || paper.name} · tech pack</> : 'tech pack'}
               </div>
               <div className='text-2xl font-bold uppercase leading-tight'>
                 {tc.name || 'untitled'}
@@ -3657,7 +3658,7 @@ export function TechPackDocument({
       )}
 
       <footer className='mt-6 border-t border-borderColor pt-2 text-nano uppercase tracking-wide text-labelColor'>
-        {tc.brand || 'GRBPWR'} · {tc.styleNumber || ''} · {tc.name || ''} · generated{' '}
+        {(tc.brand || paper.name) && <>{tc.brand || paper.name} · </>}{tc.styleNumber || ''} · {tc.name || ''} · generated{' '}
         {formatTechCardDate(techCard.updatedAt)}
       </footer>
     </div>

@@ -16,6 +16,7 @@ import type { ModelOpenReferencePreviewInputV1 } from 'components/managers/model
 import { modelFormRevisionKeyV1 } from 'components/managers/model/components/schema';
 import { useAllModels } from 'components/managers/models/components/useModelQuery';
 import type {
+  MeasurementSurfacePatternDragPlaneV1,
   MeasurementSurfacePatternPieceOverlayV1,
   MeasurementSurfacePatternPieceV1,
   MeasurementSurfacePatternPieceTransformV1,
@@ -23,13 +24,27 @@ import type {
 } from 'components/shared/measurement-watertight-surface-v1-stage';
 import { ROUTES } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Link } from 'react-router-dom';
-import { Button, CheckboxCommon, Pill, Text } from 'ui';
+import { Button, CheckboxCommon, Pill, Select, Text } from 'ui';
 
 import type { TechCardFormData } from '../../schema';
 import { BodyPicker, modelFacts, modelName } from '../../design/render/model-picker';
+import {
+  cadMannequinPlacementGroupKeysV1,
+  type CadMannequinTableSelectionV1,
+} from './cad-mannequin-placement-group-v1';
+import { CAD_MANNEQUIN_ARRANGEMENT_LIMITS_V1 } from './cad-mannequin-arrangement-document-v1';
+import { CadMannequinPatternOffsetControlsV1 } from './cad-mannequin-pattern-offset-controls-v1';
 import {
   buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1,
   type PatternImportDxfPhaseECadMannequinPatternOverlayDecorationV1,
@@ -40,9 +55,14 @@ import type {
   PatternImportDxfPhaseECadMannequinDxfStagingSourceV1,
 } from './cad-mannequin-dxf-staging-v1';
 import type { PatternImportDxfPhaseECadMannequinSceneOverlayRendererBridgeV1 } from './cad-mannequin-scene-overlay-renderer-bridge-v1';
+import type { CadTableSavedTopstitchOverlayV1 } from './cad-table-saved-topstitch-overlay-v1';
+import type { CadWorkbenchPhysicalHostV1 } from './cad-workbench-physical-host-v1';
 
 export const PATTERN_IMPORT_DXF_PHASE_E_CAD_MANNEQUIN_MODEL_PICKER_V1 =
   'pattern-import-dxf-phase-e-cad-mannequin-model-picker/1' as const;
+const DRAG_PLANES = ['view', 'xy', 'xz', 'yz'] as const;
+const ZERO_PATTERN_OFFSET_M = [0, 0, 0] as const;
+type PatternTransforms = Readonly<Record<string, MeasurementSurfacePatternPieceTransformV1>>;
 
 export const PATTERN_IMPORT_DXF_PHASE_E_CAD_MANNEQUIN_MODEL_PICKER_CLAIMS_V1 = Object.freeze({
   techCardBaseModelFieldReused: true,
@@ -61,7 +81,8 @@ export const PATTERN_IMPORT_DXF_PHASE_E_CAD_MANNEQUIN_MODEL_PICKER_CLAIMS_V1 = O
   createsCameraAuthority: false,
   createsModelWriteOwner: false,
   paperDollClaimsMeasurementShape: false,
-  selectionPersistsThroughExistingTechCardSave: true,
+  ordinarySelectionPersistsThroughExistingTechCardSave: true,
+  workbenchSelectionPersistsThroughExistingArrangementSave: true,
   neutralPoseCreatesSessionOwner: true,
   sessionPoseNeverWritesFromAssemblyTable: true,
 } as const);
@@ -72,22 +93,32 @@ export const PATTERN_IMPORT_DXF_PHASE_E_CAD_MANNEQUIN_VIEW_PRESETS_V1 = Object.f
   'back',
 ] as const satisfies readonly MeasurementSurfaceViewPreset[]);
 
+type TopstitchVisibility = Readonly<{ visible: boolean; onChange: (visible: boolean) => void }>;
+
 export function PatternImportDxfPhaseECadMannequinViewToolbarV1({
   viewPreset,
   onViewPreset,
   patternTool,
   onPatternTool,
+  dragPlane,
+  onDragPlaneChange,
+  patternTransformDisabled = false,
   poseEditing,
   poseEditingDisabled = false,
   onPoseEditingChange,
+  topstitchVisibility,
 }: Readonly<{
   viewPreset: MeasurementSurfaceViewPreset;
   onViewPreset: (preset: MeasurementSurfaceViewPreset) => void;
   patternTool?: PatternImportDxfPhaseECadMannequinPatternOverlayToolV1;
   onPatternTool?: (tool: PatternImportDxfPhaseECadMannequinPatternOverlayToolV1) => void;
+  dragPlane?: MeasurementSurfacePatternDragPlaneV1;
+  onDragPlaneChange?: (plane: MeasurementSurfacePatternDragPlaneV1) => void;
+  patternTransformDisabled?: boolean;
   poseEditing: boolean;
   poseEditingDisabled?: boolean;
   onPoseEditingChange: (enabled: boolean) => void;
+  topstitchVisibility?: TopstitchVisibility;
 }>) {
   return (
     <nav
@@ -119,6 +150,7 @@ export function PatternImportDxfPhaseECadMannequinViewToolbarV1({
               size='xs'
               variant={patternTool === tool ? 'simpleReverseWithBorder' : 'underline'}
               aria-pressed={patternTool === tool}
+              disabled={patternTransformDisabled && tool !== 'select'}
               data-cad-mannequin-pattern-tool={tool}
               onClick={() => onPatternTool(tool)}
             >
@@ -126,6 +158,35 @@ export function PatternImportDxfPhaseECadMannequinViewToolbarV1({
             </Button>
           ))}
         </>
+      ) : null}
+      {patternTool === 'translate' && dragPlane && onDragPlaneChange ? (
+        <Select
+          name='cad-placement-drag-plane'
+          size='sm'
+          placeholder='Move plane'
+          value={dragPlane}
+          items={DRAG_PLANES.map((value) => ({
+            value,
+            label: value === 'view' ? 'View plane' : `${value.toUpperCase()} plane`,
+          }))}
+          onValueChange={(value) => {
+            const plane = DRAG_PLANES.find((option) => option === value);
+            if (plane) onDragPlaneChange(plane);
+          }}
+          readOnly={patternTransformDisabled}
+        />
+      ) : null}
+      {topstitchVisibility ? (
+        <Button
+          type='button'
+          size='xs'
+          variant={topstitchVisibility.visible ? 'simpleReverseWithBorder' : 'underline'}
+          aria-label='Show topstitch in 3D'
+          aria-pressed={topstitchVisibility.visible}
+          onClick={() => topstitchVisibility.onChange(!topstitchVisibility.visible)}
+        >
+          Topstitch
+        </Button>
       ) : null}
       <label className='ml-auto flex min-h-7 cursor-pointer items-center gap-1.5 px-1 text-micro font-bold'>
         <CheckboxCommon
@@ -189,6 +250,11 @@ export type PatternImportDxfPhaseECadMannequinModelPickerViewPropsV1 = Readonly<
   poseError?: unknown;
   onRetryPose?: () => void;
   onDisplayedBodyInputV1?: CadMannequinDisplayedBodyInputObserverV1;
+  acceptedCloth?: CadWorkbenchPhysicalHostV1['acceptedCloth'];
+  reserveViewportHeight?: boolean;
+  onSaveMannequinArrangement?: CadWorkbenchPhysicalHostV1['onSaveMannequinArrangement'];
+  onReadMannequinArrangement?: CadWorkbenchPhysicalHostV1['onReadMannequinArrangement'];
+  arrangementSourceKey?: string;
 }>;
 
 export type PatternImportDxfPhaseECadMannequinPoseSessionV1 = Readonly<{
@@ -244,11 +310,15 @@ export function usePatternImportDxfPhaseECadMannequinPoseSessionV1(
 }
 
 export type PatternImportDxfPhaseECadMannequinPatternPieceSceneV1 = Readonly<{
+  annotationSource?: Readonly<{ identity: string; revision: string; sha256: string }>;
   sources: readonly PatternImportDxfPhaseECadMannequinDxfStagingSourceV1[];
   activeScopeKey?: string | null;
+  tableSelection?: CadMannequinTableSelectionV1;
   selection?: PatternImportDxfPhaseECadMannequinDxfStagingSelectionV1 | null;
   swatchesByScope?: Readonly<Record<string, string | null | undefined>>;
   decorations?: readonly PatternImportDxfPhaseECadMannequinPatternOverlayDecorationV1[];
+  savedTopstitch?: CadTableSavedTopstitchOverlayV1;
+  topstitchVisibility?: TopstitchVisibility;
   guides?: MeasurementSurfacePatternPieceOverlayV1['guides'];
   sceneOverlay?: PatternImportDxfPhaseECadMannequinSceneOverlayCapabilityV1;
   onFocus?: (selection: PatternImportDxfPhaseECadMannequinDxfStagingSelectionV1) => void;
@@ -441,6 +511,11 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
   poseError = null,
   onRetryPose,
   onDisplayedBodyInputV1,
+  acceptedCloth,
+  reserveViewportHeight = false,
+  onSaveMannequinArrangement,
+  onReadMannequinArrangement,
+  arrangementSourceKey,
 }: PatternImportDxfPhaseECadMannequinModelPickerViewPropsV1) {
   const selected = selectedCadWorkbenchModelV1(models, modelId);
   const selectedRevision = selected ? modelFormRevisionKeyV1(selected) : null;
@@ -501,20 +576,356 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
   const [viewPreset, setViewPreset] = useState<MeasurementSurfaceViewPreset>('front');
   const [patternTool, setPatternTool] =
     useState<PatternImportDxfPhaseECadMannequinPatternOverlayToolV1>('select');
+  const [dragPlane, setDragPlane] = useState<MeasurementSurfacePatternDragPlaneV1>('view');
   const [poseEditing, setPoseEditing] = useState(false);
-  const [patternTransforms, setPatternTransforms] = useState<
-    Readonly<Record<string, MeasurementSurfacePatternPieceTransformV1>>
-  >({});
-  const handlePatternTransform = useCallback(
-    (pieceKey: string, transform: MeasurementSurfacePatternPieceTransformV1) =>
-      setPatternTransforms((current) => Object.freeze({ ...current, [pieceKey]: transform })),
-    [],
+  const [patternTransforms, setPatternTransforms] = useState<PatternTransforms>({});
+  // Pointer, numeric and undo commands can arrive before React publishes the next overlay.
+  const latestTransforms = useRef(patternTransforms);
+  const publishTransforms = useCallback((next: PatternTransforms) => {
+    latestTransforms.current = next;
+    setPatternTransforms(next);
+  }, []);
+  const placementHistory = useRef<
+    (readonly {
+      pieceKey: string;
+      previous: MeasurementSurfacePatternPieceTransformV1 | undefined;
+    }[])[]
+  >([]);
+  const [canUndoPlacement, setCanUndoPlacement] = useState(false);
+  const [arrangementSaving, setArrangementSaving] = useState(false);
+  const [arrangementMessage, setArrangementMessage] = useState<string | null>(null);
+  const arrangementSource =
+    patternPieceScene?.sources.find(
+      ({ scopeKey }) => scopeKey === patternPieceScene.activeScopeKey,
+    ) ?? (patternPieceScene?.sources.length === 1 ? patternPieceScene.sources[0] : null);
+  const arrangementExpected =
+    arrangementSource && selected?.id && selectedRevision && poseBinding
+      ? {
+          scopeKey: arrangementSource.scopeKey,
+          projection: arrangementSource.projection,
+          mannequin: {
+            baseModelId: selected.id,
+            modelFormRevisionKeyV1: selectedRevision,
+            poseBinding: { canonicalKey: poseBinding.canonicalKey },
+          },
+        }
+      : null;
+  const arrangementKey = arrangementExpected
+    ? JSON.stringify([
+        arrangementSourceKey,
+        arrangementExpected.scopeKey,
+        arrangementExpected.projection.sourceFileId,
+        arrangementExpected.projection.expectedCatalogCanonicalSha256,
+        arrangementExpected.projection.sizeSelectionCanonicalSha256,
+        arrangementExpected.projection.sizeToken,
+        arrangementExpected.mannequin,
+      ])
+    : null;
+  const placementTurn = useMemo(
+    () =>
+      arrangementKey &&
+      !disabled &&
+      !loading &&
+      !error &&
+      !poseLoading &&
+      !poseError &&
+      !poseEditing
+        ? Symbol()
+        : null,
+    [arrangementKey, disabled, loading, error, poseLoading, poseError, poseEditing],
   );
+  const currentPlacementTurn = useRef<typeof placementTurn>(null);
+  useLayoutEffect(() => {
+    currentPlacementTurn.current = placementTurn;
+    placementHistory.current = [];
+    setCanUndoPlacement(false);
+    return () => {
+      currentPlacementTurn.current = null;
+    };
+  }, [placementTurn]);
+  const arrangementCurrent = useRef({
+    key: arrangementKey,
+    expected: arrangementExpected,
+    read: onReadMannequinArrangement,
+  });
+  arrangementCurrent.current = {
+    key: arrangementKey,
+    expected: arrangementExpected,
+    read: onReadMannequinArrangement,
+  };
+  const arrangementEdits = useRef(0);
+  const arrangementSaveController = useRef<AbortController | null>(null);
+  useLayoutEffect(() => {
+    publishTransforms({});
+    setArrangementMessage(null);
+    setArrangementSaving(false);
+    return () => arrangementSaveController.current?.abort();
+  }, [arrangementKey, publishTransforms]);
+  useEffect(() => {
+    const controller = new AbortController();
+    const current = arrangementCurrent.current;
+    const edits = arrangementEdits.current;
+    if (current.expected && current.read) {
+      void current
+        .read(current.expected, controller.signal)
+        .then((pieces) => {
+          if (
+            !controller.signal.aborted &&
+            arrangementCurrent.current.key === current.key &&
+            arrangementEdits.current === edits &&
+            pieces
+          ) {
+            publishTransforms(
+              Object.fromEntries(pieces.map(({ pieceKey, transform }) => [pieceKey, transform])),
+            );
+          }
+        })
+        .catch((error: unknown) => {
+          if (!controller.signal.aborted && arrangementCurrent.current.key === current.key)
+            setArrangementMessage(
+              error instanceof Error ? error.message : 'Saved arrangement could not be read.',
+            );
+        });
+    }
+    return () => controller.abort();
+  }, [arrangementKey, publishTransforms]);
+  const saveArrangement = async () => {
+    const source = arrangementSource;
+    const key = arrangementKey;
+    const editGeneration = arrangementEdits.current;
+    if (
+      !source ||
+      arrangementCurrent.current.key !== key ||
+      currentPlacementTurn.current !== placementTurn ||
+      !selected?.id ||
+      !selectedRevision ||
+      !poseBinding ||
+      !onSaveMannequinArrangement
+    )
+      return;
+    setArrangementSaving(true);
+    setArrangementMessage(null);
+    const controller = new AbortController();
+    arrangementSaveController.current = controller;
+    try {
+      await onSaveMannequinArrangement(
+        {
+          annotationSource: patternPieceScene?.annotationSource,
+          scopeKey: source.scopeKey,
+          projection: source.projection,
+          mannequin: {
+            baseModelId: selected.id,
+            modelFormRevisionKeyV1: selectedRevision,
+            poseBinding: { canonicalKey: poseBinding.canonicalKey },
+          },
+          pieces: source.projection.pieces.map(({ pieceId, pieceLineKey }) => {
+            const pieceKey = `${source.scopeKey}:${pieceId}:${pieceLineKey}`;
+            const transform = latestTransforms.current[pieceKey];
+            return {
+              pieceKey,
+              scopeKey: source.scopeKey,
+              pieceId,
+              pieceLineKey,
+              transform: transform
+                ? {
+                    offsetM: [...transform.offsetM] as [number, number, number],
+                    rotationRad: transform.rotationRad,
+                  }
+                : { offsetM: [0, 0, 0] as const, rotationRad: 0 },
+            };
+          }),
+        },
+        controller.signal,
+      );
+      if (!controller.signal.aborted && arrangementCurrent.current.key === key)
+        setArrangementMessage(
+          arrangementEdits.current === editGeneration
+            ? 'Placement saved. Cloth preview is unchanged.'
+            : 'Earlier placement saved. Cloth preview is unchanged. Current changes are not saved.',
+        );
+    } catch (error) {
+      if (!controller.signal.aborted && arrangementCurrent.current.key === key)
+        setArrangementMessage(
+          error instanceof Error ? error.message : 'Arrangement could not be saved.',
+        );
+    } finally {
+      if (arrangementCurrent.current.key === key) setArrangementSaving(false);
+    }
+  };
+  const commitPlacement = useCallback(
+    (updates: PatternTransforms) => {
+      if (!placementTurn || currentPlacementTurn.current !== placementTurn) return;
+      const current = latestTransforms.current;
+      const changes = Object.entries(updates).filter(([key, transform]) => {
+        const previous = current[key];
+        const offset = previous?.offsetM ?? ZERO_PATTERN_OFFSET_M;
+        return (
+          transform.rotationRad !== (previous?.rotationRad ?? 0) ||
+          transform.offsetM.some((value, axis) => value !== offset[axis])
+        );
+      });
+      if (!changes.length) return;
+      placementHistory.current.push(
+        changes.map(([pieceKey]) => ({ pieceKey, previous: current[pieceKey] })),
+      );
+      setCanUndoPlacement(true);
+      arrangementEdits.current += 1;
+      setArrangementMessage(null);
+      publishTransforms(Object.freeze({ ...current, ...updates }));
+    },
+    [placementTurn, publishTransforms],
+  );
+  const handlePatternTransform = useCallback(
+    (pieceKey: string, transform: MeasurementSurfacePatternPieceTransformV1) => {
+      const source = arrangementCurrent.current.expected;
+      if (
+        source?.projection.pieces.some(
+          ({ pieceId, pieceLineKey }) =>
+            pieceKey === `${source.scopeKey}:${pieceId}:${pieceLineKey}`,
+        )
+      )
+        commitPlacement({ [pieceKey]: transform });
+    },
+    [commitPlacement],
+  );
+  const selectionProjection = patternPieceScene?.tableSelection?.projection;
+  const selectionScope = patternPieceScene?.tableSelection?.scopeKey;
+  const selectionKeys = patternPieceScene?.tableSelection?.selectedPieceKeys;
+  const activeProjection = arrangementSource?.projection;
+  const activeScope = arrangementSource?.scopeKey;
+  const groupKeys = useMemo(
+    () =>
+      cadMannequinPlacementGroupKeysV1(
+        selectionProjection && selectionScope && selectionKeys
+          ? {
+              projection: selectionProjection,
+              scopeKey: selectionScope,
+              selectedPieceKeys: selectionKeys,
+            }
+          : undefined,
+        activeProjection && activeScope
+          ? { projection: activeProjection, scopeKey: activeScope }
+          : null,
+      ),
+    [selectionProjection, selectionScope, selectionKeys, activeProjection, activeScope],
+  );
+  const currentGroup =
+    useRef<MeasurementSurfacePatternPieceOverlayV1['translationGroup']>(undefined);
+  const translationGroup = useMemo<
+    MeasurementSurfacePatternPieceOverlayV1['translationGroup']
+  >(() => {
+    if (!placementTurn || patternTool !== 'translate' || groupKeys.length < 2) return undefined;
+    const group: NonNullable<MeasurementSurfacePatternPieceOverlayV1['translationGroup']> = {
+      pieceKeys: groupKeys,
+      onTranslateBy(deltaM) {
+        if (currentGroup.current !== group) return;
+        const updates: Record<string, MeasurementSurfacePatternPieceTransformV1> = {};
+        for (const key of groupKeys) {
+          const previous = latestTransforms.current[key];
+          const offset = previous?.offsetM ?? ZERO_PATTERN_OFFSET_M;
+          const offsetM: [number, number, number] = [
+            offset[0] + deltaM[0],
+            offset[1] + deltaM[1],
+            offset[2] + deltaM[2],
+          ];
+          if (
+            offsetM.some(
+              (value) =>
+                !Number.isFinite(value) ||
+                Math.abs(value) > CAD_MANNEQUIN_ARRANGEMENT_LIMITS_V1.maxOffsetMetres,
+            )
+          )
+            return;
+          updates[key] = { offsetM, rotationRad: previous?.rotationRad ?? 0 };
+        }
+        commitPlacement(updates);
+      },
+    };
+    return group;
+  }, [placementTurn, patternTool, groupKeys, commitPlacement]);
+  useLayoutEffect(() => {
+    currentGroup.current = translationGroup;
+    return () => {
+      currentGroup.current = undefined;
+    };
+  }, [translationGroup]);
+  const rotationTurn = useMemo(
+    () => (placementTurn && patternTool === 'rotate' && groupKeys.length > 1 ? Symbol() : null),
+    [placementTurn, patternTool, groupKeys],
+  );
+  const [enabledRotationTurn, setEnabledRotationTurn] = useState<symbol | null>(null);
+  const currentRotationGroup =
+    useRef<MeasurementSurfacePatternPieceOverlayV1['rotationGroup']>(undefined);
+  const rotationGroup = useMemo<MeasurementSurfacePatternPieceOverlayV1['rotationGroup']>(() => {
+    if (!rotationTurn || enabledRotationTurn !== rotationTurn) return undefined;
+    const group: NonNullable<MeasurementSurfacePatternPieceOverlayV1['rotationGroup']> = {
+      pieceKeys: groupKeys,
+      onRotate(pivotKey, radians, displacements) {
+        if (
+          currentRotationGroup.current !== group ||
+          latestTransforms.current !== patternTransforms ||
+          !Number.isFinite(radians) ||
+          radians === 0 ||
+          displacements.size !== groupKeys.length ||
+          !groupKeys.includes(pivotKey)
+        )
+          return;
+        const pivot = displacements.get(pivotKey);
+        if (!pivot || pivot[0] !== 0 || pivot[1] !== 0) return;
+        const updates: Record<string, MeasurementSurfacePatternPieceTransformV1> = {};
+        for (const key of groupKeys) {
+          const delta = displacements.get(key);
+          if (!delta) return;
+          const previous = patternTransforms[key];
+          const offset = previous?.offsetM ?? ZERO_PATTERN_OFFSET_M;
+          const offsetM: [number, number, number] = [
+            offset[0] + delta[0],
+            offset[1] + delta[1],
+            offset[2],
+          ];
+          const rotationRad = (previous?.rotationRad ?? 0) + radians;
+          if (
+            offsetM.some(
+              (value) =>
+                !Number.isFinite(value) ||
+                Math.abs(value) > CAD_MANNEQUIN_ARRANGEMENT_LIMITS_V1.maxOffsetMetres,
+            ) ||
+            Math.abs(rotationRad) > CAD_MANNEQUIN_ARRANGEMENT_LIMITS_V1.maxRotationRadians
+          )
+            return;
+          updates[key] = { offsetM, rotationRad };
+        }
+        commitPlacement(updates);
+      },
+    };
+    return group;
+  }, [rotationTurn, enabledRotationTurn, groupKeys, patternTransforms, commitPlacement]);
+  useLayoutEffect(() => {
+    currentRotationGroup.current = rotationGroup;
+    return () => {
+      currentRotationGroup.current = undefined;
+    };
+  }, [rotationGroup]);
+  const undoPlacement = () => {
+    if (!placementTurn || currentPlacementTurn.current !== placementTurn) return;
+    const edit = placementHistory.current.pop();
+    if (!edit) return;
+    const next = { ...latestTransforms.current };
+    for (const { pieceKey, previous } of edit) {
+      if (previous) next[pieceKey] = previous;
+      else delete next[pieceKey];
+    }
+    setCanUndoPlacement(placementHistory.current.length > 0);
+    arrangementEdits.current += 1;
+    setArrangementMessage(null);
+    publishTransforms(Object.freeze(next));
+  };
   const patternOverlayResult = useMemo(
     () =>
       patternPieceScene
         ? buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1({
             ...patternPieceScene,
+            preserveLegacyMultiScopeLanes: Boolean(onReadMannequinArrangement || onSaveMannequinArrangement),
             decorations:
               patternPieceScene.sceneOverlay?.status === 'available'
                 ? patternPieceScene.sceneOverlay.bridge.decorations
@@ -523,13 +934,36 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
               patternPieceScene.sceneOverlay?.status === 'available'
                 ? patternPieceScene.sceneOverlay.bridge.guides
                 : patternPieceScene.guides,
-            tool: patternTool,
+            tool: placementTurn ? patternTool : 'select',
+            dragPlane,
+            translationGroup,
+            rotationGroup,
             transformsByPieceKey: patternTransforms,
-            onTransform: handlePatternTransform,
+            onTransform: placementTurn ? handlePatternTransform : undefined,
           })
         : null,
-    [handlePatternTransform, patternPieceScene, patternTool, patternTransforms],
+    [
+      dragPlane,
+      handlePatternTransform,
+      onReadMannequinArrangement,
+      onSaveMannequinArrangement,
+      translationGroup,
+      rotationGroup,
+      patternPieceScene,
+      patternTool,
+      patternTransforms,
+      placementTurn,
+    ],
   );
+  const offsetPiece =
+    patternTool === 'translate' &&
+    patternOverlayResult?.ok &&
+    placementTurn &&
+    onSaveMannequinArrangement
+      ? patternOverlayResult.overlay.pieces.find(
+          ({ selected, scopeKey }) => selected && scopeKey === arrangementSource?.scopeKey,
+        )
+      : undefined;
   const sceneOverlayBridge =
     patternPieceScene?.sceneOverlay?.status === 'available'
       ? patternPieceScene.sceneOverlay.bridge
@@ -550,7 +984,7 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
 
   return (
     <section
-      className='flex h-full min-h-0 flex-col gap-2'
+      className={`flex h-full min-h-0 flex-col gap-2${reserveViewportHeight ? ' overflow-y-auto overscroll-y-contain' : ''}`}
       aria-label='Mannequin model'
       data-cad-mannequin-model-picker=''
       data-cad-mannequin-model-id={selected?.id ?? undefined}
@@ -573,6 +1007,17 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
       data-cad-mannequin-scene-overlay-edges={sceneOverlayBridge?.decorations
         .map(({ seamId, side, semanticColorCss }) => `${seamId}:${side}:${semanticColorCss}`)
         .join('|')}
+      data-cad-mannequin-scene-overlay-seam-ordinals={
+        sceneOverlayBridge?.decorations.length
+          ? JSON.stringify(
+              sceneOverlayBridge.decorations.map(({ seamId, side, operationSeam }) => ({
+                seamId,
+                side,
+                ...operationSeam,
+              })),
+            )
+          : undefined
+      }
       data-cad-mannequin-scene-overlay-correspondences={
         sceneOverlayBridge
           ? correspondenceGuides
@@ -631,12 +1076,91 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
         <PatternImportDxfPhaseECadMannequinViewToolbarV1
           viewPreset={viewPreset}
           onViewPreset={setViewPreset}
-          patternTool={patternOverlayResult?.ok ? patternTool : undefined}
+          patternTool={patternOverlayResult?.ok ? patternOverlayResult.overlay.tool : undefined}
           onPatternTool={patternOverlayResult?.ok ? setPatternTool : undefined}
+          dragPlane={dragPlane}
+          onDragPlaneChange={setDragPlane}
+          patternTransformDisabled={!placementTurn}
           poseEditing={poseEditing}
           poseEditingDisabled={!poseBinding || Boolean(poseError)}
           onPoseEditingChange={setPoseEditing}
+          topstitchVisibility={patternPieceScene?.topstitchVisibility}
         />
+      ) : null}
+      {rotationTurn ? (
+        <div className='flex flex-wrap items-center gap-2 px-2'>
+          <Button
+            type='button'
+            size='xs'
+            variant={rotationGroup ? 'simpleReverseWithBorder' : 'secondary'}
+            aria-pressed={Boolean(rotationGroup)}
+            onClick={() => setEnabledRotationTurn(rotationGroup ? null : rotationTurn)}
+          >
+            Rotate group about a piece
+          </Button>
+          {rotationGroup && (
+            <Text component='span' size='micro'>
+              Drag a selected piece to use its center as the world Z pivot.
+            </Text>
+          )}
+        </div>
+      ) : null}
+      {offsetPiece ? (
+        <CadMannequinPatternOffsetControlsV1
+          key={JSON.stringify([
+            arrangementKey,
+            offsetPiece.pieceKey,
+            offsetPiece.lane,
+            offsetPiece.laneIndex,
+          ])}
+          offsetM={offsetPiece.transform?.offsetM ?? ZERO_PATTERN_OFFSET_M}
+          onApply={(axis, valueM) => {
+            if (arrangementCurrent.current.key !== arrangementKey) return;
+            const previous = latestTransforms.current[offsetPiece.pieceKey];
+            const offsetM: [number, number, number] = [
+              ...(previous?.offsetM ?? ZERO_PATTERN_OFFSET_M),
+            ];
+            offsetM[axis] = valueM;
+            handlePatternTransform(offsetPiece.pieceKey, {
+              offsetM,
+              rotationRad: previous?.rotationRad ?? 0,
+            });
+          }}
+        />
+      ) : null}
+      {onSaveMannequinArrangement && selected && patternPieceScene ? (
+        <div className='flex shrink-0 items-center gap-2 px-2 py-1'>
+          <Button
+            type='button'
+            size='xs'
+            variant='secondary'
+            disabled={!placementTurn || !canUndoPlacement}
+            onClick={undoPlacement}
+          >
+            Undo placement
+          </Button>
+          <Button
+            type='button'
+            size='xs'
+            variant='secondary'
+            disabled={
+              disabled ||
+              arrangementSaving ||
+              !arrangementSource ||
+              !poseBinding ||
+              poseLoading ||
+              Boolean(poseError)
+            }
+            onClick={() => void saveArrangement()}
+          >
+            {arrangementSaving ? 'Saving…' : 'Save arrangement'}
+          </Button>
+          {arrangementMessage ? (
+            <Text component='span' size='micro' role='status'>
+              {arrangementMessage}
+            </Text>
+          ) : null}
+        </div>
       ) : null}
 
       {error ? (
@@ -681,7 +1205,7 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
         </div>
       ) : (
         <div
-          className='relative flex min-h-0 flex-1 flex-col overflow-hidden p-2'
+          className={`relative flex flex-1 flex-col p-2 ${reserveViewportHeight ? 'min-h-72' : 'min-h-0 overflow-hidden'}`}
           data-cad-measurement-model-preview=''
         >
           <div className='mb-2 flex flex-wrap items-baseline justify-between gap-2'>
@@ -703,10 +1227,14 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
               onDisplayedBodySnapshotV1={observesBody ? handleDisplayedBodySnapshot : undefined}
               directPoseViewportEditingEnabledV9={poseEditing}
               hideDirectPoseControlV9
+              acceptedCloth={acceptedCloth}
+              reserveWorkbenchViewportHeight={reserveViewportHeight}
               variant='workbench'
               viewPreset={viewPreset}
               patternPieceOverlay={
-                patternOverlayResult?.ok ? patternOverlayResult.overlay : undefined
+                !acceptedCloth && patternOverlayResult?.ok
+                  ? patternOverlayResult.overlay
+                  : undefined
               }
             />
           </div>
@@ -729,8 +1257,8 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
 }
 
 /**
- * Production adapter. `baseModelId` remains the existing TechCard RHF field and is persisted by the
- * ordinary card save; the picker owns neither another form nor a model mutation.
+ * A saved Workbench arrangement owns its preview model. Beyond that context, model selection
+ * continues to use the ordinary TechCard form.
  */
 export function PatternImportDxfPhaseECadMannequinModelPickerV1({
   disabled = false,
@@ -738,16 +1266,53 @@ export function PatternImportDxfPhaseECadMannequinModelPickerV1({
   stagedPieces = null,
   patternPieceScene = null,
   onDisplayedBodyInputV1,
+  acceptedCloth,
+  reserveViewportHeight = false,
+  onSaveMannequinArrangement,
+  onReadMannequinArrangement,
+  onReadSavedMannequinModelId,
+  arrangementSourceKey,
 }: Readonly<{
   disabled?: boolean;
   paperDoll?: ReactNode;
   stagedPieces?: ReactNode;
   patternPieceScene?: PatternImportDxfPhaseECadMannequinPatternPieceSceneV1 | null;
   onDisplayedBodyInputV1?: CadMannequinDisplayedBodyInputObserverV1;
+  acceptedCloth?: CadWorkbenchPhysicalHostV1['acceptedCloth'];
+  reserveViewportHeight?: boolean;
+  onSaveMannequinArrangement?: CadWorkbenchPhysicalHostV1['onSaveMannequinArrangement'];
+  onReadMannequinArrangement?: CadWorkbenchPhysicalHostV1['onReadMannequinArrangement'];
+  onReadSavedMannequinModelId?: CadWorkbenchPhysicalHostV1['onReadSavedMannequinModelId'];
+  arrangementSourceKey?: string;
 }>) {
   const form = useFormContext<TechCardFormData>();
-  const modelId =
+  const cardModelId =
     (useWatch({ control: form.control, name: 'baseModelId' }) as number | undefined) ?? 0;
+  const sourceKey = onReadSavedMannequinModelId ? arrangementSourceKey ?? null : null;
+  const [pickedModel, setPickedModel] = useState<{ sourceKey: string; modelId: number } | null>(
+    null,
+  );
+  const [savedModel, setSavedModel] = useState<{
+    sourceKey: string;
+    modelId: number | null;
+  } | null>(null);
+  useEffect(() => {
+    if (sourceKey === null || !onReadSavedMannequinModelId) return;
+    const controller = new AbortController();
+    const settle = (modelId: number | null) => {
+      if (!controller.signal.aborted) setSavedModel({ sourceKey, modelId });
+    };
+    void onReadSavedMannequinModelId(controller.signal).then(settle, () => settle(null));
+    return () => controller.abort();
+  }, [onReadSavedMannequinModelId, sourceKey]);
+  const modelId =
+    sourceKey === null
+      ? cardModelId
+      : pickedModel?.sourceKey === sourceKey
+        ? pickedModel.modelId
+        : savedModel?.sourceKey === sourceKey
+          ? savedModel.modelId ?? cardModelId
+          : 0;
   const { data: models, isLoading, isError } = useAllModels();
   const poseSession = usePatternImportDxfPhaseECadMannequinPoseSessionV1(modelId);
   const { dictionary } = useDictionary();
@@ -769,13 +1334,17 @@ export function PatternImportDxfPhaseECadMannequinModelPickerV1({
       modelId={modelId}
       disabled={disabled}
       sizeName={(id) => sizeNames.get(id) ?? `#${id}`}
-      onModelChange={(nextModelId) =>
+      onModelChange={(nextModelId) => {
+        if (sourceKey !== null) {
+          setPickedModel({ sourceKey, modelId: nextModelId });
+          return;
+        }
         form.setValue('baseModelId', nextModelId, {
           shouldDirty: true,
           shouldTouch: true,
           shouldValidate: true,
-        })
-      }
+        });
+      }}
       paperDoll={paperDoll}
       stagedPieces={stagedPieces}
       patternPieceScene={patternPieceScene}
@@ -784,6 +1353,11 @@ export function PatternImportDxfPhaseECadMannequinModelPickerV1({
       poseError={poseSession.error}
       onRetryPose={poseSession.retry}
       onDisplayedBodyInputV1={onDisplayedBodyInputV1}
+      acceptedCloth={acceptedCloth}
+      reserveViewportHeight={reserveViewportHeight}
+      onSaveMannequinArrangement={onSaveMannequinArrangement}
+      onReadMannequinArrangement={onReadMannequinArrangement}
+      arrangementSourceKey={arrangementSourceKey}
     />
   );
 }

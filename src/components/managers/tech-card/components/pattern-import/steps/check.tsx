@@ -217,8 +217,8 @@ export function CheckStep({
       (p): HeaderWarning => ({
         text: `not in this file: ${p.what} (${p.why})`,
         action: {
-          label: 'back to pieces',
-          onClick: () => void api.dispatch({ type: 'back', to: 'pieces' }),
+          label: `back to ${stepWord(p.to)}`,
+          onClick: () => void api.dispatch({ type: 'back', to: p.to }),
         },
       }),
     ),

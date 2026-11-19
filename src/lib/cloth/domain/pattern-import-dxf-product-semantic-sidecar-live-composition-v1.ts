@@ -168,9 +168,6 @@ export async function composePatternImportDxfProductSemanticSidecarPersistenceV1
     schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_POST_SAVE_READBACK_V1,
     compositionInput,
     expectedCompositionSealSha256: composition.compositionSeal.canonicalSha256,
-    ...(compositionInput.expectedSavedRow
-      ? { expectedSavedRow: compositionInput.expectedSavedRow }
-      : {}),
   };
   const getTechCard = (techCardId: number) =>
     service.GetTechCard({ id: techCardId, vatCountryCode: undefined });
@@ -221,6 +218,7 @@ export async function composePatternImportDxfProductSemanticSidecarPersistenceV1
     service as PatternImportDxfProductSidecarStorageServiceV1,
     sidecar.owner,
     crypto,
+    compositionInput.expectedSavedRow?.firstAttachmentSavedRowRevision,
   );
   if (!persisted.ok)
     return blocked(

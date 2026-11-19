@@ -204,6 +204,7 @@ export function readName(opts: {
     Pick<PieceSpec, 'code' | 'mods' | 'displayName' | 'nameOrigin' | 'aiConfidence' | 'pairHand'>
   >;
   dxfIdentity?: string | null;
+  dxfDisplayName?: string;
   texts: string[];
   isSizeToken: (t: string) => boolean;
   /**
@@ -243,7 +244,7 @@ export function readName(opts: {
     if (p && !identityGrammarProblem([p.code, ...p.mods].join('_'))) {
       return {
         ...p,
-        displayName: override?.displayName ?? dxfIdentity.trim(),
+        displayName: override?.displayName ?? opts.dxfDisplayName ?? dxfIdentity.trim(),
         nameOrigin: 'text',
         notes: [`name from the DXF block ${dxfIdentity}`, ...p.notes],
       };

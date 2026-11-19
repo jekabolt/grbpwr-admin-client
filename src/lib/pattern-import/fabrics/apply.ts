@@ -36,6 +36,11 @@ import {
 import { FUSING_FULL, FUSING_UNKNOWN, IDENTICAL, aliasKey, mintLineKey, normBlock } from './draft';
 import { FOLD_CUT_SYMMETRY } from 'components/managers/tech-card/components/piece-codes';
 import { NEW_PIECE, withAnswers } from './assembly-impact';
+import {
+  checkApplyNewPieceIntent,
+  planPreservesNewPiece,
+  type ApplyNewPieceIntent,
+} from './apply-new-piece-intent';
 
 /** 40 MiB — `MAX_PATTERN_BYTES` (utils/pattern.ts), the server's hard limit. */
 export const MAX_PATTERN_BYTES = 40 * 1024 * 1024;
@@ -81,6 +86,11 @@ export type FormWrite = { path: string; value: unknown };
 export type ApplyProgressEvent = { scopeKey: string; state: 'uploading' | 'uploaded' | 'failed' };
 
 export type ApplyDeps = {
+  saveJoinedPattern?: (
+    binding: ApplyCommitScopeBinding,
+    upload: ApplyUploaded,
+    previousLock: number | undefined,
+  ) => Promise<void>;
   /** `adminService.UploadPattern` behind the same rules as pattern-upload-button.tsx. */
   upload: (file: {
     filename: string;
@@ -105,6 +115,15 @@ export type ApplyDeps = {
    * the caller can arm the snapshot reason the save carries (nesting/reupload-session.ts).
    */
   onReplaced?: (replaced: ApplyReplaced[]) => void;
+  /** Exact single saved row for an Assembly-clock-guarded replacement. */
+  expectedReplacement?: Readonly<{
+    scopeKey: string;
+    lineKey: string;
+    oldUrl: string;
+    sha256: string;
+    sizeBytes: number;
+    expectedLockVersion: number;
+  }>;
   /**
    * Codex r5 #3: rows an earlier try wrote into the form whose save was not confirmed ('ok') — a
    * retry finds them there (nothing to write) and must still save. Kept by the caller across tries.
@@ -123,6 +142,10 @@ export type ApplyDeps = {
    * card's own save finishes the rebuild in the background (its chip, its error line).
    */
   rebuilding?: () => boolean;
+  /** An explicit Review DXF action requesting a new revision of the exact matching file. */
+  replaceMatchingFile?: true;
+  /** Optional exact new-piece decision from the review. No ordinary matching fallback is allowed. */
+  newPieceIntent?: ApplyNewPieceIntent;
   mintKey?: () => string;
   /**
    * The card scope a live sheet or link belongs to (bom-purpose `scopeKeyOfBinding` over the card's
@@ -362,7 +385,7 @@ export function planFormWrites(
         ungraded: !!p.ungraded,
         grainline: p.grainline,
         fused: p.fused,
-        fusingMode: p.fused ? (p.fusingMode ?? FUSING_FULL) : FUSING_UNKNOWN,
+        fusingMode: p.fused ? p.fusingMode ?? FUSING_FULL : FUSING_UNKNOWN,
         fusingWidthMm: '',
         calloutNumber: 0,
         note: '',
@@ -616,6 +639,74 @@ export async function applyDraft(
   const mintKey = deps.mintKey ?? mintLineKey;
   const uploaded: ApplyUploaded[] = [];
   const reused: string[] = [];
+  const scopeOf = deps.scopeOf ?? scopeKeyOf;
+  const newPieceIntent = deps.newPieceIntent;
+  const guarded = deps.expectedReplacement;
+  const replacementMoved = (): ApplyResult => ({
+    ok: false,
+    failedScope: guarded?.scopeKey ?? '',
+    message: 'The guarded pattern or editing lock changed. Open a fresh corner review.',
+    uploaded,
+  });
+  const guardedRowCurrent = (live: LiveCard) => {
+    if (!guarded) return false;
+    const rows = live.patterns.filter(
+      (row) => scopeOf(row, 'sheet') === guarded.scopeKey && row.lineKey === guarded.lineKey,
+    );
+    return (
+      rows.length === 1 &&
+      rows[0]?.url === guarded.oldUrl &&
+      rows[0]?.sha256 === guarded.sha256 &&
+      Number(rows[0]?.sizeBytes) === guarded.sizeBytes
+    );
+  };
+  if (
+    guarded &&
+    (!deps.save ||
+      !deps.onReplaced ||
+      deps.saveJoinedPattern ||
+      newPieceIntent ||
+      draft.scopes.length !== 1 ||
+      draft.scopes[0]?.target.scopeKey !== guarded.scopeKey ||
+      deps.readPreviousLockVersion?.() !== guarded.expectedLockVersion ||
+      !guardedRowCurrent(deps.read()))
+  )
+    return replacementMoved();
+  const newPiece =
+    newPieceIntent === undefined
+      ? null
+      : checkApplyNewPieceIntent(newPieceIntent, draft, deps.read(), scopeOf);
+  const newPieceMoved = (): ApplyResult => ({
+    ok: false,
+    failedScope: newPiece?.scopeKey ?? '',
+    message:
+      'The approved new piece could no longer be created under its own key. Reopen the DXF review.',
+    uploaded,
+  });
+  if (newPieceIntent !== undefined && !newPiece) return newPieceMoved();
+  const repeatScope =
+    deps.replaceMatchingFile && draft.scopes.length === 1 ? draft.scopes[0] : null;
+  const matchingPattern = (live: LiveCard) => {
+    if (!repeatScope?.alreadyOnCard) return undefined;
+    const matching = live.patterns.filter(
+      (row) =>
+        scopeOf(row, 'sheet') === repeatScope.target.scopeKey &&
+        row.filename === repeatScope.filename,
+    );
+    const row = matching[0];
+    return matching.length === 1 && row?.lineKey && row.url === repeatScope.alreadyOnCard.url
+      ? row
+      : undefined;
+  };
+  const previousMatch = deps.replaceMatchingFile ? matchingPattern(deps.read()) : undefined;
+  if (deps.replaceMatchingFile && !previousMatch)
+    return {
+      ok: false,
+      failedScope: '',
+      message: 'The matching saved pattern row changed. Reopen the DXF review.',
+      uploaded,
+    };
+  const replacement = previousMatch ? { ...previousMatch } : undefined;
 
   // T4 (Codex HIGH, T1): a block nothing binds is answered first — never applied unbound
   const open = (draft.unresolved ?? []).filter((u) => {
@@ -650,7 +741,11 @@ export async function applyDraft(
   // 1. uploads — all of them, or the form is not touched
   for (const s of draft.scopes) {
     const scopeKey = s.target.scopeKey;
-    if (onCard(draft, deps.read(), scopeKey, deps.scopeOf)) {
+    if (
+      !deps.saveJoinedPattern &&
+      !replacement &&
+      onCard(draft, deps.read(), scopeKey, deps.scopeOf)
+    ) {
       reused.push(scopeKey);
       onProgress?.({ scopeKey, state: 'uploaded' });
       continue;
@@ -678,23 +773,75 @@ export async function applyDraft(
   }
 
   // 2. one ordered batch against the live form
-  const plan = planFormWrites(draft, deps.read(), uploaded, {
+  const live = deps.read();
+  if (
+    newPiece &&
+    (!newPieceIntent ||
+      !checkApplyNewPieceIntent(newPieceIntent, draft, live, scopeOf) ||
+      uploaded.filter(({ scopeKey }) => scopeKey === newPiece.scopeKey).length !== 1)
+  )
+    return newPieceMoved();
+  let commitDraft = draft;
+  if (replacement && repeatScope) {
+    const current = matchingPattern(live);
+    if (
+      !current ||
+      current.lineKey !== replacement.lineKey ||
+      current.version !== replacement.version ||
+      current.sha256 !== replacement.sha256 ||
+      current.sizeId !== replacement.sizeId ||
+      current.sizeBytes !== replacement.sizeBytes ||
+      uploaded[0]?.url === replacement.url
+    )
+      return {
+        ok: false,
+        failedScope: repeatScope.target.label || repeatScope.target.scopeKey,
+        message: 'The current pattern row moved or the upload returned the same URL.',
+        uploaded,
+      };
+    commitDraft = {
+      ...draft,
+      scopes: [
+        {
+          ...repeatScope,
+          replaces: {
+            lineKey: replacement.lineKey!,
+            url: replacement.url!,
+            filename: repeatScope.filename,
+            name: replacement.name ?? '',
+            matchedBy: 'scope',
+            convertedAt: '',
+          },
+        },
+      ],
+    };
+  }
+  const plan = planFormWrites(commitDraft, live, uploaded, {
     storageSizeId: deps.storageSizeId,
     mintKey,
     scopeOf: deps.scopeOf,
   });
+  if (newPiece && !planPreservesNewPiece(plan, newPiece)) return newPieceMoved();
   // No await occurs between this read and the writes/save request below. It is the editing base the
   // host is about to claim, not a lock value reconstructed from the later response.
   const previousLockVersion = deps.readPreviousLockVersion?.();
-  for (const w of plan.writes) deps.write(w.path, w.value);
-  if (plan.replaced.length) deps.onReplaced?.(plan.replaced);
-  const retry = !plan.writes.length && !!deps.unsaved?.get();
-  if (plan.writes.length) deps.unsaved?.set(true);
 
-  // 3. the card's own save (the only transaction) — this try's rows, or an earlier try's rows the
-  //    save refused; success only on what the save answered
-  const urls = [...uploaded.map((u) => u.url), ...plan.replaced.map((r) => r.newUrl)];
-  const { rebuilding, landed: rowsLanded } = deps;
+  if (
+    guarded &&
+    (previousLockVersion !== guarded.expectedLockVersion ||
+      !guardedRowCurrent(live) ||
+      uploaded.length !== 1 ||
+      plan.replaced.length !== 1 ||
+      plan.created !== 0 ||
+      plan.commitBindingBlockers.length ||
+      plan.commitBindings.length !== 1 ||
+      plan.writes.some(({ path }) => path === 'pieceDxfAliases') ||
+      plan.replaced[0]?.scopeKey !== guarded.scopeKey ||
+      plan.replaced[0]?.lineKey !== guarded.lineKey ||
+      plan.replaced[0]?.oldUrl !== guarded.oldUrl ||
+      plan.replaced[0]?.newUrl !== uploaded[0]?.url)
+  )
+    return replacementMoved();
   const commitFields = (persisted: boolean) => {
     if (!persisted) return {};
     const blockers = [...plan.commitBindingBlockers];
@@ -714,6 +861,45 @@ export async function applyDraft(
       },
     };
   };
+  if (deps.saveJoinedPattern) {
+    if (
+      plan.created !== 1 ||
+      plan.reusedPieces !== 0 ||
+      plan.replaced.length !== 1 ||
+      uploaded.length !== 1 ||
+      !plan.commitBindings[0] ||
+      plan.commitBindings.length !== 1 ||
+      plan.commitBindingBlockers.length ||
+      !Number.isSafeInteger(previousLockVersion)
+    )
+      return {
+        ok: false,
+        failedScope: uploaded[0]?.scopeKey ?? '',
+        message: 'The saved Join has no exact reviewed row and piece binding.',
+        uploaded,
+      };
+    try {
+      await deps.saveJoinedPattern(plan.commitBindings[0], uploaded[0]!, previousLockVersion);
+      return { ok: true, uploaded, reused, writes: 1, save: 'ok', ...commitFields(true) };
+    } catch (error) {
+      return {
+        ok: false,
+        failedScope: uploaded[0]!.scopeKey,
+        message: error instanceof Error ? error.message : 'The saved Join could not be confirmed.',
+        uploaded,
+      };
+    }
+  }
+  if (guarded) deps.onReplaced!(plan.replaced);
+  for (const w of plan.writes) deps.write(w.path, w.value);
+  if (!guarded && plan.replaced.length) deps.onReplaced?.(plan.replaced);
+  const retry = !plan.writes.length && !!deps.unsaved?.get();
+  if (plan.writes.length) deps.unsaved?.set(true);
+
+  // 3. the card's own save (the only transaction) — this try's rows, or an earlier try's rows the
+  //    save refused; success only on what the save answered
+  const urls = [...uploaded.map((u) => u.url), ...plan.replaced.map((r) => r.newUrl)];
+  const { rebuilding, landed: rowsLanded } = deps;
   const save =
     (plan.writes.length || retry) && deps.save
       ? await saveOrLanded(
@@ -722,9 +908,10 @@ export async function applyDraft(
         )
       : undefined;
   if (save !== undefined) {
-    const fine = retry ? save === 'ok' : save === 'ok' || save === 'nothing' || save === 'off';
+    const fine =
+      guarded || retry ? save === 'ok' : save === 'ok' || save === 'nothing' || save === 'off';
     // T3: the rows are the saved card's — the card saved; a later write is what is owed.
-    const landed = fine ? null : (deps.landed?.(urls) ?? null);
+    const landed = fine ? null : deps.landed?.(urls) ?? null;
     if (landed) {
       deps.unsaved?.set(false);
       return {

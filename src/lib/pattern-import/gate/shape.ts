@@ -9,6 +9,7 @@
 //   probe switch (node only): SHAPE_GATE_OFF=1 — not evaluated (the "before" column)
 
 import type { GateCheck, PtMm, ShapeIssue } from '../types';
+import { readNativeInsetAuthoredOutlineCorner } from '../manifest/authored-outline-corner';
 import { repairMinorityKinks } from '../semantics/kink-repair';
 import {
   countMismatch,
@@ -76,6 +77,7 @@ export function shapeFamilies(ctx: GateCtx): {
     // drawn line alone held traced outlines on their trace jitter: e2e scan:synth 8/8 → 0/8).
     const seamDrawn = bs.every(
       (b) =>
+        !b.mb.authoredInsetOutlineCorner &&
         b.spec?.allowance.meaning === 'seam' &&
         (b.spec?.allowance.allowanceMm ?? 0) > 0 &&
         (ctx.contours.get(b.block)?.get(LAYERS.seam)?.length ?? 0) >= 3,
@@ -92,12 +94,41 @@ export function shapeFamilies(ctx: GateCtx): {
         (e) => e.layer === LAYERS.internal && isPoly(e.type) && isDrillMark(e),
       ).length;
       const seam = seamDrawn ? ctx.contours.get(b.block)?.get(LAYERS.seam) ?? null : null;
+      const marker = b.mb.authoredInsetOutlineCorner;
+      let turnOutline = cut;
+      if (marker) {
+        const outlines = ents.filter(({ type }) => type !== 'TEXT');
+        const [rawCut, ...otherCut] = outlines.filter(({ layer }) => layer === LAYERS.cut);
+        const [rawSeam, ...otherSeam] = outlines.filter(({ layer }) => layer === LAYERS.seam);
+        const original =
+          b.spec?.allowance.allowanceMm === marker.widthMm &&
+          rawCut?.closed &&
+          isPoly(rawCut.type) &&
+          !otherCut.length &&
+          rawSeam?.closed &&
+          isPoly(rawSeam.type) &&
+          !otherSeam.length &&
+          readNativeInsetAuthoredOutlineCorner(
+            rawCut.pts,
+            rawSeam.pts,
+            marker.controls,
+            marker.widthMm,
+          );
+        if (!original) {
+          failed.push(b.block);
+          notes.push(`${b.block}: the authored corner does not match its native cut and inset.`);
+        } else {
+          // Compare the reconstructed construction supports for turns only. Geometry gates
+          // continue measuring the actual cut and sewing contours.
+          turnOutline = original.originalOutline;
+        }
+      }
       rows.push({
         cut,
         block: b.block,
         token: b.mb.sizeToken,
         rank: rankOf.get(b.mb.sizeToken) ?? b.size?.rank ?? 0,
-        sh: shapeOfCut(cut, notches, drills),
+        sh: shapeOfCut(turnOutline, notches, drills),
         seam,
       });
     }

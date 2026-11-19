@@ -1,6 +1,6 @@
 import { AccessLevel } from 'api/proto-http/admin';
 import { SECTION, SIDE_BAR_ITEMS } from 'constants/routes';
-import { isLekaloHost } from 'lib/host';
+import { currentHost, isLekaloHost } from 'lib/host';
 import { BACKEND_SECTION, featureOn } from 'lib/workspace/features';
 import { useWorkspace } from 'lib/workspace/use-workspace';
 import { useMemo } from 'react';
@@ -54,7 +54,7 @@ export function usePermissions() {
       (section?: string, level: AccessLevel = ACCESS.READ): boolean => {
         if (!section) return true;
         if (!resolved || isSuper) return true;
-        const key = closed ? (BACKEND_SECTION[section] ?? section) : section;
+        const key = closed ? BACKEND_SECTION[section] ?? section : section;
         // Legacy: only gate keys the backend recognises; unknown keys fail open.
         // A workspace: unknown keys fail closed.
         if (catalog.size > 0 && !catalog.has(key)) return closed ? false : true;
@@ -68,8 +68,10 @@ export function usePermissions() {
   // A super-only item has no section, so `hasSection` alone would call it readable and land an
   // account with no other grant on a page that bounces it to /me; it counts for supers only.
   const homeRoute = useMemo(() => {
+    const team = currentHost().kind === 'team';
     const item = SIDE_BAR_ITEMS.find(
       (it) =>
+        !(team && it.legacyOnly) &&
         (isSuper || !it.superOnly) &&
         featureOn(workspace, it.feature) &&
         hasSection(it.section, ACCESS.READ),
@@ -86,8 +88,14 @@ export function usePermissions() {
     homeRoute,
     canRead: (section?: string) => hasSection(section, ACCESS.READ),
     /** Is a nav item drawn: super-only rule, team feature, and read access. */
-    canSee: (item: { section?: string; superOnly?: boolean; feature?: string }) =>
+    canSee: (item: {
+      section?: string;
+      superOnly?: boolean;
+      feature?: string;
+      legacyOnly?: boolean;
+    }) =>
       gate !== 'missing' &&
+      !(item.legacyOnly && currentHost().kind === 'team') &&
       !(gate === 'loading' && isLekaloHost()) &&
       (isSuper || !item.superOnly) &&
       featureOn(workspace, item.feature) &&

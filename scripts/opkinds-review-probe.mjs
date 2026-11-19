@@ -37,9 +37,9 @@
 //    молча, через `false`; поэтому текст экранируется.
 //
 //   node scripts/opkinds-review-probe.mjs             прогон
-//   node scripts/opkinds-review-probe.mjs --mutate=N  ломает В БАНДЛЕ починку N (1..5), репозиторий
+//   node scripts/opkinds-review-probe.mjs --mutate=N  ломает В БАНДЛЕ починку N (1..25), репозиторий
 //                                                     не трогается; проба обязана покраснеть
-//   node scripts/opkinds-review-probe.mjs --mutate    то же по очереди для всех пяти
+//   node scripts/opkinds-review-probe.mjs --mutate    то же по очереди для всех мутаций
 //
 // Playwright не в зависимостях проекта — ищется в кэше npx и МОЛЧА пропускается, если не найден.
 
@@ -57,6 +57,12 @@ const MUTANT = arg ? Number((arg.split('=')[1] ?? '0').trim()) || 0 : null;
 
 // МУТАЦИИ ЖИВУТ В ПАМЯТИ СБОРЩИКА, А НЕ В ФАЙЛЕ. Правка исходника ради проверки — это правка,
 // которую однажды забудут откатить; здесь ломается ровно одна строка ровно на один прогон.
+const stepSchema = /[\\/]tech-card[\\/]components[\\/]schema\.ts$/;
+const decorativeLineRule =
+  "    if (o.seamClass === 'TECH_CARD_SEAM_CLASS_OS_TOPSTITCH' && !stepEnumSet(o.topstitchMode)) {";
+const pressActionGate = "  const showPressAction = opType === 'TECH_CARD_OPERATION_TYPE_PRESS';";
+const bindingGate = '    showStitching && (effectiveSeam === BOUND_SEAM_CLASS || onMachine(BINDING_MACHINE));';
+
 const MUTATIONS = {
   1: {
     what: 'находка 1: блок press снова не доезжает до композиторов листа',
@@ -66,15 +72,20 @@ const MUTATIONS = {
   },
   2: {
     what: 'находка 2: выбор пункта снова ничего не снимает',
-    file: /operation-kinds\.ts$/,
-    from: '  if (answers(kindOf(step)?.id)) return out;',
-    to: '  return out;',
+    file: /operation-work\.ts$/,
+    from: '  const clears = k ? kindClears(k, after) : {};',
+    to: '  const clears = {};',
   },
   3: {
     what: 'находка 3: очистка скрытого снова гасит под-глагол на PRESS_OPEN',
     file: /operations-field\.tsx$/,
-    from: "      opType === 'TECH_CARD_OPERATION_TYPE_PRESS_OPEN';",
-    to: '      false;',
+    from: pressActionGate,
+    to: pressActionGate + `
+  useEffect(() => {
+    if (opType === 'TECH_CARD_OPERATION_TYPE_PRESS_OPEN' && pressAction !== NONE_PRESS_ACTION) {
+      setValue(\`operations.\${index}.pressAction\`, NONE_PRESS_ACTION, { shouldDirty: true });
+    }
+  }, [index, opType, pressAction, setValue]);`,
   },
   4: {
     what: 'находка 4: игольная четвёрка снова рисуется на сварочной машине',
@@ -84,7 +95,7 @@ const MUTATIONS = {
   },
   5: {
     what: 'находка 4: zod снова не отвергает игольную четвёрку на сварке',
-    file: /schema\.ts$/,
+    file: stepSchema,
     from: `      refuseAtWeld(stepTextSet(o.needleGaugeMm), 'needleGaugeMm', 'needle');
       refuseAtWeld(!!o.needleCount, 'needleCount', 'needle');
       refuseAtWeld(stepEnumSet(o.seamSecuring), 'seamSecuring', 'stitch to secure');
@@ -103,22 +114,30 @@ const MUTATIONS = {
     to: "    datum: 'the edge',",
   },
   7: {
-    what: 'находка 5: подпись отступа снова константа и не зависит от режима',
+    what: 'находка 5: подпись расстояния в основном редакторе потеряла единицу измерения',
     file: /operations-field\.tsx$/,
-    from: 'label={topstitchWidthLabel(topstitchMode)}',
-    to: "label='topstitch width, mm'",
+    from: `                <TopstitchEdgeSelect index={index} className={selectNoGrow} />
+                {showTopstitchWidth && (
+                  <DecimalField
+                    name={\`operations.\${index}.topstitchWidthMm\`}
+                    label='distance, mm'`,
+    to: `                <TopstitchEdgeSelect index={index} className={selectNoGrow} />
+                {showTopstitchWidth && (
+                  <DecimalField
+                    name={\`operations.\${index}.topstitchWidthMm\`}
+                    label='distance'`,
   },
   8: {
     what: 'находка 5: лист снова печатает «from edge» при любом режиме',
     file: /tech-pack-document\.tsx$/,
-    from: '  return `topstitch ${rows}${topstitchPhrase(t.mode, dec(t.widthMm))}`.trim();',
-    to: "  return `topstitch ${rows}${dec(t.widthMm) ? dec(t.widthMm) + ' mm from edge' : ''}`.trim();",
+    from: '  topstitchLine(t?.mode, dec(t?.widthMm), t?.rows);',
+    to: "  t?.mode ? 'topstitch' + (t.widthMm ? ' ' + dec(t.widthMm) + ' mm from edge' : '') : '';",
   },
   9: {
-    what: 'находка 5: соседи снова не говорят, между чем меряют (калибр и шаг рядов)',
+    what: 'находка 5: калибр игл ошибочно подписан как шаг рядов',
     file: /operations-field\.tsx$/,
-    from: "label='gauge between needles, mm'",
-    to: "label='needle gauge, mm'",
+    from: "label='needle gauge, mm'",
+    to: "label='row spacing, mm'",
   },
   10: {
     what: 'находка 5: лист снова печатает «rows N apart» и «gauge N» — рядом с размером иглы',
@@ -156,9 +175,9 @@ const MUTATIONS = {
   },
   14: {
     what: 'находка 6: маппер снова роняет отступ края по дороге на провод',
-    file: /schema\.ts$/,
-    from: '                widthMm: topstitchModeRefusesWidth(topstitchMode)',
-    to: '                widthMm: !topstitchModeNeedsWidth(topstitchMode)',
+    file: stepSchema,
+    from: '                widthMm: inputToDecimal(o.topstitchWidthMm),',
+    to: "                widthMm: topstitchMode === 'TECH_CARD_TOPSTITCH_MODE_EDGE' ? undefined : inputToDecimal(o.topstitchWidthMm),",
   },
   15: {
     what: 'находка 6: лист и схема снова молчат про режим без числа («in the ditch»)',
@@ -179,9 +198,10 @@ const MUTATIONS = {
   },
   17: {
     what: '0327: снятая разутюжка снова предлагается пунктом рядом со своим глаголом',
-    file: /operation-options\.ts$/,
-    from: "  TECH_CARD_PRESS_ACTION_STEAM: 'steam',",
-    to: "  TECH_CARD_PRESS_ACTION_OPEN: 'press open',\n  TECH_CARD_PRESS_ACTION_STEAM: 'steam',",
+    file: /press-action-tiles\.tsx$/,
+    from: "  { action: 'TECH_CARD_PRESS_ACTION_STEAM', work: 'press_steam', label: 'steam' },",
+    to: "  { action: 'TECH_CARD_PRESS_ACTION_OPEN', work: 'press_open', label: 'press open' },\n" +
+      "  { action: 'TECH_CARD_PRESS_ACTION_STEAM', work: 'press_steam', label: 'steam' },",
   },
   18: {
     what: '0328: двухигольная снова предлагается пикером — второе написание числа игл',
@@ -197,37 +217,40 @@ const MUTATIONS = {
   },
   20: {
     what: 'F7 снят: двухигольная машина снова уживается с одной иглой',
-    file: /schema\.ts$/,
+    file: stepSchema,
     from: "    if (stepIsMachine && stepMachineType === 'TECH_CARD_MACHINE_TYPE_LOCKSTITCH_DOUBLE_NEEDLE') {",
     to: '    if (false) {',
   },
   21: {
     what: 'F11 (первая половина) снят: класс «отстрочка» снова не требует режима',
-    file: /schema\.ts$/,
-    from: "    if (o.seamClass === 'TECH_CARD_SEAM_CLASS_OS_TOPSTITCH' && !stepEnumSet(o.topstitchMode)) {",
+    file: stepSchema,
+    from: decorativeLineRule,
     to: '    if (false) {',
   },
   22: {
-    what: 'F11 (вторая половина) снят: неназванный класс снова наследует умолчание молча',
-    file: /schema\.ts$/,
-    from: '    if (stepEnumSet(o.topstitchMode) && !stepEnumSet(o.seamClass)) {',
-    to: '    if (false) {',
+    what: 'F11: прежний запрет снова блокирует наследуемый класс при заданном режиме',
+    file: stepSchema,
+    from: decorativeLineRule,
+    to: `    if (stepEnumSet(o.topstitchMode) && !stepEnumSet(o.seamClass)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['seamClass'], message: 'seam class required' });
+    }
+` + decorativeLineRule,
   },
   23: {
     what: 'F22 снят в zod: исполнение бейки снова законно при любом классе шва',
-    file: /schema\.ts$/,
+    file: stepSchema,
     from: "    if (stepEnumSet(o.bindingStyle) && o.seamClass !== 'TECH_CARD_SEAM_CLASS_BS_BOUND') {",
     to: '    if (false) {',
   },
   24: {
     what: 'F22 на экране: контрол исполнения снова висит на машинке, а не на классе шва',
     file: /operations-field\.tsx$/,
-    from: '            {seamClass === BOUND_SEAM_CLASS && (',
-    to: "            {machineType === 'TECH_CARD_MACHINE_TYPE_BINDING_TAPING' && (",
+    from: bindingGate,
+    to: '    showStitching && onMachine(BINDING_MACHINE);',
   },
   25: {
     what: '0327: съём носителя снова законен на шелкографии — член вместо правила',
-    file: /schema\.ts$/,
+    file: stepSchema,
     from: "    if (o.printMethod === 'TECH_CARD_PRINT_METHOD_SCREEN' && stepEnumSet(o.peelMode)) {",
     to: '    if (false) {',
   },
@@ -381,11 +404,16 @@ async function run(bundle) {
   const hasResidue = async (name) => has(RESIDUE(name));
   const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+  const setup = page.locator('[role="button"][aria-expanded]').filter({
+    has: page.getByText('setup', { exact: true }),
+  });
+
   async function mount(op) {
     await page.goto('http://probe.local/');
     await page.addScriptTag({ content: bundle });
     await page.evaluate((o) => window.__review.mount(o), op);
     await page.waitForSelector(KIND, { timeout: 15000 });
+    if ((await setup.getAttribute('aria-expanded')) === 'false') await setup.click();
     // Эффект очистки скрытого — это эффект: он стреляет ПОСЛЕ коммита, и читать форму сразу после
     // появления пикера значило бы иногда успевать до него.
     await page.waitForTimeout(150);
@@ -419,6 +447,12 @@ async function run(bundle) {
     await page.waitForTimeout(120);
     return true;
   }
+  const pressTile = (field, label) =>
+    page.locator(F(field)).getByRole('button', { name: label, exact: true });
+  const pressTiles = async (field) =>
+    page.locator(`${F(field)} button[aria-pressed]`).evaluateAll((tiles) =>
+      tiles.map((tile) => tile.getAttribute('title')),
+    );
   async function optionsOf(sel) {
     if (!(await has(sel))) return null;
     await openList(sel);
@@ -451,9 +485,18 @@ async function run(bundle) {
     const n = page.locator(`${sel} label`);
     return (await n.count()) ? ((await n.first().textContent()) ?? '').trim() : '';
   };
+  const triggerText = async (sel) =>
+    page.locator(`${sel} button`).evaluateAll((buttons) =>
+      buttons.length === 1 ? (buttons[0].textContent ?? '').trim() : '',
+    );
+  const inputValue = (field) =>
+    page.locator(`${F(field)} input`).evaluateAll((inputs) =>
+      inputs.length === 1 ? inputs[0].value : null,
+    );
   const typeInto = async (sel, text) => {
-    if (!(await has(sel))) return false;
-    await page.fill(`${sel} input`, text);
+    const input = page.locator(`${sel} input`);
+    if ((await input.count()) !== 1 || !(await input.isVisible())) return false;
+    await input.fill(text);
     await page.waitForTimeout(120);
     return true;
   };
@@ -491,8 +534,8 @@ async function run(bundle) {
   ck(await has(F('pressAction')), 'контрол под-глагола на экране — стенд действительно смонтирован');
 
   // Значения ставятся КЛИКАМИ по живым контролам, а не записью в форму мимо органов.
-  ck(await pick(F('pressAction'), 'press to one side'), 'выбран приём «press to one side»');
-  ck(await pick(F('pressToward'), 'toward the front'), 'выбрано направление «toward the front»');
+  await pressTile('pressAction', 'one side').click();
+  await pressTile('pressToward', 'front').click();
   const vPress = await values();
   ck(vPress.pressAction === T.ONE_SIDE, 'приём записан в форму', String(vPress.pressAction));
   ck(vPress.pressToward === T.TOWARD_FRONT, 'направление записано в форму', String(vPress.pressToward));
@@ -726,10 +769,6 @@ async function run(bundle) {
   };
   const STEP = { operationType: T.MACHINE, machineType: T.LOCKSTITCH, zone: T.ZONE };
   const roundTrip = (op) => page.evaluate((o) => window.__review.roundTrip(o), op);
-  // Подсказка про пустое поле живёт РЯДОМ с контролом, а не внутри него: ищется по своим словам.
-  const hintShown = async () =>
-    (await page.locator('#root').getByText('leave empty and the stitch runs flush').count()) > 0;
-
   await mount(STEP);
   ck(await has(F('topstitchMode')), 'блок отстрочки смонтирован — пикер режима на экране');
   ck(!(await has(F('topstitchWidthMm'))), 'без режима контрола отступа НЕТ');
@@ -754,10 +793,12 @@ async function run(bundle) {
     await has(F('topstitchWidthMm')),
     'у КРАЯ контрол отступа ЕСТЬ — прежде он здесь прятался, и ради него держали второй пункт',
   );
-  const lblEdge = await labelOf(F('topstitchWidthMm'));
-  ck(/from the edge/i.test(lblEdge), 'подпись называет КРАЙ', lblEdge);
-  ck(!/^topstitch width, mm$/i.test(lblEdge), 'и это уже не безымянная «topstitch width, mm»', lblEdge);
-  ck(await hintShown(), 'сказано, что значит ПУСТОЕ поле — иначе оно читается как «забыли»');
+  ck(
+    (await triggerText(F('topstitchMode'))) === 'at the edge' &&
+      (await labelOf(F('topstitchWidthMm'))) === 'distance, mm',
+    'редактор показывает отсчёт от края и расстояние в миллиметрах',
+  );
+  ck((await inputValue('topstitchWidthMm')) === '', 'у края поле расстояния действительно пустое');
 
   await page.evaluate(() => window.__review.trigger());
   await page.waitForTimeout(150);
@@ -781,7 +822,7 @@ async function run(bundle) {
 
   // ── КРАЙ С ЧИСЛОМ: ТОТ ЖЕ ТОКЕН, но число доезжает и возвращается ────────────────────────────
   ck(await typeInto(F('topstitchWidthMm'), '6'), 'отступ набран числом в живой контрол');
-  ck(!(await hintShown()), 'при набранном числе подсказка про пустоту снята — состояния этого нет');
+  ck((await inputValue('topstitchWidthMm')) === '6', 'контрол показывает введённое расстояние 6 мм');
   const wNum = await wire();
   ck(
     wNum?.topstitch?.mode === TS.EDGE,
@@ -813,11 +854,11 @@ async function run(bundle) {
 
   // ── ПАРАЛЛЕЛЬ: та же величина, ДРУГАЯ линия, и число ОБЯЗАТЕЛЬНО ─────────────────────────────
   ck(await pick(F('topstitchMode'), 'parallel to the seam'), 'режим переключён на «parallel to the seam»');
-  const lblSeam = await labelOf(F('topstitchWidthMm'));
-  ck(/from the seam line/i.test(lblSeam), 'подпись переехала на ЛИНИЮ ШВА', lblSeam);
-  ck(!/from the edge/i.test(lblSeam), 'и про край больше не говорит', lblSeam);
-  ck(lblEdge !== lblSeam, 'ПОДПИСЬ ИЗМЕНИЛАСЬ вместе с режимом', `${lblEdge} → ${lblSeam}`);
-  ck(!(await hintShown()), 'у параллели пустое поле НЕ ответ — подсказки про пустоту нет');
+  ck(
+    (await triggerText(F('topstitchMode'))) === 'parallel to the seam' &&
+      (await labelOf(F('topstitchWidthMm'))) === 'distance, mm',
+    'редактор показывает отсчёт от шва и расстояние в миллиметрах',
+  );
   const vKeep = await values();
   ck(vKeep.topstitchWidthMm === '6', 'число пережило смену режима — оба режима его несут', String(vKeep.topstitchWidthMm));
   const rSeam = await sheetRow();
@@ -874,7 +915,7 @@ async function run(bundle) {
   ck((await refuses({ topstitchMode: TS.EDGE, topstitchWidthMm: '6' })).length === 0, 'zod: край с числом — можно');
   const parBare = await refuses({ topstitchMode: TS.PARALLEL, topstitchWidthMm: '' });
   ck(parBare.length === 1, 'zod: параллель без числа — НЕЛЬЗЯ', parBare.join(' | '));
-  ck(/the seam line/i.test(parBare[0] ?? ''), 'и отказ называет ту же линию, что подпись', parBare[0] ?? '—');
+  ck(/the seam line/i.test(parBare[0] ?? ''), 'и отказ называет ту же линию, что выбранный режим', parBare[0] ?? '—');
   const ditchNum = await refuses({ topstitchMode: TS.DITCH, topstitchWidthMm: '6' });
   ck(ditchNum.length === 1, 'zod: число в шов — НЕЛЬЗЯ', ditchNum.join(' | '));
 
@@ -919,12 +960,16 @@ async function run(bundle) {
     needleGaugeMm: '6.4',
     rowSpacingMm: '6',
   });
-  const lblGauge = await labelOf(F('needleGaugeMm'));
-  const lblRows = await labelOf(F('rowSpacingMm'));
-  ck(/between needles/i.test(lblGauge), 'калибр говорит «между иглами»', lblGauge);
-  ck(/between stitch rows/i.test(lblRows), 'шаг говорит «между рядами строчек»', lblRows);
-  ck(!/^needle gauge, mm$/i.test(lblGauge), 'и это уже не «needle gauge, mm»', lblGauge);
-  ck(!/^row spacing, mm$/i.test(lblRows), 'и это уже не «row spacing, mm»', lblRows);
+  ck(
+    (await labelOf(F('needleGaugeMm'))) === 'needle gauge, mm' &&
+      (await inputValue('needleGaugeMm')) === '6.4',
+    'калибр и его 6.4 мм показаны в своём контроле',
+  );
+  ck(
+    (await labelOf(F('rowSpacingMm'))) === 'row spacing, mm' &&
+      (await inputValue('rowSpacingMm')) === '6',
+    'шаг рядов и его 6 мм показаны в своём контроле',
+  );
   const rowNeedles = await sheetRow();
   ck(
     /2 needles, 6\.4 mm apart/i.test(rowNeedles?.machineMode ?? ''),
@@ -965,20 +1010,6 @@ async function run(bundle) {
   const PLAIN = 'TECH_CARD_SEAM_CLASS_SS_PLAIN';
   const FOLD = 'TECH_CARD_BINDING_STYLE_DOUBLE_FOLD';
 
-  // Створка «differs from standard» ЗАКРЫТА по умолчанию и РАЗМОНТИРУЕТ содержимое: класс шва и
-  // натяжение нитки живут в ней, и без раскрытия «контрола нет» смешалось бы с «правило работает».
-  async function openFold() {
-    const head_ = page
-      .locator('[role="button"][aria-expanded]')
-      .filter({ hasText: 'differs from standard' });
-    if ((await head_.count()) === 0) return false;
-    if ((await head_.first().getAttribute('aria-expanded')) === 'true') return true;
-    await head_.first().scrollIntoViewIfNeeded();
-    await head_.first().click();
-    await page.waitForTimeout(150);
-    return (await head_.first().getAttribute('aria-expanded')) === 'true';
-  }
-
   // СНЯТОГО В СПИСКЕ НЕТ, ЖИВОЕ В НЁМ ЕСТЬ — одной парой, иначе «нет» ничего не значит.
   async function listSays(sel, where, gone, kept) {
     const list = await optionsOf(sel);
@@ -989,8 +1020,6 @@ async function run(bundle) {
       ck((list ?? []).some((x) => x === k), `${where}: «${k}» на месте`, JSON.stringify(list));
     return list;
   }
-  const triggerText = async (sel) =>
-    ((await page.locator(`${sel} button`).first().textContent()) ?? '').trim();
   const issuesAt = (issues, field) =>
     issues.filter((i) => i.path.endsWith(`.${field}`)).map((i) => i.message);
 
@@ -1002,7 +1031,7 @@ async function run(bundle) {
     ['hardware attach', 'twin-needle lockstitch'],
     ['lockstitch 301', 'binding / taping'],
   );
-  ck(await openFold(), 'створка «differs from standard» раскрыта');
+  ck((await setup.getAttribute('aria-expanded')) === 'true', 'секция Setup раскрыта');
   await listSays(
     F('threadTension'),
     'натяжение нитки',
@@ -1073,14 +1102,16 @@ async function run(bundle) {
   );
 
   await mount({ operationType: T.PRESS, zone: T.ZONE, pressEquipment: T.IRON });
-  await listSays(F('pressAction'), 'приём ВТО', ['press open'], ['press flat', 'steam']);
-  ck(await pick(F('pressAction'), 'press to one side'), 'приём — «press to one side»');
-  await listSays(
-    F('pressToward'),
-    'направление припуска',
-    ['toward the side seam'],
-    ['toward the front', 'toward the lining'],
-  );
+  await pressTile('pressAction', 'more').click();
+  const actions = await pressTiles('pressAction');
+  ck(!actions.includes('press open') && actions.includes('flat') && actions.includes('steam'),
+    'приём ВТО: «press open» отсутствует, flat и steam остаются', actions.join(' | '));
+  await pressTile('pressAction', 'one side').click();
+  ck((await values()).pressAction === T.ONE_SIDE, 'плитка записала «press to one side»');
+  const directions = await pressTiles('pressToward');
+  ck(!directions.some((label) => /side seam/i.test(label ?? '')) &&
+      directions.includes('front') && directions.includes('lining'),
+    'направление припуска: снятый side seam отсутствует, front и lining остаются', directions.join(' | '));
 
   // ── 6e. УСИЛИТЕЛЬ: ПЕРЕНОС, А НЕ УДАЛЕНИЕ ───────────────────────────────────────────────────
   // Два снятых написания свернулись в ОДИН новый член. Запись, сделанная до волны, обязана
@@ -1184,27 +1215,21 @@ async function run(bundle) {
     'F22: окантовочная машина БЕЗ исполнения не задета — запрещённой она не стала',
   );
 
-  // ЖИВАЯ ПОЛОВИНА, ПАРОЙ «НЕТ → ЕСТЬ → НЕТ» НА ОДНОМ СМОНТИРОВАННОМ ШАГЕ.
-  await mount({ ...MACHINE_STEP, machineType: BINDER });
-  ck(
-    !(await has(F('bindingStyle'))),
-    'F22 на экране: на окантовочной машине БЕЗ класса «bound» контрола исполнения НЕТ',
-  );
-  ck(await openFold(), 'створка раскрыта — класс шва живёт в ней');
-  ck(await pick(F('seamClass'), 'BS — bound'), 'класс шва выставлен «BS — bound»');
-  ck(await has(F('bindingStyle')), 'F22 на экране: контрол исполнения ПОЯВИЛСЯ');
-  ck(await pick(F('seamClass'), 'SS — plain seam'), 'класс шва возвращён на стачной');
-  ck(!(await has(F('bindingStyle'))), 'F22 на экране: и контрол снова ИСЧЕЗ');
-  // И ТА ЖЕ ПАРА НА ПРЯМОСТРОЧКЕ — та самая работа, которой поле было недоступно.
-  await mount({ ...MACHINE_STEP, seamClass: BOUND });
-  ck(
-    await has(F('bindingStyle')),
-    'F22 на экране: окантовка на ПРЯМОСТРОЧКЕ видит контрол исполнения',
-  );
-  ck(
-    await listSays(F('bindingStyle'), 'исполнение бейки', [], ['double-fold binding']),
-    'и список исполнений в нём настоящий',
-  );
+  // Binding tiles choose the class and the fold together, including on the binding machine.
+  for (const op of [{ ...MACHINE_STEP, machineType: BINDER }, { ...MACHINE_STEP, seamClass: BOUND }]) {
+    await mount(op);
+    const binding = page.locator(F('bindingStyle')).getByRole('button', { name: 'double fold', exact: true });
+    ck(await binding.isVisible(), 'настраивается сложение бейки', String(op.machineType));
+    if (await binding.isVisible()) {
+      await binding.click();
+      const selected = await values();
+      ck(
+        selected.seamClass === BOUND && selected.bindingStyle === FOLD,
+        'плитка записала «bound» и двойное сложение',
+        `${selected.seamClass} / ${selected.bindingStyle}`,
+      );
+    }
+  }
 
   // ── 6i. F10: У ШЕЛКОГРАФИИ НОСИТЕЛЯ НЕТ — ПРАВИЛО ВМЕСТО ЧЛЕНА ──────────────────────────────
   head('6i. F10: «носителя нет» стало правилом, а не значением словаря');

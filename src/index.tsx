@@ -137,6 +137,13 @@ const ModelOpenReferencePreviewDevPage = import.meta.env.DEV
       ),
     )
   : null;
+const AssemblyCarrierDevPage = import.meta.env.DEV
+  ? lazyRoute(() =>
+      import(
+        'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/assembly-carrier-dev-page'
+      ).then((m) => ({ default: m.AssemblyCarrierDevPage })),
+    )
+  : null;
 const ModelFormPersonalizedPreviewDevPage = import.meta.env.DEV
   ? lazyRoute(() =>
       import('components/managers/model/components/model-form-personalized-preview-dev-page').then(
@@ -316,7 +323,7 @@ const HOST_KIND = currentHost().kind;
 const RootApp = lazyRoute(() => import('components/auth/root-app'));
 const ConsoleApp = lazyRoute(() => import('components/shell/console-layout'));
 const ConsoleHome = lazyRoute(() => import('components/console/console-page'));
-const PeoplePage = lazyRoute(() => import('components/people/people-page'));
+const WorkspacePage = lazyRoute(() => import('components/workspace/workspace-page'));
 const Handoff = lazyRoute(() =>
   import('components/auth/handoff').then((m) => ({ default: m.Handoff })),
 );
@@ -465,6 +472,9 @@ const app = (
                 {HOST_KIND === 'team' && <Route path={ROUTES.join} element={<Join />} />}
                 <Route path='/' element={<ProtectedLayout />}>
                   <Route path={ROUTES.main} element={<AnalyticsHome />} />
+                  {import.meta.env.DEV && AssemblyCarrierDevPage ? (
+                    <Route path='/dev/assembly-carrier' element={<AssemblyCarrierDevPage />} />
+                  ) : null}
                   {/* Без `disabled`: страница библиотеки — единственное место, где снимки можно
                       выбрать пачкой и удалить одним действием. Флаг глушил `toggleMedia`, то есть
                       выбор на ней был мёртв физически, и чистка после съёмки шла по одному кадру. */}
@@ -555,12 +565,29 @@ const app = (
                   </Route>
                   <Route path={ROUTES.employees} element={<Employees />} />
                   <Route path={ROUTES.taskDetails} element={<TaskDetail />} />
-                  <Route path={ROUTES.accounts} element={<Accounts />} />
+                  <Route
+                    path={ROUTES.accounts}
+                    element={
+                      HOST_KIND === 'team' ? (
+                        <Navigate to={ROUTES.workspace} replace />
+                      ) : (
+                        <Accounts />
+                      )
+                    }
+                  />
                   {/* Свой аккаунт открыт любому вошедшему и потому НЕ гейтится секцией —
                       в отличие от /accounts, который гейт закрывает и который уводит сюда
                       редиректом, когда accounts:read нет. */}
                   <Route path={ROUTES.me} element={<MyProfile />} />
-                  {HOST_KIND === 'team' && <Route path={ROUTES.people} element={<PeoplePage />} />}
+                  {HOST_KIND === 'team' && (
+                    <Route path={ROUTES.workspace} element={<WorkspacePage />} />
+                  )}
+                  {HOST_KIND === 'team' && (
+                    <Route
+                      path={ROUTES.people}
+                      element={<Navigate to={ROUTES.workspace} replace />}
+                    />
+                  )}
                 </Route>
                 {/* Layout-less protected route: a standalone page so the browser print
                     engine (Safari especially) renders the document in normal flow, with

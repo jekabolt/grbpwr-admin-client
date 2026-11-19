@@ -9,6 +9,10 @@
 //
 // Observability (M5): every open / stage start / end / error is one console line with the prefix
 // `[pattern-import]` and lands in `client.log` (a ring buffer), which the error report carries.
+import {
+  takeReviewedAddPointWorkerOpen,
+  type ReviewedAddPointLease,
+} from './reviewed-add-point-main';
 import type {
   ImportErrorCode,
   ImportWorkerRequest,
@@ -133,6 +137,7 @@ export class ImportWorkerClient {
   private pending = new Map<number, Pending>();
   /** Sessions of the CURRENT worker; a respawn empties it (their state died with the worker). */
   private live = new Set<number>();
+  private reviewedSessions = new Map<number, ReviewedAddPointLease>();
   private running: number | null = null;
   /** Worker JS heap after the last answer, and the peak over the client's life (MB). */
   heapMb: number | null = null;
@@ -212,6 +217,8 @@ export class ImportWorkerClient {
     this.worker = null;
     this.ran = false;
     this.live.clear();
+    for (const lease of this.reviewedSessions.values()) lease.release();
+    this.reviewedSessions.clear();
     this.running = null;
     this.waiters.splice(0).forEach((waiter) => waiter.reject(err));
     // Reject, never abandon: an unsettled promise pins its closure (and the bytes it holds).
@@ -262,19 +269,39 @@ export class ImportWorkerClient {
     }
     // Transferred: the bytes leave the main thread (the wizard keeps the File objects).
     const wireFiles = wireOpenFiles(files);
-    const msg = await this.whenRunning()
-      .then(() =>
-        this.request(
-          { type: 'open', id, files: wireFiles },
-          wireFiles.map((f) => f.bytes),
-        ),
-      )
-      .catch((e) => {
-        this.logError(e);
-        throw e;
-      });
-    if (msg.type !== 'opened') throw new ImportWorkerError('internal', 'unexpected worker reply');
+    const reviewed = takeReviewedAddPointWorkerOpen(files);
+    let msg: WorkerMessage;
+    try {
+      await this.whenRunning();
+      reviewed?.check();
+      msg = await this.request(
+        {
+          type: 'open',
+          id,
+          files: wireFiles,
+          ...(reviewed ? { reviewedAddPoint: reviewed.wire } : {}),
+        },
+        wireFiles.map((f) => f.bytes),
+      );
+    } catch (error) {
+      reviewed?.release();
+      this.logError(error);
+      throw error;
+    }
+    if (msg.type !== 'opened') {
+      reviewed?.release();
+      throw new ImportWorkerError('internal', 'unexpected worker reply');
+    }
     this.live.add(msg.sessionId);
+    if (reviewed) {
+      this.reviewedSessions.set(msg.sessionId, reviewed);
+      try {
+        reviewed.check();
+      } catch (e) {
+        await this.close(msg.sessionId);
+        throw e;
+      }
+    }
     return { sessionId: msg.sessionId, files: msg.files };
   }
 
@@ -292,16 +319,26 @@ export class ImportWorkerClient {
       );
     const id = this.nextId++;
     this.running = id;
+    const reviewed = stage === 'write' ? this.reviewedSessions.get(sessionId) : undefined;
     const t0 = now();
     this.log.push({ event: 'start', stage });
     try {
+      reviewed?.check();
       const msg = await this.request(
-        { type: 'run', id, sessionId, stage, input } as ImportWorkerRequest,
+        {
+          type: 'run',
+          id,
+          sessionId,
+          stage,
+          input,
+          ...(reviewed ? { reviewedAddPointAtWrite: reviewed.atWrite() } : {}),
+        } as ImportWorkerRequest,
         [],
         onProgress,
       );
       if (msg.type !== 'result' || msg.stage !== stage)
         throw new ImportWorkerError('internal', 'unexpected worker reply', stage);
+      reviewed?.check();
       this.log.push({ event: 'end', stage, ms: Math.round(now() - t0), heapMb: this.heapMb });
       return msg.output as StageIO[S]['out'];
     } catch (e) {
@@ -350,6 +387,8 @@ export class ImportWorkerClient {
   }
 
   async close(sessionId: number): Promise<void> {
+    this.reviewedSessions.get(sessionId)?.release();
+    this.reviewedSessions.delete(sessionId);
     if (!this.live.delete(sessionId) || !this.worker) return;
     const id = this.nextId++;
     await this.request({ type: 'close', id, sessionId }).catch(() => undefined);

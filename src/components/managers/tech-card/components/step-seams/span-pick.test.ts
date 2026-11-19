@@ -556,7 +556,7 @@ describe('a gap a fold cut fills on its own', () => {
   });
 });
 
-describe('a surface takes one piece by whole edges (C2, Р5)', () => {
+describe('a surface keeps the chosen spans on one part piece', () => {
   const isInner = (id: string) => id.includes(':i');
   const pieceOf = (id: string) => id.split(/[#:]/)[0];
 
@@ -567,23 +567,34 @@ describe('a surface takes one piece by whole edges (C2, Р5)', () => {
     expect(surfacePartSide({ a: ['FR:i0'], b: ['BK:i0'] }, isInner)).toBeNull();
   });
 
-  it('drops the stretch on the part side and keeps the line whole', () => {
+  it('keeps the part span selected while the host stays whole', () => {
     const sel = {
       a: ['FR:i0'],
       b: ['PCK#0'],
       spans: { a: {}, b: { 'PCK#0': [[10, 40]] as const } },
     };
-    expect(surfacePick(sel, isInner, pieceOf)).toEqual({
-      a: ['FR:i0'],
-      b: ['PCK#0'],
-      spans: { a: {}, b: {} },
-    });
+    expect(surfacePick(sel, isInner, pieceOf)).toBe(sel);
   });
 
-  it('a click on a second piece takes that piece instead', () => {
-    const sel = { a: ['FR:i0'], b: ['PCK#0', 'PCK#1', 'FLP#2'], spans: NO_SPANS };
-    expect(surfacePick(sel, isInner, pieceOf, 'FLP#2').b).toEqual(['FLP#2']);
-    expect(surfacePick(sel, isInner, pieceOf).b).toEqual(['PCK#0', 'PCK#1']);
+  it('keeps only the clicked piece, with its original ordered targets and ranges', () => {
+    const sel = {
+      a: ['FR:i0'],
+      b: ['PCK#1', 'PCK#0', 'FLP#2'],
+      spans: {
+        a: { 'FR:i0': [[10, 100]] as const },
+        b: {
+          'PCK#1': [[10, 40]] as const,
+          'PCK#0': [[2, 8]] as const,
+          'FLP#2': [[20, 40]] as const,
+        },
+      },
+    };
+    const flap = surfacePick(sel, isInner, pieceOf, 'FLP#2');
+    expect(flap.b).toEqual(['FLP#2']);
+    expect(flap.spans).toEqual({ a: sel.spans.a, b: { 'FLP#2': [[20, 40]] } });
+    const pocket = surfacePick(sel, isInner, pieceOf);
+    expect(pocket.b).toEqual(['PCK#1', 'PCK#0']);
+    expect(pocket.spans.b).toEqual({ 'PCK#1': [[10, 40]], 'PCK#0': [[2, 8]] });
   });
 
   it('an edge pair is left as it is', () => {

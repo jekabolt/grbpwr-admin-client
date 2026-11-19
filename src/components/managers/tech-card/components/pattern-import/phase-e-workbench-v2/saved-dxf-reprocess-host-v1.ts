@@ -1,6 +1,9 @@
 import { readAuthToken as readStoredAuthToken, teamHeaders } from 'api/auth-headers';
 import { mediaProxyHeaders } from 'lib/features/media-proxy';
+import { contourSignature, contourSigCap } from 'lib/pattern-import/manifest/contour-sig';
+import { DXF_NATIVE_SEWING_REPLAY_REQUEST_V1 } from 'lib/pattern-import/dxf-native-sewing-replay-v1';
 import { readManifestBytes } from 'lib/pattern-import/manifest';
+import { blockNameOf, UNI_TOKEN } from 'lib/pattern-import/write/plan';
 import {
   DXF_PIPELINE_PROVENANCE_REQUEST_V1,
   type DxfPipelineProvenanceStageOutputV1,
@@ -14,7 +17,7 @@ import {
   type DxfProductSavedReprocessHostV1,
   type DxfProductSavedRowIdentityV1,
 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
-import { pinToScope } from 'lib/pattern-import/fabrics/scope';
+import { pinToScope, scopedSpec } from 'lib/pattern-import/fabrics/scope';
 import {
   PATIMPORT,
   type AllowanceDecision,
@@ -23,6 +26,7 @@ import {
   type PieceSpec,
   type StageIO,
 } from 'lib/pattern-import/types';
+import { bindProtectedSavedReadWorkerOpen } from 'lib/pattern-import/worker/reviewed-add-point-main';
 import { ImportWorkerClient } from 'lib/pattern-import/worker/client';
 
 import { cardBuildDraft } from '../card-apply';
@@ -39,6 +43,10 @@ export type PatternImportDxfPhaseESavedDxfAuthorityReadV1 = Readonly<{
 }>;
 
 export type PatternImportDxfPhaseESavedDxfReprocessHostDepsV1 = Readonly<{
+  /** Explicit physical-source opt-in; content is later verified against native source authority. */
+  nativeSewingReplay?: boolean;
+  /** A protected Draft edit requires the ordinary unmodified semantics and scoped writer to keep its identity. */
+  requiredStablePiece?: string;
   /** Current GetTechCard projection, explicitly rebound to the row's optimistic card lock. */
   resolveCard: (
     expected: DxfProductSavedRowIdentityV1,
@@ -192,34 +200,28 @@ function readBrowserAuthToken(): string | null {
   return readStoredAuthToken();
 }
 
+function savedBackendDownloadUrl(resolvedUrl: string, serverUrl: string): URL | null {
+  try {
+    const download = new URL(resolvedUrl);
+    return download.origin === new URL(serverUrl).origin ? download : null;
+  } catch {
+    return null;
+  }
+}
+
 function backendDownloadAuthHeaders(
   resolvedUrl: string,
   serverUrl: string,
   readAuthToken: () => string | null,
 ): Readonly<Record<string, string>> | undefined {
-  let downloadOrigin: string;
-  let backendOrigin: string;
-  try {
-    downloadOrigin = new URL(resolvedUrl).origin;
-    backendOrigin = new URL(serverUrl).origin;
-  } catch {
-    return undefined;
-  }
-  if (downloadOrigin !== backendOrigin) return undefined;
+  if (!savedBackendDownloadUrl(resolvedUrl, serverUrl)) return undefined;
   const token = readAuthToken()?.trim();
   return token ? { 'Grpc-Metadata-Authorization': `Bearer ${token}`, ...teamHeaders() } : undefined;
 }
 
 function backendPatternCapabilityJsonUrl(resolvedUrl: string, serverUrl: string): string | null {
-  let download: URL;
-  let backend: URL;
-  try {
-    download = new URL(resolvedUrl);
-    backend = new URL(serverUrl);
-  } catch {
-    return null;
-  }
-  if (download.origin !== backend.origin || !download.pathname.startsWith('/api/p/')) return null;
+  const download = savedBackendDownloadUrl(resolvedUrl, serverUrl);
+  if (!download?.pathname.startsWith('/api/p/')) return null;
   download.searchParams.set('mode', 'json');
   return download.toString();
 }
@@ -422,14 +424,122 @@ export function buildPatternImportDxfExactManifestPieceOverridesV1(
   return overrides;
 }
 
+function savedHalfFoldChoices(
+  row: DxfProductSavedRowIdentityV1,
+  card: CardContext,
+  manifest: ConversionManifest,
+  initial: StageIO['semantics']['out'],
+  pieces: StageIO['pieces']['out'],
+  overrides: StageIO['semantics']['in']['pieceOverrides'],
+): NonNullable<StageIO['semantics']['in']['savedNativeHalfFolds']> {
+  const choices: NonNullable<StageIO['semantics']['in']['savedNativeHalfFolds']> = {};
+  const halves = manifest.pieces.filter((p) => p.halfFold);
+  if (!halves.length) return choices;
+  const inScope = (scopeKey: string) => scopeKey.trim() === row.scopeKey;
+  const patterns = card.existingPatterns?.filter((p) => inScope(p.scopeKey)) ?? [];
+  if (
+    patterns.length !== 1 ||
+    patterns[0]!.scopeKey !== row.scopeKey ||
+    patterns[0]!.lineKey !== row.patternLineKey
+  )
+    throw new Error('Saved half-on-fold pattern line differs from the current row.');
+  const scopeAliases = card.existingAliases?.filter((a) => inScope(a.scopeKey)) ?? [];
+  const indexes = exactManifestPieceIndexes(initial.pieces, manifest);
+  for (const half of halves) {
+    const blocks = manifest.blocks.filter((b) => b.identity === half.identity);
+
+    if (
+      half.unfoldedFold ||
+      half.pairOf ||
+      half.piecesPerGarment !== 1 ||
+      blocks.length < 1 ||
+      blocks.length > 2 ||
+      (blocks.length === 2 && half.ungraded)
+    )
+      throw new Error('Saved half requires one confirmed piece and one or two explicit sizes.');
+    const aliases = scopeAliases.filter(
+      (a) => a.blockName.trim().toUpperCase() === half.identity.toUpperCase(),
+    );
+    const alias = aliases[0];
+    const lines = card.existingPieces.filter((p) => p.lineKey === alias?.pieceLineKey);
+    if (
+      aliases.length !== 1 ||
+      !alias?.pieceLineKey ||
+      alias.scopeKey !== row.scopeKey ||
+      alias.blockName !== half.identity ||
+      scopeAliases.filter((a) => a.pieceLineKey === alias.pieceLineKey).length !== 1 ||
+      lines.length !== 1 ||
+      lines[0]!.cutSymmetry !== 'TECH_CARD_PIECE_CUT_SYMMETRY_FOLD' ||
+      lines[0]!.piecesPerGarment !== 1
+    )
+      throw new Error('Saved half has no unique current fold line and block alias.');
+    const index = indexes.indexOf(manifest.pieces.indexOf(half));
+    const source = initial.pieces[index];
+    const family = pieces.families.find((f) => f.seed === source?.seed);
+    const axes =
+      pieces.productFoldAxes?.filter(
+        (a) => a.seed === source?.seed && a.identity === half.identity,
+      ) ?? [];
+    if (
+      !source ||
+      !family ||
+      !overrides?.[source.seed] ||
+      family.candidates.length !== blocks.length ||
+      axes.length !== blocks.length
+    )
+      throw new Error('Saved half requires one native axis on every owned rank.');
+    const answers = blocks.map((block) => {
+      const matches = axes.filter((a) => a.block === block.block && a.size === block.sizeToken);
+      const axis = matches[0];
+      const sizes = manifest.sizes.filter(
+        (s) => s.rank === axis?.rank && s.token === block.sizeToken && s.sizeId === block.sizeId,
+      );
+      const candidates = family.candidates.filter((c) => c.rank === axis?.rank);
+      const signature =
+        candidates.length === 1 &&
+        contourSignature(candidates[0]!.outer, contourSigCap(manifest.blocks.length));
+      if (
+        matches.length !== 1 ||
+        !axis ||
+        sizes.length !== 1 ||
+        !block.contour ||
+        !signature ||
+        signature.dev !== block.contour.dev ||
+        signature.pts.length !== block.contour.pts.length ||
+        !signature.pts.every((v, i) => v === block.contour!.pts[i])
+      )
+        throw new Error('Saved half native rank, axis or signed cut boundary differs.');
+      return { ...axis, sizeId: block.sizeId, sourceSha256: row.sha256 };
+    });
+    if (
+      new Set(answers.map((a) => a.rank)).size !== answers.length ||
+      new Set(answers.map((a) => a.sizeId)).size !== answers.length
+    )
+      throw new Error('Saved half reuses one native size.');
+    // In the generic override false means the operator rejected folding. A saved half has its own explicit choice.
+    delete overrides[source.seed]!.unfoldedFold;
+    choices[source.seed] = answers;
+  }
+  return choices;
+}
+
 function restoreExactSavedWriterPieces(
   pieces: readonly PieceSpec[],
-  manifest: Pick<ConversionManifest, 'pieces' | 'blocks'>,
+  manifest: Pick<ConversionManifest, 'pieces' | 'blocks' | 'sizes'>,
 ): PieceSpec[] {
   const manifestIndexes = exactManifestPieceIndexes(pieces, manifest);
   const usedBlockIndexes = new Set<number>();
   const restored = pieces.map((piece, pieceIndex) => {
     const saved = manifest.pieces[manifestIndexes[pieceIndex]];
+    const savedBlocks = manifest.blocks.flatMap((block, index) =>
+      block.identity === saved.identity ? [{ block, index }] : [],
+    );
+    const ungraded =
+      saved.ungraded === true &&
+      piece.ungraded &&
+      piece.identity === saved.identity &&
+      piece.sizes.length === 1 &&
+      savedBlocks.length === 1;
     return {
       ...piece,
       // Restore the authoritative written outline semantics from the embedded manifest. The
@@ -441,11 +551,21 @@ function restoreExactSavedWriterPieces(
       }),
       fabrics: [...saved.fabrics],
       sizes: piece.sizes.map((size) => {
-        const blockIndexes = manifest.blocks.flatMap((block, blockIndex) =>
-          block.identity === saved.identity &&
+        // The one ungraded block has a UNI token and retains the authoring rank's SIZE label.
+        // Keep the reconstructed rank and the stored block token in their original roles.
+        const authoringRank =
+          ungraded &&
+          manifest.sizes.filter(
+            ({ token, sizeId, rank }) =>
+              token === size.sizeToken && sizeId === size.sizeId && rank === size.rank,
+          ).length === 1;
+        const blockIndexes = savedBlocks.flatMap(({ block, index }) =>
           block.sizeId === size.sizeId &&
-          block.sizeToken === size.sizeToken
-            ? [blockIndex]
+          (block.sizeToken === size.sizeToken ||
+            (authoringRank &&
+              block.sizeToken === UNI_TOKEN &&
+              block.block === blockNameOf(piece, size)))
+            ? [index]
             : [],
         );
         if (blockIndexes.length !== 1)
@@ -483,6 +603,7 @@ function semanticsInput(
   scopeKey: string,
   pieceOverrides: StageIO['semantics']['in']['pieceOverrides'],
   manifest: ConversionManifest,
+  savedNativeHalfFolds: StageIO['semantics']['in']['savedNativeHalfFolds'] = {},
 ): StageIO['semantics']['in'] {
   return {
     fileAllowance: buildPatternImportDxfSavedManifestAllowanceV1(manifest),
@@ -491,6 +612,7 @@ function semanticsInput(
     operatorGrain: {},
     aiQuantity: {},
     operatorFold: {},
+    savedNativeHalfFolds,
     foldListChecked: [],
   };
 }
@@ -540,6 +662,9 @@ export function restorePatternImportDxfSavedWriterReplayV1(
   else delete restoredJob.passport;
   if (manifest.replay) restoredJob.replay = structuredClone(manifest.replay);
   else delete restoredJob.replay;
+  // The gate was authored during the saved write. Running it again on the resulting geometry
+  // gives a different report. Keep the saved report while rebuilding and hashing the DXF.
+  scope.manifest = structuredClone(manifest);
   scope.writerReplay = {
     ...replay,
     createdAt: manifest.createdAt,
@@ -592,13 +717,18 @@ async function reprocessSavedDxf(
   signal.addEventListener('abort', cancel, { once: true });
   try {
     report(onProgress, 0, 13, 'opening saved DXF', 0, 1);
-    const opened = await client.open([
-      {
-        name: input.syntheticFilename,
-        bytes,
-        dxfPathProvenance: { sourceFileId: input.sourceFileId },
-      },
-    ]);
+    const file = {
+      name: input.syntheticFilename,
+      bytes,
+      dxfPathProvenance: { sourceFileId: input.sourceFileId },
+    };
+    const authorizeProtectedWrite = await bindProtectedSavedReadWorkerOpen(
+      input,
+      file,
+      manifest,
+      resolvedCard,
+    );
+    const opened = await client.open([file]);
     sessionId = opened.sessionId;
     assertLive(signal);
 
@@ -672,13 +802,34 @@ async function reprocessSavedDxf(
       8,
       'reading product semantics',
     );
+    if (deps.requiredStablePiece) {
+      const pieces = initialSemantics.pieces;
+      const indexes = exactManifestPieceIndexes(pieces, manifest);
+      const matches = pieces.filter(
+        (_, index) => manifest.pieces[indexes[index]!]!.identity === deps.requiredStablePiece,
+      );
+      if (
+        matches.length !== 1 ||
+        matches[0]!.identity !== deps.requiredStablePiece ||
+        scopedSpec(matches[0]!, target).identity !== deps.requiredStablePiece
+      )
+        throw new Error('Ordinary import would rename the selected protected piece.');
+    }
     const overrides = buildPatternImportDxfExactManifestPieceOverridesV1(
       initialSemantics,
       manifest,
     );
+    const savedNativeHalfFolds = savedHalfFoldChoices(
+      input.row,
+      card,
+      manifest,
+      initialSemantics,
+      pieces,
+      overrides,
+    );
     let semantics = await run(
       'semantics',
-      semanticsInput(card, input.row.scopeKey, overrides, manifest),
+      semanticsInput(card, input.row.scopeKey, overrides, manifest, savedNativeHalfFolds),
       9,
       'restoring saved piece semantics',
     );
@@ -694,7 +845,7 @@ async function reprocessSavedDxf(
     );
     semantics = await run(
       'semantics',
-      semanticsInput(card, input.row.scopeKey, overrides, manifest),
+      semanticsInput(card, input.row.scopeKey, overrides, manifest, savedNativeHalfFolds),
       11,
       'sealing saved piece semantics',
     );
@@ -713,6 +864,18 @@ async function reprocessSavedDxf(
       11,
       'building exact topology replay',
     )) as DxfProductPhaseDReplayStageOutputV1;
+    const nativeSewingReplay = deps.nativeSewingReplay
+      ? await run(
+          'dxf-native-sewing-replay',
+          { schemaVersion: DXF_NATIVE_SEWING_REPLAY_REQUEST_V1 },
+          11,
+          'reading exact native sewing paths',
+        )
+      : undefined;
+    if (authorizeProtectedWrite) {
+      authorizeProtectedWrite(await deps.resolveCard(input.row, signal));
+      assertLive(signal);
+    }
     const written = await run(
       'write',
       {
@@ -720,7 +883,7 @@ async function reprocessSavedDxf(
         scopes: [target],
         assignment,
         sizes: structuredClone(manifest.sizes),
-        dialect: 'r12',
+        dialect: extracted.productWriterDialect ?? 'r12',
         generator: manifest.generator,
         ...(manifest.autopilot ? { autopilot: structuredClone(manifest.autopilot) } : {}),
         ...(manifest.replay ? { replay: structuredClone(manifest.replay) } : {}),
@@ -737,6 +900,7 @@ async function reprocessSavedDxf(
     return Object.freeze({
       row: Object.freeze({ ...input.row }),
       draft: restorePatternImportDxfSavedWriterReplayV1(draft, manifest),
+      ...(nativeSewingReplay ? { nativeSewingReplay } : {}),
     });
   } finally {
     signal.removeEventListener('abort', cancel);
@@ -828,18 +992,19 @@ export function createPatternImportDxfPhaseESavedDxfReprocessHostV1(
       const headers = byteTarget.usedCapabilityHop
         ? undefined
         : backendDownloadAuthHeaders(byteTarget.url, transportServerUrl, readAuthToken);
-      const response = await fetchSavedDxfBytes(
-        fetcher,
-        byteTarget.url,
-        {
-          method: 'GET',
-          credentials: byteTarget.usedCapabilityHop ? 'omit' : 'same-origin',
-          ...(headers ? { headers } : {}),
-          signal,
-        },
-        mediaProxyUrl,
+      const request: NonNullable<Parameters<typeof fetcher>[1]> = {
+        method: 'GET',
+        credentials: byteTarget.usedCapabilityHop ? 'omit' : 'same-origin',
+        ...(headers ? { headers } : {}),
         signal,
-      );
+      };
+      const privateFileProxy =
+        !byteTarget.usedCapabilityHop &&
+        savedBackendDownloadUrl(byteTarget.url, transportServerUrl)?.pathname ===
+          '/api/files/proxy';
+      const response = privateFileProxy
+        ? await fetcher(byteTarget.url, { ...request, redirect: 'error' })
+        : await fetchSavedDxfBytes(fetcher, byteTarget.url, request, mediaProxyUrl, signal);
       if (!response.ok) throw new Error(`Saved DXF download failed with HTTP ${response.status}.`);
       const declaredLength = response.headers.get('content-length');
       if (

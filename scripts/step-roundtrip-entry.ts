@@ -9,6 +9,7 @@
 // сборку, а не мапперы. Чтение пустого шага с провода даёт ровно ту же строку формы — и даёт её
 // тем же кодом, который правится в этой задаче.
 import type { common_TechCard, common_TechCardInsert } from 'api/proto-http/admin';
+import type { TechCardSeamWire } from 'lib/seams';
 import {
   mapFormToTechCardInsert,
   mapTechCardToForm,
@@ -26,16 +27,23 @@ export function emptyOp(): Op {
   return (form.operations ?? [])[0] as unknown as Op;
 }
 
-export function toWire(ops: Op[]): common_TechCardInsert {
+export function toWire(ops: Op[], referenceCard?: common_TechCard): common_TechCardInsert {
   const data = {
-    ...techCardDefaultData,
+    ...(referenceCard ? mapTechCardToForm(referenceCard) : techCardDefaultData),
     operations: ops,
   } as unknown as TechCardFormData;
   return mapFormToTechCardInsert(data);
 }
 
-export function readBack(insert: common_TechCardInsert): Op[] {
-  const form = mapTechCardToForm({ techCard: insert } as unknown as common_TechCard);
+export function readBack(
+  insert: common_TechCardInsert,
+  savedSeams?: readonly Pick<TechCardSeamWire, 'seamKey' | 'kind'>[],
+): Op[] {
+  // Seam and pose documents come from the saved card, while the operation mapper carries references.
+  const form = mapTechCardToForm({
+    techCard: insert,
+    seams: savedSeams,
+  } as unknown as common_TechCard);
   return (form.operations ?? []) as unknown as Op[];
 }
 

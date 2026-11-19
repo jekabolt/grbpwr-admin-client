@@ -1,10 +1,18 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
+  isPatternImportDxfPhaseEExactSavedCompoundOperationV1,
   isPatternImportDxfPhaseEExactSavedEmptyOperationV1,
+  isPatternImportDxfPhaseEExactSavedStaleOperationV1,
   resolvePatternImportDxfPhaseEWorkbenchRequestedV1,
   routePatternImportDxfPhaseEAssemblyOrderEntryV2,
   shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1,
 } from './assembly-order-entry';
+
+const assemblyOrderEntrySource = readFileSync(
+  new URL('./assembly-order-entry.tsx', import.meta.url),
+  'utf8',
+);
 
 describe('saved Assembly Order workbench routing', () => {
   it('treats the visible Assembly Table tab as an open request on the first render', () => {
@@ -36,6 +44,48 @@ describe('saved Assembly Order workbench routing', () => {
         exactSavedEmptyOperation: false,
       }),
     ).toBe(false);
+  });
+
+  it('opens zero-connect only for a separately proven linked one-physical-seam target', () => {
+    expect(
+      shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
+        workbenchOpen: true,
+        exactNSessionAvailable: false,
+        savedProjectionBlockerCode: 'saved-operation-not-two-seam',
+        selectedSeamKeys: ['existing-edge', 'existing-pose'],
+        savedOrderedSeamKeys: null,
+        exactSavedEmptyOperation: false,
+        exactSavedLinkedN1Target: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
+        workbenchOpen: true,
+        exactNSessionAvailable: true,
+        savedProjectionBlockerCode: 'saved-operation-not-two-seam',
+        selectedSeamKeys: ['existing-edge', 'existing-pose'],
+        savedOrderedSeamKeys: null,
+        exactSavedEmptyOperation: false,
+        exactSavedLinkedN1Target: true,
+      }),
+    ).toBe(false);
+  });
+
+  it('uses native sewing for the proven linked target and explicitly opted-in empty operation', () => {
+    expect(assemblyOrderEntrySource).toContain(
+      "sourceSurface={useSavedSewingEdges ? 'explicit-native-drawn-sewing' : undefined}",
+    );
+    expect(assemblyOrderEntrySource).toContain(
+      '(savedEmptyOperation || savedLinkedN1) && zeroConnectAuthoringHandoff',
+    );
+    expect(assemblyOrderEntrySource).toContain('savedLinkedN1 || emptyOperationSewingSource');
+    expect(assemblyOrderEntrySource).toContain(
+      'savedEmptyOperation && emptyOperationSewingSourceKey === emptyOperationKey',
+    );
+    expect(assemblyOrderEntrySource).toContain('disabled={emptyOperationConnectionPending}');
+    expect(assemblyOrderEntrySource).toContain(
+      'resolvePatternImportDxfPhaseEZeroConnectExistingLinkedN1TargetV1',
+    );
   });
 
   it.each([
@@ -91,6 +141,94 @@ describe('saved Assembly Order workbench routing', () => {
       ).toBe(fallback);
     },
   );
+
+  it('opens browse-only saved Draft for uniquely owned confirmed stale seams', () => {
+    const stale = { status: 'TECH_CARD_SEAM_STATUS_CONFIRMED', stale: true };
+    const liveSeamKeys = ['seam-a', 'seam-b'];
+    const savedSeams = liveSeamKeys.map((seamKey) => ({ seamKey, ...stale }));
+    const input = {
+      liveOperationNumber: 10,
+      liveSeamKeys,
+      savedOperations: [{ operationNumber: 10, seamKeys: liveSeamKeys }],
+      savedSeams,
+    };
+    expect(isPatternImportDxfPhaseEExactSavedStaleOperationV1(input)).toBe(true);
+    expect(
+      isPatternImportDxfPhaseEExactSavedStaleOperationV1({
+        ...input,
+        liveSeamKeys: ['seam-b', 'seam-a'],
+      }),
+    ).toBe(false);
+    expect(
+      isPatternImportDxfPhaseEExactSavedStaleOperationV1({
+        ...input,
+        savedSeams: [savedSeams[0]!, { ...savedSeams[1]!, stale: false }],
+      }),
+    ).toBe(false);
+    expect(
+      isPatternImportDxfPhaseEExactSavedStaleOperationV1({
+        ...input,
+        savedSeams: [...savedSeams, savedSeams[0]!],
+      }),
+    ).toBe(false);
+    const fallback = {
+      workbenchOpen: true,
+      exactNSessionAvailable: false,
+      savedProjectionBlockerCode: 'saved-seam-not-exact',
+      selectedSeamKeys: liveSeamKeys,
+      savedOrderedSeamKeys: null,
+      exactSavedEmptyOperation: false,
+      exactSavedStaleOperation: true,
+    };
+    expect(shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1(fallback)).toBe(true);
+    expect(
+      shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
+        ...fallback,
+        exactNSessionAvailable: true,
+      }),
+    ).toBe(false);
+  });
+
+  it('opens the saved 2D workbench for current compound seams without admitting a physical owner', () => {
+    const confirmed = { status: 'TECH_CARD_SEAM_STATUS_CONFIRMED', stale: false };
+    const seamKeys = ['seam-a', 'seam-b'];
+    const savedSeams = [
+      { ...confirmed, seamKey: 'seam-a', kind: 'TECH_CARD_SEAM_KIND_PARTIAL' },
+      { ...confirmed, seamKey: 'seam-b', kind: 'TECH_CARD_SEAM_KIND_COMPOSITE' },
+    ];
+    const input = {
+      liveOperationNumber: 10,
+      liveSeamKeys: seamKeys,
+      savedOperations: [{ operationNumber: 10, seamKeys }],
+      savedSeams,
+    };
+    expect(isPatternImportDxfPhaseEExactSavedCompoundOperationV1(input)).toBe(true);
+    for (const overrides of [
+      { liveSeamKeys: [...seamKeys].reverse() },
+      { savedSeams: [...savedSeams, savedSeams[1]!] },
+      { savedSeams: [savedSeams[0]!, { ...savedSeams[1]!, stale: true }] },
+    ]) {
+      expect(
+        isPatternImportDxfPhaseEExactSavedCompoundOperationV1({ ...input, ...overrides }),
+      ).toBe(false);
+    }
+    const fallback = {
+      workbenchOpen: true,
+      exactNSessionAvailable: false,
+      savedProjectionBlockerCode: 'saved-seam-not-exact',
+      selectedSeamKeys: seamKeys,
+      savedOrderedSeamKeys: null,
+      exactSavedEmptyOperation: false,
+      exactSavedCompoundOperation: true,
+    };
+    expect(shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1(fallback)).toBe(true);
+    expect(
+      shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
+        ...fallback,
+        exactNSessionAvailable: true,
+      }),
+    ).toBe(false);
+  });
 
   it('does not replace an exact-N owner or a genuine saved projection failure', () => {
     expect(

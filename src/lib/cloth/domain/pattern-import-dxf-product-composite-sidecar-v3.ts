@@ -688,8 +688,15 @@ function validateLegacyCrossBinding(
   const persistence = document.persistence as Record<string, unknown>;
   const card = persistence.card as Record<string, unknown>;
   const pattern = persistence.pattern as Record<string, unknown>;
-  const previousLockVersion = card.previousLockVersion;
+  const previousLockVersion =
+    card.lockBasis === 'current-saved-row' ? card.capturedLockVersion : card.previousLockVersion;
   const observedLockVersion = card.observedLockVersion;
+  const validLockBasis =
+    card.lockBasis === 'current-saved-row'
+      ? card.previousLockVersion === undefined && observedLockVersion === previousLockVersion
+      : card.lockBasis === undefined &&
+        card.capturedLockVersion === undefined &&
+        (observedLockVersion as number) > (previousLockVersion as number);
   if (
     document.schemaVersion !== PATTERN_IMPORT_DXF_PRODUCT_SEMANTIC_SIDECAR_DOCUMENT_V1 ||
     product.scopeKey !== bindings.row.scopeKey ||
@@ -699,7 +706,7 @@ function validateLegacyCrossBinding(
     !Number.isSafeInteger(previousLockVersion) ||
     (previousLockVersion as number) < 0 ||
     !Number.isSafeInteger(observedLockVersion) ||
-    (observedLockVersion as number) <= (previousLockVersion as number) ||
+    !validLockBasis ||
     (observedLockVersion as number) > bindings.row.cardLockVersion ||
     pattern.lineKey !== bindings.row.patternLineKey ||
     pattern.url !== bindings.row.url ||

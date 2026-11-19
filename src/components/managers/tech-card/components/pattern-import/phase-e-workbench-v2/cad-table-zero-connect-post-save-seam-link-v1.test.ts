@@ -230,14 +230,14 @@ describe('zero-connect post-save exact StoredSeam link', () => {
           sideA: [
             {
               piece: 'piece-front',
-              edgeHint: 'piece-front#dxf:front%3Asewing:front%3Av0>front%3Av1',
+              edgeHint: 'piece-front#dxf:0:0',
               lenMm: 100,
             },
           ],
           sideB: [
             {
               piece: 'piece-back',
-              edgeHint: 'piece-back#dxf:back%3Asewing:back%3Av0>back%3Av1',
+              edgeHint: 'piece-back#dxf:0:0',
               lenMm: 100,
             },
           ],
@@ -398,6 +398,18 @@ describe('zero-connect post-save exact StoredSeam link', () => {
     await expect(first).resolves.toMatchObject({ ok: true });
     await expect(second).resolves.toMatchObject({ ok: true });
     expect(upsert).toHaveBeenCalledTimes(1);
+    // A resumed form attachment reuses the write receipt after its CAS has advanced the card.
+    const refetchAndUpsert = vi.fn();
+    const resumed = executePatternImportDxfPhaseEZeroConnectStrictSeamWriteOnceV1(
+      pendingIdentity,
+      prepared.receipt,
+      refetchAndUpsert,
+    );
+    await expect(resumed).resolves.toMatchObject({
+      ok: true,
+      receipt: { seamWriteLockVersion: 42 },
+    });
+    expect(refetchAndUpsert).not.toHaveBeenCalled();
   });
 
   it('evicts only a safe not-attempted gate before one successful strict RPC retry', async () => {

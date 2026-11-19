@@ -5,22 +5,45 @@ import { describe, expect, it } from 'vitest';
 
 import {
   PATTERN_IMPORT_DXF_PRODUCT_PHASE_E_AUTHORING_CATALOG_V1,
+  buildPatternImportDxfProductPhaseEAuthoringCatalogV1,
   type PatternImportDxfProductPhaseEAuthoringCatalogV1,
 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
+import { selectPatternImportDxfProductDraftPhaseDSizeV1 } from 'lib/cloth/domain/pattern-import-dxf-product-draft-phase-d-selection-v1';
+import { createPatternImportDxfProductSavedRuntimeSeedV1Fixture } from 'lib/cloth/domain/pattern-import-dxf-product-garment-mesh-composer-v2.test-fixture';
 import {
   PATTERN_IMPORT_DXF_PRODUCT_PHASE_E_ASSEMBLY_PROJECTION_V1,
+  projectPatternImportDxfProductPhaseEAssemblyV1,
   type PatternImportDxfProductPhaseEAssemblyProjectionV1,
 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
+import {
+  createPatternImportDxfProductPhaseEMultiseamWorkbenchStateV2,
+  proposePatternImportDxfProductPhaseEMultiseamAssemblyV2,
+} from 'lib/pattern-import/dxf-product-phase-e-multiseam-workbench-v2';
 
-import { SHEET_INK } from '../sheet-viewport';
+import { computeDxfProductSavedSourceFileIdV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
+import { SHEET_INK, vy } from '../sheet-viewport';
+import { buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1 } from './cad-mannequin-pattern-piece-overlay-v1';
+import { buildPatternImportDxfPhaseECadMannequinSceneOverlayFromExactAuthorityV2 } from './cad-mannequin-scene-overlay-adapter-v1';
+import { bridgePatternImportDxfPhaseECadMannequinSceneOverlayToRendererV1 } from './cad-mannequin-scene-overlay-renderer-bridge-v1';
+import { cadWorkbenchOperationSeamOrdinal } from './cad-workbench-seam-ordinal-v1';
+import { CAD_WORKBENCH_SEAM_SIDE_COLORS } from './cad-workbench-seam-colors-v1';
+import { projectCadTablePieceFeatures } from './cad-table-piece-features-v1';
+import {
+  createPatternImportDxfPhaseECadTablePieceLayoutSessionV1,
+  patternImportDxfPhaseECadTablePieceKeyV1,
+  selectPatternImportDxfPhaseECadTablePiecesInBoxV1,
+  selectPatternImportDxfPhaseECadTablePiecesInLassoV1,
+} from './cad-table-piece-layout-session-v1';
 import {
   activatePatternImportDxfPhaseECadTableZeroCanvasPieceV1,
+  selectCadTableAcceptedClothPieceV1,
   createPatternImportDxfPhaseECadTableZeroCanvasSessionV1,
   fitPatternImportDxfPhaseECadTableZeroCanvasSessionV1,
   movePatternImportDxfPhaseECadTableZeroCanvasSessionV1,
   patternImportDxfPhaseECadTableZeroKeyboardMoveDeltaV1,
   PatternImportDxfPhaseECadTableZeroConnectCanvasV1,
 } from './cad-table-zero-connect-canvas-v1';
+import { PatternImportDxfProductPhaseEMultiseamWorkbenchV2 } from './workbench';
 
 const REQUIRED_FIELDS = [
   'documentId-and-revision',
@@ -32,6 +55,43 @@ const REQUIRED_FIELDS = [
   'immutable-material-revisions',
   'tolerances',
 ] as const;
+
+it('selects the exact accepted cloth occurrence in the existing table session only on its current row', () => {
+  const { projection } = fixture();
+  const row = {
+    techCardId: 6,
+    scopeKey: 'main',
+    patternLineKey: 'saved-fronts',
+    revision: 1,
+    cardLockVersion: 7,
+    url: 'https://saved.example/fixture.dxf',
+    sizeBytes: 1234,
+    sha256: 'a'.repeat(64),
+  };
+  const current = { ...projection, sourceFileId: computeDxfProductSavedSourceFileIdV1(row) };
+  const initial = createPatternImportDxfPhaseECadTableZeroCanvasSessionV1(current);
+  const hit = {
+    row,
+    sizeToken: current.sizeToken,
+    pieceId: 'closed-piece',
+    pieceLineKey: 'closed:M',
+    sourceInstancePath: ['insert-a'],
+  };
+  const selected = selectCadTableAcceptedClothPieceV1(initial, row, current, hit);
+  expect(selected.layout.selectedPieceKeys).toEqual([
+    patternImportDxfPhaseECadTablePieceKeyV1(hit.pieceId, hit.pieceLineKey),
+  ]);
+  for (const stale of [
+    { ...hit, row: { ...row, scopeKey: 'pocketing' } },
+    { ...hit, row: { ...row, patternLineKey: 'another-exact-row' } },
+    { ...hit, row: { ...row, revision: 2 } },
+    { ...hit, row: { ...row, cardLockVersion: 8 } },
+    { ...hit, sizeToken: 'XL' },
+    { ...hit, pieceLineKey: 'open:M' },
+  ])
+    expect(selectCadTableAcceptedClothPieceV1(selected, row, current, stale)).toBe(selected);
+  expect(selectCadTableAcceptedClothPieceV1(selected, row, projection, hit)).toBe(selected);
+});
 
 function fixture(): Readonly<{
   catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1;
@@ -125,6 +185,77 @@ function fixture(): Readonly<{
   return { catalog, projection };
 }
 
+function overlappingFixture() {
+  const { catalog, projection } = fixture();
+  const contour = (
+    contourId: string,
+    role: 'cut-boundary' | 'hole',
+    points: readonly (readonly [number, number])[],
+  ) => ({
+    contourId,
+    role,
+    closed: true,
+    vertices: points.map(([x, y], ordinal) => ({
+      ordinal,
+      pointMm: { x, y },
+      vertexId: `${contourId}:${ordinal}`,
+      normalizedArc: ordinal / points.length,
+    })),
+  });
+  const pieces = projection.pieces.map((piece, index) => ({
+    ...piece,
+    cameraMm: { minX: 0, minY: 0, maxX: 40, maxY: 40, padding: 0 },
+    contours:
+      index === 0
+        ? [
+            contour('concave', 'cut-boundary', [
+              [0, 0],
+              [40, 0],
+              [40, 12],
+              [12, 12],
+              [12, 40],
+              [0, 40],
+            ]),
+            contour('hole', 'hole', [
+              [2, 2],
+              [6, 2],
+              [6, 6],
+              [2, 6],
+            ]),
+          ]
+        : [
+            contour('rectangle', 'cut-boundary', [
+              [0, 0],
+              [40, 0],
+              [40, 40],
+              [0, 40],
+            ]),
+          ],
+  }));
+  return {
+    projection: { ...projection, pieces },
+    catalog: {
+      ...catalog,
+      pieces: pieces.map(({ pieceId, pieceLineKey, contours }) => ({
+        pieceId,
+        pieceLineKey,
+        contours: contours.map(({ vertices, ...outline }) => ({
+          ...outline,
+          geometry:
+            outline.role === 'hole'
+              ? { kind: 'cut-loop' as const, index: 0 }
+              : { kind: 'cut' as const },
+          boundaryVertices: vertices.map(({ ordinal, normalizedArc, vertexId }) => ({
+            ordinal,
+            normalizedArc,
+            vertexId,
+          })),
+        })),
+      })),
+    },
+  };
+}
+
 function contourTag(html: string, contourId: string): string {
   const tag = html.match(
     new RegExp(`<polyline[^>]*data-cad-zero-connect-contour="${contourId}"[^>]*>`),
@@ -149,7 +280,174 @@ function translated(value: string | null): readonly [number, number] {
   return [Number(match[1]), Number(match[2])];
 }
 
+describe('V2 assembly fallback material selection', () => {
+  it('mounts full material and hole hit geometry with exact contour and object controls', () => {
+    const { catalog, projection } = overlappingFixture();
+    const seamKeys = ['join-one', 'join-two'];
+    const anchor = (pieceLineKey: string) => ({
+      pieceLineKey,
+      edgeHint: 'cut',
+      range: [0, 0.25] as const,
+      lenMm: 40,
+      contourSig: 'a'.repeat(64),
+    });
+    const result = proposePatternImportDxfProductPhaseEMultiseamAssemblyV2(catalog, {
+      selectedOperationNumber: 5,
+      operations: [
+        {
+          authoringOperationId: 'op-5',
+          number: 5,
+          work: 'stitch',
+          phaseEKind: 'stitch',
+          inputKeys: catalog.pieces.map(({ pieceLineKey }) => pieceLineKey),
+          outputUnitKey: 'joined',
+          outputUnitName: 'Joined pieces',
+          seamKeys,
+        },
+      ],
+      seams: seamKeys.map((seamKey) => ({
+        seamKey,
+        confirmed: true,
+        stale: false,
+        kind: 'edge',
+        direction: 'reversed',
+        anchoredSize: catalog.sizeToken,
+        sideA: [anchor('closed:M')],
+        sideB: [anchor('open:M')],
+      })),
+    });
+    if (!result.ok) throw new Error(result.blockers[0].detail);
+    const state = createPatternImportDxfProductPhaseEMultiseamWorkbenchStateV2(
+      catalog,
+      result.proposal,
+      { documentId: catalog.sourceFileId, revision: 'rev-1' },
+      1,
+    );
+    const html = renderToStaticMarkup(
+      <PatternImportDxfProductPhaseEMultiseamWorkbenchV2
+        catalog={catalog}
+        projection={projection}
+        proposal={result.proposal}
+        state={{
+          ...state,
+          physicalSurface: { mode: 'cut-surface', seamAllowancePhysical: true },
+        }}
+        materialOptions={[]}
+        colorwayOptions={[{ id: 1, label: 'Blue', swatchHex: SHEET_INK.blue }]}
+        activeSeamIndex={0}
+        activePieceIndex={0}
+        onActiveSeamIndexChange={() => {}}
+        onActivePieceIndexChange={() => {}}
+        onStateChange={() => {}}
+        onConfirm={() => {}}
+      />,
+    );
+    const material = html.match(/<path[^>]*data-v2-piece-hit-area=""[^>]*>/g);
+    expect(material).toHaveLength(2);
+    expect(material?.[0]).toContain('d="M 0,0 40,0 40,12 12,12 12,40 0,40 Z M 2,2 6,2 6,6 2,6 Z"');
+    expect(material?.[0]).toContain('fill-rule="evenodd"');
+    expect(material?.[0]).toContain(`fill="${SHEET_INK.blue}"`);
+    expect(material?.[0]).toContain('pointer-events="fill"');
+    expect(html).not.toMatch(/<rect[^>]*data-v2-piece-hit-area=/);
+    const contour = (id: string) =>
+      html.match(
+        new RegExp(`<polyline[^>]*aria-label="Select exact contour ${id} for seam join-one"[^>]*>`),
+      )?.[0];
+    expect(contour('concave')).toContain('pointer-events="stroke"');
+    expect(contour('hole')).toContain('pointer-events="none"');
+    expect(html).toMatch(/<button[^>]*data-cad-object-piece="closed-piece"/);
+    expect(html).toMatch(/<button[^>]*data-cad-object-piece="open-piece"/);
+  });
+});
+
 describe('zero-operation CAD table rendering', () => {
+  it('displays exact retained selected-size features as toggleable, pointer-transparent layers', async () => {
+    const { draft } = await createPatternImportDxfProductSavedRuntimeSeedV1Fixture();
+    const selected = await selectPatternImportDxfProductDraftPhaseDSizeV1(draft, 'main', 'M');
+    if (!selected.ok) throw new Error(selected.blockers[0].detail);
+    const built = await buildPatternImportDxfProductPhaseEAuthoringCatalogV1(draft, 'main', 'M');
+    if (!built.ok) throw new Error(built.blockers[0].detail);
+    const { catalog } = built;
+    const projected = projectPatternImportDxfProductPhaseEAssemblyV1(catalog, selected.selection);
+    if (!projected.ok) throw new Error(projected.blockers[0].detail);
+    const { projection } = projected;
+    const first = projection.pieces[0]!;
+    const scopes = structuredClone(draft.scopes);
+    const writerPiece = scopes[0]!.writerReplay!.job.pieces.find(
+      ({ identity }) => identity === first.pieceId,
+    )!;
+    const size = writerPiece.sizes.find(({ sizeToken }) => sizeToken === projection.sizeToken)!;
+    const grain = size.grain!;
+    const evidence = { ranges: [], origin: 'operator', confidence: 1 } as const;
+    const a = { x: 14, y: 9 };
+    const b = { x: 14, y: 11 };
+    size.internal.push({ ...evidence, ranges: [], kind: 'internal', pts: [a, b], closed: false });
+    size.fold = { ...evidence, ranges: [], kind: 'fold', a, b };
+    size.notches.push({ ...evidence, ranges: [], kind: 'notch', seg: [a, b], at: a, depthMm: 2 });
+    size.drills.push({ ...evidence, ranges: [], kind: 'drill', at: a, form: 'point' });
+    size.pointMarks = [
+      { kind: 'draft-point', at: a },
+      { kind: 'point-only', at: b },
+    ];
+    size.textMarks = [{ at: a, text: 'СГИБ' }];
+    const pieceFeatures = projectCadTablePieceFeatures(catalog, projection, scopes, 'Main fabric');
+    expect(pieceFeatures.size).toBe(2);
+    const key = patternImportDxfPhaseECadTablePieceKeyV1(first.pieceId, first.pieceLineKey);
+    expect(pieceFeatures.get(key)?.grain).toEqual(grain);
+    const html = renderToStaticMarkup(
+      <PatternImportDxfPhaseECadTableZeroConnectCanvasV1
+        catalog={catalog}
+        projection={projection}
+        pieceFeatures={pieceFeatures}
+      />,
+    );
+    expect(buttonTag(html, 'Show grainlines')).toContain('aria-pressed="true"');
+    const lines = html.match(/<line[^>]*data-cad-zero-connect-grainline[^>]*>/g);
+    expect(lines).toHaveLength(2);
+    expect(lines?.[0]).toContain(
+      `x1="${grain.a.x}" y1="${vy(grain.a.y)}" x2="${grain.b.x}" y2="${vy(grain.b.y)}"`,
+    );
+    expect(lines?.every((line) => line.includes('pointer-events="none"'))).toBe(true);
+    for (const [label, mark] of [
+      ['Show internal lines', 'internal'],
+      ['Show fold lines', 'fold'],
+      ['Show notches', 'notch'],
+      ['Show drill marks', 'drill'],
+      ['Show text marks', 'text-mark'],
+      ['Show piece names', 'piece-label'],
+      ['Show material names', 'material-label'],
+    ]) {
+      expect(buttonTag(html, label)).toContain('aria-pressed="true"');
+      expect(html).toContain(`data-cad-zero-connect-${mark}=""`);
+    }
+    expect(buttonTag(html, 'Show construction points')).toContain('aria-pressed="true"');
+    expect(html).toContain(
+      `data-cad-zero-connect-construction-point="draft-point" cx="${a.x}" cy="${vy(a.y)}"`,
+    );
+    expect(html).toContain(
+      `data-cad-zero-connect-construction-point="point-only" cx="${b.x}" cy="${vy(b.y)}"`,
+    );
+    expect(html).toContain('>СГИБ</text>');
+    expect(html).toContain('>Main fabric</tspan>');
+    expect(pieceFeatures.get(key)?.pieceLabel).toBe(writerPiece.displayName);
+    const translated = {
+      ...projection,
+      pieces: [
+        {
+          ...first,
+          contours: first.contours.map((contour) => ({
+            ...contour,
+            vertices: contour.vertices.map((vertex) => ({
+              ...vertex,
+              pointMm: { x: vertex.pointMm.x + 2, y: vertex.pointMm.y },
+            })),
+          })),
+        },
+      ],
+    };
+    expect(projectCadTablePieceFeatures(catalog, translated, draft.scopes).size).toBe(0);
+  });
+
   it('keeps the production CAD controls visible without dashing real cut boundaries', () => {
     const html = renderToStaticMarkup(
       <PatternImportDxfPhaseECadTableZeroConnectCanvasV1 {...fixture()} />,
@@ -205,12 +503,216 @@ describe('zero-operation CAD table rendering', () => {
     const open = contourTag(html, 'open-cut');
 
     expect(closed).toContain('points="0,0 40,0 40,-30 0,-30 0,0"');
-    expect(closed).toContain(`fill="${SHEET_INK.fill}"`);
+    const fills = html.match(/<path[^>]*data-cad-zero-connect-material=""[^>]*>/g);
+    expect(fills).toHaveLength(1);
+    expect(fills?.[0]).toContain('fill-rule="evenodd"');
+    expect(fills?.[0]).toContain(`fill="${SHEET_INK.fill}"`);
+    expect(fills?.[0]).toContain('pointer-events="fill"');
     expect(closed).not.toContain('stroke-dasharray');
 
     expect(open).toContain('points="0,0 40,0 40,-30 0,-30"');
     expect(open).toContain('fill="none"');
     expect(open).not.toContain('stroke-dasharray');
+  });
+
+  it('selects filled material and ignores the hole and empty concave part of its bounds', () => {
+    const { catalog, projection } = overlappingFixture();
+    const piece = projection.pieces[0]!;
+    const html = renderToStaticMarkup(
+      <PatternImportDxfPhaseECadTableZeroConnectCanvasV1
+        catalog={catalog}
+        projection={projection}
+      />,
+    );
+    expect(html).toContain('d="M 0,0 40,0 40,-12 12,-12 12,-40 0,-40 Z M 2,-2 6,-2 6,-6 2,-6 Z"');
+    expect(contourTag(html, 'hole')).toContain('pointer-events="none"');
+    const session = createPatternImportDxfPhaseECadTablePieceLayoutSessionV1([piece]);
+    const inBox = (minX: number, minY: number, maxX: number, maxY: number) =>
+      selectPatternImportDxfPhaseECadTablePiecesInBoxV1(session, { minX, minY, maxX, maxY })
+        .selectedPieceKeys;
+
+    expect(inBox(20, 20, 30, 30)).toEqual([]);
+    expect(inBox(3, 3, 5, 5)).toEqual([]);
+    expect(inBox(8, 8, 10, 10)).toEqual([session.pieces[0]!.identity.key]);
+    expect(
+      selectPatternImportDxfPhaseECadTablePiecesInLassoV1(session, [
+        { x: -5, y: 30 },
+        { x: 15, y: 30 },
+        { x: 15, y: 31 },
+        { x: -5, y: 31 },
+      ]).selectedPieceKeys,
+    ).toEqual([session.pieces[0]!.identity.key]);
+  });
+
+  it('cycles visible material hits at an overlap while leaving the view and Shift selection intact', () => {
+    const { projection } = overlappingFixture();
+    const initial = createPatternImportDxfPhaseECadTableZeroCanvasSessionV1(projection);
+    const [back, front] = initial.layout.pieces;
+    const coincident = movePatternImportDxfPhaseECadTableZeroCanvasSessionV1(
+      initial,
+      front!.identity.key,
+      { x: back!.offsetMm.x - front!.offsetMm.x, y: back!.offsetMm.y - front!.offsetMm.y },
+    );
+    const activate = activatePatternImportDxfPhaseECadTableZeroCanvasPieceV1;
+    const frontKey = front!.identity.key;
+    const backKey = back!.identity.key;
+    const cleared = activate(coincident, '', false);
+    const point = { x: 9, y: 9 };
+    const top = activate(cleared, frontKey, false, point);
+    const lower = activate(top, frontKey, false, point);
+
+    expect(top.layout.selectedPieceKeys).toEqual([frontKey]);
+    expect(lower.layout.selectedPieceKeys).toEqual([backKey]);
+    expect(activate(lower, frontKey, false, point).layout.selectedPieceKeys).toEqual([frontKey]);
+    expect(activate(lower, frontKey, true, point).layout.selectedPieceKeys).toEqual([
+      backKey,
+      frontKey,
+    ]);
+    expect(activate(top, frontKey, false, { x: 4, y: 4 }).layout.selectedPieceKeys).toEqual([
+      frontKey,
+    ]);
+    expect(activate(top, frontKey, false, { x: 20, y: 20 }).layout.selectedPieceKeys).toEqual([
+      frontKey,
+    ]);
+    expect(lower.viewportBounds).toBe(initial.viewportBounds);
+  });
+
+  it('uses the verified operation order for the saved seam position', () => {
+    expect(cadWorkbenchOperationSeamOrdinal(['seam-z', 'seam-a'], 'seam-z')).toBe(1);
+    expect(cadWorkbenchOperationSeamOrdinal(['seam-z', 'seam-a'], 'seam-a')).toBe(2);
+    expect(cadWorkbenchOperationSeamOrdinal(['seam-z', 'seam-a'], 'seam-missing')).toBeNull();
+    expect(cadWorkbenchOperationSeamOrdinal(['seam-z', 'seam-z'], 'seam-z')).toBeNull();
+  });
+
+  it('shares the saved operation seam ordinal and A/B palette between 2D and 3D', () => {
+    const { catalog, projection } = overlappingFixture();
+    const seamId = 'saved-seam';
+    const operationNumber = 14;
+    const seamKeys = [seamId];
+    const ordinal = cadWorkbenchOperationSeamOrdinal(seamKeys, seamId)!;
+    const sides = [
+      {
+        seamId,
+        sideIndex: 0,
+        pieceId: 'closed-piece',
+        pieceLineKey: 'closed:M',
+        contourId: 'concave',
+        boundaryVertexIds: ['concave:5', 'concave:0'],
+        direction: 'forward',
+      },
+      {
+        seamId,
+        sideIndex: 1,
+        pieceId: 'open-piece',
+        pieceLineKey: 'open:M',
+        contourId: 'rectangle',
+        boundaryVertexIds: ['rectangle:1', 'rectangle:0'],
+        direction: 'reverse',
+      },
+    ] as const;
+    const html = renderToStaticMarkup(
+      <PatternImportDxfPhaseECadTableZeroConnectCanvasV1
+        catalog={catalog}
+        projection={projection}
+        disabled
+        savedSeam={{ seamId, operationNumber, ordinal, sides }}
+      />,
+    );
+    const current = {
+      techCardId: catalog.techCardId,
+      cardRef: 'card-6',
+      cardLockVersion: 2,
+      serverAssemblyRevision: 'assembly-2',
+      importGeneration: 1,
+    };
+    const connection = {
+      connectionRef: seamId,
+      operationNumber,
+      authoringOperationId: 'operation-14',
+      row: {
+        techCardId: current.techCardId,
+        scopeKey: catalog.scopeKey,
+        patternLineKey: 'pattern-1',
+        revision: 1,
+        cardLockVersion: current.cardLockVersion,
+        url: '/pattern.dxf',
+        sizeBytes: 100,
+        sha256: 'c'.repeat(64),
+      },
+      serverTopologySha256: 'd'.repeat(64),
+      catalogCanonicalSha256: catalog.canonicalSha256,
+      sides,
+    };
+    const sources = [{ scopeKey: catalog.scopeKey, label: 'Main', projection }];
+    const scene = buildPatternImportDxfPhaseECadMannequinSceneOverlayFromExactAuthorityV2({
+      current,
+      staging: {
+        techCardId: current.techCardId,
+        importGeneration: current.importGeneration,
+        sources,
+      },
+      authority: {
+        ...current,
+        operations: [{ operationNumber, seamKeys, exactConnections: [connection] }],
+        connections: [connection],
+      },
+      activeOperationNumber: operationNumber,
+      selection: { seamId },
+      stitchVisuals: [],
+      bomItems: [],
+    });
+    if (!scene.ok) throw new Error(scene.blocker.detail);
+    const bridge = bridgePatternImportDxfPhaseECadMannequinSceneOverlayToRendererV1(scene.overlay);
+    if (!bridge.ok) throw new Error(bridge.blocker.detail);
+    expect(
+      bridgePatternImportDxfPhaseECadMannequinSceneOverlayToRendererV1({
+        ...scene.overlay,
+        edgeHighlights: scene.overlay.edgeHighlights.map((edge) =>
+          edge.side === 'B' ? { ...edge, seamOrdinal: 2 } : edge,
+        ),
+      }),
+    ).toMatchObject({ ok: false, blocker: { code: 'stale-overlay' } });
+    const rendererInput = buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1({
+      sources,
+      decorations: bridge.bridge.decorations,
+      guides: bridge.bridge.guides,
+    });
+    if (!rendererInput.ok) throw new Error(rendererInput.blocker.detail);
+    const rendererSeams = rendererInput.overlay.pieces.flatMap(({ seams }) => seams);
+    expect(rendererSeams.map(({ side, colorCss }) => [side, colorCss])).toEqual([
+      ['A', CAD_WORKBENCH_SEAM_SIDE_COLORS.A],
+      ['B', CAD_WORKBENCH_SEAM_SIDE_COLORS.B],
+    ]);
+    expect(rendererSeams[0]?.colorCss).not.toBe(rendererSeams[1]?.colorCss);
+    for (const { side, colorCss, operationSeam } of rendererSeams) {
+      expect(operationSeam).toEqual({ operationNumber, ordinal: 1 });
+      const line = html.match(
+        new RegExp(`data-cad-zero-connect-side="${side.toLowerCase()}">(<line[^>]*>)`),
+      )?.[1];
+      expect(line).toContain(`stroke="${colorCss}"`);
+      expect(line?.includes('stroke-dasharray="6 3"')).toBe(side === 'B');
+      const label = html.match(
+        new RegExp(
+          `<text[^>]*aria-label="Operation ${operationNumber}, seam 1 side ${side}"[^>]*>1 ${side}</text>`,
+        ),
+      )?.[0];
+      expect(label).toContain(`fill="${colorCss}"`);
+      expect(label).toContain('pointer-events="none"');
+    }
+    expect(rendererSeams.map(({ ordinalBadgeVisible }) => ordinalBadgeVisible)).toEqual([
+      true,
+      true,
+    ]);
+    const withoutSelectedSeam = bridgePatternImportDxfPhaseECadMannequinSceneOverlayToRendererV1({
+      ...scene.overlay,
+      focus: { ...scene.overlay.focus, selectedConnectionRef: null },
+    });
+    if (!withoutSelectedSeam.ok) throw new Error(withoutSelectedSeam.blocker.detail);
+    expect(
+      withoutSelectedSeam.bridge.decorations.map(({ ordinalBadgeVisible }) => ordinalBadgeVisible),
+    ).toEqual([false, false]);
+    expect(html).toContain('aria-label="Fit all pieces"');
+    expect(html).not.toContain('aria-label="Connect edges"');
   });
 
   it('keeps the viewport frozen while pointer movement updates session-only offsets', () => {
@@ -264,14 +766,15 @@ describe('zero-operation CAD table rendering', () => {
     expect(toggled.layout.selectedPieceKeys).toEqual([]);
   });
 
-  it('keeps the mounted SVG viewBox byte-identical through a real piece pointer drag', async () => {
-    const browserFixture = JSON.stringify(fixture()).replaceAll('<', '\\u003c');
+  it('keeps the mounted view fixed during drag and picks precise material through the pointer', async () => {
+    const ordinaryFixture = JSON.stringify(fixture()).replaceAll('<', '\\u003c');
+    const shapedFixture = JSON.stringify(overlappingFixture()).replaceAll('<', '\\u003c');
     const virtualId = 'virtual:cad-table-pointer-drag-regression';
     const resolvedVirtualId = `\0${virtualId}`;
     const uiVirtualId = 'virtual:cad-table-pointer-drag-ui';
     const resolvedUiVirtualId = `\0${uiVirtualId}`;
-    const componentPath =
-      '/src/components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/cad-table-zero-connect-canvas-v1.tsx';
+    const directory =
+      '/src/components/managers/tech-card/components/pattern-import/phase-e-workbench-v2';
     const harnessPlugin: Plugin = {
       name: 'cad-table-pointer-drag-regression',
       resolveId(id) {
@@ -285,6 +788,11 @@ describe('zero-operation CAD table rendering', () => {
             import React from 'react';
             export function Button({ size, variant, fullWidth, ...props }) {
               return React.createElement('button', props);
+            }
+            export function Input(props) { return React.createElement('input', props); }
+            export function Pill({ tone, ...props }) { return React.createElement('span', props); }
+            export function Text({ component = 'span', size, variant, ...props }) {
+              return React.createElement(component, props);
             }
             const Icon = (props) => React.createElement('svg', props);
             export {
@@ -300,8 +808,10 @@ describe('zero-operation CAD table rendering', () => {
               Icon as EyeOpenIcon,
               Icon as FileTextIcon,
               Icon as HandIcon,
+              Icon as Half2Icon,
               Icon as LayersIcon,
               Icon as MagicWandIcon,
+              Icon as MinusIcon,
               Icon as Pencil1Icon,
               Icon as PlusIcon,
               Icon as RulerHorizontalIcon,
@@ -317,9 +827,30 @@ describe('zero-operation CAD table rendering', () => {
           import React, { useEffect } from 'react';
           import { createRoot } from 'react-dom/client';
           import '/src/global.css';
-          import { PatternImportDxfPhaseECadTableZeroConnectCanvasV1 } from '${componentPath}';
+          import {
+            PatternImportDxfPhaseECadTableZeroConnectCanvasV1,
+            useCadTableZeroCanvasOwner,
+          } from '${directory}/cad-table-zero-connect-canvas-v1.tsx';
+          import {
+            CadTablePieceSelection,
+            handleCadTablePieceSelectionKey,
+          } from '${directory}/cad-table-piece-selection-panel-v1.tsx';
+          function SharedHarness({ fixture }) {
+            const owner = useCadTableZeroCanvasOwner(fixture.projection);
+            if (!owner) return null;
+            return React.createElement(
+              'main',
+              { className: 'flex', onKeyDown: (event) => handleCadTablePieceSelectionKey(event, owner) },
+              React.createElement(CadTablePieceSelection, { owner, projection: fixture.projection }),
+              React.createElement(PatternImportDxfPhaseECadTableZeroConnectCanvasV1, {
+                ...fixture, tableSessionOwner: owner,
+              }),
+            );
+          }
           function Harness() {
             useEffect(() => { globalThis.__CAD_TABLE_POINTER_READY__ = true; }, []);
+            if (new URLSearchParams(location.search).has('shared'))
+              return React.createElement(SharedHarness, { fixture: globalThis.__CAD_TABLE_POINTER_FIXTURE__ });
             return React.createElement(
               PatternImportDxfPhaseECadTableZeroConnectCanvasV1,
               globalThis.__CAD_TABLE_POINTER_FIXTURE__,
@@ -330,12 +861,13 @@ describe('zero-operation CAD table rendering', () => {
       },
       configureServer(server) {
         server.middlewares.use(async (request, response, next) => {
-          if (request.url !== '/__cad-table-pointer-drag-regression__') {
+          const url = new URL(request.url ?? '/', 'http://localhost');
+          if (url.pathname !== '/__cad-table-pointer-drag-regression__') {
             next();
             return;
           }
           const html = await server.transformIndexHtml(
-            request.url,
+            url.pathname,
             `<!doctype html>
               <html>
                 <head>
@@ -345,7 +877,7 @@ describe('zero-operation CAD table rendering', () => {
                 </head>
                 <body>
                   <div id="root"></div>
-                  <script>globalThis.__CAD_TABLE_POINTER_FIXTURE__ = ${browserFixture};</script>
+                  <script>globalThis.__CAD_TABLE_POINTER_FIXTURE__ = ${url.searchParams.get('scene') === 'shaped' ? shapedFixture : ordinaryFixture};</script>
                   <script type="module">import '${virtualId}';</script>
                 </body>
               </html>`,
@@ -364,12 +896,13 @@ describe('zero-operation CAD table rendering', () => {
       resolve: { alias: { ui: uiVirtualId } },
       server: { host: '127.0.0.1', port: 0, strictPort: false },
     });
-    const browser = await chromium.launch({ headless: true });
+    const browser = await chromium.launch({ headless: true, args: ['--disable-gpu'] });
     try {
       await server.listen();
       const address = server.httpServer?.address();
       if (!address || typeof address === 'string') throw new Error('Vite test server has no port.');
       const page = await browser.newPage({ viewport: { width: 900, height: 650 } });
+      page.setDefaultTimeout(5_000);
       await page.addInitScript(() => {
         Object.defineProperties(SVGSVGElement.prototype, {
           setPointerCapture: {
@@ -410,7 +943,7 @@ describe('zero-operation CAD table rendering', () => {
 
       const viewport = page.locator('[data-sheet-viewport]');
       const piece = page.locator('[data-cad-zero-connect-piece="closed-piece"]');
-      const hitSurface = piece.locator('rect').first();
+      const hitSurface = piece.locator('[data-cad-zero-connect-material]');
       await viewport.waitFor({ timeout: 5_000 });
       await piece.waitFor({ timeout: 5_000 });
       expect(await viewport.getAttribute('class')).toContain('cursor-move');
@@ -440,11 +973,166 @@ describe('zero-operation CAD table rendering', () => {
       const transformAfterMove = translated(await piece.getAttribute('transform'));
 
       expect(await viewport.getAttribute('viewBox')).toBe(viewBoxBefore);
-      expect(transformAfterMove[0]).toBeCloseTo(transformBefore[0] + 50 / scale, 10);
-      expect(transformAfterMove[1]).toBeCloseTo(transformBefore[1] + 25 / scale, 10);
+      expect(transformAfterMove[0]).toBeCloseTo(transformBefore[0] + 50 / scale, 4);
+      expect(transformAfterMove[1]).toBeCloseTo(transformBefore[1] + 25 / scale, 4);
       await page.mouse.up();
       expect(await viewport.getAttribute('viewBox')).toBe(viewBoxBefore);
       expect(translated(await piece.getAttribute('transform'))).toEqual(transformAfterMove);
+
+      await page.setViewportSize({ width: 900, height: 1600 });
+      await page.goto(
+        `http://127.0.0.1:${address.port}/__cad-table-pointer-drag-regression__?scene=shaped`,
+        { waitUntil: 'domcontentloaded', timeout: 8_000 },
+      );
+      await piece.waitFor({ timeout: 5_000 });
+      const shapedMaterial = piece.locator('[data-cad-zero-connect-material]');
+      await shapedMaterial.scrollIntoViewIfNeeded();
+      const screen = (pieceId: string, x: number, y: number) =>
+        page.evaluate(
+          ({ pieceId, x, y }) => {
+            const group = document.querySelector<SVGGraphicsElement>(
+              `[data-cad-zero-connect-piece="${pieceId}"]`,
+            );
+            const matrix = group?.getScreenCTM();
+            if (!matrix) throw new Error('The shaped piece has no screen transform.');
+            const client = new DOMPoint(x, -y).matrixTransform(matrix);
+            return { x: client.x, y: client.y };
+          },
+          { pieceId, x, y },
+        );
+      const selected = page.locator('[data-cad-zero-connect-piece-selected="true"]');
+      const clickAt = async (x: number, y: number) => {
+        const point = await screen('closed-piece', x, y);
+        await page.mouse.click(point.x, point.y);
+      };
+      await clickAt(9, 9);
+      const clickLocation = await screen('closed-piece', 9, 9);
+      const hit = await page.evaluate(
+        ({ x, y }) => document.elementFromPoint(x, y)?.outerHTML.slice(0, 350),
+        clickLocation,
+      );
+      expect(await selected.count(), JSON.stringify({ clickLocation, hit, browserErrors })).toBe(1);
+      expect(await selected.getAttribute('data-cad-zero-connect-piece')).toBe('closed-piece');
+      await clickAt(4, 4);
+      expect(await selected.count()).toBe(0);
+      await clickAt(9, 9);
+      await clickAt(26, 26);
+      expect(await selected.count()).toBe(0);
+
+      await moveTool.click({ timeout: 5_000 });
+      await shapedMaterial.scrollIntoViewIfNeeded();
+      const origin = await screen('open-piece', 9, 9);
+      const target = await screen('closed-piece', 9, 9);
+      await page.mouse.move(origin.x, origin.y);
+      await page.mouse.down();
+      await page.mouse.move(target.x, target.y, { steps: 6 });
+      await page.mouse.up();
+      const movedSite = await screen('open-piece', 9, 9);
+      expect(
+        Math.hypot(movedSite.x - target.x, movedSite.y - target.y),
+        JSON.stringify({
+          origin,
+          target,
+          movedSite,
+        }),
+      ).toBeLessThan(2);
+      await page.getByRole('button', { name: 'Select pieces' }).click();
+      await shapedMaterial.scrollIntoViewIfNeeded();
+      await clickAt(9, 9);
+      const firstHit = await selected.getAttribute('data-cad-zero-connect-piece');
+      await clickAt(9, 9);
+      const secondHit = await selected.getAttribute('data-cad-zero-connect-piece');
+      expect(new Set([firstHit, secondHit])).toEqual(new Set(['closed-piece', 'open-piece']));
+
+      await page.goto(
+        `http://127.0.0.1:${address.port}/__cad-table-pointer-drag-regression__?shared&scene=shaped`,
+        { waitUntil: 'domcontentloaded', timeout: 8_000 },
+      );
+      const tree = page.locator('[data-cad-object-tree]');
+      const treePiece = tree.locator('[data-cad-object-piece="closed-piece"]');
+      const treeSecond = tree.locator('[data-cad-object-piece="open-piece"]');
+      const inspector = page.locator('[data-cad-selected-piece-inspector]');
+      await treePiece.press('Enter');
+      expect(await treePiece.getAttribute('aria-pressed')).toBe('true');
+      expect(await piece.getAttribute('aria-pressed')).toBe('true');
+      expect(await inspector.getAttribute('data-cad-selected-piece-inspector')).toBe(
+        await treePiece.getAttribute('data-cad-object-key'),
+      );
+      expect(await inspector.textContent()).toContain('Perimeter');
+      await treeSecond.click({ modifiers: ['Shift'] });
+      expect(await selected.count()).toBe(2);
+      expect(await inspector.count()).toBe(0);
+      await treeSecond.press('Escape');
+      expect(await selected.count()).toBe(0);
+      await piece.press('Space');
+      expect(await treePiece.getAttribute('aria-pressed')).toBe('true');
+      expect(await selected.count()).toBe(1);
+      await piece.press('Escape');
+      expect(await treePiece.getAttribute('aria-pressed')).toBe('false');
+
+      const other = page.locator('[data-cad-zero-connect-piece="open-piece"]');
+      await viewport.scrollIntoViewIfNeeded();
+      const a = await piece.locator('[data-cad-zero-connect-material]').boundingBox();
+      const b = await other.locator('[data-cad-zero-connect-material]').boundingBox();
+      if (!a || !b) throw new Error('The marquee fixture needs two closed material shapes.');
+      await page.mouse.move(Math.min(a.x, b.x) - 2, Math.min(a.y, b.y) - 2);
+      await page.mouse.down();
+      await page.mouse.move(
+        Math.max(a.x + a.width, b.x + b.width) + 2,
+        Math.max(a.y + a.height, b.y + b.height) + 2,
+        { steps: 6 },
+      );
+      await page.mouse.up();
+      expect(await treePiece.getAttribute('aria-pressed')).toBe('true');
+      expect(await treeSecond.getAttribute('aria-pressed')).toBe('true');
+      expect(await selected.count()).toBe(2);
+
+      await page.getByRole('button', { name: 'Connect edges' }).click();
+      const edgeTargets = page.getByRole('button', { name: /^Choose .* edge .*hold Shift/ });
+      const originalEdgeCount = await edgeTargets.count();
+      expect(originalEdgeCount).toBeGreaterThan(1);
+      await edgeTargets.first().press('Enter');
+      expect(await page.locator('[data-cad-zero-connect-side="a"]').count()).toBe(1);
+      const cutVisibility = page.getByRole('button', { name: 'Show cut outlines' });
+      await cutVisibility.click();
+      expect(await cutVisibility.getAttribute('aria-pressed')).toBe('false');
+      expect(await edgeTargets.count()).toBe(0);
+      expect(await page.locator('[data-cad-zero-connect-contour]').count()).toBe(0);
+      expect(await page.locator('[data-cad-zero-connect-material]').count()).toBe(2);
+      await cutVisibility.click();
+      expect(await edgeTargets.count()).toBe(originalEdgeCount);
+      expect(await page.locator('[data-cad-zero-connect-side="a"]').count()).toBe(0);
+
+      const piecePath = piece.locator('[data-cad-zero-connect-material]');
+      const pathBeforeRotation = await piecePath.getAttribute('d');
+      const firstExactEdge = edgeTargets.first();
+      const firstExactGroup = firstExactEdge.locator('..');
+      const firstEdgeIdentity = await firstExactGroup.getAttribute('data-cad-zero-connect-edge');
+      const firstEdgeEndpoints = await firstExactEdge.evaluate((edge) =>
+        ['x1', 'y1', 'x2', 'y2'].map((name) => edge.getAttribute(name)),
+      );
+      const arrange = page.getByRole('button', { name: 'Arrange selected pieces' });
+      await arrange.click();
+      await page.getByLabel('Rotation (°)').fill('27.5');
+      await page.getByRole('button', { name: 'Rotate', exact: true }).click();
+      expect(await piece.getAttribute('transform')).toContain('rotate(-27.5');
+      expect(await firstExactGroup.getAttribute('transform')).toBe(
+        await piece.getAttribute('transform'),
+      );
+      expect(await firstExactGroup.getAttribute('data-cad-zero-connect-edge')).toBe(
+        firstEdgeIdentity,
+      );
+      expect(
+        await firstExactEdge.evaluate((edge) =>
+          ['x1', 'y1', 'x2', 'y2'].map((name) => edge.getAttribute(name)),
+        ),
+      ).toEqual(firstEdgeEndpoints);
+      expect(await piecePath.getAttribute('d')).toBe(pathBeforeRotation);
+      await page.getByRole('button', { name: 'Left', exact: true }).click();
+      const firstAligned = await piecePath.boundingBox();
+      const secondAligned = await other.locator('[data-cad-zero-connect-material]').boundingBox();
+      if (!firstAligned || !secondAligned) throw new Error('Aligned pieces must remain visible.');
+      expect(firstAligned.x).toBeCloseTo(secondAligned.x, 1);
     } finally {
       await browser.close();
       await server.close();

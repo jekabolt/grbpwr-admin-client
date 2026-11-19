@@ -3,6 +3,7 @@ import type {
   DxfMaterialAssignmentV1,
 } from '../cloth/domain/dxf-assembly-handoff-v1';
 import {
+  isPreparedPatternImportDxfProductPhaseEAuthoringCatalogV1,
   PATTERN_IMPORT_DXF_PRODUCT_PHASE_E_AUTHORING_CATALOG_V1,
   type PatternImportDxfProductPhaseEAuthoringCatalogV1,
 } from '../cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
@@ -185,6 +186,51 @@ export type PatternImportDxfProductPhaseEAssemblyProjectionV1 = Readonly<{
   geometryPlacementApplied: false;
 }>;
 
+type PreparedPieceOrder = Readonly<{
+  scopeKey: string;
+  projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
+  ordinals: ReadonlyMap<PatternImportDxfProductPhaseEAssemblyProjectionPieceV1, number>;
+}>;
+
+const preparedOrderByPiece = new WeakMap<
+  PatternImportDxfProductPhaseEAssemblyProjectionPieceV1,
+  PreparedPieceOrder
+>();
+
+/**
+ * Return the original catalog ordinal for each piece in the current view order. A view may
+ * reorder the prepared piece records; the complete set and source bindings must still match.
+ */
+export function readPatternImportDxfProductPhaseEPreparedPieceOrdinalsV1(
+  projection: PatternImportDxfProductPhaseEAssemblyProjectionV1,
+  scopeKey: string,
+): readonly number[] | null {
+  const firstPiece = projection.pieces[0];
+  const prepared = firstPiece && preparedOrderByPiece.get(firstPiece);
+  if (!prepared || prepared.scopeKey !== scopeKey) return null;
+  const original = prepared.projection;
+  if (
+    projection.schemaVersion !== original.schemaVersion ||
+    projection.sourceFileId !== original.sourceFileId ||
+    projection.expectedCatalogCanonicalSha256 !== original.expectedCatalogCanonicalSha256 ||
+    projection.sizeSelectionCanonicalSha256 !== original.sizeSelectionCanonicalSha256 ||
+    projection.sizeToken !== original.sizeToken ||
+    projection.joinMode !== original.joinMode ||
+    projection.geometryPlacementApplied !== original.geometryPlacementApplied ||
+    projection.pieces.length !== prepared.ordinals.size
+  )
+    return null;
+  const ordinals: number[] = [];
+  const seen = new Set<number>();
+  for (const piece of projection.pieces) {
+    const ordinal = prepared.ordinals.get(piece);
+    if (ordinal === undefined || seen.has(ordinal)) return null;
+    seen.add(ordinal);
+    ordinals.push(ordinal);
+  }
+  return Object.freeze(ordinals);
+}
+
 export type PatternImportDxfProductPhaseEAssemblyProjectionBlockerCodeV1 =
   | 'catalog-invalid'
   | 'phase-d-selection-binding-mismatch'
@@ -264,6 +310,7 @@ export type PatternImportDxfProductPhaseEAssemblyChoicesBlockerCodeV1 =
   | 'operation-unconfirmed'
   | 'side-choice-unconfirmed'
   | 'side-choice-invalid'
+  | 'native-contained-range-not-supported'
   | 'material-choice-unconfirmed'
   | 'material-choice-invalid'
   | 'tolerance-unconfirmed'
@@ -727,20 +774,22 @@ export function projectPatternImportDxfProductPhaseEAssemblyV1(
       cameraMm: { minX, minY, maxX, maxY, padding },
     });
   }
-  return deepFreeze({
-    ok: true as const,
-    projection: {
-      schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_PHASE_E_ASSEMBLY_PROJECTION_V1,
-      expectedCatalogCanonicalSha256: catalog.canonicalSha256,
-      sizeSelectionCanonicalSha256: selection.canonicalSha256,
-      sourceFileId: catalog.sourceFileId,
-      sizeToken: catalog.sizeToken,
-      joinMode: 'catalog-ordinal-to-phase-d-point' as const,
-      pieces: projectedPieces,
-      geometryPlacementApplied: false as const,
-    },
-    blockers: [] as const,
+  const projection = deepFreeze<PatternImportDxfProductPhaseEAssemblyProjectionV1>({
+    schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_PHASE_E_ASSEMBLY_PROJECTION_V1,
+    expectedCatalogCanonicalSha256: catalog.canonicalSha256,
+    sizeSelectionCanonicalSha256: selection.canonicalSha256,
+    sourceFileId: catalog.sourceFileId,
+    sizeToken: catalog.sizeToken,
+    joinMode: 'catalog-ordinal-to-phase-d-point',
+    pieces: projectedPieces,
+    geometryPlacementApplied: false,
   });
+  if (isPreparedPatternImportDxfProductPhaseEAuthoringCatalogV1(catalog)) {
+    const ordinals = new Map(projectedPieces.map((piece, ordinal) => [piece, ordinal]));
+    const prepared = { scopeKey: catalog.scopeKey, projection, ordinals };
+    for (const piece of projectedPieces) preparedOrderByPiece.set(piece, prepared);
+  }
+  return deepFreeze({ ok: true as const, projection, blockers: [] as const });
 }
 
 export function createPatternImportDxfProductPhaseEAssemblyWorkbenchStateV1(
@@ -911,6 +960,19 @@ export function buildPatternImportDxfProductPhaseEAssemblyChoicesV1(
       blockers,
       'operation-unconfirmed',
       'The existing operation identity/order and an explicit Phase-E stage require confirmation.',
+    );
+
+  if (
+    proposal.sides.some(
+      ({ evidence }) =>
+        evidence.edgeHint.startsWith(`${evidence.pieceLineKey}#dxf:`) &&
+        (evidence.range[0] !== 0 || evidence.range[1] !== 1),
+    )
+  )
+    addBlocker(
+      blockers,
+      'native-contained-range-not-supported',
+      'This exact native seam uses a portion of a saved edge. The current pattern metadata can save whole edges only.',
     );
 
   const expectedRole =

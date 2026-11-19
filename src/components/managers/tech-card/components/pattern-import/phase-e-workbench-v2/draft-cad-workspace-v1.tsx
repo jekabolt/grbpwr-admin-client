@@ -1,3 +1,32 @@
+import { num as dxfCoordinate } from 'lib/pattern-import/write/format';
+import {
+  recordSavedFrenchCurveHandleV1,
+  selectSavedFrenchCurveV1,
+} from './draft-cad-saved-french-curve-v1';
+import { SavedJoinControl, type PrepareJoin } from './draft-cad-saved-join-control';
+import {
+  SavedDartIntakeControlV1,
+  SavedDartTipControlV1,
+} from './draft-cad-saved-dart-tip-control-v1';
+import {
+  adjustedSavedDartFeetV1,
+  recordSavedDartIntakeV1,
+  recordSavedDartTipV1,
+  recordSavedFishEyeMoveV1,
+  selectSavedDartTipV1,
+  selectSavedFishEyeMoveV1,
+} from './draft-cad-saved-dart-tip-v1';
+import { SavedDraftPieceCopyControlV1 } from './draft-cad-unlinked-piece-copy-control-v1';
+import type {
+  PrepareSavedCopyReviewV1,
+  SavedCopySelectionV1,
+} from './draft-cad-unlinked-piece-copy-review-v1';
+import {
+  compileDraftForOrdinaryReviewV1,
+  type SavedAddPointReviewOwner,
+} from './draft-cad-saved-add-point-review-v1';
+import type { SavedDraftPairedAllowanceAuthorityV1 } from './draft-cad-paired-allowance-authority-v1';
+import type { SavedRankedPointReviewV1 } from './draft-cad-saved-ranked-point-review-v1';
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 import type { DxfProductPhaseDSizeSelectionResultV1 } from 'lib/pattern-import/dxf-product-phase-d-size-selection-v1';
 import {
@@ -11,9 +40,6 @@ import {
   type ReactNode,
 } from 'react';
 import { Button, Input, Pill, Select, Text } from 'ui';
-
-import { PRESS_EQUIPMENT_LABELS } from '../../equipment-options';
-import { PRESS_ACTION_LABELS } from '../../operation-options';
 
 import { PatternImportDxfPhaseEDraftCadCanvasV1 } from './draft-cad-canvas-v1';
 import {
@@ -33,16 +59,14 @@ import { usePatternImportDxfPhaseECadWorkbenchMeasurementUnitV1 } from './cad-wo
 import type { PatternImportDxfPhaseECadTableCrossScopeAuthoringHandoffResultV1 } from './cad-table-cross-scope-authoring-handoff-v1';
 import type { PatternImportDxfPhaseECadTableCrossScopeConnectSideV1 } from './cad-table-cross-scope-connect-v1';
 import {
-  PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_PRESS_ACTIONS_V1,
-  PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_PRESS_EQUIPMENT_V1,
-  type PatternImportDxfPhaseECadTablePressActionV1,
-  type PatternImportDxfPhaseECadTablePressAuthoringResultV1,
-  type PatternImportDxfPhaseECadTablePressEquipmentV1,
-} from './cad-table-press-authoring-v1';
+  CadTablePressControlV1,
+  type CreateCadTablePressDraftV1,
+} from './cad-table-press-control-v1';
 import { stagePatternImportDxfPhaseECadSemanticCompiledArtifactV1 } from './cad-command-semantic-reimport-session-owner-v1';
 import {
   PATTERN_IMPORT_DXF_PHASE_E_CAD_COMMAND_COMPILED_REIMPORT_HANDOFF_V1,
   guardPatternImportDxfPhaseECadCommandCompiledReimportCurrentV1,
+  openSavedRankedPointInPatternsV1,
   readPatternImportDxfPhaseECadCommandCompiledReimportCapabilityV1,
   refusePatternImportDxfPhaseECadCommandCompiledReimportV1,
   requestPatternImportDxfPhaseECadCommandCompiledReimportV1,
@@ -57,6 +81,8 @@ import {
 import { PatternImportDxfPhaseEDraftCadEditorShellV1 } from './draft-cad-editor-shell-v1';
 import type { PatternImportDxfPhaseEDraftCadGeometryCompileArtifactV1 } from './draft-cad-geometry-compile-v1';
 import {
+  draftCadNewPieceObjectKeyV1,
+  listActiveDraftCadNewPiecesV1,
   redoPatternImportDxfPhaseEDraftCadSessionV1,
   undoPatternImportDxfPhaseEDraftCadSessionV1,
   type PatternImportDxfPhaseEDraftCadSessionV1,
@@ -155,6 +181,17 @@ export type PatternImportDxfPhaseEDraftCadWorkspacePropsV1 = Readonly<{
   activeMaterialScopeKey?: string;
   /** Confirmed import generation visible when this compile starts; zero for saved-only sources. */
   confirmedImportGeneration?: number;
+  prepareSavedJoin?: PrepareJoin;
+  prepareSavedPieceCopyReview?: PrepareSavedCopyReviewV1;
+  prepareSavedAddPointReview?: () => Promise<SavedAddPointReviewOwner>;
+  prepareSavedRankedPointReview?: () => Promise<SavedRankedPointReviewV1 | null>;
+  prepareSavedDartTip?: () => ReturnType<
+    typeof import('./draft-cad-saved-dart-tip-review-v1').compileSavedDartTipReviewV1
+  >;
+  prepareSavedGeometryReview?: () => ReturnType<
+    typeof import('./draft-cad-saved-dart-tip-review-v1').compileSavedDraftGeometryReviewV1
+  >;
+  prepareSavedPairedAllowance?: () => Promise<SavedDraftPairedAllowanceAuthorityV1>;
   onSelectMaterialScope?: (scopeKey: string) => void;
   workspaceContextControl?: ReactNode;
   arrangementScope?: PatternImportDxfPhaseEDraftCadArrangementScopeV1 | null;
@@ -173,11 +210,7 @@ export type PatternImportDxfPhaseEDraftCadWorkspacePropsV1 = Readonly<{
     direction: 'same' | 'reversed',
   ) => Promise<PatternImportDxfPhaseECadTableCrossScopeAuthoringHandoffResultV1>;
   pressDraftDisabled?: boolean;
-  onCreatePressDraft?: (
-    selectedPieceIds: readonly string[],
-    pressAction: PatternImportDxfPhaseECadTablePressActionV1,
-    pressEquipment: PatternImportDxfPhaseECadTablePressEquipmentV1,
-  ) => PatternImportDxfPhaseECadTablePressAuthoringResultV1;
+  onCreatePressDraft?: CreateCadTablePressDraftV1;
 }>;
 
 export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
@@ -190,6 +223,13 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
   preparedMaterialScopeKeys,
   activeMaterialScopeKey,
   confirmedImportGeneration = 0,
+  prepareSavedAddPointReview,
+  prepareSavedRankedPointReview,
+  prepareSavedPairedAllowance,
+  prepareSavedDartTip,
+  prepareSavedGeometryReview = prepareSavedDartTip,
+  prepareSavedJoin,
+  prepareSavedPieceCopyReview,
   onSelectMaterialScope,
   workspaceContextControl,
   arrangementScope = null,
@@ -206,6 +246,20 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
   const [activeTool, setActiveTool] =
     useState<PatternImportDxfPhaseEDraftCadToolV1>('internal-line');
   const [activePieceIndex, setActivePieceIndex] = useState(0);
+  const [selectedDraftPiece, setSelectedDraftPiece] = useState<Readonly<{
+    pieceId: string;
+    commandId: string;
+    catalogSha256: string;
+  }> | null>(null);
+  const draftPieces = useMemo(() => listActiveDraftCadNewPiecesV1(session), [session]);
+  const draftPieceId =
+    selectedDraftPiece?.catalogSha256 === session.source.catalog.canonicalSha256 &&
+    draftPieces.some(
+      ({ pieceId, commandId }) =>
+        pieceId === selectedDraftPiece.pieceId && commandId === selectedDraftPiece.commandId,
+    )
+      ? selectedDraftPiece.pieceId
+      : null;
   const [arrangeActive, setArrangeActive] = useState(false);
   const [panActive, setPanActive] = useState(false);
   const [crossScopeConnectActive, setCrossScopeConnectActive] = useState(false);
@@ -218,11 +272,6 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
   const [crossScopeConnecting, setCrossScopeConnecting] = useState(false);
   const [crossScopeResult, setCrossScopeResult] =
     useState<PatternImportDxfPhaseECadTableCrossScopeAuthoringHandoffResultV1 | null>(null);
-  const [pressAction, setPressAction] = useState<string>('');
-  const [pressEquipment, setPressEquipment] = useState<string>('');
-  const [pressResult, setPressResult] =
-    useState<PatternImportDxfPhaseECadTablePressAuthoringResultV1 | null>(null);
-  const pressSubmitLocked = useRef(false);
   const [localArrangements, setLocalArrangements] =
     useState<PatternImportDxfPhaseEDraftCadArrangementByScopeV1>({});
   const [compileState, setCompileState] =
@@ -277,11 +326,46 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
     [arrangementKey, arrangementScope, localArrangements, pieceIds],
   );
   const selectedPieceIds = arrangement.selectedPieceIds;
-  const selectedPieceIdentity = selectedPieceIds.join('\u0000');
+  const selectedForCopy =
+    arrangeActive && session.cursor === 0 && selectedPieceIds.length === 1
+      ? projection.pieces.find((p) => p.pieceId === selectedPieceIds[0])
+      : null;
+  const joinPieces = selectedPieceIds.flatMap((id) => {
+    const p = projection.pieces.find((p) => p.pieceId === id);
+    return p?.pieceLineKey ? [{ pieceId: p.pieceId, pieceLineKey: p.pieceLineKey }] : [];
+  });
+  const dartInput = { session, projection, selection, compileSource };
+  const savedEditPiece =
+    prepareSavedGeometryReview && compiledReimportCapability.available ? selectedForCopy : null;
+  const savedDart = savedEditPiece ? selectSavedDartTipV1(dartInput, savedEditPiece) : null;
+  const savedFishEye = savedEditPiece ? selectSavedFishEyeMoveV1(dartInput, savedEditPiece) : null;
+  const curvePiece =
+    !arrangeActive &&
+    !draftPieceId &&
+    session.cursor === 0 &&
+    prepareSavedGeometryReview &&
+    compiledReimportCapability.available
+      ? projection.pieces[activePieceIndex]
+      : null;
+  const savedCurve = curvePiece ? selectSavedFrenchCurveV1(dartInput, curvePiece) : null;
+  const copySelection = useRef<SavedCopySelectionV1 | null>(null);
+  copySelection.current = selectedForCopy?.pieceLineKey
+    ? {
+        selectedPieceId: selectedForCopy.pieceId,
+        selectedPieceLineKey: selectedForCopy.pieceLineKey,
+      }
+    : null;
+  const copyMounted = useRef(false);
   useEffect(() => {
-    pressSubmitLocked.current = false;
-    setPressResult(null);
-  }, [selectedPieceIdentity]);
+    copyMounted.current = true;
+    return () => {
+      copyMounted.current = false;
+    };
+  }, []);
+  const readCopySelection = useCallback(
+    () => (copyMounted.current ? copySelection.current : null),
+    [],
+  );
   const publishArrangement = (next: PatternImportDxfPhaseEDraftCadArrangementScopeV1): void => {
     if (onArrangementScopeChange) onArrangementScopeChange(next);
     else
@@ -382,6 +466,7 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
     setCrossScopeResult(null);
     setCrossScopeConnecting(false);
     if (active) {
+      setSelectedDraftPiece(null);
       setArrangeActive(false);
       setPanActive(false);
       updateTopologySession((current) =>
@@ -412,46 +497,59 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
       setCrossScopeConnecting(false);
     }
   };
-  const submitPressDraft = () => {
-    if (
-      pressSubmitLocked.current ||
-      !onCreatePressDraft ||
-      pressDraftDisabled ||
-      !PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_PRESS_ACTIONS_V1.includes(pressAction as never) ||
-      !PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_PRESS_EQUIPMENT_V1.includes(pressEquipment as never)
-    )
-      return;
-    pressSubmitLocked.current = true;
-    const result = onCreatePressDraft(
-      selectedPieceIds,
-      pressAction as PatternImportDxfPhaseECadTablePressActionV1,
-      pressEquipment as PatternImportDxfPhaseECadTablePressEquipmentV1,
-    );
-    if (!result.ok) pressSubmitLocked.current = false;
-    setPressResult(result);
-  };
-  const compileDraft = () => {
+  const compileDraft = async () => {
     const epoch = compiledReimportEpoch.current + 1;
     compiledReimportEpoch.current = epoch;
     compiledReimportRequestLocked.current = false;
     setPendingCompiledReimport(null);
     setCompiledReimportResult(null);
-    let compiledArtifact: PatternImportDxfPhaseEDraftCadGeometryCompileArtifactV1 | null = null;
-    const nextCompileState = executePatternImportDxfPhaseEDraftCadCompileUiActionV1(
-      {
-        session,
-        projection,
-        selection,
-        compileSource,
-      },
-      undefined,
-      (artifact) => {
-        compiledArtifact = artifact;
-      },
+    const input = { session, projection, selection, compileSource };
+    if (
+      prepareSavedRankedPointReview &&
+      session.history
+        .slice(0, session.cursor)
+        .some(({ commands }) => commands.some(({ tool }) => tool === 'draft-point'))
+    ) {
+      setCompileState(null);
+      try {
+        const review = await prepareSavedRankedPointReview();
+        if (compiledReimportEpoch.current !== epoch) return;
+        if (review) {
+          openSavedRankedPointInPatternsV1(compileSource.techCardId, review);
+          return;
+        }
+      } catch (error) {
+        if (compiledReimportEpoch.current === epoch)
+          setCompileState(
+            executePatternImportDxfPhaseEDraftCadCompileUiActionV1(input, () => ({
+              ok: false,
+              artifact: null,
+              blockers: [
+                {
+                  code: 'source-binding-mismatch',
+                  commandId: null,
+                  tool: 'draft-point',
+                  detail:
+                    error instanceof Error
+                      ? error.message
+                      : 'The saved size edit could not be reviewed.',
+                },
+              ],
+            })),
+          );
+        return;
+      }
+    }
+    const result = await compileDraftForOrdinaryReviewV1(
+      input,
+      prepareSavedAddPointReview,
+      prepareSavedPairedAllowance,
+      prepareSavedGeometryReview,
     );
-    setCompileState(nextCompileState);
-    if (!compiledArtifact) return;
-    const artifact = compiledArtifact;
+    if (compiledReimportEpoch.current !== epoch) return;
+    setCompileState(executePatternImportDxfPhaseEDraftCadCompileUiActionV1(input, () => result));
+    if (!result.ok) return;
+    const artifact = result.artifact;
     const confirmedImportGenerationAtCompile = confirmedImportGeneration;
     const sessionCursorAtCompile = session.cursor;
     void stagePatternImportDxfPhaseECadSemanticCompiledArtifactV1(artifact, {
@@ -534,7 +632,11 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
       onConnectChange={
         onCrossScopeConnect && !crossScopeConnectDisabled ? changeCrossScopeConnect : undefined
       }
-      selectedPieceIds={selectedPieceIds}
+      selectedPieceIds={
+        draftPieceId && selectedDraftPiece
+          ? [draftCadNewPieceObjectKeyV1(selectedDraftPiece.commandId)]
+          : selectedPieceIds
+      }
       onArrangeSelectionAction={(action) =>
         publishArrangement(
           applyPatternImportDxfPhaseEDraftCadArrangementActionV1(arrangement, action),
@@ -550,9 +652,26 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
             }))
           : []
       }
-      onFocusPiece={(pieceId, toggle) => {
+      onFocusPiece={(objectKey, toggle) => {
+        const piece = draftPieces.find(
+          (candidate) => draftCadNewPieceObjectKeyV1(candidate.commandId) === objectKey,
+        );
+        if (piece) {
+          setSelectedDraftPiece({
+            pieceId: piece.pieceId,
+            commandId: piece.commandId,
+            catalogSha256: session.source.catalog.canonicalSha256,
+          });
+          setActiveTool('mark');
+          updateTopologySession((current) =>
+            selectPatternImportDxfPhaseEDraftCadTopologyToolV1(current, null),
+          );
+          return;
+        }
+        const pieceId = objectKey;
         const index = projection.pieces.findIndex((piece) => piece.pieceId === pieceId);
         if (index < 0) return;
+        setSelectedDraftPiece(null);
         const next = !toggle
           ? [pieceId]
           : selectedPieceIds.includes(pieceId)
@@ -565,6 +684,7 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
       }}
       onArrangeChange={(active) => {
         setArrangeActive(active);
+        if (active) setSelectedDraftPiece(null);
         if (active && selectedPieceIds.length === 0) {
           const activePieceId = projection.pieces[activePieceIndex]?.pieceId;
           if (activePieceId)
@@ -590,6 +710,10 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
       }
       onUndo={undo}
       onRedo={redo}
+      canSharpenCorner={Boolean(prepareSavedGeometryReview && compiledReimportCapability.available)}
+      canOffsetAllowance={Boolean(
+        prepareSavedPairedAllowance && compiledReimportCapability.available,
+      )}
       canCompile={session.cursor > 0}
       compileState={compileState}
       onCompile={compileDraft}
@@ -623,77 +747,105 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
                 onCrossScopeConnect && !crossScopeConnectDisabled,
               )}
             />
-            {showPatternImportDxfPhaseECadContextualPressV1(
-              arrangeActive,
-              selectedPieceIds,
-              Boolean(onCreatePressDraft),
-            ) ? (
-              <div
-                className='flex min-w-0 items-center gap-1 border-l border-hairline pl-2'
-                data-cad-contextual-press-authoring=''
-              >
-                <Text component='span' size='micro' className='whitespace-nowrap font-bold'>
-                  Press · {selectedPieceIds.length}
-                </Text>
-                <Select
-                  name='cad-contextual-press-action'
-                  size='sm'
-                  value={pressAction}
-                  placeholder='action'
-                  items={PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_PRESS_ACTIONS_V1.map((value) => ({
-                    value,
-                    label: PRESS_ACTION_LABELS[value],
-                  }))}
-                  onValueChange={(value) => {
-                    pressSubmitLocked.current = false;
-                    setPressAction(value);
-                    setPressResult(null);
-                  }}
-                  readOnly={pressDraftDisabled}
+            {savedDart && selectedForCopy && (
+              <SavedDartTipControlV1
+                key={JSON.stringify([
+                  savedDart.savedTip.sourceSha256,
+                  savedDart.savedTip.scopeKey,
+                  savedDart.savedTip.sizeToken,
+                  selectedForCopy.pieceLineKey,
+                  confirmedImportGeneration,
+                ])}
+                positionMm={savedDart.apexMm}
+                onMove={(point) => {
+                  const edit = recordSavedDartTipV1(dartInput, selectedForCopy, point);
+                  if (edit?.ok) publishSession(edit.session);
+                }}
+              />
+            )}
+            {savedDart && savedDart.intakeSourcePathId !== undefined && selectedForCopy && (
+              <SavedDartIntakeControlV1
+                key={JSON.stringify([
+                  savedDart.savedTip.sourceSha256,
+                  savedDart.savedTip.scopeKey,
+                  savedDart.savedTip.sizeToken,
+                  selectedForCopy.pieceLineKey,
+                  savedDart.intakeSourcePathId,
+                  confirmedImportGeneration,
+                ])}
+                intakeMm={savedDart.intakeMm}
+                canAdjust={(value) =>
+                  adjustedSavedDartFeetV1(savedDart.edge, savedDart.savedTip.original, value) !==
+                  null
+                }
+                onAdjust={(value) => {
+                  const edit = recordSavedDartIntakeV1(dartInput, selectedForCopy, value);
+                  if (edit?.ok) publishSession(edit.session);
+                }}
+              />
+            )}
+            {savedFishEye && selectedForCopy && (
+              <SavedDartTipControlV1
+                kind='fish-eye'
+                key={JSON.stringify([
+                  savedFishEye.savedMove.sourceSha256,
+                  savedFishEye.savedMove.scopeKey,
+                  savedFishEye.savedMove.sizeToken,
+                  selectedForCopy.pieceLineKey,
+                  savedFishEye.savedMove.sourcePathId,
+                  confirmedImportGeneration,
+                ])}
+                positionMm={savedFishEye.centerMm}
+                onMove={(point) => {
+                  const edit = recordSavedFishEyeMoveV1(dartInput, selectedForCopy, point);
+                  if (edit?.ok) publishSession(edit.session);
+                }}
+              />
+            )}
+            {arrangeActive &&
+              prepareSavedJoin &&
+              session.cursor === 0 &&
+              compiledReimportCapability.available &&
+              joinPieces.length === 2 &&
+              selectedPieceIds.length === 2 && (
+                <SavedJoinControl
+                  key={JSON.stringify([materialScopeKey, confirmedImportGeneration, joinPieces])}
+                  pieces={joinPieces}
+                  prepare={prepareSavedJoin}
                 />
-                <Select
-                  name='cad-contextual-press-equipment'
-                  size='sm'
-                  value={pressEquipment}
-                  placeholder='equipment'
-                  items={PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_PRESS_EQUIPMENT_V1.map((value) => ({
-                    value,
-                    label: PRESS_EQUIPMENT_LABELS[value],
-                  }))}
-                  onValueChange={(value) => {
-                    pressSubmitLocked.current = false;
-                    setPressEquipment(value);
-                    setPressResult(null);
-                  }}
-                  readOnly={pressDraftDisabled}
-                />
-                <Button
-                  type='button'
-                  size='xs'
-                  variant='main'
-                  disabled={
-                    pressDraftDisabled ||
-                    !pressAction ||
-                    !pressEquipment ||
-                    Boolean(pressResult?.ok)
+              )}
+            {arrangeActive &&
+              selectedPieceIds.length === 1 &&
+              (['duplicate', 'mirror-across-grain'] as const).map((mode) => (
+                <SavedDraftPieceCopyControlV1
+                  mode={mode}
+                  key={JSON.stringify([
+                    mode,
+                    selectedPieceIds[0],
+                    selectedForCopy?.pieceLineKey,
+                    materialScopeKey,
+                    confirmedImportGeneration,
+                  ])}
+                  session={session}
+                  readSelection={readCopySelection}
+                  prepare={
+                    compiledReimportCapability.available && copySelection.current
+                      ? prepareSavedPieceCopyReview
+                      : undefined
                   }
-                  onClick={submitPressDraft}
-                >
-                  Add draft
-                </Button>
-                {pressResult ? (
-                  <Text
-                    component='span'
-                    size='micro'
-                    variant={pressResult.ok ? 'label' : 'errorLabel'}
-                    className='max-w-48 truncate'
-                    title={pressResult.blocker?.detail}
-                    data-cad-contextual-press-result={pressResult.ok ? 'inserted' : 'refused'}
-                  >
-                    {pressResult.ok ? 'draft added' : pressResult.blocker.detail}
-                  </Text>
-                ) : null}
-              </div>
+                />
+              ))}
+            {onCreatePressDraft ? (
+              <CadTablePressControlV1
+                selectedPieceIds={selectedPieceIds}
+                disabled={pressDraftDisabled}
+                visible={showPatternImportDxfPhaseECadContextualPressV1(
+                  arrangeActive,
+                  selectedPieceIds,
+                  true,
+                )}
+                onCreateDraft={onCreatePressDraft}
+              />
             ) : null}
             {crossScopeConnectActive ? (
               <div
@@ -777,10 +929,66 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
             ) : null}
           </div>
           <PatternImportDxfPhaseEDraftCadCanvasV1
+            allowSavedParallelOpening={Boolean(
+              prepareSavedGeometryReview && compiledReimportCapability.available,
+            )}
+            savedFrenchCurve={
+              savedCurve && curvePiece
+                ? {
+                    key: JSON.stringify([
+                      savedCurve.savedCurve.sourceSha256,
+                      savedCurve.savedCurve.scopeKey,
+                      savedCurve.savedCurve.sizeToken,
+                      savedCurve.savedCurve.pieceLineKey,
+                      savedCurve.savedCurve.sourcePathId,
+                      confirmedImportGeneration,
+                    ]),
+                    primitive: {
+                      kind: 'curve',
+                      role: 'french-curve',
+                      tool: 'french-curve',
+                      commandId: 'saved-french-curve',
+                      entityId: 'saved-french-curve',
+                      target: curvePiece,
+                      controlPointsMm: savedCurve.controlPointsMm,
+                    },
+                    pointsMm: savedCurve.pointsMm,
+                    onEdit: (handle, point) => {
+                      if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+                      const edit = recordSavedFrenchCurveHandleV1(dartInput, curvePiece, handle, {
+                        x: Number(dxfCoordinate(point.x)),
+                        y: Number(dxfCoordinate(point.y)),
+                      });
+                      if (edit?.ok) publishSession(edit.session);
+                    },
+                  }
+                : null
+            }
+            savedDartPaths={[
+              ...(savedDart
+                ? [
+                    {
+                      pieceLineKey: savedDart.savedTip.pieceLineKey,
+                      kind: 'dart' as const,
+                      pointsMm: savedDart.savedTip.original,
+                    },
+                  ]
+                : []),
+              ...(savedFishEye
+                ? [
+                    {
+                      pieceLineKey: savedFishEye.savedMove.pieceLineKey,
+                      kind: 'fish-eye' as const,
+                      pointsMm: savedFishEye.savedMove.original,
+                    },
+                  ]
+                : []),
+            ]}
             session={session}
             projection={projection}
             scopeKey={topologyScopeKey}
             activePieceIndex={activePieceIndex}
+            activeDraftPieceId={draftPieceId}
             activeTool={activeTool}
             arrangeActive={arrangeActive}
             panActive={panActive}

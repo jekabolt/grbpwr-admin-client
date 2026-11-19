@@ -369,16 +369,22 @@ head('матрица отстрочки (§6.1) — клиентская пол�
   // строка обязана ПРОПАСТЬ С ПРОВОДА КЛЮЧОМ, а не приехать как `{value: ""}`: сервер меряет
   // присланность децимала содержимым, и пустое значение с непустым указателем он прочитал бы как
   // «отступ прислан» — то есть [clear] по отступу упёрся бы в отказ «назови режим».
-  const cleared = JSON.stringify(
-    wireOne({ ...base, topstitchMode: 'TECH_CARD_TOPSTITCH_MODE_EDGE', topstitchWidthMm: '' }),
+  const cleared = JSON.parse(
+    JSON.stringify(
+      wireOne({ ...base, topstitchMode: 'TECH_CARD_TOPSTITCH_MODE_EDGE', topstitchWidthMm: '' }),
+    ),
   );
   ck(
-    !cleared.includes('widthMm'),
-    'после [clear] ключа отступа в JSON нет вовсе',
-    cleared.slice(0, 160),
+    cleared.topstitch?.mode === 'TECH_CARD_TOPSTITCH_MODE_EDGE' &&
+      !Object.hasOwn(cleared.topstitch, 'widthMm'),
+    'после [clear] ключа отступа в JSON нет, выбранный режим сохранён',
+    JSON.stringify(cleared.topstitch),
   );
-  const clearedAll = JSON.stringify(wireOne({ ...base, topstitchWidthMm: '', topstitchRows: 0 }));
-  ck(!clearedAll.includes('topstitch'), 'очищены оба поля и режим пуст → обёртки в JSON нет');
+  const clearedAll = JSON.parse(
+    JSON.stringify(wireOne({ ...base, topstitchWidthMm: '', topstitchRows: 0 })),
+  );
+  // topstitchLines is a separate repeated field. It can be an empty list on the same wire row.
+  ck(!Object.hasOwn(clearedAll, 'topstitch'), 'очищены оба поля и режим пуст → обёртки в JSON нет');
 }
 
 // РЕГРЕСС: шаг без единого факта волны шлёт ТЕ ЖЕ БАЙТЫ, что и раньше — ни одной пустой обёртки.
@@ -436,6 +442,9 @@ const FILLED = {
   calloutNumber: 3,
   note: 'a note',
   seamClass: T.SS_PLAIN,
+  seamKind: 'bound_open',
+  workVariant: 'two_way',
+  seamToleranceMm: '0.8',
   stitchesPerCm: '4.5',
   seamAllowanceMm: '10',
   topstitchMode: T.IN_DITCH,
@@ -488,9 +497,16 @@ const FILLED = {
   buttonholeOrientation: 'TECH_CARD_BUTTONHOLE_ORIENTATION_VERTICAL',
   bartackLengthMm: '7',
   attachPattern: 'TECH_CARD_BUTTON_ATTACH_PATTERN_CROSS_X',
+  buttonHoles: 4,
   zipperApplication: 'TECH_CARD_ZIPPER_APPLICATION_LAPPED',
   pressAction: T.STEAM,
   pressToward: T.TOWARD_FRONT,
+  inputKeys: ['FRONT', 'POCKET'],
+  labelKeys: ['label-size'],
+  seamKeys: ['seam-physical'],
+  poseKeys: ['seam-pose'],
+  foldKeys: ['fold-front'],
+  layerOrder: ['FRONT', 'POCKET'],
   outputUnitKey: 'SHELL',
   outputUnitName: 'shell unit',
   review: 'reshaped',
@@ -509,22 +525,92 @@ const NOT_A_STEP_FACT = new Set([
   'media', // снимки с выносками — отдельная проба (annotation-shape-probe)
 ]);
 
+const savedSeams = [
+  { seamKey: 'seam-physical', kind: 'TECH_CARD_SEAM_KIND_EDGE' },
+  { seamKey: 'seam-pose', kind: 'TECH_CARD_SEAM_KIND_POSE' },
+];
+
+// Drawn lines belong to a topstitch step, a carried thread BOM line and a current card size.
+// This is a separate populated step so the residual PACK fixture still proves the old contract.
+const topstitchCard = {
+  techCard: {
+    sizeIds: [7],
+    bomItems: [
+      {
+        lineKey: 'thread-topstitch',
+        name: 'topstitch 40/2',
+        section: 'TECH_CARD_BOM_SECTION_THREAD',
+        kind: 'TECH_CARD_BOM_KIND_TOPSTITCH_THREAD',
+        unit: 'm',
+      },
+    ],
+  },
+};
+const drawnTopstitch = readBack({
+  ...topstitchCard.techCard,
+  operations: [
+    {
+      operationNumber: 10,
+      operationType: T.MACHINE,
+      machineType: T.LOCKSTITCH,
+      topstitch: { mode: 'TECH_CARD_TOPSTITCH_MODE_EDGE', widthMm: { value: '2' }, rows: 1 },
+      bomLineKeys: ['thread-topstitch'],
+      topstitchLines: [
+        {
+          lineKey: 'topstitch-a',
+          bomLineKey: 'thread-topstitch',
+          anchoredSize: 'M',
+          rows: 2,
+          sizes: [{ sizeId: 7, lineMm: { value: '240.5' } }],
+          parts: [
+            {
+              pieceLineKey: 'FRONT',
+              samples: [0, 0.25, 0.5, 0.75, 1].map((u) => ({ u, v: 0 })),
+              rangeFrom: 0.25,
+              rangeTo: 0.75,
+              perimShare: 0.25,
+              lenMm: 240,
+              notches: 0,
+              turnDeg: 0,
+              edgeHint: 'front#0',
+              contourSig: 'front-shape',
+            },
+          ],
+        },
+      ],
+    },
+  ],
+})[0];
+
 {
   const names = operationFieldNames();
   ck(names.length > 40, 'zod-схема шага перечисляет поля', `полей: ${names.length}`);
-  const missing = names.filter((n) => !(n in FILLED) && !NOT_A_STEP_FACT.has(n));
+  const drawnLineFacts = { topstitchLines: drawnTopstitch.topstitchLines };
+  const covered = { ...FILLED, ...drawnLineFacts };
+  const missing = names.filter((n) => !(n in covered) && !NOT_A_STEP_FACT.has(n));
   ck(missing.length === 0, 'фикстура покрывает КАЖДОЕ поле схемы шага', missing.join(', '));
-  const stray = Object.keys(FILLED).filter((n) => !names.includes(n));
+  const stray = Object.keys(covered).filter((n) => !names.includes(n));
   ck(stray.length === 0, 'в фикстуре нет полей, которых в схеме уже нет', stray.join(', '));
 
   const form1 = step(FILLED);
   const wire = toWire([form1]);
-  const form2 = readBack(wire)[0];
+  const form2 = readBack(wire, savedSeams)[0];
+  ck(
+    JSON.stringify(wire.operations[0].seamKeys) === JSON.stringify(['seam-physical', 'seam-pose']),
+    'шов и POSE разделены в форме и едут в общем списке ключей',
+  );
+  const drawnWire = toWire([drawnTopstitch], topstitchCard);
+  const drawnBack = readBack(drawnWire)[0];
+  ck(
+    drawnWire.operations[0].topstitchLines?.[0]?.sizes?.[0]?.lineMm?.value === '240.5' &&
+      drawnTopstitch.topstitchLines.length === 1,
+    'размеченная линия несёт измерение своего размера и живую строку ниток',
+  );
   const lost = [];
   for (const n of names) {
     if (NOT_A_STEP_FACT.has(n)) continue;
-    const a = JSON.stringify(form1[n]);
-    const b = JSON.stringify(form2[n]);
+    const a = JSON.stringify(n === 'topstitchLines' ? drawnLineFacts[n] : form1[n]);
+    const b = JSON.stringify(n === 'topstitchLines' ? drawnBack[n] : form2[n]);
     if (a !== b) lost.push(`${n}: ${a} → ${b}`);
   }
   ck(
@@ -538,6 +624,11 @@ const NOT_A_STEP_FACT = new Set([
   const a = JSON.stringify(wire.operations[0]);
   const b = JSON.stringify(wire2.operations[0]);
   ck(a === b, 'второй оборот круга байтово совпадает с первым', a === b ? '' : 'провод поехал');
+  ck(
+    JSON.stringify(toWire([drawnBack], topstitchCard).operations[0].topstitchLines) ===
+      JSON.stringify(drawnWire.operations[0].topstitchLines),
+    'второй оборот размеченной отстрочки байтово совпадает с первым',
+  );
 }
 
 // ─── ЦИТАТА В: в эффектах редактора не осталось разрушающих записей ───────────────────────────

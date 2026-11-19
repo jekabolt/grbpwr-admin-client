@@ -1,3 +1,16 @@
+import { cancelSavedJoinFile } from './pattern-import/phase-e-workbench-v2/draft-cad-saved-join-file';
+import { useGuardedPieceJoin } from './guarded-piece-join';
+import {
+  cancelSavedDartTipReviewV1,
+  isSavedDartTipReviewFileV1,
+} from './pattern-import/phase-e-workbench-v2/draft-cad-saved-dart-tip-file-v1';
+import { cancelSavedCopyReviewFileV1 } from './pattern-import/phase-e-workbench-v2/draft-cad-unlinked-piece-copy-review-v1';
+import { savedWorkbenchScopeKeyV1 } from './pattern-import/phase-e-workbench-v2/saved-workbench-scope-v1';
+import {
+  buildPatternImportDxfPhaseESavedCardContextV1,
+  patternImportSavedScopeLabelV1,
+} from './pattern-import/phase-e-workbench-v2/saved-card-production-projection-v1';
+import { createPatternsConfirmedSessionLifecycleV1 } from './pattern-import/patterns-confirmed-session-lifecycle-v1';
 import { parseDecimalNumber } from 'utils/decimal';
 import { revealField } from 'utils/field-errors';
 import type { common_Material } from 'api/proto-http/admin';
@@ -14,7 +27,7 @@ import {
 } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useQueryClient } from '@tanstack/react-query';
 import type { common_TechCard, common_TechCardPatternRevision } from 'api/proto-http/admin';
-import { adminService } from 'api/api';
+import { abortableAdminService, adminService } from 'api/api';
 import { NEST_DEFAULTS, type PieceDTO } from 'lib/nesting/types';
 import { fetchMediaBlob } from 'lib/features/media-blob';
 import {
@@ -506,8 +519,17 @@ type FormPiece = NonNullable<TechCardFormData['pieces']>[number] & {
 };
 type FormAlias = NonNullable<TechCardFormData['pieceDxfAliases']>[number];
 type FormOp = NonNullable<TechCardFormData['operations']>[number];
+type RankedPointReview = ReturnType<
+  typeof import('./pattern-import/phase-e-workbench-v2/draft-cad-saved-ranked-point-review-v1').readSavedRankedPointReviewV1
+>;
 type OccupiedAsk =
-  | { kind: 'files'; scopeKey: string; files: File[]; target: string }
+  | {
+      kind: 'files';
+      scopeKey: string;
+      files: File[];
+      target: string;
+      rankedPoint?: RankedPointReview;
+    }
   | { kind: 'move'; scopeKey: string; rowId: string }
   | { kind: 'purpose'; scopeKey: string; nextPurpose: string };
 type OccupiedVersion = { current?: PatternRow; incomingNames: string[] };
@@ -684,6 +706,7 @@ export function PatternsField({
   // Server-known size range: a form-added size cannot take a marker until the card saves.
   savedSizeIds?: number[];
 }) {
+  const saveJoin = useGuardedPieceJoin();
   const { control, setValue, getValues, register, setFocus } = useFormContext<TechCardFormData>();
   const writeDirty = (path: string, value: unknown) =>
     setValue(path as Parameters<typeof setValue>[0], value as never, { shouldDirty: true });
@@ -842,6 +865,37 @@ export function PatternsField({
     [sizeById, baseSampleSizeId],
   );
   const orderSizes = useSizeOrdering();
+  const patternSessionLifecycle = useRef<ReturnType<
+    typeof createPatternsConfirmedSessionLifecycleV1
+  > | null>(null);
+  const patternSessionContext = useRef({ orderSizes, sizeById });
+  patternSessionContext.current = { orderSizes, sizeById };
+  useEffect(() => {
+    if (!techCardId) return;
+    const lifecycle = createPatternsConfirmedSessionLifecycleV1({
+      techCardId,
+      service: adminService,
+      readCard: async (signal) =>
+        (
+          await abortableAdminService(signal).GetTechCard({
+            id: techCardId,
+            vatCountryCode: undefined,
+          })
+        ).techCard,
+      buildCardContext: (card) =>
+        buildPatternImportDxfPhaseESavedCardContextV1(
+          card,
+          patternSessionContext.current.orderSizes,
+          patternSessionContext.current.sizeById,
+        ),
+    });
+    patternSessionLifecycle.current = lifecycle;
+    return () => {
+      if (patternSessionLifecycle.current === lifecycle) patternSessionLifecycle.current = null;
+      lifecycle.dispose();
+    };
+  }, [techCardId]);
+
   const dictTokens = useDictionarySizeTokens();
   const fileSizeRun = useFileSizeRun();
 
@@ -929,10 +983,40 @@ export function PatternsField({
     target?: string;
     afterReady?: () => Promise<void> | void;
   } | null>(null);
-  // Non-DXF files dropped on a slot: the import wizard, starting from those files.
-  const [importing, setImporting] = useState<{ scopeKey: string; files: File[] } | null>(null);
+  // Non-DXF files and an explicit DXF review open the import wizard for this slot.
+  const [importing, setImporting] = useState<{
+    scopeKey: string;
+    files: File[];
+    requireManualApply?: boolean;
+    savedCopyFile?: File;
+  } | null>(null);
   const importingRef = useRef(importing);
   importingRef.current = importing;
+  const closePatternImportReview = () => {
+    cancelSavedDartTipReviewV1(importingRef.current?.files[0]);
+    const file = importingRef.current?.savedCopyFile;
+    if (file) {
+      cancelSavedJoinFile(file);
+      cancelSavedCopyReviewFileV1(file);
+    }
+    importingRef.current = null;
+    setImporting(null);
+  };
+  const activeCopyFile = importing?.savedCopyFile;
+  const firstReviewFile = importing?.files[0];
+  const activeDartFile =
+    firstReviewFile && isSavedDartTipReviewFileV1(firstReviewFile) ? firstReviewFile : undefined;
+  useEffect(
+    () => () => {
+      cancelSavedDartTipReviewV1(activeDartFile);
+      if (activeCopyFile) {
+        cancelSavedJoinFile(activeCopyFile);
+        cancelSavedCopyReviewFileV1(activeCopyFile);
+      }
+    },
+    [activeCopyFile, activeDartFile],
+  );
+
   // Direct uploads in flight, per slot.
   const [uploading, setUploading] = useState<Record<string, number>>({});
   const uploadingRef = useRef<Record<string, number>>({});
@@ -942,6 +1026,8 @@ export function PatternsField({
   const [reuploadFeedback, setReuploadFeedback] = useState<Record<string, ReuploadFeedback>>({});
   // Every operation that would put a second active row in a slot stops at the same choice.
   const [occupiedAsk, setOccupiedAsk] = useState<OccupiedAsk | null>(null);
+  const occupiedAskRef = useRef(occupiedAsk);
+  occupiedAskRef.current = occupiedAsk;
   const [interliningAsk, setInterliningAsk] = useState<InterliningUploadAsk | null>(null);
   const occupiedCancelRef = useRef<HTMLButtonElement>(null);
   // Open the pieces viewer of this slot as soon as the form holds these sheet urls.
@@ -952,7 +1038,7 @@ export function PatternsField({
   // The hidden picker and the slot it was opened for.
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pickFor = useRef('');
-  const pickDxfOnly = useRef(false);
+  const pickerMode = useRef<'standard' | 'review'>('standard');
   // Legacy PDF sheet open in the in-app viewer (null = closed). DXF names open the pieces viewer.
   const [viewing, setViewing] = useState<PatternRow | null>(null);
   // Units dialog: DXFs without $INSUNITS, and what confirm does with the picked units.
@@ -1654,17 +1740,46 @@ export function PatternsField({
   const setSelectedKey = setPickedKey;
   useEffect(() => {
     if (!techCardId || !Number.isSafeInteger(techCardId) || techCardId < 1) return;
+    const resolveScope = (key: string) =>
+      scopesRef.current.find(
+        (scope) => scope.key === key || savedWorkbenchScopeKeyV1(scope) === key,
+      );
     return registerPatternImportDxfPhaseEPatternsFieldCompiledReimportOwnerV1({
       techCardId,
       // A saved-only card has no in-memory Phase-E session. Generation zero is its explicit,
       // stable compile identity; a confirmed fresh import advances through the existing session.
       readConfirmedImportGeneration: () =>
         readPatternImportDxfPhaseECardSessionV1(techCardId)?.importGeneration ?? 0,
-      scopeAvailable: (scopeKey) => scopesRef.current.some((scope) => scope.key === scopeKey),
-      reviewAlreadyOpen: () => importingRef.current !== null,
-      openExistingImportReview: ({ scopeKey, files }) => {
-        setPickedKey(scopeKey);
-        setImporting({ scopeKey, files: [...files] });
+      scopeAvailable: (scopeKey) => Boolean(resolveScope(scopeKey)),
+      reviewAlreadyOpen: () => {
+        const pending = occupiedAskRef.current;
+        return (
+          importingRef.current !== null || (pending?.kind === 'files' && !!pending.rankedPoint)
+        );
+      },
+      openExistingImportReview: ({ scopeKey, files, requireManualApply, savedCopyFile }) => {
+        const scope = resolveScope(scopeKey);
+        if (!scope || importingRef.current)
+          throw new Error('The Patterns import review is no longer available.');
+        const next = { scopeKey: scope.key, files: [...files], requireManualApply, savedCopyFile };
+        importingRef.current = next;
+        setPickedKey(scope.key);
+        setImporting(next);
+      },
+      openExistingRankedPointReview: (rankedPoint) => {
+        const scope = resolveScope(rankedPoint.row.scopeKey);
+        if (!scope || importingRef.current || occupiedAskRef.current || !rankedPoint.isCurrent())
+          throw new Error('The current saved pattern review is unavailable.');
+        const pending = {
+          kind: 'files' as const,
+          scopeKey: scope.key,
+          files: [rankedPoint.file],
+          target: rankedPoint.row.patternLineKey,
+          rankedPoint,
+        };
+        occupiedAskRef.current = pending;
+        setPickedKey(scope.key);
+        setOccupiedAsk(pending);
       },
     });
   }, [techCardId]);
@@ -1924,17 +2039,17 @@ export function PatternsField({
   const canUpload = canEdit && scopes.length > 0;
   const importOk = PATTERN_IMPORT_ENABLED && !!techCardId;
 
-  function openPicker(scopeKey: string, dxfOnly = false) {
+  function openPicker(scopeKey: string, mode: typeof pickerMode.current = 'standard') {
     if (!canUpload || (uploadingRef.current[scopeKey] ?? 0) > 0) return;
+    if (mode === 'review' && (!importOk || !sizeIds.length || isSubmitting || importingRef.current))
+      return;
+    const input = fileInputRef.current;
+    if (!input) return;
     pickFor.current = scopeKey;
-    pickDxfOnly.current = dxfOnly;
-    if (fileInputRef.current)
-      fileInputRef.current.accept = dxfOnly
-        ? SLOT_ACCEPT_DXF
-        : importOk
-          ? SLOT_ACCEPT_ALL
-          : SLOT_ACCEPT_DXF;
-    fileInputRef.current?.click();
+    pickerMode.current = mode;
+    input.accept = mode === 'standard' && importOk ? SLOT_ACCEPT_ALL : SLOT_ACCEPT_DXF;
+    input.multiple = mode === 'standard';
+    input.click();
   }
 
   const scopeOfKey = (key: string) => scopes.find((x) => x.key === key);
@@ -2273,6 +2388,7 @@ export function PatternsField({
     scopeKey: string,
     picked: File,
     target?: string,
+    rankedPoint?: RankedPointReview,
   ): Promise<ReuploadOutcome<FormPiece, FormAlias, FormOp>['kind']> {
     const sc = scopeOfKey(scopeKey);
     if (!sc || !slotHasSheet(scopeKey)) return 'first';
@@ -2343,7 +2459,22 @@ export function PatternsField({
     const before = inputsSig(allSeams);
     const pieces = piecesNow();
     let out: ReuploadOutcome<FormPiece, FormAlias, FormOp>;
-    const deps = reuploadDeps(scopeKey, picked.type);
+    const baseDeps = reuploadDeps(scopeKey, picked.type);
+    const deps: typeof baseDeps = rankedPoint
+      ? {
+          ...baseDeps,
+          requireUnchangedCardStructure: true,
+          upload: (file) => {
+            if (
+              !rankedPoint.isCurrent() ||
+              inputsSig() !== before ||
+              scopeSig(scopeKey) !== slotSig
+            )
+              throw new Error('The saved pattern changed. Review the current size again.');
+            return baseDeps.upload(file);
+          },
+        }
+      : baseDeps;
     beginReupload(scopeKey, target);
     bumpUploading(scopeKey, 1);
     try {
@@ -2469,9 +2600,11 @@ export function PatternsField({
       say('not applied', 'error');
       return 'refused';
     }
-    setValue('pieces', out.pieces, { shouldDirty: true });
-    setValue('pieceDxfAliases', out.aliases, { shouldDirty: true });
-    setValue('operations', out.operations, { shouldDirty: true });
+    if (!rankedPoint) {
+      setValue('pieces', out.pieces, { shouldDirty: true });
+      setValue('pieceDxfAliases', out.aliases, { shouldDirty: true });
+      setValue('operations', out.operations, { shouldDirty: true });
+    }
     // Preservation apply keeps operation indexes stable, so issue references stay on their steps.
     const issueNumbers = out.issueNumbers;
     (getValues('issues') ?? []).forEach((iss, ii) => {
@@ -2720,15 +2853,25 @@ export function PatternsField({
     scopeKey: string,
     list: FileList | File[] | null,
     target?: string,
-    dxfOnly = false,
+    mode: typeof pickerMode.current = 'standard',
   ) {
     // Array.from, not spread — FileList iteration needs lib dom.iterable, which tsconfig omits.
     const files = list ? Array.from(list) : [];
     if (files.length === 0 || !canUpload || (uploadingRef.current[scopeKey] ?? 0) > 0) return;
     const hasRange = ((getValues('sizeIds') ?? []) as number[]).length > 0;
+    const review = mode === 'review';
+    if (
+      review &&
+      (!importOk || !hasRange || !liveScope(scopeKey) || isSubmitting || importingRef.current)
+    )
+      return;
+    if (review && files.length !== 1) {
+      useSnackBarStore.getState().showMessage('Choose one DXF to review.', 'error');
+      return;
+    }
     const errOf = (f: File): string | null => {
       if (isDxfFile(f)) return patternFileError(f, { dxfOnly: true });
-      if (dxfOnly) return 'DXF only';
+      if (review) return 'DXF only';
       const ext = (f.name.match(/\.[^.]+$/)?.[0] ?? '').toLowerCase();
       if (!importOk || !IMPORT_EXT.has(ext)) return 'DXF only';
       // The import wizard lays the drawn sizes out on the card's range: it needs one.
@@ -2746,7 +2889,7 @@ export function PatternsField({
     const handOff = () => settleFileBatch(null, files.length, faults, 'accepted', 'refused');
     if (good.length === 0) return handOff();
     setSelectedKey(scopeKey);
-    if (good.every(isDxfFile)) {
+    if (!review && good.every(isDxfFile)) {
       if (good.length === 1 && isInterliningScopeKey(scopeKey)) {
         void (async () => {
           const ready = await withUnits(good, faults);
@@ -2783,17 +2926,47 @@ export function PatternsField({
       return;
     }
     handOff();
-    setImporting({ scopeKey, files: good });
+    setImporting({ scopeKey, files: good, requireManualApply: review });
   }
 
   async function chooseOccupiedFiles(
     ask: Extract<OccupiedAsk, { kind: 'files' }>,
     choice: OccupiedChoice,
   ) {
+    if (ask.rankedPoint && occupiedAskRef.current !== ask) return;
+    occupiedAskRef.current = null;
     setOccupiedAsk(null);
     const current = slotOccupant(ask.scopeKey, ask.target);
     if (!current || sheetRowId(current) !== ask.target) {
       useSnackBarStore.getState().showMessage('material changed', 'error');
+      return;
+    }
+    if (ask.rankedPoint) {
+      const { rankedPoint } = ask;
+      const matchesSavedRow = () => {
+        const row = slotOccupant(ask.scopeKey, ask.target);
+        return (
+          row?.lineKey === rankedPoint.row.patternLineKey &&
+          row.url === rankedPoint.row.url &&
+          row.sha256 === rankedPoint.row.sha256 &&
+          Number(row.sizeBytes) === rankedPoint.row.sizeBytes
+        );
+      };
+      try {
+        if (choice !== 'replace' || !canUpload || isSubmitting || !matchesSavedRow())
+          throw new Error('The saved pattern changed. Review the current size again.');
+        await rankedPoint.verifyApply(ask.files[0]!);
+        if (!matchesSavedRow() || !rankedPoint.isCurrent())
+          throw new Error('The saved pattern changed. Review the current size again.');
+        await replaceSheet(ask.scopeKey, rankedPoint.file, ask.target, rankedPoint);
+      } catch (error) {
+        useSnackBarStore
+          .getState()
+          .showMessage(
+            error instanceof Error ? error.message : 'The saved size edit could not be applied.',
+            'error',
+          );
+      }
       return;
     }
     if (choice === 'replace' && ask.files.length === 1) {
@@ -3263,6 +3436,7 @@ export function PatternsField({
   // 'ok' и только если применение что-то записало: повторное применение того же импорта остаётся
   // нулевым (F7).
   const importScopeRef = useRef('');
+  const importWorkbenchFailure = useRef<string | null>(null);
   /** The fusing rebuild run counter when the import's save started (T5). */
   const importSaveRun = useRef(0);
   importScopeRef.current = importing?.scopeKey ?? '';
@@ -3270,9 +3444,33 @@ export function PatternsField({
     null,
   );
   function followUpApply(apply: ApplyDraftFn): ApplyDraftFn {
-    return async (draft, onProgress) => {
-      const result = await apply(draft, onProgress);
-      const targets = followUpTargets(draft, result);
+    return async (draft, onProgress, options) => {
+      importWorkbenchFailure.current = null;
+      const result = await apply(draft, onProgress, options);
+      if (import.meta.env.DEV && techCardId && importing?.requireManualApply && result.ok) {
+        try {
+          const report = {
+            savedAt: new Date().toISOString(),
+            save: result.save ?? null,
+            uploads: result.uploaded.length,
+            claimedScopeKeys: result.commitReceipt?.scopes.map(({ scopeKey }) => scopeKey) ?? [],
+            previousLock: result.commitReceipt?.previousLockVersion ?? null,
+            blockers: result.commitReceiptBlockers?.map(({ code }) => code) ?? [],
+            workbenchFailure: importWorkbenchFailure.current,
+            registeredNativeSha:
+              readPatternImportDxfPhaseECardSessionV1(techCardId)?.draft.dxfNativeSewingReplay
+                ?.pipeline?.contentBinding?.sourceSha256 ?? null,
+          };
+          localStorage.setItem(`dev.workbenchImport.${techCardId}`, JSON.stringify(report));
+        } catch {
+          // An unavailable local diagnostic must not change the saved import.
+        }
+      }
+      const targets =
+        followUpTargets(draft, result)?.map((target) => ({
+          ...target,
+          scopeKey: uiImportScopeKey(target.scopeKey),
+        })) ?? null;
       // T6: the stale stamps the server holds now (this re-upload's, or an earlier one's when the
       // same file made zero writes) get the unchanged-edge re-confirm, once the card saved — after
       // the fusing rebuild the save still owes (T5), when it closed before that.
@@ -3285,12 +3483,12 @@ export function PatternsField({
         // After an apply the pieces viewer of the slot opens by itself: the dropped-on slot when
         // the import wrote into it, else the first slot it wrote.
         const keys = draft.scopes.map((sc) => sc.target.scopeKey);
-        const aimed = importScopeRef.current;
+        const aimed = importScopeKey(importScopeRef.current);
         const k = keys.includes(aimed) ? aimed : keys[0];
         if (k) {
-          setImporting(null);
+          closePatternImportReview();
           setPendingView({
-            scopeKey: k,
+            scopeKey: uiImportScopeKey(k),
             urls: [
               ...result.uploaded.filter((u) => u.scopeKey === k).map((u) => u.url),
               ...(result.replaced ?? []).filter((r) => r.scopeKey === k).map((r) => r.newUrl),
@@ -4676,6 +4874,18 @@ export function PatternsField({
             ))}
           </div>
           {has && <span className='mt-1 block'>{renderCoverage(g.entries)}</span>}
+          {canUpload && importOk && sizeIds.length > 0 && (
+            <Button
+              type='button'
+              variant='secondary'
+              size='sm'
+              className='mt-1 w-full'
+              disabled={busy || isSubmitting}
+              onClick={() => openPicker(key, 'review')}
+            >
+              Review DXF import
+            </Button>
+          )}
         </Tile>
       </div>
     );
@@ -4871,21 +5081,29 @@ export function PatternsField({
   }
 
   // Мастер импорта: только с файлами, брошенными на слот.
+  const importScopeKey = (key: string) => {
+    const scope = scopes.find((candidate) => candidate.key === key);
+    return scope ? savedWorkbenchScopeKeyV1(scope) : key;
+  };
+  const uiImportScopeKey = (key: string) =>
+    scopes.find((scope) => savedWorkbenchScopeKeyV1(scope) === key)?.key ?? key;
   const renderImportWizard = () =>
     techCardId && importing ? (
       <Suspense fallback={null}>
         <ImportWizard
           initialFiles={importing.files}
-          initialScopeKey={importing.scopeKey}
+          initialScopeKey={importScopeKey(importing.scopeKey)}
+          requireManualApply={importing.requireManualApply}
+          savedCopyFile={importing.savedCopyFile}
           card={buildCardContext({
             techCardId,
             orderedSizeIds: orderSizes(sizeIds),
             sizeName: (id) => formatSizeName(sizeById.get(id) ?? `#${id}`),
             rawSizeName: (id) => sizeById.get(id),
             scopes: scopes.map((sc) => ({
-              key: sc.key,
+              key: importScopeKey(sc.key),
               byPurpose: sc.byPurpose,
-              label: scopeLabel(sc),
+              label: patternImportSavedScopeLabelV1(sc),
               binding: bindingForScope(sc),
               sections: sc.lines.map((l) => l.section),
             })),
@@ -4893,12 +5111,12 @@ export function PatternsField({
             // Live links and sheets under the scope they RESOLVE to — the key the targets carry
             // (a line sorted into a purpose, an interlining line bound with its purpose, L11).
             aliases: pieceDxfAliases.map((a) => ({
-              scopeKey: scopeKeyOfBinding(a.fabricPurpose, a.bomLineKey, linkSet),
+              scopeKey: importScopeKey(scopeKeyOfBinding(a.fabricPurpose, a.bomLineKey, linkSet)),
               blockName: a.blockName,
               pieceLineKey: a.pieceLineKey,
             })),
             patterns: liveRows.map((p) => ({
-              scopeKey: scopeKeyOfBinding(p.fabricPurpose, p.bomLineKey, sheetSet),
+              scopeKey: importScopeKey(scopeKeyOfBinding(p.fabricPurpose, p.bomLineKey, sheetSet)),
               filename: p.filename,
               url: p.url,
               lineKey: p.lineKey,
@@ -4906,7 +5124,10 @@ export function PatternsField({
               manifest: (p.url && bundle?.manifestByUrl?.get(p.url)) || null,
               generatedFusing: isGeneratedFusingRow(p),
             })),
-            shapes: importShapes,
+            shapes: importShapes.map((shape) => ({
+              ...shape,
+              scopeKey: importScopeKey(shape.scopeKey),
+            })),
             shapesPending: importShapesPending,
             styleLabel: [season, styleNumber].filter(Boolean).join(' · '),
             cardName,
@@ -4929,6 +5150,32 @@ export function PatternsField({
           // F7: upload every file, then ONE batch into this form, then the card's own save.
           applyDraft={followUpApply(
             createCardApply({
+              saveJoin,
+              readPreviousLockVersion: () => autosave.getBaseLockVersion(),
+              afterConfirmedPatternImportSave: async (draft, result) => {
+                const lifecycle = patternSessionLifecycle.current;
+                if (!lifecycle) throw new Error('The pattern authoring session is unavailable.');
+                await lifecycle.afterConfirmedSave(
+                  draft,
+                  result,
+                  importScopeKey(importing.scopeKey),
+                );
+              },
+              onPatternSemanticAttachmentHostError: (error) => {
+                const detail =
+                  error instanceof Error
+                    ? error.message
+                    : 'The exact DXF authoring session could not be opened.';
+                importWorkbenchFailure.current = detail
+                  .replace(/https?:\/\/[^\s"']+/gu, '[URL omitted]')
+                  .slice(0, 450);
+                notify({
+                  sev: 'error',
+                  subject: 'DXF IMPORT',
+                  text: 'Workbench session unavailable',
+                  detail,
+                });
+              },
               read: () => ({
                 patterns: (getValues('patterns') ?? []) as LiveCard['patterns'],
                 pieces: (getValues('pieces') ?? []) as LiveCard['pieces'],
@@ -4940,7 +5187,7 @@ export function PatternsField({
                 }),
               storageSizeId,
               // read at commit time: the BOM may have been sorted while the wizard was open
-              scopeOf: liveScopeOf,
+              scopeOf: (row, kind) => importScopeKey(liveScopeOf(row, kind)),
               save: (reason) => {
                 importSaveRun.current = getFusingSheetGenerationState(techCardId).run;
                 return undoHistory.flushThenCut(reason);
@@ -4952,8 +5199,8 @@ export function PatternsField({
                 return g.phase === 'generating' && g.run > importSaveRun.current;
               },
               // A sheet replaced in place: its save archives the old file with a card snapshot.
-              onReplaced: (list) =>
-                list.forEach((r) => armReuploadSnapshot(techCardId, r.newUrl, r.oldUrl)),
+              onReplaced: (list, guard) =>
+                list.forEach((r) => armReuploadSnapshot(techCardId, r.newUrl, r.oldUrl, guard)),
               unsaved: {
                 get: () => importUnsaved.current,
                 set: (v) => {
@@ -4980,13 +5227,13 @@ export function PatternsField({
           followUp={followUp?.rows ?? null}
           onRetryFollowUp={retryFollowUp}
           onReviewPieces={(scopeKey) => {
-            const g = scopeGroups.find((x) => x.scope.key === scopeKey);
+            const g = scopeGroups.find((x) => importScopeKey(x.scope.key) === scopeKey);
             if (!g || g.entries.length === 0) return;
-            setImporting(null);
-            setSelectedKey(scopeKey);
+            closePatternImportReview();
+            setSelectedKey(g.scope.key);
             openPieces(g);
           }}
-          onClose={() => setImporting(null)}
+          onClose={closePatternImportReview}
         />
       </Suspense>
     ) : null;
@@ -5260,6 +5507,7 @@ export function PatternsField({
   }
 
   const occupiedVersion = occupiedAsk ? occupiedVersionDetails(occupiedAsk) : null;
+  const rankedPointReview = occupiedAsk?.kind === 'files' ? occupiedAsk.rankedPoint : undefined;
   const occupiedCurrentRevision = shownRevision(occupiedVersion?.current);
   const occupiedNextRevision = occupiedCurrentRevision == null ? null : occupiedCurrentRevision + 1;
 
@@ -5277,7 +5525,7 @@ export function PatternsField({
         tabIndex={-1}
         aria-hidden
         onChange={(e) => {
-          routeFiles(pickFor.current, e.target.files, undefined, pickDxfOnly.current);
+          routeFiles(pickFor.current, e.target.files, undefined, pickerMode.current);
           // Reset so re-picking the same file re-fires onChange.
           e.target.value = '';
         }}
@@ -5372,23 +5620,33 @@ export function PatternsField({
         title={
           occupiedNextRevision == null ? 'new version' : `new version · v${occupiedNextRevision}`
         }
-        confirmLabel='new version'
+        confirmLabel={
+          rankedPointReview ? `Apply to size ${rankedPointReview.sizeToken}` : 'new version'
+        }
         width='sm'
         footerActions={
-          <Button
-            variant='secondary'
-            size='sm'
-            onClick={() => {
-              if (occupiedAsk) void chooseOccupied(occupiedAsk, 'merge');
-            }}
-          >
-            {occupiedCurrentRevision == null
-              ? 'merge with current'
-              : `merge with v${occupiedCurrentRevision}`}
-          </Button>
+          rankedPointReview ? undefined : (
+            <Button
+              variant='secondary'
+              size='sm'
+              onClick={() => {
+                if (occupiedAsk) void chooseOccupied(occupiedAsk, 'merge');
+              }}
+            >
+              {occupiedCurrentRevision == null
+                ? 'merge with current'
+                : `merge with v${occupiedCurrentRevision}`}
+            </Button>
+          )
         }
       >
         <div>
+          {rankedPointReview && (
+            <Text component='p' size='micro'>
+              Construction point on {rankedPointReview.blockName} · size{' '}
+              {rankedPointReview.sizeToken}
+            </Text>
+          )}
           <Row
             label={
               <span className='flex min-w-0 items-baseline gap-2.5'>

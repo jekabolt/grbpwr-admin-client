@@ -157,7 +157,10 @@ function angleDegrees(a: number, b: number, opposite: number): number {
   return (Math.acos(cosine) * 180) / Math.PI;
 }
 
-function measureQuality(positions: Float32Array, triangles: Uint32Array): ClothMeshQuality {
+export function measureClothMeshQuality(
+  positions: Float32Array,
+  triangles: Uint32Array,
+): ClothMeshQuality {
   let degenerateTriangles = 0;
   let minTriangleAngleDegrees = 180;
   let maxEdgeRatio = 1;
@@ -316,7 +319,7 @@ export function compileRectangleFixtureMesh(
     pieceRanges,
     boundarySamples,
     seams: seamMaps,
-    quality: measureQuality(restPositions2Mm, triangleBuffer),
+    quality: measureClothMeshQuality(restPositions2Mm, triangleBuffer),
   };
 }
 

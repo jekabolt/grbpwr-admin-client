@@ -202,7 +202,8 @@ export type ScopePlan = {
 export type ScopeProblem =
   | { kind: 'no-fabric'; seeds: SeedId[]; message: string }
   | { kind: 'duplicate'; scopeKey: string; identity: PieceKey; seeds: SeedId[]; message: string }
-  | { kind: 'refused'; seeds: SeedId[]; message: string };
+  | { kind: 'refused'; seeds: SeedId[]; message: string }
+  | { kind: 'selection'; seeds: []; message: string };
 
 /**
  * What each scope's file holds, and everything that stops the write. A scope with no ticked piece
@@ -213,6 +214,30 @@ export function planScopes(
   a: FabricAssignment,
   targets: readonly DraftScopeTarget[],
 ): { scopes: ScopePlan[]; problems: ScopeProblem[] } {
+  const omissions = a.dxfOmissions;
+  const omitted = new Set(omissions?.seeds);
+  const included = pieces.filter((p) => !omitted.has(p.seed));
+  const omittedIdentities = new Set(
+    pieces.filter((p) => omitted.has(p.seed)).map((p) => p.identity),
+  );
+  if (omissions && omitted.size) {
+    const seeds = new Set(pieces.map((p) => p.seed));
+    if (
+      !targets.some((t) => t.scopeKey === omissions.scopeKey) ||
+      [...omitted].some((seed) => !seeds.has(seed))
+    )
+      return {
+        scopes: [],
+        problems: [{ kind: 'selection', seeds: [], message: 'Review the selection for this DXF.' }],
+      };
+    if (!included.length)
+      return {
+        scopes: [],
+        problems: [
+          { kind: 'selection', seeds: [], message: 'Include at least one piece in this import.' },
+        ],
+      };
+  }
   const problems: ScopeProblem[] = [];
   const scopes: ScopePlan[] = [];
   const placed = new Set<SeedId>();
@@ -221,8 +246,14 @@ export function planScopes(
     if (seen.has(t.scopeKey)) continue; // one file per scope, never two (K1 item 7)
     seen.add(t.scopeKey);
     const ticked = new Set(a.byPurpose[t.scopeKey] ?? []);
-    const src = pieces.filter((p) => ticked.has(p.seed));
-    const specs = src.map((p) => scopedSpec(p, t));
+    const src = included.filter((p) => ticked.has(p.seed));
+    const specs = src.map((p) =>
+      scopedSpec(
+        // An omitted, separately drawn hand must not be synthesized by the writer.
+        p.pairOf && omittedIdentities.has(p.pairOf) ? { ...p, pairHand: null, pairOf: null } : p,
+        t,
+      ),
+    );
     if (!specs.length) continue;
     const sourceOf: Record<PieceKey, PieceKey> = {};
     const byId = new Map<string, SeedId[]>();
@@ -245,10 +276,10 @@ export function planScopes(
   const fused = fusedSeeds(a, targets);
   const refusedSeeds = new Set((a.refused ?? []).flatMap((r) => r.seeds));
   for (const r of a.refused ?? []) {
-    const open = r.seeds.filter((s) => !placed.has(s));
+    const open = r.seeds.filter((s) => !placed.has(s) && !omitted.has(s));
     if (open.length) problems.push({ kind: 'refused', seeds: open, message: r.reason });
   }
-  const orphan = [...new Set(pieces.map((p) => p.seed))].filter(
+  const orphan = [...new Set(included.map((p) => p.seed))].filter(
     (s) => !placed.has(s) && !refusedSeeds.has(s),
   );
   if (orphan.length) {

@@ -10,6 +10,7 @@ import { isPatternImportDxfPhaseECadTableZeroConnectAuthoringRequestV1 } from '.
 import {
   isPatternImportDxfPhaseEZeroConnectPreparedAuthorityV1,
   type PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1,
+  type PatternImportDxfPhaseEZeroConnectRefreshLockV1,
 } from './cad-table-zero-connect-phase-e-authority-v1';
 import type { PatternImportDxfPhaseECadTableZeroConnectCandidateV1 } from './cad-table-zero-connect-session-v1';
 import {
@@ -276,7 +277,10 @@ export type PatternImportDxfPhaseEZeroConnectSeamLinkAuthorityRefreshResultV1 =
 
 const refreshedAuthorityByOwner = new WeakMap<
   object,
-  PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1
+  Readonly<{
+    lock: PatternImportDxfPhaseEZeroConnectRefreshLockV1;
+    authority: PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1;
+  }>
 >();
 
 function authorityMatchesCatalog(
@@ -297,6 +301,7 @@ function authorityMatchesCatalog(
 export async function refreshPatternImportDxfPhaseEZeroConnectSeamLinkAuthorityV1(
   request: PatternImportDxfPhaseEZeroConnectPostSaveOwnerRequestV1,
   signal: AbortSignal,
+  lock: PatternImportDxfPhaseEZeroConnectRefreshLockV1 = 'advanced',
 ): Promise<PatternImportDxfPhaseEZeroConnectSeamLinkAuthorityRefreshResultV1> {
   if (
     signal.aborted ||
@@ -316,8 +321,9 @@ export async function refreshPatternImportDxfPhaseEZeroConnectSeamLinkAuthorityV
       }),
     });
   const cached = refreshedAuthorityByOwner.get(request.authoringAuthorityRefresh);
-  if (cached) return Object.freeze({ ok: true as const, authority: cached, blocker: null });
-  const refreshed = await request.authoringAuthorityRefresh.refresh(signal);
+  if (cached?.lock === lock)
+    return Object.freeze({ ok: true as const, authority: cached.authority, blocker: null });
+  const refreshed = await request.authoringAuthorityRefresh.refresh(signal, lock);
   if (
     !refreshed.ok ||
     signal.aborted ||
@@ -333,7 +339,10 @@ export async function refreshPatternImportDxfPhaseEZeroConnectSeamLinkAuthorityV
           : refreshed.blocker.detail,
       }),
     });
-  refreshedAuthorityByOwner.set(request.authoringAuthorityRefresh, refreshed.authority);
+  refreshedAuthorityByOwner.set(request.authoringAuthorityRefresh, {
+    lock,
+    authority: refreshed.authority,
+  });
   return Object.freeze({ ok: true as const, authority: refreshed.authority, blocker: null });
 }
 

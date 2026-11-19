@@ -1,3 +1,4 @@
+import { mapAuthoredQuadratic } from 'lib/pattern-import/manifest/authored-internal';
 import type { PieceSizeSpec, PieceSpec, PtMm, WriteJob } from 'lib/pattern-import/types';
 
 import { executePatternImportDxfPhaseEDraftCadCutGeometryV1 } from './draft-cad-cut-geometry-executor-v1';
@@ -203,6 +204,7 @@ function rotateSize(size: PieceSizeSpec, pivot: PtMm, radians: number): PieceSiz
   const cut = size.cut.map(point);
   const output = structuredClone(size);
   output.cut = cut;
+  if (size.cutLoops?.length) output.cutLoops = size.cutLoops.map((loop) => loop.map(point));
   output.seam = size.seam?.map(point) ?? null;
   output.notches = size.notches.map((feature) => ({
     ...structuredClone(feature),
@@ -213,9 +215,16 @@ function rotateSize(size: PieceSizeSpec, pivot: PtMm, radians: number): PieceSiz
     ...structuredClone(feature),
     at: point(feature.at),
   }));
+  if (size.textMarks?.length)
+    output.textMarks = size.textMarks.map((mark) => ({ ...mark, at: point(mark.at) }));
+  if (size.pointMarks?.length)
+    output.pointMarks = size.pointMarks.map((mark) => ({ ...mark, at: point(mark.at) }));
   output.internal = size.internal.map((feature) => ({
     ...structuredClone(feature),
     pts: feature.pts.map(point),
+    ...(feature.authoredQuadratic
+      ? { authoredQuadratic: mapAuthoredQuadratic(feature.authoredQuadratic, point) }
+      : {}),
   }));
   output.grain = size.grain
     ? {
@@ -261,20 +270,21 @@ function derivedIdentity(
   source: PieceSpec,
   cut: CutCommand,
   spread: SpreadCommand,
+  pivot: PtMm,
 ): readonly [string, string] {
   const fingerprint = fnv1a64(
     JSON.stringify({
       source: source.identity,
       line: spread.target.pieceLineKey,
       cut: normalizedCut(cut.payload.pointsMm),
-      pivot: normalizedPoint(spread.payload.pivotMm),
+      pivot: normalizedPoint(pivot),
       amountMm: spread.payload.amountMm,
     }),
-  ).slice(0, 10);
-  return [
-    `${source.identity}__SPREAD_${fingerprint}_A`,
-    `${source.identity}__SPREAD_${fingerprint}_B`,
-  ];
+  )
+    .slice(0, 10)
+    .toUpperCase();
+  const stem = `S${fingerprint}`;
+  return [`${stem}A`, `${stem}B`];
 }
 
 /**
@@ -298,6 +308,7 @@ export function executePatternImportDxfPhaseEDraftCadSpreadGeometryV1(
     spread.payload.cutLineEntityId !== cut.payload.entityId ||
     spread.target.pieceId !== cut.target.pieceId ||
     spread.target.pieceLineKey !== cut.target.pieceLineKey ||
+    spread.payload.mode === 'parallel' ||
     !finitePoint(spread.payload.pivotMm)
   )
     return blocked(
@@ -312,6 +323,7 @@ export function executePatternImportDxfPhaseEDraftCadSpreadGeometryV1(
       spread.target.pieceId,
     );
 
+  const pivotMm = spread.payload.pivotMm;
   const sourceMatches = sourceJob.pieces.filter(
     ({ identity }) => identity === spread.target.pieceId,
   );
@@ -362,7 +374,7 @@ export function executePatternImportDxfPhaseEDraftCadSpreadGeometryV1(
         `Spread size ${stationarySize.sizeToken} does not expose exactly two slash endpoints.`,
         source.identity,
       );
-    const pivotMatches = shared.filter((point) => samePoint(point, spread.payload.pivotMm));
+    const pivotMatches = shared.filter((point) => samePoint(point, pivotMm));
     if (pivotMatches.length !== 1)
       return blocked(
         'invalid-pivot',
@@ -417,7 +429,7 @@ export function executePatternImportDxfPhaseEDraftCadSpreadGeometryV1(
       source.identity,
     );
 
-  const identities = derivedIdentity(source, cut, spread);
+  const identities = derivedIdentity(source, cut, spread, pivotMm);
   if (
     job.pieces.some(
       (piece) =>

@@ -2,10 +2,12 @@
 // golden writer (tmp/plans/pdf-to-dxf/k2-work/write-golden.mjs). Every tag outside geometry is
 // deterministic; `golden-min.dxf` is the structural fixture (scripts/pattern-import/f6-entry.ts).
 
+import { AUTHORED_TEXT_HEIGHT_MM, AUTHORED_TEXT_LAYER } from '../manifest/authored-text';
 import type { PtMm } from '../types';
 import type { PlannedBlock, PlannedDrill } from './plan';
 import { DRILL_CIRCLE_SEGMENTS, DRILL_SQUARE_MM } from './plan';
 import { type Tag, hex, num, serialize, txt } from './format';
+import { AUTHORED_POINT_LAYERS } from '../manifest/authored-point';
 
 /** CLO's 8 layers (name, ACI colour). */
 export const CLO_LAYERS: readonly [string, number][] = [
@@ -202,8 +204,19 @@ export function writeR2000(blocks: readonly PlannedBlock[]): string {
     E(40, num(0));
   }
   E(0, 'ENDTAB');
-  tableHead('LAYER', 3, CLO_LAYERS.length);
-  for (const [n, c] of CLO_LAYERS) {
+  const markLayers = new Set<string>();
+  for (const block of blocks) {
+    if (block.size.textMarks?.length) markLayers.add(AUTHORED_TEXT_LAYER);
+    for (const mark of block.size.pointMarks ?? [])
+      markLayers.add(AUTHORED_POINT_LAYERS[mark.kind]);
+  }
+  const layers: [string, number][] = [
+    ...CLO_LAYERS,
+    ...[...markLayers].map((name): [string, number] => [name, 8]),
+  ];
+  if (blocks.some((block) => block.confirmedHalfFold)) layers.push(['6', 3]);
+  tableHead('LAYER', 3, layers.length);
+  for (const [n, c] of layers) {
     E(0, 'LAYER');
     E(5, hex(h++));
     rec('AcDbLayerTableRecord', 3);
@@ -328,7 +341,10 @@ export function writeR2000(blocks: readonly PlannedBlock[]): string {
     if (b.seam) lw(o, '14', b.seam, true); // seam line first, as CLO does
     lw(o, '1', b.cut, true); // final cutting line
     for (const loop of b.cutLoops) lw(o, '1', loop, true);
-    for (const ip of b.internal) lw(o, '8', ip.pts, ip.closed);
+    b.internal.forEach((line, index) => {
+      const isHalfAxis = b.confirmedHalfFold && index === b.internal.length - 1;
+      lw(o, isHalfAxis ? '6' : '8', line.pts, line.closed);
+    });
     for (const d of b.drills) lw(o, '8', drillMark(d), true);
     if (b.grain) lw(o, '7', [b.grain.tail, b.grain.tip, b.grain.barb], false);
     for (const n of b.notches) {
@@ -350,6 +366,14 @@ export function writeR2000(blocks: readonly PlannedBlock[]): string {
         s,
       ),
     );
+    for (const mark of b.size.textMarks ?? [])
+      text(o, AUTHORED_TEXT_LAYER, mark.at, AUTHORED_TEXT_HEIGHT_MM, mark.text);
+    for (const { kind, at } of b.size.pointMarks ?? []) {
+      ent('POINT', o, AUTHORED_POINT_LAYERS[kind], 'AcDbPoint');
+      E(10, num(at.x));
+      E(20, num(at.y));
+      E(30, num(0));
+    }
     blockEnd(o, false);
   });
   E(0, 'ENDSEC');

@@ -1,6 +1,19 @@
+import { parseAuthoredAllowanceCorner } from 'lib/pattern-import/manifest/authored-allowance-corner';
+import { isAuthoredTurnAllowanceVariant } from 'lib/pattern-import/manifest/authored-turn-allowance';
+import {
+  parseAuthoredOutlineCorner,
+  parseAuthoredFixedEndOutlineCorner,
+  validDraftCornerSetbackV1,
+} from 'lib/pattern-import/manifest/authored-outline-corner';
+import { normalizeAuthoredText } from 'lib/pattern-import/manifest/authored-text';
 import type { PatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import type { DxfProductPhaseDReplayCarrierV1 } from 'lib/pattern-import/dxf-product-phase-d-replay-v1';
-import type { PtMm } from 'lib/pattern-import/types';
+import type {
+  AuthoredQuadraticGrid,
+  AuthoredTurnAllowanceVariant,
+  ManifestAuthoredAllowanceCorner,
+  PtMm,
+} from 'lib/pattern-import/types';
 
 export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_SESSION_V1 =
   'pattern-import-dxf-phase-e-draft-cad-session/1' as const;
@@ -11,6 +24,13 @@ export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_TOOLS_V1 = Object.freeze([
   'circle',
   'ellipse',
   'add-point',
+  'move-point',
+  'delete-point',
+  'sharpen-corner',
+  'round-corner',
+  'allowance-corner',
+  'edge-length',
+  'allowance-offset',
   'internal-line',
   'french-curve',
   'draft-point',
@@ -35,20 +55,41 @@ export type PatternImportDxfPhaseEDraftCadToolV1 =
  * The larger command union remains readable for old/session evidence, but unsupported intents are
  * not advertised as working CAD actions in the production rail.
  */
+export const DRAFT_CAD_CROSS_MARK_HALF_SPAN_MM = 3;
+
 export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_PRODUCTIVE_TOOLS_V1 = Object.freeze([
+  'pen',
   'rectangle',
   'circle',
   'ellipse',
   'internal-line',
   'pattern-line',
   'french-curve',
+  'guideline',
+  'draft-point',
+  'point-only',
   'add-point',
+  'move-point',
+  'delete-point',
+  'sharpen-corner',
+  'edge-length',
+  'allowance-offset',
   'dart',
+  'fish-eye',
   'cut',
   'spread',
   'mark',
   'notch',
 ] as const satisfies readonly PatternImportDxfPhaseEDraftCadToolV1[]);
+
+export function validParallelDisplacementV1(amount: number) {
+  return Number.isFinite(amount) && amount !== 0 && Number(amount.toFixed(6)) === amount;
+}
+export function parallelOpeningAxisV1(points: readonly PtMm[]) {
+  const [a, b] = points;
+  if (points.length !== 2 || !a || !b) return null;
+  return a.x === b.x && a.y !== b.y ? 'x' : a.y === b.y && a.x !== b.x ? 'y' : null;
+}
 
 export type PatternImportDxfPhaseEDraftCadTargetV1 = Readonly<
   Pick<
@@ -77,6 +118,12 @@ export type PatternImportDxfPhaseEDraftCadRectanglePieceV1 = Readonly<{
   placementPolicy: 'separate-writer-block';
 }>;
 
+export type PatternImportDxfPhaseEDraftCadPenPieceV1 = Readonly<
+  Omit<PatternImportDxfPhaseEDraftCadRectanglePieceV1, 'vertexIds'> & {
+    vertexIds: readonly string[];
+  }
+>;
+
 /**
  * Explicit identity and approximation contract for circle/ellipse piece creation. PieceSpec stores
  * closed boundaries as point loops, so curved authoring uses a deterministic bounded polyline and
@@ -93,6 +140,23 @@ export type PatternImportDxfPhaseEDraftCadRoundPieceV1 = Readonly<{
   placementPolicy: 'separate-writer-block';
 }>;
 
+export type SavedDraftInternalPathBindingV1 = Readonly<{
+  pieceId: string;
+  pieceLineKey: string;
+  sourceSha256: string;
+  scopeKey: string;
+  sizeToken: string;
+  sizeId: number;
+  rank: number;
+  index: number;
+  original: readonly PtMm[];
+}>;
+
+export type SavedDraftDartPathBindingV1 = SavedDraftInternalPathBindingV1;
+export type SavedDraftFrenchCurveBindingV1 = SavedDraftInternalPathBindingV1 & {
+  readonly sourcePathId: number;
+};
+
 type Command<Tool extends PatternImportDxfPhaseEDraftCadToolV1, Payload> = Readonly<{
   commandId: string;
   tool: Tool;
@@ -101,7 +165,15 @@ type Command<Tool extends PatternImportDxfPhaseEDraftCadToolV1, Payload> = Reado
 }>;
 
 export type PatternImportDxfPhaseEDraftCadCommandV1 =
-  | Command<'pen', { entityId: string; pointsMm: readonly PtMm[]; closed: boolean }>
+  | Command<
+      'pen',
+      {
+        entityId: string;
+        pointsMm: readonly PtMm[];
+        closed: boolean;
+        newPiece?: PatternImportDxfPhaseEDraftCadPenPieceV1;
+      }
+    >
   | Command<
       'rectangle',
       {
@@ -147,8 +219,68 @@ export type PatternImportDxfPhaseEDraftCadCommandV1 =
         edge?: PatternImportDxfPhaseEDraftCadBoundaryAnchorV1;
       }
     >
+  | Command<
+      'move-point',
+      { entityId: string; contourId: string; vertexId: string; pointMm: PtMm; sizeToken: string }
+    >
+  | Command<
+      'delete-point',
+      { entityId: string; contourId: string; vertexId: string; sizeToken: string }
+    >
+  | Command<
+      'sharpen-corner',
+      { entityId: string; edge: PatternImportDxfPhaseEDraftCadBoundaryAnchorV1; sizeToken: string }
+    >
+  | Command<
+      'round-corner',
+      {
+        entityId: string;
+        contourId: string;
+        vertexId: string;
+        sizeToken: string;
+        setbackMm: number;
+        savedCorner?: AuthoredQuadraticGrid;
+        fixedEnd?: 'start' | 'end';
+      }
+    >
+  | Command<
+      'allowance-corner',
+      {
+        entityId: string;
+        sizeToken: string;
+        allRanks: true;
+        corner: ManifestAuthoredAllowanceCorner;
+      }
+    >
+  | Command<
+      'edge-length',
+      {
+        entityId: string;
+        edge: PatternImportDxfPhaseEDraftCadBoundaryAnchorV1;
+        fixed: 'start' | 'end';
+        lengthMm: number;
+        sizeToken: string;
+      }
+    >
+  | Command<
+      'allowance-offset',
+      {
+        entityId: string;
+        edge: PatternImportDxfPhaseEDraftCadBoundaryAnchorV1;
+        offsetMm: number;
+        turnAllowance?: AuthoredTurnAllowanceVariant;
+        sizeToken: string;
+      }
+    >
   | Command<'internal-line', { entityId: string; pointsMm: readonly PtMm[] }>
-  | Command<'french-curve', { entityId: string; controlPointsMm: readonly PtMm[] }>
+  | Command<
+      'french-curve',
+      {
+        entityId: string;
+        controlPointsMm: readonly PtMm[];
+        savedCurve?: SavedDraftFrenchCurveBindingV1;
+      }
+    >
   | Command<'draft-point', { entityId: string; pointMm: PtMm }>
   | Command<'guideline', { entityId: string; fromMm: PtMm; toMm: PtMm }>
   | Command<'pattern-line', { entityId: string; pointsMm: readonly PtMm[]; closed: boolean }>
@@ -158,22 +290,34 @@ export type PatternImportDxfPhaseEDraftCadCommandV1 =
       {
         entityId: string;
         base: PatternImportDxfPhaseEDraftCadBoundaryAnchorV1;
+        savedTip?: SavedDraftDartPathBindingV1;
+        savedIntakeSourcePathId?: number;
         apexMm: PtMm;
         intakeMm: number;
       }
     >
   | Command<
       'fish-eye',
-      { entityId: string; centerMm: PtMm; axisMm: number; intakeMm: number; rotationDeg: number }
+      { entityId: string; centerMm: PtMm } & (
+        | { axisMm: number; intakeMm: number; rotationDeg: number; savedMove?: never }
+        | {
+            savedMove: SavedDraftDartPathBindingV1 & { readonly sourcePathId: number };
+            axisMm?: never;
+            intakeMm?: never;
+            rotationDeg?: never;
+          }
+      )
     >
   | Command<
       'spread',
       {
         entityId: string;
-        pivotMm: PtMm;
         cutLineEntityId: string;
         amountMm: number;
-      }
+      } & (
+        | { mode?: 'pivot'; pivotMm: PtMm }
+        | { mode: 'parallel'; movingSide: 'positive' | 'negative' }
+      )
     >
   | Command<
       'gather',
@@ -206,7 +350,10 @@ export type PatternImportDxfPhaseEDraftCadCommandV1 =
         depthMm: number;
       }
     >
-  | Command<'mark', { entityId: string; pointMm: PtMm; kind: 'drill' | 'cross' | 'text' }>;
+  | Command<
+      'mark',
+      { entityId: string; pointMm: PtMm; kind: 'drill' | 'cross' | 'text'; text?: string }
+    >;
 
 export type PatternImportDxfPhaseEDraftCadSourceV1 = Readonly<{
   phaseD: Readonly<
@@ -245,6 +392,8 @@ export type PatternImportDxfPhaseEDraftCadTransactionV1 = Readonly<{
   label: string;
   status: 'intent-only';
   commands: readonly PatternImportDxfPhaseEDraftCadCommandV1[];
+  /** A local handle revision replays in the original command's slot. */
+  revisesFrenchCurveCommandId?: string;
 }>;
 
 export type PatternImportDxfPhaseEDraftCadBlockerV1 = Readonly<{
@@ -310,6 +459,28 @@ function target(value: unknown): value is PatternImportDxfPhaseEDraftCadTargetV1
   return stableId(candidate.pieceId) && stableId(candidate.pieceLineKey);
 }
 
+function validSavedInternalPath(value: unknown, pointCount: number, requireSourcePath = false) {
+  if (!value || typeof value !== 'object') return false;
+  const p = value as Record<string, unknown>;
+  return (
+    typeof p.sourceSha256 === 'string' &&
+    SHA256.test(p.sourceSha256) &&
+    stableId(p.pieceId) &&
+    stableId(p.pieceLineKey) &&
+    stableId(p.scopeKey) &&
+    stableId(p.sizeToken) &&
+    [p.rank, p.index, p.sizeId].every(
+      (n) => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0,
+    ) &&
+    (!requireSourcePath ||
+      (typeof p.sourcePathId === 'number' &&
+        Number.isSafeInteger(p.sourcePathId) &&
+        p.sourcePathId >= 0)) &&
+    points(p.original, pointCount) &&
+    p.original.length === pointCount
+  );
+}
+
 function boundaryAnchor(value: unknown): value is PatternImportDxfPhaseEDraftCadBoundaryAnchorV1 {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const candidate = value as Partial<PatternImportDxfPhaseEDraftCadBoundaryAnchorV1>;
@@ -326,17 +497,17 @@ function boundaryAnchor(value: unknown): value is PatternImportDxfPhaseEDraftCad
   );
 }
 
-function rectanglePiece(value: unknown): value is PatternImportDxfPhaseEDraftCadRectanglePieceV1 {
+function linearPiece(value: unknown, count: number): boolean {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const candidate = value as Partial<PatternImportDxfPhaseEDraftCadRectanglePieceV1>;
+  const candidate = value as Partial<PatternImportDxfPhaseEDraftCadPenPieceV1>;
   return (
     stableId(candidate.pieceId) &&
     stableId(candidate.pieceLineKey) &&
     stableId(candidate.contourId) &&
     Array.isArray(candidate.vertexIds) &&
-    candidate.vertexIds.length === 4 &&
+    candidate.vertexIds.length === count &&
     candidate.vertexIds.every(stableId) &&
-    new Set(candidate.vertexIds).size === 4 &&
+    new Set(candidate.vertexIds).size === count &&
     typeof candidate.displayName === 'string' &&
     candidate.displayName.trim().length > 0 &&
     candidate.displayName.trim().length <= 256 &&
@@ -389,6 +560,15 @@ function validCommand(value: unknown): value is PatternImportDxfPhaseEDraftCadCo
   if (!stableId(payload.entityId)) return false;
   switch (value.tool) {
     case 'pen':
+      return (
+        points(payload.pointsMm, 2) &&
+        typeof payload.closed === 'boolean' &&
+        (payload.newPiece === undefined ||
+          (payload.closed &&
+            payload.pointsMm.length >= 3 &&
+            payload.pointsMm.length <= 256 &&
+            linearPiece(payload.newPiece, payload.pointsMm.length)))
+      );
     case 'pattern-line':
       return points(payload.pointsMm, 2) && typeof payload.closed === 'boolean';
     case 'rectangle':
@@ -397,7 +577,7 @@ function validCommand(value: unknown): value is PatternImportDxfPhaseEDraftCadCo
         finitePositive(payload.widthMm) &&
         finitePositive(payload.heightMm) &&
         Number.isFinite(payload.rotationDeg) &&
-        (payload.newPiece === undefined || rectanglePiece(payload.newPiece))
+        (payload.newPiece === undefined || linearPiece(payload.newPiece, 4))
       );
     case 'circle':
       return (
@@ -425,10 +605,61 @@ function validCommand(value: unknown): value is PatternImportDxfPhaseEDraftCadCo
             (payload.edge as PatternImportDxfPhaseEDraftCadBoundaryAnchorV1)
               .boundaryVertexIds[0] === payload.afterVertexId))
       );
+    case 'move-point':
+    case 'delete-point':
+      return (
+        stableId(payload.contourId) &&
+        stableId(payload.vertexId) &&
+        (value.tool === 'delete-point' || point(payload.pointMm)) &&
+        stableId(payload.sizeToken)
+      );
+    case 'sharpen-corner':
+      return boundaryAnchor(payload.edge) && stableId(payload.sizeToken);
+    case 'round-corner':
+      return (
+        stableId(payload.contourId) &&
+        stableId(payload.vertexId) &&
+        stableId(payload.sizeToken) &&
+        typeof payload.setbackMm === 'number' &&
+        validDraftCornerSetbackV1(payload.setbackMm) &&
+        (payload.fixedEnd === undefined
+          ? payload.savedCorner === undefined ||
+            parseAuthoredOutlineCorner(payload.savedCorner) !== null
+          : (payload.fixedEnd === 'start' || payload.fixedEnd === 'end') &&
+            (parseAuthoredOutlineCorner(payload.savedCorner) !== null ||
+              parseAuthoredFixedEndOutlineCorner(payload.savedCorner) !== null))
+      );
+    case 'allowance-corner':
+      return (
+        payload.allRanks === true &&
+        stableId(payload.sizeToken) &&
+        parseAuthoredAllowanceCorner(payload.corner) !== null
+      );
+    case 'edge-length':
+      return (
+        boundaryAnchor(payload.edge) &&
+        (payload.fixed === 'start' || payload.fixed === 'end') &&
+        finitePositive(payload.lengthMm) &&
+        stableId(payload.sizeToken)
+      );
+    case 'allowance-offset':
+      return (
+        boundaryAnchor(payload.edge) &&
+        typeof payload.offsetMm === 'number' &&
+        validParallelDisplacementV1(payload.offsetMm) &&
+        (payload.turnAllowance === undefined ||
+          (isAuthoredTurnAllowanceVariant(payload.turnAllowance) && payload.offsetMm > 0)) &&
+        stableId(payload.sizeToken)
+      );
     case 'internal-line':
       return points(payload.pointsMm, 2);
     case 'french-curve':
-      return points(payload.controlPointsMm, 3);
+      return (
+        points(payload.controlPointsMm, 3) &&
+        (payload.savedCurve === undefined ||
+          (payload.controlPointsMm.length === 3 &&
+            validSavedInternalPath(payload.savedCurve, 3, true)))
+      );
     case 'draft-point':
     case 'point-only':
       return point(payload.pointMm);
@@ -436,18 +667,34 @@ function validCommand(value: unknown): value is PatternImportDxfPhaseEDraftCadCo
       return point(payload.fromMm) && point(payload.toMm);
     case 'dart':
       return (
-        boundaryAnchor(payload.base) && point(payload.apexMm) && finitePositive(payload.intakeMm)
+        boundaryAnchor(payload.base) &&
+        point(payload.apexMm) &&
+        finitePositive(payload.intakeMm) &&
+        (payload.savedTip === undefined || validSavedInternalPath(payload.savedTip, 3)) &&
+        (payload.savedIntakeSourcePathId === undefined ||
+          (payload.savedTip !== undefined &&
+            typeof payload.savedIntakeSourcePathId === 'number' &&
+            Number.isSafeInteger(payload.savedIntakeSourcePathId) &&
+            payload.savedIntakeSourcePathId >= 0))
       );
     case 'fish-eye':
       return (
         point(payload.centerMm) &&
-        finitePositive(payload.axisMm) &&
-        finitePositive(payload.intakeMm) &&
-        Number.isFinite(payload.rotationDeg)
+        (payload.savedMove !== undefined
+          ? validSavedInternalPath(payload.savedMove, 4, true) &&
+            payload.axisMm === undefined &&
+            payload.intakeMm === undefined &&
+            payload.rotationDeg === undefined
+          : finitePositive(payload.axisMm) &&
+            finitePositive(payload.intakeMm) &&
+            Number.isFinite(payload.rotationDeg))
       );
     case 'spread':
       return (
-        point(payload.pivotMm) &&
+        (payload.mode === 'parallel'
+          ? payload.pivotMm === undefined &&
+            (payload.movingSide === 'positive' || payload.movingSide === 'negative')
+          : (payload.mode === undefined || payload.mode === 'pivot') && point(payload.pivotMm)) &&
         stableId(payload.cutLineEntityId) &&
         finitePositive(payload.amountMm)
       );
@@ -479,7 +726,11 @@ function validCommand(value: unknown): value is PatternImportDxfPhaseEDraftCadCo
     case 'mark':
       return (
         point(payload.pointMm) &&
-        (payload.kind === 'drill' || payload.kind === 'cross' || payload.kind === 'text')
+        (payload.kind === 'drill' || payload.kind === 'cross' || payload.kind === 'text') &&
+        (payload.text === undefined ||
+          (payload.kind === 'text' &&
+            typeof payload.text === 'string' &&
+            normalizeAuthoredText(payload.text) === payload.text))
       );
   }
 }
@@ -504,12 +755,22 @@ function eligibility(cursor: number): PatternImportDxfPhaseEDraftCadApplyEligibi
   });
 }
 
+const recordedSessions = new WeakSet<object>();
+
+/** A structural copy cannot authorize an authored-geometry review. */
+export function isRecordedDraftCadSessionV1(
+  value: PatternImportDxfPhaseEDraftCadSessionV1,
+): boolean {
+  return recordedSessions.has(value);
+}
+
 function session(
   source: PatternImportDxfPhaseEDraftCadSourceV1,
   history: readonly PatternImportDxfPhaseEDraftCadTransactionV1[],
   cursor: number,
+  parent?: PatternImportDxfPhaseEDraftCadSessionV1,
 ): PatternImportDxfPhaseEDraftCadSessionV1 {
-  return deepFreeze({
+  const next: PatternImportDxfPhaseEDraftCadSessionV1 = deepFreeze({
     schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_SESSION_V1,
     source,
     history,
@@ -517,6 +778,8 @@ function session(
     dirty: cursor > 0,
     apply: eligibility(cursor),
   });
+  if (!parent || recordedSessions.has(parent)) recordedSessions.add(next);
+  return next;
 }
 
 export function createPatternImportDxfPhaseEDraftCadSessionV1(
@@ -551,6 +814,129 @@ export function createPatternImportDxfPhaseEDraftCadSessionV1(
   });
 }
 
+export function draftCadNewPieceObjectKeyV1(commandId: string) {
+  return `draft:${commandId}`;
+}
+
+export function listActiveDraftCadNewPiecesV1(session: PatternImportDxfPhaseEDraftCadSessionV1) {
+  return session.history.slice(0, session.cursor).flatMap(({ commands }) =>
+    commands.flatMap((command) => {
+      if (
+        (command.tool === 'pen' ||
+          command.tool === 'rectangle' ||
+          command.tool === 'circle' ||
+          command.tool === 'ellipse') &&
+        command.payload.newPiece
+      )
+        return [{ commandId: command.commandId, ...command.payload.newPiece }];
+      return [];
+    }),
+  );
+}
+
+export type DraftCadFrenchCurveHandleV1 = 0 | 1 | 2;
+
+export function activeDraftCadTransactionsV1(
+  current: PatternImportDxfPhaseEDraftCadSessionV1,
+): readonly PatternImportDxfPhaseEDraftCadTransactionV1[] {
+  const active = current.history.slice(0, current.cursor);
+  if (!recordedSessions.has(current)) return active;
+
+  const revisions = new Map<string, PatternImportDxfPhaseEDraftCadCommandV1>();
+  for (const tx of active)
+    if (tx.revisesFrenchCurveCommandId)
+      revisions.set(tx.revisesFrenchCurveCommandId, tx.commands[0]);
+  if (!revisions.size) return active;
+
+  return active.flatMap((tx) =>
+    tx.revisesFrenchCurveCommandId
+      ? []
+      : [
+          {
+            ...tx,
+            commands: tx.commands.map((command) => revisions.get(command.commandId) ?? command),
+          },
+        ],
+  );
+}
+
+export function recordDraftCadFrenchCurveHandleV1(
+  current: PatternImportDxfPhaseEDraftCadSessionV1,
+  input: Readonly<{
+    transactionId: string;
+    commandId: string;
+    target: PatternImportDxfPhaseEDraftCadTargetV1;
+    handle: DraftCadFrenchCurveHandleV1;
+    expected: readonly PtMm[];
+    pointMm: PtMm;
+  }>,
+): PatternImportDxfPhaseEDraftCadSessionResultV1 {
+  const refuse = (detail: string) =>
+    Object.freeze({
+      ok: false as const,
+      session: current,
+      blocker: blocker('invalid-command', detail),
+    });
+  const active = current.history.slice(0, current.cursor);
+  if (
+    !recordedSessions.has(current) ||
+    !stableId(input.transactionId) ||
+    active.some(({ transactionId }) => transactionId === input.transactionId) ||
+    ![0, 1, 2].includes(input.handle) ||
+    !target(input.target) ||
+    !point(input.pointMm) ||
+    !points(input.expected, 3) ||
+    input.expected.length !== 3
+  )
+    return refuse('Move a curve handle in the current recorded Draft.');
+
+  const matching = activeDraftCadTransactionsV1(current)
+    .flatMap(({ commands }) => commands)
+    .filter(({ commandId }) => commandId === input.commandId);
+  const [curve] = matching;
+  if (
+    matching.length !== 1 ||
+    curve.tool !== 'french-curve' ||
+    curve.target.pieceId !== input.target.pieceId ||
+    curve.target.pieceLineKey !== input.target.pieceLineKey ||
+    curve.payload.controlPointsMm.length !== 3 ||
+    !curve.payload.controlPointsMm.every(
+      ({ x, y }, index) => x === input.expected[index].x && y === input.expected[index].y,
+    )
+  )
+    return refuse('The active French curve or its control points changed.');
+
+  const controlPointsMm = curve.payload.controlPointsMm.map((original, index) =>
+    index === input.handle ? { ...input.pointMm } : original,
+  );
+  const original = curve.payload.controlPointsMm[input.handle];
+  if (original.x === input.pointMm.x && original.y === input.pointMm.y)
+    return Object.freeze({ ok: true, session: current, blocker: null });
+  if (controlPointsMm.every(({ x, y }) => x === controlPointsMm[0].x && y === controlPointsMm[0].y))
+    return refuse('French curve control points must span a nonzero path.');
+
+  const revision = deepFreeze({
+    transactionId: input.transactionId,
+    label: 'Move French curve handle',
+    status: 'intent-only' as const,
+    revisesFrenchCurveCommandId: curve.commandId,
+    commands: [{ ...curve, payload: { ...curve.payload, controlPointsMm } }],
+  });
+  const next = session(
+    current.source,
+    Object.freeze([...active, revision]),
+    active.length + 1,
+    current,
+  );
+  return Object.freeze({ ok: true, session: next, blocker: null });
+}
+
+export function permitsDraftCadLocalPieceEditV1(
+  tool: PatternImportDxfPhaseEDraftCadToolV1,
+): boolean {
+  return tool === 'mark' || tool === 'draft-point' || tool === 'point-only';
+}
+
 export function recordPatternImportDxfPhaseEDraftCadTransactionV1(
   current: PatternImportDxfPhaseEDraftCadSessionV1,
   input: Readonly<{
@@ -579,11 +965,16 @@ export function recordPatternImportDxfPhaseEDraftCadTransactionV1(
       ({ pieceId, pieceLineKey }) => `${pieceId}\u0000${pieceLineKey}`,
     ),
   );
+  const localPieces = new Set(
+    listActiveDraftCadNewPiecesV1(current).map(
+      ({ pieceId, pieceLineKey }) => `${pieceId}\u0000${pieceLineKey}`,
+    ),
+  );
   if (
-    input.commands.some(
-      ({ target: commandTarget }) =>
-        !pieces.has(`${commandTarget.pieceId}\u0000${commandTarget.pieceLineKey}`),
-    )
+    input.commands.some(({ target: { pieceId, pieceLineKey }, tool }) => {
+      const key = `${pieceId}\u0000${pieceLineKey}`;
+      return !pieces.has(key) && !(permitsDraftCadLocalPieceEditV1(tool) && localPieces.has(key));
+    })
   )
     return Object.freeze({
       ok: false,
@@ -600,7 +991,12 @@ export function recordPatternImportDxfPhaseEDraftCadTransactionV1(
     commands: structuredClone(input.commands),
   });
   const active = current.history.slice(0, current.cursor);
-  const next = session(current.source, Object.freeze([...active, transaction]), active.length + 1);
+  const next = session(
+    current.source,
+    Object.freeze([...active, transaction]),
+    active.length + 1,
+    current,
+  );
   return Object.freeze({ ok: true, session: next, blocker: null });
 }
 
@@ -615,7 +1011,7 @@ export function undoPatternImportDxfPhaseEDraftCadSessionV1(
     });
   return Object.freeze({
     ok: true,
-    session: session(current.source, current.history, current.cursor - 1),
+    session: session(current.source, current.history, current.cursor - 1, current),
     blocker: null,
   });
 }
@@ -631,7 +1027,7 @@ export function redoPatternImportDxfPhaseEDraftCadSessionV1(
     });
   return Object.freeze({
     ok: true,
-    session: session(current.source, current.history, current.cursor + 1),
+    session: session(current.source, current.history, current.cursor + 1, current),
     blocker: null,
   });
 }

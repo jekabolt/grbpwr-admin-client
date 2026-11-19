@@ -72,7 +72,7 @@ async function handle(msg: ImportWorkerRequest): Promise<void> {
   switch (msg.type) {
     case 'open': {
       const id = nextSession++;
-      const s = new Session(id, msg.files);
+      const s = new Session(id, msg.files, msg.reviewedAddPoint);
       sessions.set(id, s);
       post({ type: 'opened', id: msg.id, sessionId: id, files: s.files });
       return;
@@ -100,6 +100,9 @@ async function handle(msg: ImportWorkerRequest): Promise<void> {
       try {
         const out = await s.runStage(msg.stage, msg.input as never, {
           checkCancel,
+          ...(msg.reviewedAddPointAtWrite
+            ? { reviewedAddPointAtWrite: msg.reviewedAddPointAtWrite }
+            : {}),
           progress: (done, total, note) => {
             checkCancel();
             // Throttled: a 91-page file would otherwise post thousands of ticks.

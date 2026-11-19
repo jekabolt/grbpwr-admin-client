@@ -394,6 +394,7 @@ export type ReplaySnapshot = {
   card: CardContext;
   baseSeeds: Seed[] | null;
   presegmented: boolean;
+  dxfImportScopeKey?: string;
   /** The step's question (blocker, else offer); null = a prefill (the step asks nothing). */
   question: string | null;
 };
@@ -1930,9 +1931,24 @@ function fabricsStep(c: Ctx): Out | null {
   const { s, i, card } = c;
   const a = s.fabrics;
   // fill-only: an assignment the operator touched in this run (or one replayed) stands
-  if (!a || i.assignment != null || !c.get('fabrics')) return null;
+  if (!a || i.assignment != null) return null;
   if (outOfScope(c, true)) return null;
   const exported = new Set((s.semantics?.pieces ?? []).map((p) => p.seed));
+  const selection = c.get('dxf-omitted-families');
+  const value = selection?.value as { scopeKey?: string; seeds?: number[] } | undefined;
+  // Block-family seeds are regenerated from the direct file. Reuse them only for the very same
+  // source bytes and the same slot; the outline matching used for fabric ticks is too weak here.
+  const dxfOmissions =
+    c.prior.exact &&
+    c.presegmented &&
+    c.dxfImportScopeKey &&
+    value?.scopeKey === c.dxfImportScopeKey &&
+    Array.isArray(value.seeds) &&
+    value.seeds.length > 0 &&
+    value.seeds.every((seed) => Number.isSafeInteger(seed))
+      ? { scopeKey: c.dxfImportScopeKey, seeds: [...new Set(value.seeds)] }
+      : undefined;
+  if (!dxfOmissions && !c.get('fabrics')) return null;
   const known = new Set<string>([
     ...card.scopes.map((x) => x.fabricPurpose),
     ...Object.keys(a.byPurpose),
@@ -1947,6 +1963,17 @@ function fabricsStep(c: Ctx): Out | null {
   );
   const matched = new Set<SeedId>();
   const as: Assumption[] = [];
+  if (dxfOmissions && selection)
+    as.push(
+      R(
+        c,
+        selection,
+        'fabric',
+        `${dxfOmissions.seeds.length} pieces omitted as before`,
+        [sameFiles(c)],
+        { ref: 'dxf-omitted-families' },
+      ),
+    );
   let moved = false;
   for (const m of piecesNow(c)) {
     const { v, seed: sd, rec } = m;
@@ -1995,7 +2022,9 @@ function fabricsStep(c: Ctx): Out | null {
   }
   // what the step asks that the previous import did not answer for a piece of the same outline
   const askAi = (a.aiOnly ?? []).filter((x) => x.needsConfirm && !matched.has(x.seed));
-  const askDefault = [...defaulted].filter((sd) => !matched.has(sd));
+  const askDefault = [...defaulted].filter(
+    (sd) => !matched.has(sd) && !dxfOmissions?.seeds.includes(sd),
+  );
   for (const x of [...askAi.map((y) => y.seed), ...askDefault])
     c.miss(`piece|${x}|fab`, `piece seed ${x}: its fabric was not answered last time`);
   // an assignment sent back ends the "main by default" offer for EVERY piece: never while one of
@@ -2006,8 +2035,15 @@ function fabricsStep(c: Ctx): Out | null {
       {
         type: 'fabrics',
         assignment:
-          moved || aiOnly.some((x, k) => x.needsConfirm !== a.aiOnly?.[k]?.needsConfirm)
-            ? { ...a, byPurpose: byPurpose as Record<FabricPurposeKey, SeedId[]>, aiOnly }
+          dxfOmissions ||
+          moved ||
+          aiOnly.some((x, k) => x.needsConfirm !== a.aiOnly?.[k]?.needsConfirm)
+            ? {
+                ...a,
+                byPurpose: byPurpose as Record<FabricPurposeKey, SeedId[]>,
+                aiOnly,
+                dxfOmissions,
+              }
             : a,
       },
     ],
@@ -2023,6 +2059,7 @@ export type ReplaySource = () => {
   card: CardContext;
   baseSeeds: Seed[] | null;
   presegmented: boolean;
+  dxfImportScopeKey?: string;
 };
 
 export type ReplayLog = {
@@ -2054,6 +2091,7 @@ export function replayDrive(
         card: x.card,
         baseSeeds: x.baseSeeds,
         presegmented: x.presegmented,
+        dxfImportScopeKey: x.dxfImportScopeKey,
         question,
       },
       x.prior,

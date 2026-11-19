@@ -69,6 +69,9 @@ export type PrintJob = {
   logo?: Art | null;
   caption?: readonly string[];
   address?: readonly string[];
+  /** Бренд команды (teams ON): юрстроки и монограмма. Нет полей — как было, байт-в-байт. */
+  company?: readonly string[];
+  houseMark?: boolean;
 };
 
 // ---------- выход ----------
@@ -211,6 +214,7 @@ export function planPrint(sh: Shaper, job: PrintJob): PrintSet {
           care: job.care,
           country: cw.country,
           logo: job.logo,
+          houseMark: job.houseMark,
         },
         seamFor(mode, 'face', orientation),
         orientation,
@@ -232,7 +236,7 @@ export function planPrint(sh: Shaper, job: PrintJob): PrintSet {
       if (!sides.has(bKey)) {
         const back = typesetABack(
           sh,
-          { url: s.qrUrl, caption: job.caption, address: job.address },
+          { url: s.qrUrl, caption: job.caption, address: job.address, company: job.company },
           seamFor(mode, 'back', orientation),
           orientation,
         );

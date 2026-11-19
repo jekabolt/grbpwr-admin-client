@@ -198,16 +198,21 @@ export async function stubAnswer(method: string, body: string | null): Promise<u
       } catch {
         /* none */
       }
+      if (h.kind !== 'team')
+        return { account: { username: 'mira', isSuper: true, permissions: [] } };
+      // the workspace screen's team (brand, logo, role): stub.ws picks the scenario
+      const { stubWorkspace } = await import('components/workspace/dev-stub');
+      const ws = stubWorkspace(DEFAULT_FEATURES);
       return {
-        account: { username: 'mira', isSuper: true, permissions: [] },
-        workspace:
-          h.kind === 'team'
-            ? { slug: h.slug, name: h.slug, role: 'owner', features: DEFAULT_FEATURES, readOnly }
-            : undefined,
+        account: { username: ws.you, isSuper: true, permissions: [] },
+        workspace: { ...ws.workspace, slug: h.slug, readOnly: readOnly || ws.workspace.readOnly },
       };
     }
     default: {
-      // console and people calls (lane C2)
+      // workspace calls (brand, people, access), then console calls (lane C2)
+      const { workspaceStubAnswer } = await import('components/workspace/dev-stub');
+      const ws = workspaceStubAnswer(method, body);
+      if (ws !== undefined) return ws;
       const { consoleStubAnswer } = await import('components/console/dev-stub');
       return consoleStubAnswer(method, body) ?? {};
     }

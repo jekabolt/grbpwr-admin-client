@@ -11,7 +11,7 @@ import type { BoxMm, PtMm } from 'lib/pattern-import/types';
 import { cn } from 'lib/utility';
 
 export type ViewBox = { x: number; y: number; w: number; h: number };
-export type ViewTool = 'pan' | 'point' | 'lasso' | 'move';
+export type ViewTool = 'pan' | 'point' | 'lasso' | 'marquee' | 'move';
 export type ViewModifiers = Readonly<{ shiftKey: boolean }>;
 
 export const vy = (y: number) => -y;
@@ -98,11 +98,11 @@ export function SheetViewport({
 }: {
   bbox: BoxMm;
   tool?: ViewTool;
-  /** Pointer released on an element carrying `data-key` without dragging. */
-  onPick?: (key: string, modifiers: ViewModifiers) => void;
+  /** Pointer released without dragging. Lasso clicks include the existing sheet-space point. */
+  onPick?: (key: string, modifiers: ViewModifiers & Readonly<{ pointMm?: PtMm }>) => void;
   /** 'point' tool: a click on the sheet, in mm. */
   onPoint?: (pt: PtMm) => void;
-  /** 'lasso' tool: the closed polygon the operator drew, in mm. */
+  /** 'lasso' and 'marquee' tools report a closed selection polygon in mm. */
   onLasso?: (pts: PtMm[], modifiers: ViewModifiers) => void;
   /** 'move' tool: incremental, finite millimetre delta for the keyed SVG element being dragged. */
   onMove?: (key: string, deltaMm: PtMm, modifiers: ViewModifiers) => void;
@@ -256,16 +256,16 @@ export function SheetViewport({
   };
 
   const unit = resolveSheetViewportUnit(box.w, viewportSize?.width ?? FALLBACK_VIEWPORT_WIDTH_PX);
-  const cursor =
-    tool === 'lasso'
-      ? 'cursor-crosshair'
-      : tool === 'point'
-        ? 'cursor-cell'
-        : tool === 'move'
-          ? 'cursor-move'
-          : panning
-            ? 'cursor-grabbing'
-            : 'cursor-grab';
+  const selectsRegion = tool === 'lasso' || tool === 'marquee';
+  const cursor = selectsRegion
+    ? 'cursor-crosshair'
+    : tool === 'point'
+      ? 'cursor-cell'
+      : tool === 'move'
+        ? 'cursor-move'
+        : panning
+          ? 'cursor-grabbing'
+          : 'cursor-grab';
 
   return (
     <svg
@@ -280,7 +280,7 @@ export function SheetViewport({
       onPointerDown={(e) => {
         if (e.button !== 0) return;
         const key = (e.target as Element).closest?.('[data-key]')?.getAttribute('data-key') ?? '';
-        if (tool === 'lasso') {
+        if (selectsRegion) {
           const p = toMm(e.clientX, e.clientY, box);
           if (p) setLasso([p]);
         }
@@ -299,14 +299,19 @@ export function SheetViewport({
       onPointerMove={(e) => {
         const st = gesture.current;
         if (!st) return;
-        if (tool === 'lasso') {
+        const dx = e.clientX - st.px;
+        const dy = e.clientY - st.py;
+        if (selectsRegion) {
           const p = toMm(e.clientX, e.clientY, st.box);
-          if (p) setLasso([...(lassoRef.current ?? []), p]);
+          if (tool === 'marquee') {
+            if (!st.moved && Math.abs(dx) + Math.abs(dy) < DRAG_SLOP) return;
+            const origin = lassoRef.current?.[0];
+            if (origin && p)
+              setLasso([origin, { x: p.x, y: origin.y }, p, { x: origin.x, y: p.y }]);
+          } else if (p) setLasso([...(lassoRef.current ?? []), p]);
           st.moved = true;
           return;
         }
-        const dx = e.clientX - st.px;
-        const dy = e.clientY - st.py;
         if (tool === 'move') {
           if (!st.key) return;
           if (!st.moved) {
@@ -338,13 +343,14 @@ export function SheetViewport({
       }}
       onPointerUp={(e) => {
         const st = gesture.current;
-        if (tool === 'lasso') {
+        if (selectsRegion) {
           const done = lassoRef.current;
           if (done && done.length >= 3)
             onLasso?.(done, { shiftKey: gesture.current?.shiftKey ?? false });
           else
             onPick?.(gesture.current?.key ?? '', {
               shiftKey: gesture.current?.shiftKey ?? false,
+              pointMm: done?.[0],
             });
           setLasso(null);
         } else if (st && !st.moved) {

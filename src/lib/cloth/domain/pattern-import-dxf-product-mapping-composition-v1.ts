@@ -1,8 +1,9 @@
 import type { DxfProductPhaseDSizeSelectionResultV1 } from '../../pattern-import/dxf-product-phase-d-size-selection-v1';
 import type { ApplyResult, CardDraft } from '../../pattern-import/types';
 import {
+  readPatternImportDxfProductCommitReplayScopeV1,
   replayCommittedPatternImportDxfProductScopeV1,
-  type PatternImportDxfProductCommitReplayResultV1,
+  type PatternImportDxfProductVerifiedSavedReplayV1,
 } from './pattern-import-dxf-product-commit-replay-v1';
 import {
   PATTERN_IMPORT_DXF_PRODUCT_PHASE_E_ADMISSION_V1,
@@ -30,6 +31,10 @@ import {
   type PatternImportDxfTwoSidedSeamMappingSealV2,
   type PatternImportDxfTwoSidedSeamMappingV2,
 } from './pattern-import-dxf-two-sided-seam-mapping-v2';
+import {
+  PATTERN_IMPORT_DXF_PRODUCT_WRITER_REPLAY_V1,
+  replayPatternImportDxfProductWriterV1,
+} from './pattern-import-dxf-product-writer-replay-v1';
 
 export const PATTERN_IMPORT_DXF_PRODUCT_MAPPING_COMPOSITION_V1 =
   'pattern-import-dxf-product-mapping-composition/1' as const;
@@ -43,13 +48,16 @@ export type PatternImportDxfProductExpectedSavedRowV1 = Readonly<{
   dxfSha256: string;
   patternVersion: number;
   cardLockVersion: number;
+  /** First Semantic V1 must not replace an existing carrier on this saved DXF row. */
+  firstAttachmentSavedRowRevision?: number;
 }>;
 
 export type PatternImportDxfProductMappingCompositionInputV1 = Readonly<{
   schemaVersion: typeof PATTERN_IMPORT_DXF_PRODUCT_MAPPING_COMPOSITION_V1;
   scopeKey: string;
   draft: CardDraft;
-  apply: ApplyResult;
+  apply?: ApplyResult;
+  savedReplay?: PatternImportDxfProductVerifiedSavedReplayV1;
   selection: DxfProductPhaseDSizeSelectionResultV1;
   intent: PatternImportDxfProductPhaseEIntentV1;
   /** Optional UI chronology precondition; when present, fresh readback must exact-match it. */
@@ -130,6 +138,7 @@ export type PatternImportDxfProductMappingCompositionResultV1 =
         patternUrl: string;
         patternSizeId: number;
         previousLockVersion: number;
+        lockBasis?: 'current-saved-row';
         pieceLineKeys: readonly string[];
         aliases: readonly Readonly<{
           scopeKey: string;
@@ -280,7 +289,7 @@ export async function buildPatternImportDxfProductMappingCompositionV1(
     input.schemaVersion !== PATTERN_IMPORT_DXF_PRODUCT_MAPPING_COMPOSITION_V1 ||
     !STABLE_ID.test(input.scopeKey ?? '') ||
     !input.draft ||
-    !input.apply ||
+    Boolean(input.apply) === Boolean(input.savedReplay) ||
     !input.selection ||
     !input.intent
   )
@@ -303,17 +312,33 @@ export async function buildPatternImportDxfProductMappingCompositionV1(
   if (admitted.plan.scopeKey !== input.scopeKey)
     return blocked('invalid-input', 'Requested scope does not equal the admitted Phase-E scope.');
 
-  const committed: PatternImportDxfProductCommitReplayResultV1 =
-    await replayCommittedPatternImportDxfProductScopeV1(
+  const committed =
+    input.savedReplay ??
+    (await replayCommittedPatternImportDxfProductScopeV1(
       input.draft,
-      input.apply,
+      input.apply!,
       input.scopeKey,
       crypto,
-    );
+    ));
   if (!committed.ok)
     return blocked(
       'commit-replay-blocked',
       committed.blockers.map(({ code, detail }) => `${code}: ${detail}`).join('; '),
+    );
+  if (
+    input.savedReplay &&
+    (readPatternImportDxfProductCommitReplayScopeV1(input.savedReplay) !== input.scopeKey ||
+      input.expectedSavedRow?.scopeKey !== input.scopeKey ||
+      input.expectedSavedRow.techCardId !== committed.evidence.techCardId ||
+      input.expectedSavedRow.dxfSha256 !== committed.evidence.productExportSha256 ||
+      input.expectedSavedRow.patternLineKey !== committed.evidence.patternLineKey ||
+      input.expectedSavedRow.firstAttachmentSavedRowRevision !==
+        input.savedReplay.savedRowRevision ||
+      input.expectedSavedRow.cardLockVersion !== committed.evidence.previousLockVersion)
+  )
+    return blocked(
+      'commit-replay-blocked',
+      'The current saved row proof does not match the exact first attachment.',
     );
   if (!input.selection.ok)
     return blocked('invalid-input', 'Successful Phase-D selection disappeared after admission.');
@@ -341,6 +366,25 @@ export async function buildPatternImportDxfProductMappingCompositionV1(
       'writer-piece-binding-blocked',
       'Writer job, manifest, draft and confirmed commit card identities differ.',
     );
+  if (input.savedReplay) {
+    const savedWriter = await replayPatternImportDxfProductWriterV1(
+      {
+        schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_WRITER_REPLAY_V1,
+        replay: structuredClone(replay),
+        finalManifest: structuredClone(scope.manifest),
+        expected: {
+          scopeKey: input.scopeKey,
+          exportSha256: committed.evidence.productExportSha256,
+        },
+      },
+      crypto,
+    );
+    if (!savedWriter.ok || savedWriter.receipt.byteLength !== committed.evidence.byteLength)
+      return blocked(
+        'commit-replay-blocked',
+        'The current authoring draft does not rebuild the exact already saved DXF bytes.',
+      );
+  }
 
   const currentManifest = manifestView(scope.manifest);
   const selections = input.selection.pipeline.carrier?.pieces.map(({ pieceId, sizeToken }) => ({
@@ -352,9 +396,27 @@ export async function buildPatternImportDxfProductMappingCompositionV1(
       'writer-piece-binding-blocked',
       'Selected public Phase-D pieces are missing or have different cardinality.',
     );
+  // Writer replay above keeps all graded sizes. The sealed Phase-D selection below contains
+  // exactly one rank, so G4F0 must receive only the matching PieceSpecs and sizes.
+  const selectedWriterPieces = replay.job.pieces.flatMap((piece) => {
+    const selected = selections.find(({ pieceId }) => pieceId === piece.identity);
+    if (!selected) return [];
+    return [
+      { ...piece, sizes: piece.sizes.filter(({ sizeToken }) => sizeToken === selected.sizeToken) },
+    ];
+  });
+  if (
+    selectedWriterPieces.length !== selections.length ||
+    selectedWriterPieces.some(({ sizes }) => sizes.length !== 1) ||
+    new Set(selectedWriterPieces.map(({ identity }) => identity)).size !== selections.length
+  )
+    return blocked(
+      'writer-piece-binding-blocked',
+      'Each selected Phase-D piece must match one exact size in the committed writer job.',
+    );
   const digests = await computePatternImportDxfBridgeBindingDigestsV1(
     currentManifest,
-    replay.job.pieces,
+    selectedWriterPieces,
     selections,
     { crypto },
   );
@@ -389,7 +451,7 @@ export async function buildPatternImportDxfProductMappingCompositionV1(
     admitted.plan,
     input.selection,
     currentManifest,
-    replay.job.pieces,
+    selectedWriterPieces,
     binding,
   );
   const mapped = await buildPatternImportDxfTwoSidedSeamMappingV2(
@@ -399,11 +461,18 @@ export async function buildPatternImportDxfProductMappingCompositionV1(
       phaseD: input.selection.phaseD,
     },
     crypto,
+    input.expectedSavedRow?.firstAttachmentSavedRowRevision !== undefined &&
+      input.expectedSavedRow.scopeKey === input.scopeKey &&
+      input.expectedSavedRow.techCardId === committed.evidence.techCardId &&
+      input.expectedSavedRow.dxfSha256 === committed.evidence.productExportSha256 &&
+      input.expectedSavedRow.patternLineKey === committed.evidence.patternLineKey
+      ? committed
+      : undefined,
   );
   if (!mapped.ok)
     return blocked(
       'g4f1-mapping-blocked',
-      mapped.blockers.map(({ code, detail }) => `${code}: ${detail}`).join('; '),
+      mapped.blockers.map(({ code, field, detail }) => `${code} at ${field}: ${detail}`).join('; '),
     );
   if (
     mapped.mapping.sourceBinding.sourceFileId !== admitted.plan.sourceFileId ||
@@ -428,6 +497,7 @@ export async function buildPatternImportDxfProductMappingCompositionV1(
     patternUrl: committed.evidence.patternUrl,
     patternSizeId: committed.evidence.patternSizeId,
     previousLockVersion: committed.evidence.previousLockVersion,
+    ...(input.savedReplay ? { lockBasis: 'current-saved-row' as const } : {}),
     pieceLineKeys: committed.evidence.pieceLineKeys,
     aliases: committed.evidence.aliases,
     handoffCanonicalSha256: mapped.mapping.sourceBinding.handoffCanonicalSha256,

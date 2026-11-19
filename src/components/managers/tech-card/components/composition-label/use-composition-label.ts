@@ -14,6 +14,7 @@ import {
   type CareLabelData,
 } from '../../care-labels/adapter';
 import type { LabelOrientation } from '../../care-labels/layout';
+import { useLabelBrand } from 'lib/workspace/paper-brand-context';
 import { compositionsOf, planAll, type FullPlan } from '../../care-labels/print-job';
 import { collectReadiness, type Readiness } from '../../care-labels/readiness';
 import { createShaper, type Shaper } from '../../care-labels/text-outline';
@@ -85,6 +86,7 @@ export function useCompositionLabel({
   logoUrlHint?: string;
 }): CompositionLabelModel {
   const { control } = useFormContext();
+  const brand = useLabelBrand();
   const careLabel = useWatch({ control, name: 'careLabel' }) as FormCareLabel | undefined;
   const careInstructions = useWatch({ control, name: 'careInstructions' }) as string | undefined;
   const sizeIds = useWatch({ control, name: 'sizeIds' }) as number[] | undefined;
@@ -160,8 +162,9 @@ export function useCompositionLabel({
       'duplex',
       deferred.label.qr,
       orientation,
+      brand,
     );
-  }, [shaper, deferred, orientation]);
+  }, [shaper, deferred, orientation, brand]);
   const readiness = useMemo(
     () =>
       deferred

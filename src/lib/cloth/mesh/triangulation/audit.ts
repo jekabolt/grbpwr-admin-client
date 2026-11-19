@@ -1,3 +1,4 @@
+import robustOrientation from 'robust-orientation';
 import type { Vec2Mm } from '../../domain/garment-assembly-ir';
 import type {
   BoundaryRing,
@@ -208,12 +209,27 @@ export function preflightTriangulationInput(
         );
       }
       const previousLength = distance(previous.positionMm, vertex.positionMm);
-      const sine =
-        Math.abs(cross(previous.positionMm, vertex.positionMm, next.positionMm)) /
-        Math.max(previousLength * edgeLength, EPSILON);
+      const turn = cross(previous.positionMm, vertex.positionMm, next.positionMm);
+      const sine = Math.abs(turn) / Math.max(previousLength * edgeLength, EPSILON);
       const intentionalSourceCurveSplit =
         previous.source.sourceCurveId === vertex.source.sourceCurveId && sine <= EPSILON;
-      if (sine < input.options.collinearSinTolerance && !intentionalSourceCurveSplit) {
+      // A straight run can contain separate native DXF segments. Keep their shared vertex and
+      // source IDs when the middle point is strictly between its neighbours. A nonzero turn
+      // still uses the original sine check.
+      const segmentDot =
+        (vertex.positionMm[0] - previous.positionMm[0]) *
+          (next.positionMm[0] - vertex.positionMm[0]) +
+        (vertex.positionMm[1] - previous.positionMm[1]) *
+          (next.positionMm[1] - vertex.positionMm[1]);
+      const forwardStraightSubdivision =
+        turn === 0 &&
+        segmentDot > 0 &&
+        robustOrientation(previous.positionMm, vertex.positionMm, next.positionMm) === 0;
+      if (
+        sine < input.options.collinearSinTolerance &&
+        !intentionalSourceCurveSplit &&
+        !forwardStraightSubdivision
+      ) {
         issue(
           issues,
           'near-collinear-boundary',

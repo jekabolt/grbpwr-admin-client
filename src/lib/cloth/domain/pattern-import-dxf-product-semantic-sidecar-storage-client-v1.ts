@@ -311,10 +311,17 @@ export async function persistPatternImportDxfProductSemanticSidecarV1(
   service: PatternImportDxfProductSidecarStorageServiceV1,
   owner: PatternImportDxfProductSemanticSidecarOwnerV1,
   crypto: Pick<Crypto, 'subtle'> = globalThis.crypto,
+  firstAttachmentSavedRowRevision?: number,
 ): Promise<PatternImportDxfProductSidecarStorageResultV1> {
   let expected: ExpectedBinding;
   try {
     expected = expectedBinding(owner);
+    if (
+      firstAttachmentSavedRowRevision !== undefined &&
+      (!Number.isSafeInteger(firstAttachmentSavedRowRevision) ||
+        firstAttachmentSavedRowRevision <= 0)
+    )
+      fail('invalid-binding', 'input', 'First attachment requires the exact saved-row revision.');
     await requireSha256(crypto);
     if ((await digest(crypto, expected.bytes)) !== expected.sidecarSha256)
       fail('invalid-owner', 'local-hash', 'Product G4F4 bytes do not match their opaque seal.');
@@ -322,33 +329,74 @@ export async function persistPatternImportDxfProductSemanticSidecarV1(
     return blocked(error, 'not-attempted');
   }
 
-  let putRow: TechCardPatternSemanticSidecar | undefined;
-  try {
-    const response = await service.PutTechCardPatternSemanticSidecar({
+  const put = (expectedPreviousSidecarSha256?: string) =>
+    service.PutTechCardPatternSemanticSidecar({
       techCardId: expected.techCardId,
       patternLineKey: expected.patternLineKey,
       expectedCardLockVersion: expected.cardLockVersion,
       expectedDxfSha256: expected.dxfSha256,
       expectedPatternVersion: expected.patternVersion,
       expectedPostSaveReceiptSha256: expected.postSaveReceiptSha256,
+      ...(firstAttachmentSavedRowRevision !== undefined
+        ? {
+            expectedSavedRowRevision: firstAttachmentSavedRowRevision,
+            expectedPreviousSidecarSha256,
+          }
+        : {}),
       selectedOperationNumber: 0,
       mediaType: PATTERN_IMPORT_DXF_PRODUCT_SEMANTIC_SIDECAR_MEDIA_TYPE_V1,
       sidecarSha256: expected.sidecarSha256,
       sidecarBytes: expected.base64,
     });
-    putRow = response?.semanticSidecar;
-  } catch {
-    return blocked(
+  const get = () =>
+    service.GetTechCardPatternSemanticSidecar({
+      techCardId: expected.techCardId,
+      patternLineKey: expected.patternLineKey,
+    });
+  const verifySavedRevision = (
+    row: TechCardPatternSemanticSidecar | undefined,
+    phase: 'put' | 'get',
+  ) => {
+    if (
+      firstAttachmentSavedRowRevision !== undefined &&
+      row?.savedRowRevision !== firstAttachmentSavedRowRevision
+    )
+      fail(
+        phase === 'put' ? 'put-readback-invalid' : 'get-readback-invalid',
+        phase,
+        'First attachment returned a different saved-row revision.',
+      );
+  };
+
+  const unverifiedPut = () =>
+    blocked(
       new StorageFailure(
         'put-failed',
         'put',
-        'PUT failed; it may have committed, so absence is not established and exact retry is safe.',
+        'The pattern metadata write could not be verified. Retry the same exact attachment.',
       ),
       'unknown',
     );
+  let putRow: TechCardPatternSemanticSidecar | undefined;
+  try {
+    putRow = (await put(firstAttachmentSavedRowRevision !== undefined ? '' : undefined))
+      ?.semanticSidecar;
+  } catch {
+    if (firstAttachmentSavedRowRevision === undefined) return unverifiedPut();
+    try {
+      // An ambiguous first write may have committed. Permit another PUT only while the current
+      // carrier is the exact authored V1 byte sequence and remains protected by its own SHA CAS.
+      const current = (await get())?.semanticSidecar;
+      verifySavedRevision(current, 'get');
+      await verifyRow(current, expected, 'get', crypto);
+      putRow = (await put(expected.sidecarSha256))?.semanticSidecar;
+    } catch {
+      return unverifiedPut();
+    }
   }
 
   try {
+    verifySavedRevision(putRow, 'put');
     await verifyRow(putRow, expected, 'put', crypto);
   } catch (error) {
     return blocked(error, 'acknowledged-unverified');
@@ -356,11 +404,7 @@ export async function persistPatternImportDxfProductSemanticSidecarV1(
 
   let getRow: TechCardPatternSemanticSidecar | undefined;
   try {
-    const response = await service.GetTechCardPatternSemanticSidecar({
-      techCardId: expected.techCardId,
-      patternLineKey: expected.patternLineKey,
-    });
-    getRow = response?.semanticSidecar;
+    getRow = (await get())?.semanticSidecar;
   } catch {
     return blocked(
       new StorageFailure(
@@ -374,6 +418,7 @@ export async function persistPatternImportDxfProductSemanticSidecarV1(
 
   try {
     const putSha256 = await verifyRow(putRow, expected, 'put', crypto);
+    verifySavedRevision(getRow, 'get');
     const getSha256 = await verifyRow(getRow, expected, 'get', crypto);
     if (putSha256 !== getSha256 || putRow?.sidecarBytes !== getRow?.sidecarBytes)
       fail(

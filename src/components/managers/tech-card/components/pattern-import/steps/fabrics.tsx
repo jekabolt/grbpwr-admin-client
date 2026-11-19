@@ -101,6 +101,10 @@ export function FabricsStep({ api, card }: { api: ImportSessionApi; card: CardCo
   if (!a || !sem || !session.sheet) return null;
 
   const seeds = [...new Set(sem.pieces.map((p) => p.seed))];
+  const dxfImportScopeKey = api.dxfImportScopeKey;
+  const omitted = new Set(a.dxfOmissions?.seeds);
+  const includedIn = (scopeKey: string) =>
+    (a.byPurpose[scopeKey] ?? []).filter((seed) => !omitted.has(seed));
   const idsOf = (seed: SeedId) => sem.pieces.filter((p) => p.seed === seed).map((p) => p.identity);
   const nameOf = (seed: SeedId) =>
     session.names.find((n) => n.seed === seed)?.displayName ||
@@ -119,10 +123,22 @@ export function FabricsStep({ api, card }: { api: ImportSessionApi; card: CardCo
   const short = (label: string) => label.split(' · ')[0];
 
   const set = (next: FabricAssignment) => api.dispatch({ type: 'fabrics', assignment: next });
+  const include = (seed: SeedId, on: boolean) => {
+    if (!dxfImportScopeKey) return;
+    const next = new Set(omitted);
+    if (on) next.delete(seed);
+    else next.add(seed);
+    void set({
+      ...a,
+      dxfOmissions: next.size ? { scopeKey: dxfImportScopeKey, seeds: [...next] } : undefined,
+    });
+  };
   // C7: a cloth other than main on the AI's word alone waits for the operator; confirming it, or
   // changing that piece's ticks, is their answer
   const aiPending = new Map(
-    (a.aiOnly ?? []).filter((x) => x.needsConfirm).map((x) => [x.seed, x.purposes]),
+    (a.aiOnly ?? [])
+      .filter((x) => x.needsConfirm && !omitted.has(x.seed))
+      .map((x) => [x.seed, x.purposes]),
   );
   const answered = (sds: readonly SeedId[], from: FabricAssignment = a): FabricAssignment =>
     sds.some((sd) => aiPending.has(sd))
@@ -193,7 +209,12 @@ export function FabricsStep({ api, card }: { api: ImportSessionApi; card: CardCo
   };
 
   // ── the questions, in the footer's order: AI-only, the planner's problems, then the offer ──
-  const defaulted = defaultedFabrics(a, card.scopes.length, api.inputs.assignment != null, seeds);
+  const defaulted = defaultedFabrics(
+    a,
+    card.scopes.length,
+    api.inputs.assignment != null,
+    seeds.filter((seed) => !omitted.has(seed)),
+  );
   const questions: FabricQuestion[] = [];
   if (card.scopes.length) {
     for (const [seed, purposes] of aiPending) {
@@ -207,6 +228,7 @@ export function FabricsStep({ api, card }: { api: ImportSessionApi; card: CardCo
       });
     }
     for (const p of problems) {
+      if (p.kind === 'selection') continue;
       const sds = p.seeds.filter((sd) => !aiPending.has(sd));
       if (!sds.length) continue;
       const fusedOnly = p.kind === 'no-fabric' && sds.every((sd) => fusedSet.has(sd));
@@ -328,7 +350,9 @@ export function FabricsStep({ api, card }: { api: ImportSessionApi; card: CardCo
     ),
     ...problems
       .filter((p) => !active || p.message !== active.why)
-      .map((p) => `${p.seeds.map(nameOf).join(', ')}: ${p.message}`),
+      .map((p) =>
+        p.kind === 'selection' ? p.message : `${p.seeds.map(nameOf).join(', ')}: ${p.message}`,
+      ),
   ];
 
   const matrix = (rows: SeedId[]) => (
@@ -336,6 +360,11 @@ export function FabricsStep({ api, card }: { api: ImportSessionApi; card: CardCo
       <thead>
         <tr>
           <th>piece</th>
+          {dxfImportScopeKey && (
+            <th data-align='left' title='Include this piece and all its mapped sizes'>
+              import
+            </th>
+          )}
           {card.scopes.map((s) => (
             <th
               key={s.scopeKey}
@@ -371,12 +400,24 @@ export function FabricsStep({ api, card }: { api: ImportSessionApi; card: CardCo
             >
               {nameOf(seed)}
             </td>
+            {dxfImportScopeKey && (
+              <td data-align='left'>
+                <CheckboxCommon
+                  name={`import-piece-${seed}`}
+                  aria-label={`Import ${nameOf(seed)}`}
+                  checked={!omitted.has(seed)}
+                  disabled={!!session.busy}
+                  onChange={(v) => include(seed, v)}
+                />
+              </td>
+            )}
             {card.scopes.map((s) => (
               <td key={s.scopeKey} data-align='left'>
                 <CheckboxCommon
                   name={`fab-${s.scopeKey}-${seed}`}
                   aria-label={`${nameOf(seed)} cut from ${s.label}`}
                   checked={(a.byPurpose[s.scopeKey] ?? []).includes(seed)}
+                  disabled={omitted.has(seed)}
                   onChange={(v) => toggle(s.scopeKey, seed, v)}
                 />
               </td>
@@ -387,6 +428,7 @@ export function FabricsStep({ api, card }: { api: ImportSessionApi; card: CardCo
                   name={`fused-${seed}`}
                   aria-label={`${nameOf(seed)} is fused`}
                   checked={fusedSet.has(seed)}
+                  disabled={omitted.has(seed)}
                   onChange={(v) => toggleFused(seed, v)}
                 />
               </td>
@@ -413,7 +455,7 @@ export function FabricsStep({ api, card }: { api: ImportSessionApi; card: CardCo
       maxY: Math.max(...bs.map((b) => b.maxY)),
     };
   })();
-  const inScope = new Set(focusScope ? a.byPurpose[focusScope] ?? [] : []);
+  const inScope = new Set(focusScope ? includedIn(focusScope) : []);
   const k = seen.size - questions.length + 1;
 
   return (
@@ -431,7 +473,7 @@ export function FabricsStep({ api, card }: { api: ImportSessionApi; card: CardCo
                   key={s.scopeKey}
                   selected={focusScope === s.scopeKey}
                   pressed={focusScope === s.scopeKey}
-                  title={`${s.label} · ${plural((a.byPurpose[s.scopeKey] ?? []).length, 'piece')} in this file (a fabric with no ticks writes no DXF)`}
+                  title={`${s.label} · ${plural(includedIn(s.scopeKey).length, 'piece')} in this file (a fabric with no ticks writes no DXF)`}
                   onClick={() => setFocusScope(s.scopeKey)}
                 >
                   {short(s.label)}
@@ -528,14 +570,30 @@ export function FabricsStep({ api, card }: { api: ImportSessionApi; card: CardCo
               </div>
             </>
           ) : (
-            <Text size='micro' variant='label' component='p'>
-              {seen.size ? 'all fixed ✓' : 'every piece has its fabric ✓'}
-            </Text>
+            !problems.length && (
+              <Text size='micro' variant='label' component='p'>
+                {omitted.size
+                  ? `${seeds.length - omitted.size} of ${seeds.length} pieces included`
+                  : seen.size
+                    ? 'all fixed ✓'
+                    : 'every piece has its fabric ✓'}
+              </Text>
+            )
+          )}
+          {problems.some((p) => p.kind === 'selection') && (
+            <Button
+              variant='secondary'
+              size='xs'
+              onClick={() => void set({ ...a, dxfOmissions: undefined })}
+              disabled={!!session.busy}
+            >
+              include all pieces
+            </Button>
           )}
           {card.scopes.length > 0 && seeds.length > 0 && (
             <Fold
               label={`all pieces · ${seeds.length}`}
-              defaultOpen={!active && seeds.length <= 12}
+              defaultOpen={!active && (!!dxfImportScopeKey || seeds.length <= 12)}
             >
               {matrix(seeds)}
             </Fold>

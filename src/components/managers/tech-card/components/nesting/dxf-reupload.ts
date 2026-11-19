@@ -76,6 +76,8 @@ export type ReuploadDeps<P extends CardPiece, A extends CardAlias, O extends Car
   /** sha256 в нижнем hex; '' — посчитать нельзя (тогда «тот же файл» не узнаётся) */
   sha256: (bytes: Uint8Array) => Promise<string>;
   upload: (file: ReuploadFile) => Promise<UploadedSheet>;
+  /** A verified retained native edit may update only the saved sheet row. */
+  requireUnchangedCardStructure?: true;
   /**
    * листы ДРУГИХ слотов (T7: деталь переехала из другой ткани). Есть другие листы — их разбор
    * обязан удаться: сбой (throw) = отказ, а не «других листов нет» (иначе переехавшая деталь
@@ -457,6 +459,12 @@ export async function reuploadSheet<
     return { kind: 'refused', why: 'parse', detail: 'new file' };
 
   const foreign = (): ReuploadOutcome<P, A, O> => {
+    if (deps.requireUnchangedCardStructure)
+      return {
+        kind: 'refused',
+        why: 'sweep',
+        detail: 'The retained edit changed the saved pieces.',
+      };
     const knownBlocks = new Map<string, readonly string[]>();
     for (let k = 0; k < rows.length; k++) {
       const names =
@@ -576,6 +584,12 @@ export async function reuploadSheet<
   if (plan.status === 'noop') return { kind: 'noop', rowIndex: rows[t].i };
   if (isForeignPlan(plan)) return foreign();
   if (plan.needsPieceMatch || plan.needsShapeReview) {
+    if (deps.requireUnchangedCardStructure)
+      return {
+        kind: 'refused',
+        why: 'sweep',
+        detail: 'The retained edit changed the saved shapes.',
+      };
     let up: UploadedSheet;
     try {
       up = await deps.upload({ name: file.name, bytes });
@@ -611,6 +625,20 @@ export async function reuploadSheet<
   if (result.refused?.reason === 'noop') return { kind: 'noop', rowIndex: rows[t].i };
   if (isForeignPlan(plan, result)) return foreign();
   if (result.refused) return { kind: 'refused', why: 'sweep', detail: result.revisionNote };
+  if (deps.requireUnchangedCardStructure) {
+    const aliases = (entries: readonly A[]) =>
+      JSON.stringify(entries.map((entry) => JSON.stringify(entry)).sort());
+    if (
+      JSON.stringify(result.pieces) !== JSON.stringify(card.pieces) ||
+      JSON.stringify(result.operations) !== JSON.stringify(card.operations) ||
+      aliases(result.aliases) !== aliases(card.aliases)
+    )
+      return {
+        kind: 'refused',
+        why: 'sweep',
+        detail: 'The retained edit changed the saved pieces, aliases or Assembly Order.',
+      };
+  }
 
   let up: UploadedSheet;
   try {

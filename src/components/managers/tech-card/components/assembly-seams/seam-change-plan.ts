@@ -30,9 +30,17 @@ import type { PendingOp, PosePendingOp } from './seams-store';
 export type StepRef = { historyKey: string };
 export type StepLink = { step: StepRef; seamKey: string };
 
+export type PointClosureWrite = common_TechCardSeam & {
+  kind: 'TECH_CARD_SEAM_KIND_POINT_CLOSURE';
+  seamKey: string;
+};
+
 /** One gesture: rows to write or delete, step links to add or take away — one transaction. */
 export type SeamChange = {
   upsert?: readonly StoredRow[];
+  /** Exact source decisions do not participate in optimistic edge resolution. */
+  upsertPointClosures?: readonly PointClosureWrite[];
+  expectedServerAssemblyRevision?: string;
   /** Rows to delete by key; a delete also unlinks the row from every step. */
   delete?: readonly string[];
   link?: readonly StepLink[];
@@ -80,12 +88,20 @@ export function changeRequest(
   const detach = links(change.detach);
   if (!link || !detach) return null;
   // One row per key: the server refuses a request that sends a key twice.
-  const upsert = new Map<string, StoredRow>();
-  for (const row of change.upsert ?? []) upsert.set(row.seamKey, row);
+  const upsert = new Map<string, common_TechCardSeam>();
+  for (const row of change.upsert ?? []) upsert.set(row.seamKey, wireOut(row));
+  if (change.upsertPointClosures?.length && !change.expectedServerAssemblyRevision) return null;
+  for (const row of change.upsertPointClosures ?? []) {
+    if (!row.seamKey || upsert.has(row.seamKey)) return null;
+    upsert.set(row.seamKey, row);
+  }
   return {
     techCardId: cardId,
     expectedLockVersion: expected,
-    upsert: [...upsert.values()].map(wireOut),
+    ...(change.expectedServerAssemblyRevision && {
+      expectedServerAssemblyRevision: change.expectedServerAssemblyRevision,
+    }),
+    upsert: [...upsert.values()],
     delete: [...new Set(change.delete ?? [])],
     link,
     detach,

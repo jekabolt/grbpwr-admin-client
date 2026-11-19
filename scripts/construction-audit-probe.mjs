@@ -633,6 +633,8 @@ const serve = (cfg, method, fallback) => {
 const call = (method) => (req) => {
   (globalThis.__auditNetCalls || (globalThis.__auditNetCalls = [])).push(method);
   const stub = globalThis.__auditStub || {};
+  if (method === 'GetCurrentAccount') return Promise.resolve({});
+  if (method === 'ListAccountSections') return Promise.resolve({ sections: [] });
   if (method === 'GetTechCardConstructionAudit') return serve(stub.audit, method);
   if (method === 'AnalyzeTechCardConstruction') return serve(stub.analyze, method);
   if (method === 'AddTechCardIssue') {
@@ -1109,6 +1111,9 @@ const gone = () => page.evaluate(() => window.__audit.gone());
 const issues = () => page.evaluate(() => window.__audit.issues());
 const alerts = () => page.evaluate(() => window.__audit.alerts());
 const netCalls = () => page.evaluate(() => window.__auditNetCalls || []);
+const permissionReads = ['GetCurrentAccount', 'ListAccountSections'];
+const sameRequests = (actual, expected) =>
+  JSON.stringify([...actual].sort()) === JSON.stringify([...expected].sort());
 const issueCalls = () => page.evaluate(() => window.__auditIssueCalls || []);
 const aiText = () => page.evaluate(() => window.aiText());
 
@@ -1159,8 +1164,8 @@ if (!pre.errorToken || !pre.uppercase)
 ck(true, 'built admin css is live', `--color-error=${pre.errorToken}`);
 const calls = await netCalls();
 ck(
-  calls.length === 1 && calls[0] === 'GetTechCardConstructionAudit',
-  'exactly one call left the component, and it was the audit',
+  sameRequests(calls, [...permissionReads, 'GetTechCardConstructionAudit']),
+  'one audit request and the two permission reads leave the component',
   JSON.stringify(calls),
 );
 ck(pageErrors.length === 0, 'no page errors', pageErrors.join(' | '));
@@ -1282,8 +1287,8 @@ ck(!tA.includes('op:999'), 'it is NOT shown on the sequence finding', 'op:999 le
 // ═══ 4. anchors ════════════════════════════════════════════════════════════════════════════════
 head('4. clicking a ref anchor calls onGoTab with the right (tab, extra)');
 const CASES = [
-  ['op:460', 'construction', { op: '460' }],
-  ['unit:base', 'construction', { unit: 'base' }],
+  ['op:460', 'assembly-order', { op: '460' }],
+  ['unit:base', 'assembly-order', { unit: 'base' }],
   ['piece:sl_ins_l', 'patterns', undefined],
   ['bom:подкладка', 'bom', undefined],
 ];
@@ -1555,19 +1560,21 @@ ck(
 );
 
 // ═══ 8. the gate ═══════════════════════════════════════════════════════════════════════════════
-head('8. the query is gated — no id, or the tab not open, and nothing leaves');
+head('8. the audit query is gated by a saved card and active tab');
 await mount({ stub: OK, techCardId: null });
-ck((await netCalls()).length === 0, 'an unsaved card makes no request', JSON.stringify(await netCalls()));
+const unsavedCalls = await netCalls();
+ck(sameRequests(unsavedCalls, permissionReads), 'an unsaved card makes only permission reads', JSON.stringify(unsavedCalls));
 ck(
   // «the audit reads the saved card — save this one first…» → «save the card to run the audit» (de5ed2fe1).
   (await panelText()).includes('save the card to run the audit'),
   'and says so instead of pretending to load',
 );
 await mount({ stub: OK, active: false });
+const inactiveCalls = await netCalls();
 ck(
-  (await netCalls()).length === 0,
-  'the construction tab closed makes no request',
-  JSON.stringify(await netCalls()),
+  sameRequests(inactiveCalls, permissionReads),
+  'an inactive audit makes only permission reads',
+  JSON.stringify(inactiveCalls),
 );
 
 // ═══ 10. the Analyze control ═══════════════════════════════════════════════════════════════════
@@ -2122,10 +2129,14 @@ await mount({ stub: AI_ON() });
     const before = (await gone()).length;
     await clickHit();
     const after = await gone();
+    const last = after[after.length - 1];
     ck(
-      a.role === 'button' && after.length === before + 1 && after[after.length - 1][0] === 'construction',
-      `«${label}» matches the run and navigates, unremarked`,
-      JSON.stringify(after[after.length - 1] ?? null),
+      a.role === 'button' &&
+        after.length === before + 1 &&
+        last?.[0] === 'assembly-order' &&
+        last?.[1]?.op === label.slice('op:'.length),
+      `«${label}» matches the run and navigates to its exact operation`,
+      JSON.stringify(last ?? null),
     );
   }
 }
@@ -2148,7 +2159,7 @@ await mount({ stub: AI_MOVED, keepSession: true });
   const after = await gone();
   const last = after[after.length - 1];
   ck(
-    after.length === before + 1 && last?.[0] === 'construction' && last?.[1]?.op === '200',
+    after.length === before + 1 && last?.[0] === 'assembly-order' && last?.[1]?.op === '200',
     'AMBER STILL NAVIGATES — §9 refuses to withhold the jump from someone who wants to look',
     JSON.stringify(last ?? null),
   );

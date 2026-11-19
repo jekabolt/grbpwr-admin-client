@@ -55,12 +55,12 @@ const MUTATIONS = {
   1: {
     what: 'починка 1: архив релизов снова не зовёт составитель ВТО-фактов',
     file: /releases-field\.tsx$/,
-    from: '                stepPressText({ press: o.press }),\n',
+    from: '                stepPressText({ press: o.press, work: o.work }),\n',
     to: '',
   },
   2: {
     what: 'починка 2: zod снова не отвергает заметку о натяжении на сварочной машине',
-    file: /schema\.ts$/,
+    file: /[\\/]tech-card[\\/]components[\\/]schema\.ts$/,
     from: "      refuseAtWeld(stepTextSet(o.threadTensionNote), 'threadTensionNote', 'thread to tension');\n",
     to: '',
   },
@@ -224,7 +224,11 @@ async function run(bundle) {
 
   async function mount(op) {
     await page.evaluate((o) => window.__tails.mount(o), op);
-    await page.waitForSelector(F('operationType'), { timeout: 15000 });
+    await page.waitForSelector('[data-kind-picker="0"]', { timeout: 15000 });
+    const setup = page.locator('[role="button"][aria-expanded]').filter({
+      has: page.getByText('setup', { exact: true }),
+    });
+    if ((await setup.getAttribute('aria-expanded')) === 'false') await setup.click();
     // Эффект очистки скрытого — это эффект: он стреляет ПОСЛЕ коммита, и читать форму сразу после
     // появления контролов значило бы иногда успевать до него.
     await page.waitForTimeout(150);

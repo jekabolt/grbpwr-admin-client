@@ -192,6 +192,28 @@ export function updatePatternImportDxfPhaseECalloutTextV1(
   return success(next, callout);
 }
 
+export function reanchorPatternImportDxfPhaseECalloutV1(
+  projection: PatternImportDxfProductPhaseEAssemblyProjectionV1,
+  callouts: readonly PatternImportDxfPhaseECalloutV1[],
+  id: string,
+  anchor: PatternImportDxfPhaseEVertexAnchorV1,
+): PatternImportDxfPhaseECalloutSessionResultV1 {
+  const invalidSession = validExistingSession(projection, callouts);
+  if (invalidSession) return invalidSession;
+  const current = callouts.find((callout) => callout.id === id);
+  if (!current) return blocked('callout-not-found', `Callout ${id} is not in the current session.`);
+  if (!resolvePatternImportDxfPhaseEVertexV1(projection, anchor))
+    return blocked(
+      'anchor-not-found',
+      'The replacement callout anchor is absent from the exact projection.',
+    );
+  const moved = freezeCallout(id, anchor, current.text);
+  return success(
+    callouts.map((callout) => (callout.id === id ? moved : callout)),
+    moved,
+  );
+}
+
 export function deletePatternImportDxfPhaseECalloutV1(
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1,
   callouts: readonly PatternImportDxfPhaseECalloutV1[],

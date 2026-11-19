@@ -71,22 +71,22 @@ const row = Object.freeze({
   sha256: 'a'.repeat(64),
 });
 
-describe('V1 selected physical source handoff (actual source fragments, no physical admission)', () => {
-  it('admits a physical row only from a saved projection with exactly two selected seams', () => {
+describe('V1 selected durable physical source handoff', () => {
+  it('admits every qualified saved projection without a selected-seam cardinality gate', () => {
     const expression = variable('physicalRow').getText(tree);
     for (const count of [0, 1, 2, 3, 4]) {
       const actual = evaluate(expression, {
         savedProjection: { ok: true, row },
         selectedSeamKeys: Array.from({ length: count }, (_, i) => `exact-seam-${i}`),
       });
-      expect(actual).toBe(count === 2 ? row : null);
+      expect(actual).toBe(row);
     }
     expect(
       evaluate(expression, { savedProjection: { ok: false }, selectedSeamKeys: ['a', 'b'] }),
     ).toBeNull();
   });
 
-  it('selects the downstream through the explicit hook before routing can hand off the one-shot source', () => {
+  it('binds the durable hook to the current saved card projection without a legacy owner', () => {
     const hook = variable('savedClothPhysicalHost');
     expect(ts.isCallExpression(hook)).toBe(true);
     if (!ts.isCallExpression(hook)) throw new Error('Expected the selected source hook.');
@@ -100,12 +100,11 @@ describe('V1 selected physical source handoff (actual source fragments, no physi
         .map((prop) => [prop.name.getText(tree), prop.initializer.getText(tree)]),
     );
     expect(properties.get('row')).toBe('physicalRow');
-    expect(properties.get('createCanonicalOwner')).toBe(
-      'createPatternImportDxfPhaseESavedGarmentMeshProductionOwnerV1',
+    expect(properties.get('cardProjection')).toBe(
+      'savedProjection.ok ? savedProjection.projection : null',
     );
-    expect(variable('savedPhysicalDownstream').getText(tree)).toBe(
-      'savedClothPhysicalHost.selected?.owner.downstream',
-    );
+    expect(properties.has('createCanonicalOwner')).toBe(false);
+    expect(source).not.toContain('savedPhysicalDownstream');
     const mount = declaration('PatternImportDxfPhaseEAssemblyOrderEntryMountV1');
     const statements = mount.body!.statements;
     const hookStatement = statements.find(
@@ -122,7 +121,7 @@ describe('V1 selected physical source handoff (actual source fragments, no physi
     expect(mount.getText(tree)).not.toContain('const savedGarmentCompileOwner = useMemo');
   });
 
-  it('keeps 2D saved-session editing available without a selected/loaded physical owner and never consumes during session construction', () => {
+  it('keeps 2D saved-session editing independent from the physical restore path', () => {
     const memo = variable('savedSession');
     if (!ts.isCallExpression(memo)) throw new Error('Expected saved session memo.');
     const callback = memo.arguments[0];
@@ -130,62 +129,96 @@ describe('V1 selected physical source handoff (actual source fragments, no physi
     const onConfirm = vi.fn();
     const prepareAllMaterialScopeStaging = vi.fn();
     const prepareAllMaterialScopeEditors = vi.fn();
-    const create = (downstream: unknown, ok = true, currentRuntime: unknown = runtime) =>
+    const create = (ok = true, currentRuntime: unknown = runtime) =>
       evaluate<() => Record<string, unknown> | null>(callback.getText(tree), {
         savedProjection: { ok, row, selectedOperationNumber: 2 },
         savedRuntimeResolution: { runtime: currentRuntime },
-        savedPhysicalDownstream: downstream,
         savedConfirm: onConfirm,
         prepareSavedAllMaterialScopeStaging: prepareAllMaterialScopeStaging,
         prepareSavedAllMaterialScopeEditors: prepareAllMaterialScopeEditors,
       })();
-    for (const downstream of [undefined, null]) {
-      const session = create(downstream);
-      expect(session).not.toBeNull();
-      expect(session?.row).toBe(row);
-      expect(session?.runtime).toBe(runtime);
-      expect(session?.onConfirm).toBe(onConfirm);
-      expect(session?.prepareAllMaterialScopeStaging).toBe(prepareAllMaterialScopeStaging);
-      expect(session?.prepareAllMaterialScopeEditors).toBe(prepareAllMaterialScopeEditors);
-      expect(Object.hasOwn(session!, 'downstream')).toBe(false);
-    }
-    const selected = Object.freeze({ ready: vi.fn(), consume: vi.fn() });
-    expect(create(selected)?.downstream).toBe(selected);
-    expect(selected.ready).not.toHaveBeenCalled();
-    expect(selected.consume).not.toHaveBeenCalled();
+    const session = create();
+    expect(session).not.toBeNull();
+    expect(session?.row).toBe(row);
+    expect(session?.runtime).toBe(runtime);
+    expect(session?.onConfirm).toBe(onConfirm);
+    expect(session?.prepareAllMaterialScopeStaging).toBe(prepareAllMaterialScopeStaging);
+    expect(session?.prepareAllMaterialScopeEditors).toBe(prepareAllMaterialScopeEditors);
+    expect(Object.hasOwn(session!, 'downstream')).toBe(false);
     expect(prepareAllMaterialScopeStaging).not.toHaveBeenCalled();
     expect(prepareAllMaterialScopeEditors).not.toHaveBeenCalled();
-    expect(create(selected, false)).toBeNull();
-    expect(create(selected, true, null)).toBeNull();
+    expect(create(false)).toBeNull();
+    expect(create(true, null)).toBeNull();
   });
 
-  it('forwards the same borrowed host to V2 and the beta nested zero-operation fallback', () => {
+  it('forwards the borrowed host only to routes with physical authority', () => {
     const host = variable('physicalHost');
     expect(ts.isObjectLiteralExpression(host)).toBe(true);
     if (!ts.isObjectLiteralExpression(host)) throw new Error('Expected shared host input.');
-    const callback = host.properties.find(
-      (p): p is ts.PropertyAssignment =>
-        ts.isPropertyAssignment(p) && p.name.getText(tree) === 'onDisplayedBodyInputV1',
-    );
-    expect(callback?.initializer.getText(tree)).toBe(
-      'savedClothPhysicalHost.onDisplayedBodyInputV1',
-    );
-    const controls = elements('SavedClothPhysicalControlsV1');
+    expect(
+      host.properties.some(
+        (property) =>
+          ts.isShorthandPropertyAssignment(property) &&
+          property.name.getText(tree) === 'onDisplayedBodyInputV1',
+      ),
+    ).toBe(true);
+    const dispatch = variable('onDisplayedBodyInputV1');
+    if (!ts.isCallExpression(dispatch)) throw new Error('Expected the shared body callback.');
+    const setDisplayedBodyInput = vi.fn();
+    const onDisplayedBodyInputV1 = vi.fn();
+    const observe = evaluate<(input: unknown) => void>(dispatch.arguments[0]!.getText(tree), {
+      setDisplayedBodyInput,
+      savedClothPhysicalHost: { onDisplayedBodyInputV1 },
+    });
+    const displayedBody = Object.freeze({ fixture: 'displayed body' });
+    observe(displayedBody);
+    observe(null);
+    for (const consumer of [setDisplayedBodyInput, onDisplayedBodyInputV1]) {
+      expect(consumer.mock.calls).toEqual([[displayedBody], [null]]);
+    }
+    const controls = elements('CadWorkbenchPhysicalHostProductionMountV1');
     expect(controls).toHaveLength(1);
-    expect(attribute(controls[0], 'host')).toBe('savedClothPhysicalHost');
-    expect(attribute(controls[0], 'row')).toBe('physicalRow');
+    expect(attribute(controls[0], 'state')).toBe('savedClothPhysicalHost');
     expect(attribute(controls[0], 'disabled')).toBe('frozen');
+    const viewport = host.properties.find(
+      (property): property is ts.PropertyAssignment =>
+        ts.isPropertyAssignment(property) && property.name.getText(tree) === 'viewport',
+    );
+    expect(viewport).toBeDefined();
     for (const name of [
       'PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2',
       'PatternImportDxfPhaseECadTableZeroOperationProductionMountV1',
     ]) {
       const routes = elements(name);
       expect(routes).toHaveLength(1);
-      expect(attribute(routes[0], 'physicalHost')).toBe('physicalHost');
+      expect(attribute(routes[0], 'physicalHost')).toBe(
+        name === 'PatternImportDxfPhaseECadTableZeroOperationProductionMountV1'
+          ? 'exactSavedCompoundOperation ? undefined : physicalHost'
+          : 'physicalHost',
+      );
     }
     expect(variable('physicalHost').pos).toBeLessThan(
       elements('PatternImportDxfPhaseECadTableZeroOperationProductionMountV1')[0].pos,
     );
+  });
+
+  it('routes cross-material review to the ordinary editor without the single-row draft fallback', () => {
+    const ordinary = elements('PatternImportDxfPhaseECadTableDraftOperationsPanelV1');
+    expect(ordinary).toHaveLength(1);
+    expect(attribute(ordinary[0], 'editor')).toBe('operationsPanel');
+    expect(attribute(ordinary[0], 'navigation')).toBe('operationNavigation');
+    const result = attribute(ordinary[0], 'result');
+    const fallbackResult = { ok: false, blocker: { code: 'exact-connection-incomplete' } };
+    expect(evaluate(result!, { savedCrossMaterialActions: {}, fallbackResult })).toBeNull();
+    expect(
+      evaluate(result!, {
+        savedCrossMaterialActions: null,
+        pointClosureTarget: null,
+        fallbackResult,
+      }),
+    ).toBe(fallbackResult);
+    expect(elements('SavedCompleteAssemblyNativeReviewActionV8')).toHaveLength(1);
+    expect(source).toContain('!savedCrossMaterialActions && durableReloadBlocker');
   });
 
   it('preserves beta auto-open and incomplete-operation browse-fallback routing', () => {
@@ -257,12 +290,12 @@ describe('V1 selected physical source handoff (actual source fragments, no physi
     expect(matches(['seam-b', 'seam-a'], ['seam-a', 'seam-b'])).toBe(false);
   });
 
-  it('routes empty saved operations to the live owner while keeping legacy N1 refusal-only', () => {
+  it('routes empty and qualified existing N1 operations to the live owner', () => {
     const fallbackMount = elements(
       'PatternImportDxfPhaseECadTableZeroOperationProductionMountV1',
     )[0];
     expect(attribute(fallbackMount, 'zeroConnectAuthoringHandoff')).toContain(
-      'savedEmptyOperation && zeroConnectAuthoringHandoff',
+      '(savedEmptyOperation || savedLinkedN1) && zeroConnectAuthoringHandoff',
     );
     expect(attribute(fallbackMount, 'zeroConnectAuthoringHandoff')).toContain(
       'EXISTING_OPERATION_REBUILD_ONLY_HANDOFF',
@@ -273,6 +306,9 @@ describe('V1 selected physical source handoff (actual source fragments, no physi
       status: 'unavailable',
       blocker: { code: 'zero-connect-authoring-write-refused' },
     });
+    expect(attribute(fallbackMount, 'sourceSurface')).toContain(
+      "useSavedSewingEdges ? 'explicit-native-drawn-sewing' : undefined",
+    );
     expect(tree.getFullText()).toContain("data-legacy-n1-rebuild-required=''");
     expect(tree.getFullText()).not.toContain('data-empty-operation-rebuild-required');
     expect(zeroConnectCanvasSource).toContain(

@@ -7,6 +7,7 @@ import type { MeasurementSurfaceDisplayedGeometryAcceptanceV1 } from 'components
 import type { common_BodyMeasurementName, common_GenderEnum } from 'api/proto-http/admin';
 import type {
   MeasurementSurfacePatternPieceOverlayV1,
+  MeasurementSurfaceAcceptedClothV1,
   MeasurementSurfaceStageStatus,
   MeasurementSurfaceViewPreset,
 } from 'components/shared/measurement-watertight-surface-v1-stage';
@@ -468,10 +469,13 @@ export interface ModelOpenReferencePreviewProps {
    */
   readonly headerStatusV9?: ModelOpenReferencePreviewHeaderControlV1;
   readonly variant?: 'form' | 'workbench' | 'card';
+  /** The containing Workbench column can scroll when its controls leave limited space. */
+  readonly reserveWorkbenchViewportHeight?: boolean;
   /** Existing renderer camera preset. Orbit and wheel zoom remain direct viewport gestures. */
   readonly viewPreset?: MeasurementSurfaceViewPreset;
   /** Caller-owned exact pattern pieces rendered by the existing mannequin Three stage. */
   readonly patternPieceOverlay?: MeasurementSurfacePatternPieceOverlayV1;
+  readonly acceptedCloth?: MeasurementSurfaceAcceptedClothV1;
   /** Measurement field currently focused or hovered in the model form. */
   readonly activeMeasurementName?: common_BodyMeasurementName;
   /** Internal asset-capture mode: supersample and frame the active 3D guide itself. */
@@ -2470,6 +2474,8 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
   editor,
   measurementGuidePresentation = 'interactive',
   patternPieceOverlay,
+  acceptedCloth,
+  reserveWorkbenchViewportHeight = false,
   variant = 'form',
   viewPreset = 'front',
 }: ModelOpenReferencePreviewFromInputProps & {
@@ -4189,12 +4195,15 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
                   directPoseViewportEditingEnabled && (editor.unifiedViewportInteraction ?? false)
                 }
                 patternPieceOverlay={patternPieceOverlay}
+                acceptedCloth={acceptedCloth}
                 retainVisibleCanvasOnRebuild={editor.version === 'full-body-v9'}
                 className={
                   card
                     ? 'pointer-events-none h-full min-h-0 w-full border border-hairline'
                     : workbench
-                      ? 'order-1 h-full min-h-0 w-full border border-hairline'
+                      ? reserveWorkbenchViewportHeight
+                        ? 'order-1 h-full min-h-56 w-full flex-1 border border-hairline'
+                        : 'order-1 h-full min-h-0 w-full border border-hairline'
                       : headerOwned
                         ? 'order-1 aspect-[6/5] max-h-[calc(100dvh-17rem)] min-h-80 w-full border border-hairline'
                         : editor.minimalViewportUi
@@ -4251,6 +4260,7 @@ function ModelOpenReferenceLinkedPreviewV2({
   variant = 'form',
   viewPreset = 'front',
   patternPieceOverlay,
+  acceptedCloth,
 }: ModelOpenReferencePreviewFromInputProps) {
   const workbench = variant === 'workbench';
   const card = variant === 'card';
@@ -4729,6 +4739,7 @@ function ModelOpenReferenceLinkedPreviewV2({
                 exclusiveContextGroup={card ? 'model-card-preview' : undefined}
                 accessibleLabel={card ? '3D mannequin preview for this model' : undefined}
                 patternPieceOverlay={patternPieceOverlay}
+                acceptedCloth={acceptedCloth}
                 className={
                   card
                     ? 'pointer-events-none h-full min-h-0 w-full border border-hairline'

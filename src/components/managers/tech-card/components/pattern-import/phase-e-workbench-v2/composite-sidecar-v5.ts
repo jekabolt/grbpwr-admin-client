@@ -1,3 +1,4 @@
+import { isCanonicalDxfVertexIdV1 } from 'lib/pattern-import/dxf-path-provenance-v1';
 import type { PatternImportDxfProductCompositeSidecarBindingsV3 } from 'lib/cloth/domain/pattern-import-dxf-product-composite-sidecar-v3';
 
 import {
@@ -259,6 +260,8 @@ type OwnerState = Readonly<{
 const SHA256 = /^[0-9a-f]{64}$/;
 const STABLE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 const MAX_ID_LENGTH = 256;
+const NATIVE_CONTOUR_ID =
+  /^dxf-piece-v1\/p\/(?:[0-9a-f]{2})+\/s\/(?:[0-9a-f]{2})+\/g\/(?:cut|seam)$/;
 const MAX_TEXT_LENGTH = 500;
 const MAX_LABEL_LENGTH = 512;
 const MAX_SOURCE_IDENTITY_LENGTH = 4_096;
@@ -593,6 +596,20 @@ function sameAuthority(
   );
 }
 
+function isNativeContourId(value: unknown, pieceId: string): value is string {
+  if (
+    typeof value !== 'string' ||
+    value !== value.trim() ||
+    value.length > MAX_ID_LENGTH ||
+    !NATIVE_CONTOUR_ID.test(value)
+  )
+    return false;
+  const pieceHex = Array.from(encoder.encode(pieceId), (byte) =>
+    byte.toString(16).padStart(2, '0'),
+  ).join('');
+  return value.startsWith(`dxf-piece-v1/p/${pieceHex}/s/`);
+}
+
 function anchor(value: unknown, field: string): PatternImportDxfPhaseETopologyAnnotationAnchorV1 {
   const candidate = exactRecord(
     value,
@@ -600,10 +617,12 @@ function anchor(value: unknown, field: string): PatternImportDxfPhaseETopologyAn
     field,
   );
   const point = exactRecord(candidate.pointMm, ['x', 'y'], `${field}.pointMm`);
-  stableString(candidate.pieceId, `${field}.pieceId`);
+  const pieceId = stableString(candidate.pieceId, `${field}.pieceId`);
   stableString(candidate.pieceLineKey, `${field}.pieceLineKey`);
-  stableString(candidate.contourId, `${field}.contourId`);
-  stableString(candidate.vertexId, `${field}.vertexId`);
+  if (!isNativeContourId(candidate.contourId, pieceId))
+    stableString(candidate.contourId, `${field}.contourId`);
+  if (!isCanonicalDxfVertexIdV1(candidate.vertexId))
+    stableString(candidate.vertexId, `${field}.vertexId`);
   if (
     typeof point.x !== 'number' ||
     !Number.isFinite(point.x) ||

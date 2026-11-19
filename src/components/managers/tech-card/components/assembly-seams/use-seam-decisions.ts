@@ -23,8 +23,10 @@ import { useUndoHistory } from '../undo-history';
 import { buildReview, type Review } from './review-model';
 import { poseChange, type StepRef } from './seam-change-plan';
 import {
+  capturedSeamWriteOptions,
   NOT_SAVED,
   runSeamChange,
+  type CapturedSeamWriteGuard,
   type SeamChangeInput,
   type SeamChangeOpts,
   type SeamChangeResult,
@@ -129,16 +131,13 @@ export type StrictSeamAcceptResult =
     }>
   | Extract<StrictSeamUpsertResult, { ok: false }>;
 
-export type StrictSeamAcceptGuardResult =
-  | Readonly<{ ok: true }>
-  | Readonly<{ ok: false; why: string }>;
+export type StrictSeamAcceptGuardResult = ReturnType<CapturedSeamWriteGuard['validate']>;
 
-export type StrictSeamAcceptGuard = Readonly<{
-  /** Exact saved-card version captured together with the empty target operation. */
-  expectedLockVersion: number;
-  /** Re-check the live selected operation synchronously at the final request boundary. */
-  validate: () => StrictSeamAcceptGuardResult;
-}>;
+export type StrictSeamAcceptGuard = CapturedSeamWriteGuard &
+  Readonly<{
+    /** An existing seam edit keeps its persisted identity. */
+    expectedExistingSeamKey?: string;
+  }>;
 
 function strictUpsertBlocked(
   code: StrictSeamUpsertFailureCode,
@@ -216,6 +215,12 @@ export function resolveStrictSeamUpsertReceipt(
         `The seam write echo contains multiple rows for the submitted pair ${row.seamKey}.`,
         'acknowledged-unverified',
       );
+    if (row.status === 'confirmed' && matches[0]!.stale)
+      return strictUpsertBlocked(
+        'receipt-missing',
+        'The saved source has changed since this seam was anchored.',
+        'acknowledged-unverified',
+      );
     resolved.push(matches[0]);
   }
   return Object.freeze({
@@ -239,7 +244,11 @@ export type SeamWrites = {
   /** Insert or replace these rows (by seam key); resolves true when the server took them. */
   upsert: (rows: StoredRow[], errorAt?: string) => Promise<boolean>;
   /** Same write, but only succeeds with the exact final rows and keys echoed by the server. */
-  upsertWithReceipt: (rows: StoredRow[], errorAt?: string) => Promise<StrictSeamUpsertResult>;
+  upsertWithReceipt: (
+    rows: StoredRow[],
+    errorAt?: string,
+    guard?: CapturedSeamWriteGuard,
+  ) => Promise<StrictSeamUpsertResult>;
   /** Delete these rows; resolves true when the server took it. */
   remove: (rows: StoredRow[]) => Promise<boolean>;
   /** Insert or replace these pose rows (P8, by seam key); true when the server took them. */
@@ -345,7 +354,11 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
   );
 
   const upsertWithReceipt = useCallback(
-    async (rows0: StoredRow[], errorAt?: string): Promise<StrictSeamUpsertResult> => {
+    async (
+      rows0: StoredRow[],
+      errorAt?: string,
+      guard?: CapturedSeamWriteGuard,
+    ): Promise<StrictSeamUpsertResult> => {
       if (rows0.length === 0)
         return strictUpsertBlocked(
           'receipt-missing',
@@ -363,7 +376,7 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
         return strictUpsertBlocked(
           'write-failed',
           'The seam list did not load before the write.',
-          'unknown',
+          guard ? 'not-attempted' : 'unknown',
         );
       if (useSeamsStore.getState().cardId !== cardId)
         return strictUpsertBlocked(
@@ -379,13 +392,17 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
       const rows: StoredRow[] = [...seams, ...poses];
       const result = await change(
         { upsert: rows },
-        { verb: rows.length > 1 ? `decisions (${rows.length})` : 'decision', errorAt },
+        {
+          verb: rows.length > 1 ? `decisions (${rows.length})` : 'decision',
+          errorAt,
+          ...(guard ? capturedSeamWriteOptions(guard) : {}),
+        },
       );
       if (!result.ok)
         return strictUpsertBlocked(
           result.why === 'still saving' ? 'write-in-flight' : 'write-failed',
           result.why,
-          result.why === 'still saving' ? 'not-attempted' : 'unknown',
+          result.why === 'still saving' ? 'not-attempted' : result.outcome ?? 'unknown',
         );
       if (useSeamsStore.getState().cardId !== cardId)
         return strictUpsertBlocked(
@@ -472,20 +489,25 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
           'The open tech card changed before the exact link write started.',
           'not-attempted',
         );
-      const [row] = reuseExactKeys([row0], rowsOf(useSeamsStore.getState()));
+      const seamState = useSeamsStore.getState();
+      const existingKey = guard?.expectedExistingSeamKey;
+      if (
+        existingKey &&
+        (row0.seamKey !== existingKey ||
+          seamState.server.filter(({ seamKey }) => seamKey === existingKey).length !== 1)
+      )
+        return strictUpsertBlocked(
+          'write-failed',
+          'The existing exact seam is no longer uniquely saved on this card.',
+          'not-attempted',
+        );
+      const [row] = existingKey ? [row0] : reuseExactKeys([row0], rowsOf(seamState));
       const result = await change(
         { upsert: [row], link: [{ step, seamKey: row.seamKey }] },
         {
           verb: 'decision',
           pastInvalidForm: true,
-          retryLockMoved: false,
-          beforeRequest: ({ expectedLockVersion }) => {
-            if (!guard) return null;
-            if (expectedLockVersion !== guard.expectedLockVersion)
-              return 'The saved card moved after the exact operation was captured.';
-            const validation = guard.validate();
-            return validation.ok ? null : validation.why;
-          },
+          ...capturedSeamWriteOptions(guard),
           ...(row.seamKey !== row0.seamKey ? { errorAt: row0.seamKey } : {}),
         },
       );

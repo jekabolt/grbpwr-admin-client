@@ -157,11 +157,16 @@ await page.route('http://probe.local/**', (route) =>
   route.fulfill({ status: 200, contentType: 'text/html', body: '<div id="root"></div>' }),
 );
 
-async function mount(op) {
+const setup = page.locator('[role="button"][aria-expanded]').filter({
+  has: page.getByText('setup', { exact: true }),
+});
+
+async function mount(op, { openSetup = true } = {}) {
   await page.goto('http://probe.local/');
   await page.addScriptTag({ content: bundle });
   await page.evaluate((o) => window.__residue.mount(o), op);
   await page.waitForSelector('[data-kind-picker="0"]', { timeout: 15000 });
+  if (openSetup && (await setup.getAttribute('aria-expanded')) === 'false') await setup.click();
 }
 
 // СТРОКА ПОЛОСЫ — ТОЛЬКО ВНУТРИ ПОЛОСЫ. Тот же `data-field` стоит и на настоящих контролах:
@@ -186,15 +191,8 @@ await mount({
 });
 ck(pageErrors.length === 0, 'редактор смонтировался без исключений', pageErrors[0] ?? '');
 ck(await has('[data-residue-strip]'), 'полоса остатков нарисована');
-// ПОДПИСЬ — СЛОВО СВОЕГО ЭКРАНА (ревью Д2). Полоса стала общим примитивом двух экранов, и
-// подпись — единственное, что у них разное: у шага причина остатка — ВИД операции. Каптион —
-// первый ребёнок полосы, строки лежат в соседнем диве, склейки нет.
-{
-  const cap = ((await page.locator('[data-residue-strip] > p').first().textContent()) ?? '').trim();
-  ck(cap.includes('on this step'), 'подпись говорит про ШАГ', cap);
-  ck(cap.includes('its current kind'), 'и называет причину этого экрана: вид операции', cap);
-  ck(!cap.includes('section and purpose'), 'и не произносит причину чужого экрана', cap);
-}
+const caption = await textOf('[data-residue-strip] > p');
+ck(caption === 'stored fields', 'открытая секция Setup называет сохранённые поля', caption);
 ck(await has(RES('threadCount')), 'число ниток стоит строкой остатка');
 ck(
   (await textOf(RES('threadCount'))).includes('3'),
@@ -310,12 +308,17 @@ ck((await dirty()).isDirty === false, 'и здесь открытие не па�
 // расширялась против плана (§3.3: строка 4 матрицы §6.1, отказ Ф3 на ПУСТОМ невидимом поле).
 // Отказ кладётся тем же жестом, что у applyServerFieldErrors: setError(path, {type:'server'}).
 head('6. catch-строка: отказ сервера на несмонтированном пути');
-await mount({ operationType: T.PACK, zone: T.ZONE });
+await mount({ operationType: T.PACK, zone: T.ZONE }, { openSetup: false });
+ck((await setup.getAttribute('aria-expanded')) === 'false', 'до отказа секция Setup закрыта');
 ck(!(await has('[data-residue-strip]')), 'до отказа полосы нет');
 await page.evaluate(() =>
   window.__residue.setError('operations.0.pressToward', 'needs press action «to one side»'),
 );
-await page.waitForTimeout(150);
+await setup.and(page.locator('[aria-expanded="true"]')).waitFor({ timeout: 5000 });
+ck(
+  (await setup.getAttribute('aria-expanded')) === 'true',
+  'отказ на скрытом поле раскрывает Setup',
+);
 ck(
   await has(RES('pressToward')),
   'отказ на ПУСТОМ поле без контрола стоит catch-строкой полосы',
@@ -338,6 +341,10 @@ await page.waitForTimeout(150);
 ck(
   !(await has('[data-residue-strip]')),
   'отказ поля, чей контрол на экране, живёт на контроле, а не строкой полосы',
+);
+ck(
+  (await textOf(`${CTRL('machineType')} [id$="-form-item-message"]`)).includes('pick the machine'),
+  'отказ виден на собственном контроле машинки',
 );
 
 head('6-тер. отказ на ОСТАТКЕ встаёт в ту же строку, что и значение');

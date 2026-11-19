@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
-import { GrbpwrMark, GroupLabel, Pill, Row } from 'ui';
+import { PaperMark, usePaperBrand } from 'lib/workspace/paper-brand-context';
+import { GroupLabel, Pill, Row } from 'ui';
 import { KV } from 'components/managers/print/sheet';
 import { deriveCover, type CoverDeriveOptions } from '../derive-cover';
 import type { Gap } from '../gaps';
@@ -52,9 +53,10 @@ export function CoverPage({
   auxiliary = false,
 }: CoverPageProps) {
   const { t } = useT();
+  const paper = usePaperBrand();
   const model = useMemo(
-    () => deriveCover(techCard, { sampleSizeName, revisionLabel }, undefined, t),
-    [techCard, sampleSizeName, revisionLabel, t],
+    () => deriveCover(techCard, { sampleSizeName, revisionLabel, paper }, undefined, t),
+    [techCard, sampleSizeName, revisionLabel, paper, t],
   );
   const land = orient === 'land';
   const fabrics = model.fabrics
@@ -222,10 +224,16 @@ export function CoverPage({
       <TechpackSheet orient={orient} docline={docline}>
         <header className='mb-4 border-b-2 border-textColor pb-3'>
           <div className='flex min-w-0 items-start gap-3'>
-            <GrbpwrMark className='mt-0.5 h-10 w-10 shrink-0 text-textColor' />
+            <PaperMark brand={paper} className='mt-0.5 h-10 w-10 shrink-0 text-textColor' />
             <div className='min-w-0'>
               <div className='text-micro uppercase tracking-section text-labelColor'>
-                {model.brand} · {t('common.techPack')}
+                {model.brand ? (
+                  <>
+                    {model.brand} · {t('common.techPack')}
+                  </>
+                ) : (
+                  t('common.techPack')
+                )}
               </div>
               <h1 className='text-statBig font-bold uppercase leading-tight'>{model.name}</h1>
               <div className='text-control'>{uniqueLine([model.collection, model.season])}</div>
@@ -270,10 +278,16 @@ export function CoverPage({
       <header className='mb-4 border-b-2 border-textColor pb-3'>
         <div className='flex items-start justify-between gap-4'>
           <div className='flex min-w-0 items-start gap-3'>
-            <GrbpwrMark className='mt-0.5 h-10 w-10 shrink-0 text-textColor' />
+            <PaperMark brand={paper} className='mt-0.5 h-10 w-10 shrink-0 text-textColor' />
             <div className='min-w-0'>
               <div className='text-micro uppercase tracking-section text-labelColor'>
-                {model.brand} · {t('common.techPack')}
+                {model.brand ? (
+                  <>
+                    {model.brand} · {t('common.techPack')}
+                  </>
+                ) : (
+                  t('common.techPack')
+                )}
               </div>
               <h1 className='text-statBig font-bold uppercase leading-tight'>
                 {model.name || (model.gaps.name && <Missing gap={model.gaps.name} />)}

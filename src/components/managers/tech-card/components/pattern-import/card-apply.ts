@@ -1,3 +1,4 @@
+import type { AssemblyPatternWriteGuard } from '../nesting/reupload-session';
 // The wizard's two card seams (client.ts `DraftBuilder`, `ApplyDraftFn`) on the real card: F7's
 // `buildDraft` / `applyDraft` (lib/pattern-import/fabrics) wired to the upload RPC, the tech-card
 // form and the card's autosave. The wizard itself never touches the form (Codex C5).
@@ -32,8 +33,10 @@ export function importRowsLanded(
 }
 
 /** F7 `buildDraft` against the card the wizard read when it opened. */
-export const cardBuildDraft: DraftBuilder = (write, { card, dxfProvenance, dxfPhaseDReplay }) =>
-  buildDraft(write, card, { dxfProvenance, dxfPhaseDReplay });
+export const cardBuildDraft: DraftBuilder = (
+  write,
+  { card, dxfProvenance, dxfPhaseDReplay, dxfNativeSewingReplay },
+) => buildDraft(write, card, { dxfProvenance, dxfPhaseDReplay, dxfNativeSewingReplay });
 
 /**
  * ASCII DXF (the writer guarantees it, write/format.ts) → base64 as UploadPattern takes it. `btoa`
@@ -53,6 +56,7 @@ function toBase64(text: string): string {
 }
 
 export function createCardApply(deps: {
+  saveJoin?: import('../guarded-piece-join').SaveJoin | null;
   read: () => LiveCard;
   write: (path: string, value: unknown) => void;
   storageSizeId: number;
@@ -63,7 +67,10 @@ export function createCardApply(deps: {
   /** Shared card lock the autosave form will claim for the body write. */
   readPreviousLockVersion?: () => number;
   /** Sheets replaced in place, told after the form writes and before the save. */
-  onReplaced?: ApplyDeps['onReplaced'];
+  onReplaced?: (
+    list: Parameters<NonNullable<ApplyDeps['onReplaced']>>[0],
+    guard?: AssemblyPatternWriteGuard,
+  ) => void;
   /** Rows a try wrote whose save was not confirmed — held by the card across the wizard's tries. */
   unsaved?: { get: () => boolean; set: (v: boolean) => void };
   /** The rows landed though the save answered otherwise (a write after the body failed). */
@@ -83,7 +90,16 @@ export function createCardApply(deps: {
   /** Best-effort observability for the additive post-save seam; this callback is also fail-open. */
   onPatternSemanticAttachmentHostError?: (error: unknown) => void;
 }): ApplyDraftFn {
-  return async (draft, onProgress) => {
+  return async (draft, onProgress, options) => {
+    const join = options?.join;
+    const fixedEnd = options?.fixedEndReplacement;
+    if (join && !deps.saveJoin)
+      return {
+        ok: false,
+        failedScope: draft.scopes[0]?.target.scopeKey ?? '',
+        message: 'The saved card Join writer is unavailable.',
+        uploaded: [],
+      };
     const result = await applyDraft(
       draft,
       {
@@ -103,21 +119,51 @@ export function createCardApply(deps: {
             throw new Error(patternUploadErrorMessage(e));
           }
         },
+        ...(join
+          ? {
+              saveJoinedPattern: async (binding, uploaded, lock) => {
+                const { commitSavedJoin } = await import(
+                  './phase-e-workbench-v2/draft-cad-saved-join-review'
+                );
+                await commitSavedJoin(join, binding, uploaded, lock, deps.saveJoin!);
+              },
+            }
+          : {}),
         read: deps.read,
         write: deps.write,
         storageSizeId: deps.storageSizeId,
         scopeOf: deps.scopeOf,
         save: deps.save,
         readPreviousLockVersion: deps.readPreviousLockVersion,
-        onReplaced: deps.onReplaced,
+        onReplaced:
+          fixedEnd && deps.onReplaced
+            ? (list) => deps.onReplaced!(list, fixedEnd.guard)
+            : deps.onReplaced,
+        expectedReplacement: fixedEnd && {
+          scopeKey: fixedEnd.scopeKey,
+          lineKey: fixedEnd.lineKey,
+          oldUrl: fixedEnd.oldUrl,
+          sha256: fixedEnd.sha256,
+          sizeBytes: fixedEnd.sizeBytes,
+          expectedLockVersion: fixedEnd.guard.expectedLockVersion,
+        },
+        replaceMatchingFile: options?.replaceMatchingFile,
+        newPieceIntent: options?.newPieceIntent,
         unsaved: deps.unsaved,
         landed: deps.landed,
         rebuilding: deps.rebuilding,
       },
       onProgress,
     );
-    if (result.ok && result.commitReceipt && deps.afterConfirmedPatternImportSave) {
+    if (result.ok && result.uploaded.length && deps.afterConfirmedPatternImportSave) {
       try {
+        if (!result.commitReceipt) {
+          const details = result.commitReceiptBlockers?.map(({ detail }) => detail).join(' ');
+          throw new Error(
+            details ||
+              `No exact import receipt was issued by the card save (${result.save ?? 'no save result'}).`,
+          );
+        }
         await deps.afterConfirmedPatternImportSave(draft, {
           ...result,
           commitReceipt: result.commitReceipt,

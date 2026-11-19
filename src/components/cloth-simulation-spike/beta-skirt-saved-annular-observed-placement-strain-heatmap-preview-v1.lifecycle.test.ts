@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { MockInstance } from 'vitest';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
@@ -16,7 +17,25 @@ const ports = vi.hoisted(() => ({
   throwRendererClear: false,
   renderers: [] as { clearCalls: number; disposeCalls: number; renderCalls: number }[],
   onRender: null as (() => void) | null,
+  permuted: false,
 }));
+const contentSha = (value: ArrayBufferView) =>
+  createHash('sha256')
+    .update(new Uint8Array(value.buffer, value.byteOffset, value.byteLength))
+    .digest('hex');
+function syntheticContent() {
+  return {
+    triangles: new Uint32Array(ports.permuted ? [0, 1, 2, 1, 3, 2] : [0, 1, 2]),
+    continuum: new Uint32Array(ports.permuted ? [1, 3, 2, 0, 0, 1, 2, 0] : [0, 1, 2, 0]),
+    positions: new Float32Array(
+      ports.permuted
+        ? [0, 0, 0.02, 1, 0, 0.02, 0, 1, 0.02, 1, 1, 0.02]
+        : [0, 0, 0.02, 1, 0, 0.02, 0, 1, 0.02],
+    ),
+    values: new Float32Array(ports.permuted ? [0, 0, 0, 1.5, 0, 0, 0, 0.25] : [0, 0, 0, 0.5]),
+    flags: new Uint32Array(ports.permuted ? [0, 0] : [0]),
+  };
+}
 vi.mock('./beta-skirt-saved-annular-observed-placement-runtime-source-v1', () => ({
   getBetaSkirtSavedAnnularObservedPlacementRuntimeSourceLifetimeV1: (owner: unknown) =>
     owner === ports.source && !ports.sourceController.signal.aborted
@@ -24,8 +43,13 @@ vi.mock('./beta-skirt-saved-annular-observed-placement-runtime-source-v1', () =>
       : null,
   projectBetaSkirtSavedAnnularObservedPlacementRuntimeSourceV1: async () => ({
     report: { reportSha256: 'a'.repeat(64) },
-    normalizedV5: { seal: { aggregateSha256: 'b'.repeat(64) } },
-    normalizedTriangles: new Uint32Array([0, 1, 2]),
+    normalizedV5: {
+      seal: { aggregateSha256: 'b'.repeat(64) },
+      simulation: {
+        constraints: { continuumStrain: { triangleIndices: syntheticContent().continuum.buffer } },
+      },
+    },
+    normalizedTriangles: syntheticContent().triangles,
     collisionInput: {
       bodyPositionsM: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
       bodyTriangles: new Uint32Array([0, 1, 2]),
@@ -42,15 +66,25 @@ vi.mock('./beta-skirt-saved-annular-observed-placement-32-frame-contact-v1', () 
     report: {
       status: 'diagnostic-completed',
       reportSha256: 'c'.repeat(64),
+      postgate: {
+        strain: {
+          bindings: {
+            triangleIndicesSha256: contentSha(syntheticContent().continuum),
+            normalizedTopologySha256: contentSha(syntheticContent().triangles),
+          },
+          valuesSha256: contentSha(syntheticContent().values),
+          flagsSha256: contentSha(syntheticContent().flags),
+        },
+      },
       bindings: {
         runtimeSourceReportSha256: 'a'.repeat(64),
         normalizedV5AggregateSha256: 'b'.repeat(64),
       },
     },
-    normalizedTriangles: new Uint32Array([0, 1, 2]),
-    finalPositions3M: new Float32Array([0, 0, 0.02, 1, 0, 0.02, 0, 1, 0.02]),
-    strainValues: new Float32Array([0, 0, 0, 0.5]),
-    strainFlags: new Uint32Array([0]),
+    normalizedTriangles: syntheticContent().triangles,
+    finalPositions3M: syntheticContent().positions,
+    strainValues: syntheticContent().values,
+    strainFlags: syntheticContent().flags,
     strainUnits: 'dimensionless',
   }),
   disposeBetaSkirtSavedAnnularObservedPlacement32FrameContactV1: ports.disposeFrame,
@@ -115,6 +149,7 @@ beforeEach(() => {
   ports.throwRendererDispose = false;
   ports.throwRendererClear = false;
   ports.onRender = null;
+  ports.permuted = false;
   vi.stubGlobal('HTMLCanvasElement', SyntheticCanvas);
   vi.clearAllMocks();
 });
@@ -251,4 +286,30 @@ describe('synthetic observed heatmap renderer lifecycle, no GPU/physics acceptan
     expectBorrowedParentsAlive();
     expect(canvas.getContext).not.toHaveBeenCalled();
   });
+});
+
+// Fixed mocked projectors carry source topology; color mapping itself is production code.
+it('maps observed continuum colors to exact render triangles and retains raw/ordered receipt hashes', async () => {
+  ports.permuted = true;
+  const { projectSavedObservedStrainHeatmapV1 } = await import(
+    './beta-skirt-saved-annular-observed-placement-strain-heatmap-preview-v1'
+  );
+  const { betaSkirtStrainUtilizationColorV1 } = await import(
+    './beta-skirt-canonical-medium-webgpu-16-frame-strain-heatmap-preview-v1'
+  );
+  const result = await projectSavedObservedStrainHeatmapV1(ports.source, ports.frame);
+  expect(Array.from(result.heatmap.colors.slice(0, 3))).toEqual(
+    Array.from(new Float32Array(betaSkirtStrainUtilizationColorV1(0.25))),
+  );
+  expect(Array.from(result.heatmap.colors.slice(9, 12))).toEqual(
+    Array.from(new Float32Array(betaSkirtStrainUtilizationColorV1(1.5))),
+  );
+  expect(result.renderTriangleOrder.rawTriangleValuesSha256).toBe(
+    contentSha(syntheticContent().values),
+  );
+  expect(result.renderTriangleOrder.orderedTriangleValuesSha256).not.toBe(
+    result.renderTriangleOrder.rawTriangleValuesSha256,
+  );
+  const { view } = await open();
+  expect(view.receipt.renderTriangleOrder).toEqual(result.renderTriangleOrder);
 });

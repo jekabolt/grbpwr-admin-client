@@ -22,6 +22,13 @@ export type PatternImportDxfPhaseECadTableConnectEdgeSegmentV1 = Readonly<{
   pointsMm: readonly [Readonly<{ x: number; y: number }>, Readonly<{ x: number; y: number }>];
 }>;
 
+export type PatternImportDxfPhaseECadTableBoundaryVisibilityV1 = Readonly<
+  Record<
+    Exclude<PatternImportDxfPhaseECadTableConnectEdgeSegmentV1['contourRole'], 'hole'>,
+    boolean
+  >
+>;
+
 function segmentsOfPiece(
   piece: PatternImportDxfProductPhaseEAssemblyProjectionPieceV1,
 ): PatternImportDxfPhaseECadTableConnectEdgeSegmentV1[] {
@@ -60,4 +67,14 @@ export function derivePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1(
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1,
 ): readonly PatternImportDxfPhaseECadTableConnectEdgeSegmentV1[] {
   return Object.freeze(projection.pieces.flatMap(segmentsOfPiece));
+}
+
+/** Exposes only visible source boundaries to the direct Connect tool. */
+export function visiblePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1(
+  projection: PatternImportDxfProductPhaseEAssemblyProjectionV1,
+  visibility: PatternImportDxfPhaseECadTableBoundaryVisibilityV1,
+): readonly PatternImportDxfPhaseECadTableConnectEdgeSegmentV1[] {
+  return derivePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1(projection).filter(
+    ({ contourRole }) => contourRole !== 'hole' && visibility[contourRole],
+  );
 }

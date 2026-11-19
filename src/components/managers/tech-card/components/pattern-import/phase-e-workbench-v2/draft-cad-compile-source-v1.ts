@@ -3,10 +3,22 @@ import type { CardDraft } from 'lib/pattern-import/types';
 export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_COMPILE_SOURCE_V1 =
   'pattern-import-dxf-phase-e-draft-cad-compile-source/1' as const;
 
+type DraftCadCompileScope = Readonly<
+  Pick<CardDraft['scopes'][number], 'target' | 'writerReplay'> & {
+    rankedOutlineBlocks?: readonly Readonly<{
+      block: string;
+      identity: string;
+      sizeToken: string;
+      sizeId: number;
+      insetWidthMm?: number;
+    }>[];
+  }
+>;
+
 export type PatternImportDxfPhaseEDraftCadCompileSourceV1 = Readonly<{
   schemaVersion: typeof PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_COMPILE_SOURCE_V1;
   techCardId: CardDraft['techCardId'];
-  scopes: readonly Readonly<Pick<CardDraft['scopes'][number], 'target' | 'writerReplay'>>[];
+  scopes: readonly DraftCadCompileScope[];
   dxfProvenance: CardDraft['dxfProvenance'];
   dxfPhaseDReplay: CardDraft['dxfPhaseDReplay'];
 }>;
@@ -37,7 +49,19 @@ export function createPatternImportDxfPhaseEDraftCadCompileSourceV1(
     const source = structuredClone({
       schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_COMPILE_SOURCE_V1,
       techCardId: draft.techCardId,
-      scopes: draft.scopes.map(({ target, writerReplay }) => ({ target, writerReplay })),
+      scopes: draft.scopes.map(({ target, writerReplay, manifest }) => ({
+        target,
+        writerReplay,
+        rankedOutlineBlocks: manifest?.blocks?.map(
+          ({ block, identity, sizeToken, sizeId, authoredInsetOutlineCorner }) => ({
+            block,
+            identity,
+            sizeToken,
+            sizeId,
+            insetWidthMm: authoredInsetOutlineCorner?.widthMm,
+          }),
+        ),
+      })),
       dxfProvenance: draft.dxfProvenance,
       dxfPhaseDReplay: draft.dxfPhaseDReplay,
     });

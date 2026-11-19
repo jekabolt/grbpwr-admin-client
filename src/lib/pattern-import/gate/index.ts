@@ -30,7 +30,7 @@ import type {
 } from '../types';
 import { PATIMPORT } from '../types';
 import { applyAffine, bboxOf } from '../write/geom';
-import { type WriteDetail, writeDxfDetailed } from '../write';
+import { type WriteDetail, writeDxfDetailed, writeDxfWithRetainedLineSplit } from '../write';
 import {
   embedManifest as embedManifestLocal,
   manifestPrologueBytes,
@@ -399,6 +399,7 @@ export function chromeByBlockFor(
 }
 
 export type WriteAndGateCtx = {
+  retainedLineSplit?: import('../types').RetainedLineSplit;
   rules: CardBlockRules;
   sizeTokens: ReadonlySet<string>;
   /** Source walls (whole chains are fine): G4 measures the written line against them. */
@@ -478,7 +479,10 @@ export async function writeAndGate(
 ): Promise<{ detail: WriteDetail; dxfText: string; report: GateReport; expect: GateExpectation }> {
   const embed = ctx.embed ?? embedManifestLocal;
   const read = ctx.read ?? readManifestLocal;
-  const detail0 = writeDxfDetailed(job, { embed: null, now: ctx.now });
+  const options = { embed: null, now: ctx.now };
+  const detail0 = ctx.retainedLineSplit
+    ? await writeDxfWithRetainedLineSplit(job, ctx.retainedLineSplit, options)
+    : writeDxfDetailed(job, options);
   // SHAPE soft rule: the passport digest records the pieces whose WRITTEN sizes carry different
   // notch / drill counts (from the manifest's blocks, i.e. what the file holds)
   const detail = detail0.manifest.passport

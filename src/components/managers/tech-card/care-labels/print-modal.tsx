@@ -1,6 +1,7 @@
 import { useSizeOrdering } from 'components/managers/model/components/use-size-systems';
 import { useProductionRuns } from 'components/managers/production-runs/components/useProductionRuns';
 import { notify } from 'lib/stores/store';
+import { useLabelBrand } from 'lib/workspace/paper-brand-context';
 import { useEffect, useMemo, useState, type ChangeEvent, type JSX } from 'react';
 import {
   Button,
@@ -70,6 +71,7 @@ export function PrintCompositionModal({
   onFixText,
 }: PrintCompositionModalProps): JSX.Element {
   const { shaper, failed } = useShaper();
+  const brand = useLabelBrand();
   const { prefs, update } = useCareLabelPrefs(techCardId);
   const runsQuery = useProductionRuns(techCardId, '', 0, false, true);
   const runs = useMemo(() => adaptRuns(runsQuery.data?.runs ?? []), [runsQuery.data]);
@@ -87,9 +89,9 @@ export function PrintCompositionModal({
   const plan = useMemo(
     () =>
       shaper && data && compositions
-        ? planAll(shaper, data, compositions, prefs.mode, data.label.qr, orientation)
+        ? planAll(shaper, data, compositions, prefs.mode, data.label.qr, orientation, brand)
         : null,
-    [shaper, data, compositions, prefs.mode, orientation],
+    [shaper, data, compositions, prefs.mode, orientation, brand],
   );
   const wholeCard = useMemo(
     () =>
@@ -187,6 +189,7 @@ export function PrintCompositionModal({
           qr: data.label.qr,
           colorwayIds: generated,
           copies,
+          ...(brand ? { brand } : {}),
         }),
       );
       const block = set.holes.find(isBlocking);

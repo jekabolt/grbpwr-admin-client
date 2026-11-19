@@ -1,3 +1,6 @@
+import { mapAuthoredAllowanceCorner } from '../manifest/authored-allowance-corner';
+import { mapAuthoredTurnAllowance } from '../manifest/authored-turn-allowance';
+import { mapAuthoredQuadratic } from '../manifest/authored-internal';
 // Pairs (owner decision 9, D1'): a piece cut twice as a left and a right hand is written as TWO
 // blocks, `_L` and `_R`, the second the explicit mirror of the first across its grain line (the
 // axis gate G12 checks against). Both hands carry piecesPerGarment for ONE hand; the card cuts the
@@ -19,7 +22,16 @@ import type {
   PieceSizeSpec,
   PtMm,
 } from '../types';
-import { applyAffine, areaOf, bboxOf, ccw, dist, reflection } from './geom';
+import {
+  applyAffine,
+  areaOf,
+  bboxOf,
+  ccw,
+  dist,
+  reflection,
+  signedArea,
+  transformCutLoops,
+} from './geom';
 
 /** Mirror of a polyline across the grain line (a→b, infinite). */
 export function mirrorAcross(pts: readonly PtMm[], grain: { a: PtMm; b: PtMm }): PtMm[] {
@@ -43,20 +55,43 @@ export function transformSizeSpec(s: PieceSizeSpec, t: Affine): PieceSizeSpec {
     seg: [P(n.seg[0]), P(n.seg[1])],
   }));
   const drills: DrillFeature[] = s.drills.map((d) => ({ ...d, at: P(d.at) }));
-  const internal: InternalFeature[] = s.internal.map((f) => ({ ...f, pts: f.pts.map(P) }));
+  const internal: InternalFeature[] = s.internal.map((f) => ({
+    ...f,
+    pts: f.pts.map(P),
+    ...(f.authoredQuadratic
+      ? { authoredQuadratic: mapAuthoredQuadratic(f.authoredQuadratic, P) }
+      : {}),
+    ...(f.authoredTurnAllowance
+      ? { authoredTurnAllowance: mapAuthoredTurnAllowance(f.authoredTurnAllowance, P) }
+      : {}),
+  }));
   const fold: FoldFeature | null = s.fold ? { ...s.fold, a: P(s.fold.a), b: P(s.fold.b) } : null;
   const cut = ccw(s.cut.map(P));
+  const cutLoops = transformCutLoops(t, s.cutLoops);
   return {
     ...s,
+    ...(s.authoredAllowanceCorner
+      ? { authoredAllowanceCorner: mapAuthoredAllowanceCorner(s.authoredAllowanceCorner, P) }
+      : {}),
+    ...(s.authoredOutlineCorner
+      ? { authoredOutlineCorner: mapAuthoredQuadratic(s.authoredOutlineCorner, P) }
+      : {}),
     cut,
+    ...(cutLoops && { cutLoops }),
     seam: s.seam ? ccw(s.seam.map(P)) : null,
     grain,
     notches,
     drills,
     internal,
+    ...(s.textMarks?.length
+      ? { textMarks: s.textMarks.map((mark) => ({ ...mark, at: P(mark.at) })) }
+      : {}),
+    ...(s.pointMarks?.length
+      ? { pointMarks: s.pointMarks.map((mark) => ({ ...mark, at: P(mark.at) })) }
+      : {}),
     fold,
-    bbox: bboxOf(cut),
-    areaMm2: areaOf(cut),
+    bbox: bboxOf(cutLoops?.length ? [...cut, ...cutLoops.flat()] : cut),
+    areaMm2: areaOf(cut) + (cutLoops?.reduce((total, loop) => total + signedArea(loop), 0) ?? 0),
   };
 }
 

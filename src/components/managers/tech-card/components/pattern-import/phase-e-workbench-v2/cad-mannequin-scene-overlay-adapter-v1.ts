@@ -7,6 +7,8 @@ import {
 
 import { isTopstitchThreadLine, type TopstitchBomLine } from '../../topstitch-lines';
 import { resolvePatternImportDxfPhaseECadWorkbenchThreadCatalogV1 } from './cad-workbench-bom-visual-authority-v1';
+import { CAD_WORKBENCH_SEAM_SIDE_COLORS } from './cad-workbench-seam-colors-v1';
+import { cadWorkbenchOperationSeamOrdinal } from './cad-workbench-seam-ordinal-v1';
 import type {
   PatternImportDxfPhaseECadMannequinDxfStagingSelectionV1,
   PatternImportDxfPhaseECadMannequinDxfStagingSourceV1,
@@ -41,7 +43,6 @@ export const PATTERN_IMPORT_DXF_PHASE_E_CAD_MANNEQUIN_SCENE_OVERLAY_CLAIMS_V1 = 
 
 const STABLE_REF = /^[A-Za-z0-9][A-Za-z0-9._:/#-]{0,255}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
-const SIDE_COLORS = Object.freeze({ A: '#2563EB', B: '#F97316' } as const);
 const PIN_AUTHORITY_UNAVAILABLE_REASON =
   'No current exact pin-coordinate owner exists; pin guides are hidden.' as const;
 
@@ -73,9 +74,10 @@ export type PatternImportDxfPhaseECadMannequinSceneEdgeHighlightV1 = Readonly<{
   primitiveId: string;
   connectionRef: string;
   operationNumber: number;
+  seamOrdinal: number;
   authoringOperationId: string;
   side: 'A' | 'B';
-  semanticColorHex: (typeof SIDE_COLORS)[keyof typeof SIDE_COLORS];
+  semanticColorHex: (typeof CAD_WORKBENCH_SEAM_SIDE_COLORS)[keyof typeof CAD_WORKBENCH_SEAM_SIDE_COLORS];
   piecePlaneKey: string;
   scopeKey: string;
   pieceId: string;
@@ -451,7 +453,8 @@ function selectedPiecePlaneKey(
   const matches = candidates.filter(
     ({ source, piece }) =>
       piece.pieceId === selection.pieceId &&
-      (!selection.scopeKey || source.scopeKey === selection.scopeKey),
+      (!selection.scopeKey || source.scopeKey === selection.scopeKey) &&
+      (selection.pieceLineKey == null || piece.pieceLineKey === selection.pieceLineKey),
   );
   return matches.length === 1 ? matches[0].piecePlaneKey : null;
 }
@@ -796,6 +799,15 @@ export function buildPatternImportDxfPhaseECadMannequinSceneOverlayFromExactAuth
     } else {
       exactLayerAvailable = true;
       for (const { connection, sides } of compiled) {
+        const seamOrdinal = cadWorkbenchOperationSeamOrdinal(
+          activeOperation.seamKeys,
+          connection.connectionRef,
+        );
+        if (seamOrdinal === null)
+          return blocked(
+            'assembly-graph-invalid',
+            'The exact seam has no unique operation position.',
+          );
         const focused =
           !selectedConnectionRef || selectedConnectionRef === connection.connectionRef;
         for (const resolved of sides)
@@ -803,9 +815,10 @@ export function buildPatternImportDxfPhaseECadMannequinSceneOverlayFromExactAuth
             primitiveId: `edge:${connection.connectionRef}:${resolved.side}`,
             connectionRef: connection.connectionRef,
             operationNumber: connection.operationNumber,
+            seamOrdinal,
             authoringOperationId: connection.authoringOperationId,
             side: resolved.side,
-            semanticColorHex: SIDE_COLORS[resolved.side],
+            semanticColorHex: CAD_WORKBENCH_SEAM_SIDE_COLORS[resolved.side],
             piecePlaneKey: resolved.candidate.piecePlaneKey,
             scopeKey: resolved.candidate.source.scopeKey,
             pieceId: resolved.binding.pieceId,

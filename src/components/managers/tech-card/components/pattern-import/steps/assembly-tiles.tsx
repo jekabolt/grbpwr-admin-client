@@ -134,6 +134,7 @@ const FIELD_WORD: Record<ImpactDiffer['field'], string> = {
 };
 
 export function AssemblyTiles({
+  newPieceOnly,
   api,
   card,
   impacts,
@@ -144,6 +145,7 @@ export function AssemblyTiles({
   impacts: Impact[];
   /** Applying or applied: the tiles show the answers, nothing is clickable. */
   locked: boolean;
+  newPieceOnly?: string;
 }) {
   const { catalog } = useOperationWorkCatalog();
   const [open, setOpen] = useState<Record<string, boolean>>({});
@@ -183,7 +185,8 @@ export function AssemblyTiles({
     const followers = unclear.filter((x) => x.after === u.blockName).map((x) => x.key);
     const pick = (v: string) =>
       say(answer(prev, 'blocks', u.key, u.answer === v ? undefined : v, u.after ? [] : followers));
-    const offered = u.state === 'open' ? u.candidates : u.all;
+    const offered =
+      newPieceOnly && u.identity === newPieceOnly ? [] : u.state === 'open' ? u.candidates : u.all;
     const own = blockShape(u.identity);
     const shapes = offered.map((c) => cardShape(c.pieceLineKey, u.scopeKey));
     const s = rowScale([own, ...shapes], 78);

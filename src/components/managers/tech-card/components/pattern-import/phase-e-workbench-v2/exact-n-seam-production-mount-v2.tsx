@@ -1,16 +1,49 @@
+import type { CadMannequinTableSelectionV1 } from './cad-mannequin-placement-group-v1';
+import * as Dialog from '@radix-ui/react-dialog';
+import type {
+  SavedGenericDurablePhysicalPreviewScopeV1,
+  SavedGenericDurablePhysicalPreviewSeamV1,
+} from 'components/cloth-simulation-spike/saved-generic-durable-physical-host-v1';
 import type { ReactNode } from 'react';
+import { Button, Close, Pencil1Icon } from 'ui';
+import type { PatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
+import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
+import type { CadTablePieceFeaturesByKey } from './cad-table-piece-features-v1';
+import {
+  activatePatternImportDxfPhaseECadTableZeroCanvasPieceV1,
+  PatternImportDxfPhaseECadTableZeroConnectCanvasV1,
+  useCadTableZeroCanvasOwner,
+} from './cad-table-zero-connect-canvas-v1';
+import {
+  CadTablePieceSelection,
+  handleCadTablePieceSelectionKey,
+} from './cad-table-piece-selection-panel-v1';
 
 import {
   PatternImportDxfPhaseECadWorkbenchSplitShellV1,
   type PatternImportDxfPhaseECadWorkbenchSlotContextV1,
+  type PatternImportDxfPhaseECadWorkbenchSelectionV1,
   type PatternImportDxfPhaseECadWorkbenchSlotV1,
 } from './cad-workbench-split-shell-v1';
 import {
   buildPatternImportDxfPhaseECadMannequinProductionSceneOverlayV2,
   type PatternImportDxfPhaseECadMannequinProductionSceneOverlayRequestV2,
 } from './cad-mannequin-production-scene-overlay-adapter-v2';
+import { buildPatternImportDxfPhaseECadMannequinSavedOneSeamSceneOverlayV1 } from './cad-mannequin-saved-one-seam-scene-overlay-v1';
 import { bridgePatternImportDxfPhaseECadMannequinSceneOverlayToRendererV1 } from './cad-mannequin-scene-overlay-renderer-bridge-v1';
+import type { PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1 } from './cad-table-zero-connect-phase-e-authority-v1';
 import type { PatternImportDxfPhaseECadMannequinSceneOverlayCapabilityV1 } from './cad-workbench-mannequin-model-picker-v1';
+import { findCadWorkbenchScopedPieceIndexV1 } from './cad-workbench-piece-selection-v1';
+import { derivePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1 } from './cad-table-connect-edge-segments-v1';
+import { cadWorkbenchOperationSeamOrdinal } from './cad-workbench-seam-ordinal-v1';
+import { matchesPatternImportDxfProductExactNDesktopGeometryV2 } from './durable-exact-session-current-v1';
+import {
+  usePatternImportDxfPhaseERestoredTopologyAnnotationsV1,
+  type PatternImportDxfPhaseERestoredTopologyAnnotationReaderV1,
+} from './restored-topology-annotation-reader-v1';
+import { PatternImportDxfPhaseESavedTopologyAnnotationEditControlV1 } from './saved-topology-annotation-edit-control-v1';
+import type { PatternImportDxfPhaseETopologyAnnotationApplicationTransactionV5 } from './topology-annotation-application-transaction-v5';
+import type { PatternImportDxfPhaseEWrappedTopologyAnnotationSaveV1 } from './wrapped-topology-annotation-save-v1';
 import type { PatternImportDxfProductExactNSeamUiSelectionOwnerV2 } from './exact-n-seam-atomic-ui-selection-v2';
 import type { PatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV1 } from './golden-card-production-v2-snapshot-feed-v1';
 import {
@@ -38,6 +71,7 @@ export const PATTERN_IMPORT_DXF_PRODUCT_EXACT_N_SEAM_PRODUCTION_MOUNT_CLAIMS_V2 
   readOnlyHost: true,
   exactNEditOrApplyControlsRendered: false,
   topologyAnnotationAuthoringSlotAvailable: true,
+  savedAnnotationReaderCallerOwned: true,
   topologyAnnotationPersistenceCallerOwned: true,
   createsSecondWriter: false,
   fixtureAuthorityAccepted: false,
@@ -65,11 +99,26 @@ export type PatternImportDxfProductExactNSeamProductionSceneOverlayInputV2 = Pic
 
 export type PatternImportDxfProductExactNSeamProductionMannequinContextV2 =
   PatternImportDxfPhaseECadWorkbenchSlotContextV1 &
-    Readonly<{ sceneOverlay: PatternImportDxfPhaseECadMannequinSceneOverlayCapabilityV1 }>;
+    Readonly<{
+      sceneOverlay: PatternImportDxfPhaseECadMannequinSceneOverlayCapabilityV1;
+      tableSelection?: CadMannequinTableSelectionV1;
+      previewScope: SavedGenericDurablePhysicalPreviewScopeV1 | null;
+      previewSeam?: SavedGenericDurablePhysicalPreviewSeamV1;
+    }>;
 
 export type PatternImportDxfProductExactNSeamProductionMannequinSlotV2 =
   | ReactNode
   | ((context: PatternImportDxfProductExactNSeamProductionMannequinContextV2) => ReactNode);
+
+export type PatternImportDxfProductExactNDesktopGeometryV2 = Readonly<{
+  catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1;
+  projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
+  annotationSource: Readonly<{ identity: string; revision: string; sha256: string }> | null;
+  pieceFeatures?: CadTablePieceFeaturesByKey;
+  savedSceneAuthority?: PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1;
+}>;
+
+export { matchesPatternImportDxfProductExactNDesktopGeometryV2 } from './durable-exact-session-current-v1';
 
 export type PatternImportDxfProductExactNSeamProductionMountPropsV2 = Readonly<{
   session: PatternImportDxfPhaseEExactNAssemblyOrderSessionV2;
@@ -77,11 +126,17 @@ export type PatternImportDxfProductExactNSeamProductionMountPropsV2 = Readonly<{
   onActiveSeamIndexChange: (index: number) => void;
   mannequin: PatternImportDxfProductExactNSeamProductionMannequinSlotV2;
   operationsPanel: PatternImportDxfPhaseECadWorkbenchSlotV1;
+  operationIssueCount?: number;
+  editingLocked?: boolean;
+  desktopGeometry?: PatternImportDxfProductExactNDesktopGeometryV2 | null;
   objectSidebar?: PatternImportDxfPhaseECadWorkbenchSlotV1;
   sceneOverlayInput?: PatternImportDxfProductExactNSeamProductionSceneOverlayInputV2 | null;
   sceneOverlayBlocker?: Readonly<{ code: string; detail: string }> | null;
   /** Mounted only by the caller that owns the genuine V4/V5 annotation transaction. */
   topologyAnnotationAuthoring?: ReactNode;
+  readSavedTopologyAnnotations?: PatternImportDxfPhaseERestoredTopologyAnnotationReaderV1;
+  saveWrappedTopologyAnnotations?: PatternImportDxfPhaseEWrappedTopologyAnnotationSaveV1;
+  saveStandaloneTopologyAnnotations?: PatternImportDxfPhaseETopologyAnnotationApplicationTransactionV5['save'];
 }>;
 
 function sceneOverlayBlocked(
@@ -102,6 +157,10 @@ export function resolvePatternImportDxfProductExactNSeamProductionSceneOverlayV2
   activeSeamIndex: number,
   input: PatternImportDxfProductExactNSeamProductionSceneOverlayInputV2 | null | undefined,
   unavailableBlocker?: Readonly<{ code: string; detail: string }> | null,
+  focus?: Pick<
+    PatternImportDxfPhaseECadWorkbenchSelectionV1,
+    'scopeKey' | 'pieceId' | 'pieceLineKey'
+  >,
 ): PatternImportDxfPhaseECadMannequinSceneOverlayCapabilityV1 {
   if (!input)
     return sceneOverlayBlocked(
@@ -123,7 +182,11 @@ export function resolvePatternImportDxfProductExactNSeamProductionSceneOverlayV2
     importGeneration: input.staging.importGeneration,
     staging: input.staging,
     selection: {
-      pieceId: activeSeam.sides[0]?.pieceId ?? null,
+      ...(focus ?? {
+        scopeKey: session.current.row.scopeKey,
+        pieceId: activeSeam.sides[0]?.pieceId ?? null,
+        pieceLineKey: activeSeam.sides[0]?.pieceLineKey ?? null,
+      }),
       seamId: activeSeam.seamId,
     },
     stitchVisuals: input.stitchVisuals,
@@ -146,9 +209,52 @@ export function resolvePatternImportDxfProductExactNSeamProductionMountV2(
   });
 }
 
+function DeferredTopologyAnnotationAuthoring({
+  children,
+  onClose,
+}: Readonly<{ children: ReactNode; onClose: () => void }>) {
+  return (
+    <Dialog.Root
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
+      <Dialog.Trigger asChild>
+        <Button
+          type='button'
+          size='xs'
+          variant='default'
+          aria-label='Edit annotations'
+          title='Edit annotations'
+          className='flex h-10 w-10 flex-none items-center justify-center p-0 hover:bg-pageBg'
+        >
+          <Pencil1Icon aria-hidden width={16} height={16} />
+        </Button>
+      </Dialog.Trigger>
+      <Dialog.Portal>
+        <Dialog.Overlay className='fixed inset-0 z-[210] bg-textColor/50' />
+        <Dialog.Content
+          className='fixed left-1/2 top-1/2 z-[211] max-h-[90vh] w-[min(46rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-auto border border-borderColor bg-bgColor'
+          aria-describedby={undefined}
+          onKeyDown={(event) => event.stopPropagation()}
+          onInteractOutside={(event) => event.preventDefault()}
+        >
+          <header className='flex items-center justify-between px-3 py-2'>
+            <Dialog.Title className='text-small font-bold'>Edit annotations</Dialog.Title>
+            <Dialog.Close asChild>
+              <Close />
+            </Dialog.Close>
+          </header>
+          {children}
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
 /**
- * Layout-only production boundary. It never prepares, restores, persists or edits exact-N data;
- * invalid/stale/forged inputs render nothing, leaving the caller to show the typed blocker.
+ * Mounts the already verified Exact-N selection. The optional annotation readback supplies only
+ * the saved presentation layer for its matching desktop geometry.
  */
 export function PatternImportDxfProductExactNSeamProductionMountV2({
   session,
@@ -156,52 +262,298 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
   onActiveSeamIndexChange,
   mannequin,
   operationsPanel,
+  operationIssueCount,
+  editingLocked,
+  desktopGeometry = null,
   objectSidebar,
   sceneOverlayInput = null,
   sceneOverlayBlocker = null,
   topologyAnnotationAuthoring = null,
+  readSavedTopologyAnnotations,
+  saveWrappedTopologyAnnotations,
+  saveStandaloneTopologyAnnotations,
 }: PatternImportDxfProductExactNSeamProductionMountPropsV2): ReactNode {
   const resolved = resolvePatternImportDxfProductExactNSeamProductionMountV2(
     session,
     activeSeamIndex,
   );
+  const exactDesktop =
+    resolved.ok &&
+    resolved.model.seamCount === 1 &&
+    matchesPatternImportDxfProductExactNDesktopGeometryV2(desktopGeometry, session)
+      ? desktopGeometry
+      : null;
+  const tableSessionOwner = useCadTableZeroCanvasOwner(exactDesktop?.projection ?? null);
+  const annotationRead = usePatternImportDxfPhaseERestoredTopologyAnnotationsV1(
+    session,
+    exactDesktop,
+    readSavedTopologyAnnotations,
+  );
+  const savedAnnotations = annotationRead.current;
   if (!resolved.ok) return null;
   const activeSeam = resolved.model.state.seams[activeSeamIndex];
+  const activeSeamChoice = resolved.model.choices.seams[activeSeamIndex]!;
+  const operation = resolved.model.state.bindings.selectedOperation;
+  const seamOrdinal = cadWorkbenchOperationSeamOrdinal(operation.seamIds, activeSeam.seamId);
+  const selectedPieceKeys = tableSessionOwner?.session.layout.selectedPieceKeys ?? [];
+  const activePiece =
+    selectedPieceKeys.length === 1
+      ? tableSessionOwner?.session.layout.pieces.find(
+          ({ identity }) => identity.key === selectedPieceKeys[0],
+        )
+      : null;
+  const savedSideFocus = tableSessionOwner?.session.savedSeamSide;
+  const savedBoundary = tableSessionOwner?.session.savedBoundary;
+  const focusedBoundary =
+    savedBoundary && activePiece?.identity.key === savedBoundary.pieceKey
+      ? savedBoundary
+      : undefined;
+  const focusedSeamSide =
+    savedSideFocus?.seamId === activeSeam.seamId &&
+    activePiece?.identity.key === savedSideFocus.pieceKey
+      ? savedSideFocus.sideIndex
+      : null;
   const selection = Object.freeze({
     operationNumber: session.current.selectedOperation.sourceOperationNumber,
-    pieceId: activeSeam.sides[0]?.pieceId ?? null,
+    scopeKey: session.current.row.scopeKey,
+    pieceId: exactDesktop
+      ? activePiece?.identity.pieceId ?? null
+      : activeSeam.sides[0]?.pieceId ?? null,
+    pieceLineKey: exactDesktop
+      ? activePiece?.identity.pieceLineKey ?? null
+      : activeSeam.sides[0]?.pieceLineKey ?? null,
     seamId: activeSeam.seamId,
+    seamSideIndex: focusedSeamSide,
+    ...(focusedBoundary && {
+      boundaryEdge: {
+        contourId: focusedBoundary.contourId,
+        boundaryVertexIds: focusedBoundary.boundaryVertexIds,
+      },
+    }),
   });
-  const sceneOverlay = resolvePatternImportDxfProductExactNSeamProductionSceneOverlayV2(
-    session,
-    activeSeamIndex,
-    sceneOverlayInput,
-    sceneOverlayBlocker,
-  );
+  const sceneOverlay =
+    !session.productionFeed && exactDesktop?.savedSceneAuthority
+      ? buildPatternImportDxfPhaseECadMannequinSavedOneSeamSceneOverlayV1({
+          session,
+          prepared: exactDesktop.savedSceneAuthority,
+          projection: exactDesktop.projection,
+          focusedPieceId: selection.pieceId,
+          focusedPieceLineKey: selection.pieceLineKey,
+        })
+      : resolvePatternImportDxfProductExactNSeamProductionSceneOverlayV2(
+          session,
+          activeSeamIndex,
+          sceneOverlayInput,
+          sceneOverlayBlocker,
+          selection,
+        );
+  const previewScope = exactDesktop
+    ? {
+        row: session.current.row,
+        sourceFileId: exactDesktop.projection.sourceFileId,
+        sizeToken: exactDesktop.projection.sizeToken,
+      }
+    : null;
+  const previewSeam = previewScope
+    ? {
+        operationNumber: operation.sourceOperationNumber,
+        seamId: activeSeam.seamId,
+        sides: activeSeamChoice.sides,
+      }
+    : undefined;
   const mannequinSlot: PatternImportDxfPhaseECadWorkbenchSlotV1 =
     typeof mannequin === 'function'
-      ? (context) => mannequin(Object.freeze({ ...context, sceneOverlay }))
+      ? (context) =>
+          mannequin(
+            Object.freeze({
+              ...context,
+              sceneOverlay,
+              previewScope,
+              previewSeam,
+              tableSelection:
+                exactDesktop && tableSessionOwner
+                  ? {
+                      scopeKey: session.current.row.scopeKey,
+                      projection: exactDesktop.projection,
+                      selectedPieceKeys,
+                    }
+                  : undefined,
+            }),
+          )
       : mannequin;
+
+  const focusSelection = (nextSelection: PatternImportDxfPhaseECadWorkbenchSelectionV1 | null) => {
+    if ((nextSelection?.pieceId || nextSelection?.pieceLineKey) && tableSessionOwner) {
+      const pieces = tableSessionOwner.session.layout.pieces;
+      const index = findCadWorkbenchScopedPieceIndexV1(
+        nextSelection,
+        session.current.row.scopeKey,
+        pieces.map(({ identity }) => identity),
+      );
+      if (index < 0) return;
+      const pieceKey = pieces[index]!.identity.key;
+      const sideIndex = nextSelection.seamSideIndex;
+      const edge = nextSelection.boundaryEdge;
+      if (edge) {
+        if (
+          !exactDesktop ||
+          edge.boundaryVertexIds.length !== 2 ||
+          sideIndex != null ||
+          nextSelection.operationNumber !== operation.sourceOperationNumber
+        )
+          return;
+        const matches = derivePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1(
+          exactDesktop.projection,
+        ).filter(
+          (segment) =>
+            segment.contourRole === 'sewing-boundary' &&
+            segment.pieceId === nextSelection.pieceId &&
+            segment.pieceLineKey === nextSelection.pieceLineKey &&
+            segment.contourId === edge.contourId &&
+            segment.boundaryVertexIds.every(
+              (id, ordinal) => id === edge.boundaryVertexIds[ordinal],
+            ),
+        );
+        if (matches.length !== 1) return;
+      }
+      if (sideIndex != null) {
+        const side = activeSeam.sides[sideIndex];
+        if (
+          !side ||
+          nextSelection.seamId !== activeSeam.seamId ||
+          nextSelection.operationNumber !== operation.sourceOperationNumber ||
+          side.pieceId !== nextSelection.pieceId ||
+          side.pieceLineKey !== nextSelection.pieceLineKey
+        )
+          return;
+      }
+      tableSessionOwner.update((current) => {
+        const activated = activatePatternImportDxfPhaseECadTableZeroCanvasPieceV1(
+          current,
+          pieceKey,
+          false,
+        );
+        if (edge)
+          return Object.freeze({
+            ...activated,
+            savedBoundary: { ...edge, pieceKey },
+          });
+        return sideIndex == null
+          ? activated
+          : Object.freeze({
+              ...activated,
+              savedSeamSide: { seamId: activeSeam.seamId, sideIndex, pieceKey },
+            });
+      });
+    }
+    if (!nextSelection?.seamId) return;
+    const nextIndex = resolved.model.state.seams.findIndex(
+      ({ seamId }) => seamId === nextSelection.seamId,
+    );
+    if (nextIndex >= 0) onActiveSeamIndexChange(nextIndex);
+  };
+  const focusActiveSeamSide = (sideIndex: 0 | 1) => {
+    const { pieceId, pieceLineKey } = activeSeamChoice.sides[sideIndex];
+    focusSelection({
+      operationNumber: operation.sourceOperationNumber,
+      scopeKey: session.current.row.scopeKey,
+      pieceId,
+      pieceLineKey,
+      seamId: activeSeam.seamId,
+      seamSideIndex: sideIndex,
+    });
+  };
 
   return (
     <PatternImportDxfPhaseECadWorkbenchSplitShellV1
-      objectSidebar={objectSidebar}
-      selection={selection}
-      onSelectionFocus={({ selection: nextSelection }) => {
-        if (!nextSelection?.seamId) return;
-        const nextIndex = resolved.model.state.seams.findIndex(
-          ({ seamId }) => seamId === nextSelection.seamId,
-        );
-        if (nextIndex >= 0) onActiveSeamIndexChange(nextIndex);
+      editingLocked={editingLocked}
+      objectSidebar={
+        objectSidebar ??
+        (exactDesktop && tableSessionOwner ? (
+          <CadTablePieceSelection
+            owner={tableSessionOwner}
+            projection={exactDesktop.projection}
+            features={exactDesktop.pieceFeatures}
+            operationIssueCount={operationIssueCount}
+            seams={[
+              {
+                seamId: activeSeam.seamId,
+                label: `Operation ${operation.sourceOperationNumber}`,
+                active: true,
+              },
+            ]}
+            onFocusSeam={() => focusActiveSeamSide(0)}
+          />
+        ) : null)
+      }
+      onContentKeyDown={(event) => {
+        if (tableSessionOwner) handleCadTablePieceSelectionKey(event, tableSessionOwner);
       }}
+      selection={selection}
+      onSelectionFocus={({ selection: nextSelection }) => focusSelection(nextSelection)}
       desktop={
-        <PatternImportDxfProductExactNSeamWorkbenchHostV2
-          selectionOwner={session.selectionOwner}
-          current={session.current}
-          activeSeamIndex={activeSeamIndex}
-          onActiveSeamIndexChange={onActiveSeamIndexChange}
-          operationWindow={topologyAnnotationAuthoring}
-        />
+        exactDesktop && tableSessionOwner && seamOrdinal !== null ? (
+          <PatternImportDxfPhaseECadTableZeroConnectCanvasV1
+            catalog={exactDesktop.catalog}
+            projection={exactDesktop.projection}
+            pieceFeatures={exactDesktop.pieceFeatures}
+            tableSessionOwner={tableSessionOwner}
+            savedAnnotations={
+              savedAnnotations?.status === 'ready' ? savedAnnotations.readback.draft : undefined
+            }
+            savedAnnotationBlocker={
+              savedAnnotations?.status === 'blocked' ? savedAnnotations.detail : undefined
+            }
+            savedAnnotationEditControl={
+              !session.productionFeed &&
+              (saveWrappedTopologyAnnotations || saveStandaloneTopologyAnnotations) &&
+              savedAnnotations?.status === 'ready' ? (
+                <PatternImportDxfPhaseESavedTopologyAnnotationEditControlV1
+                  session={session}
+                  geometry={exactDesktop}
+                  saved={savedAnnotations.readback}
+                  save={saveWrappedTopologyAnnotations}
+                  saveStandalone={saveStandaloneTopologyAnnotations}
+                  onReadback={annotationRead.publish}
+                  onReload={annotationRead.reload}
+                />
+              ) : topologyAnnotationAuthoring ? (
+                <DeferredTopologyAnnotationAuthoring onClose={annotationRead.reload}>
+                  {topologyAnnotationAuthoring}
+                </DeferredTopologyAnnotationAuthoring>
+              ) : null
+            }
+            savedSeam={{
+              seamId: activeSeam.seamId,
+              operationNumber: operation.sourceOperationNumber,
+              ordinal: seamOrdinal,
+              focusedSideIndex: focusedSeamSide,
+              focusedBoundary,
+              onFocusBoundary: (segment) =>
+                focusSelection({
+                  operationNumber: operation.sourceOperationNumber,
+                  scopeKey: session.current.row.scopeKey,
+                  pieceId: segment.pieceId,
+                  pieceLineKey: segment.pieceLineKey,
+                  boundaryEdge: {
+                    contourId: segment.contourId,
+                    boundaryVertexIds: segment.boundaryVertexIds,
+                  },
+                }),
+              sides: activeSeamChoice.sides,
+              onFocusSide: focusActiveSeamSide,
+            }}
+            disabled
+          />
+        ) : (
+          <PatternImportDxfProductExactNSeamWorkbenchHostV2
+            selectionOwner={session.selectionOwner}
+            current={session.current}
+            activeSeamIndex={activeSeamIndex}
+            onActiveSeamIndexChange={onActiveSeamIndexChange}
+            operationWindow={topologyAnnotationAuthoring}
+          />
+        )
       }
       mannequin={mannequinSlot}
       operationsPanel={operationsPanel}

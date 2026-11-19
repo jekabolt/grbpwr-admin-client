@@ -1,4 +1,4 @@
-import { useState, type ElementType, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ElementType, type ReactNode } from 'react';
 import { BoxIcon, Button, DrawingPinIcon, Pill, RulerSquareIcon, SewingPinIcon, Text } from 'ui';
 
 import type { PatternImportDxfPhaseEDraftCadCompileUiStateV1 } from './draft-cad-compile-ui-v1';
@@ -8,6 +8,8 @@ import {
   PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_PRODUCTIVE_TOOLS_V1,
   type PatternImportDxfPhaseEDraftCadSessionV1,
   type PatternImportDxfPhaseEDraftCadToolV1,
+  draftCadNewPieceObjectKeyV1,
+  listActiveDraftCadNewPiecesV1,
 } from './draft-cad-session-v1';
 import { PatternImportDxfPhaseECadWorkbenchToolButtonV1 } from './cad-workbench-tool-button-v1';
 import { PatternImportDxfPhaseECadWorkbenchObjectSidebarV1 } from './cad-workbench-object-sidebar-v1';
@@ -24,19 +26,28 @@ export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_TOOL_GROUPS_V1 = Object.freeze
     id: 'construct',
     label: 'Construct',
     tools: Object.freeze([
+      'pen',
       'rectangle',
       'circle',
       'ellipse',
       'internal-line',
       'pattern-line',
       'french-curve',
+      'guideline',
+      'draft-point',
+      'point-only',
       'add-point',
+      'move-point',
+      'delete-point',
+      'sharpen-corner',
+      'edge-length',
+      'allowance-offset',
     ] as const),
   }),
   Object.freeze({
     id: 'shape',
     label: 'Shape',
-    tools: Object.freeze(['dart', 'cut', 'spread'] as const),
+    tools: Object.freeze(['dart', 'fish-eye', 'cut', 'spread'] as const),
   }),
   Object.freeze({
     id: 'details',
@@ -51,6 +62,13 @@ const TOOL_LABELS = Object.freeze({
   circle: 'Circle',
   ellipse: 'Ellipse',
   'add-point': 'Add point',
+  'move-point': 'Move point',
+  'delete-point': 'Delete point',
+  'sharpen-corner': 'Sharpen corner',
+  'round-corner': 'Round corner',
+  'allowance-corner': 'Corner treatment',
+  'edge-length': 'Edge length',
+  'allowance-offset': 'Offset allowance',
   'internal-line': 'Internal line',
   'french-curve': 'French curve',
   'draft-point': 'Draft point',
@@ -135,11 +153,13 @@ export type PatternImportDxfPhaseEDraftCadEditorShellPropsV1 = Readonly<{
     pieceCount: number;
     active: boolean;
   }>[];
-  onFocusPiece?: (pieceId: string, toggle: boolean) => void;
+  onFocusPiece?: (objectKey: string, toggle: boolean) => void;
   onToolChange: (tool: PatternImportDxfPhaseEDraftCadToolV1) => void;
   onTopologyToolChange?: (tool: PatternImportDxfPhaseEDraftCadTopologyToolV1 | null) => void;
   onUndo: () => void;
   onRedo: () => void;
+  canSharpenCorner?: boolean;
+  canOffsetAllowance?: boolean;
   canCompile?: boolean;
   compileState?: PatternImportDxfPhaseEDraftCadCompileUiStateV1 | null;
   compiledReimportAction?: Readonly<{
@@ -174,6 +194,8 @@ export function PatternImportDxfPhaseEDraftCadEditorShellV1({
   onTopologyToolChange,
   onUndo,
   onRedo,
+  canSharpenCorner = false,
+  canOffsetAllowance = false,
   canCompile = false,
   compileState = null,
   compiledReimportAction,
@@ -190,27 +212,41 @@ export function PatternImportDxfPhaseEDraftCadEditorShellV1({
   const [objectSidebarCollapsed, setObjectSidebarCollapsed] = useState(false);
   const [openToolGroupId, setOpenToolGroupId] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(defaultHistoryOpen);
+  const toolRailId = useId();
+  const keyboardOpenedToolGroupRef = useRef<string | null>(null);
+  const toolGroupSummaryRefs = useRef(new Map<string, HTMLElement>());
+  const toolFlyoutRef = useRef<HTMLDivElement | null>(null);
   const activeCommandCount = activeTransactions.reduce(
     (count, transaction) => count + transaction.commands.length,
     0,
   );
-  const draftRectanglePieces = activeTransactions.flatMap(({ commands }) =>
-    commands.flatMap((command) =>
-      command.tool === 'rectangle' && command.payload.newPiece
-        ? [
-            {
-              objectKey: `draft:${command.commandId}`,
-              pieceId: command.payload.newPiece.pieceId,
-              label: command.payload.newPiece.displayName,
-              quantity: 1,
-              focusable: false,
-              statusLabel: 'Draft',
-            },
-          ]
-        : [],
-    ),
+  const draftNewPieces = listActiveDraftCadNewPiecesV1(session).map((piece) => ({
+    objectKey: draftCadNewPieceObjectKeyV1(piece.commandId),
+    pieceId: piece.pieceId,
+    label: piece.displayName,
+    quantity: 1,
+    focusable: !arrangeActive && !connectActive,
+    statusLabel: 'Draft',
+  }));
+  const pieceCount = session.source.catalog.pieces.length + draftNewPieces.length;
+  const openProductiveToolGroup = PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_TOOL_GROUPS_V1.find(
+    ({ id }) => id === openToolGroupId,
   );
-  const pieceCount = session.source.catalog.pieces.length + draftRectanglePieces.length;
+  const toolFlyoutId = openToolGroupId ? `${toolRailId}-tool-flyout-${openToolGroupId}` : undefined;
+
+  useEffect(() => {
+    if (!openToolGroupId || keyboardOpenedToolGroupRef.current !== openToolGroupId) return;
+    keyboardOpenedToolGroupRef.current = null;
+    toolFlyoutRef.current?.querySelector<HTMLElement>('button:not(:disabled)')?.focus();
+  }, [openToolGroupId]);
+
+  const closeToolFlyoutFromKeyboard = () => {
+    const groupId = openToolGroupId;
+    if (!groupId) return;
+    keyboardOpenedToolGroupRef.current = null;
+    toolGroupSummaryRefs.current.get(groupId)?.focus();
+    setOpenToolGroupId(null);
+  };
 
   return (
     <section
@@ -345,176 +381,256 @@ export function PatternImportDxfPhaseEDraftCadEditorShellV1({
                 label: piece.pieceLineKey,
                 quantity: 1,
               })),
-              ...draftRectanglePieces,
+              ...draftNewPieces,
             ]}
             selectedPieceIds={selectedPieceIds}
             materialScopes={materialScopes}
             fabricCount={materialScopes.length}
             collapsed={objectSidebarCollapsed}
             onCollapsedChange={setObjectSidebarCollapsed}
-            onFocusPiece={(pieceId, { toggle }) => onFocusPiece?.(pieceId, toggle)}
+            onFocusPiece={(objectKey, { toggle }) => onFocusPiece?.(objectKey, toggle)}
           />
         </div>
         <div className='relative min-h-[42rem] min-w-0'>
-          <nav
-            className={`absolute top-0 z-20 flex w-12 min-w-0 flex-col gap-1 overflow-visible border border-borderColor bg-bgColor/95 p-1 ${
-              objectSidebarCollapsed ? 'left-[3.25rem]' : 'left-[14.5rem]'
-            }`}
-            aria-label='Pattern Draft tools'
-            data-draft-cad-surface-tools='2d'
+          <div
+            className='absolute right-2 top-1/2 z-30 flex h-[calc(100%-1rem)] w-12 -translate-y-1/2 items-center overflow-visible'
+            data-draft-cad-tool-rail-wrapper=''
           >
-            {onArrangeChange ? (
-              <div className='flex flex-col gap-1 pb-1' data-draft-cad-tool-group='select'>
-                <PatternImportDxfPhaseECadWorkbenchToolButtonV1
-                  icon='select'
-                  label='Arrange pieces'
-                  active={arrangeActive}
-                  pressed={arrangeActive}
-                  dataAttributes={{ 'data-draft-cad-arrange-tool': '' }}
-                  onClick={() => {
-                    onPanChange?.(false);
-                    onArrangeChange(!arrangeActive);
-                  }}
-                />
-                {onPanChange ? (
+            <nav
+              className='flex max-h-full w-12 flex-col gap-0.5 overflow-y-auto border border-borderColor bg-bgColor/95 p-0.5'
+              aria-label='Pattern Draft tools'
+              data-draft-cad-surface-tools='2d'
+            >
+              {onArrangeChange ? (
+                <div className='flex flex-col gap-1 pb-1' data-draft-cad-tool-group='select'>
                   <PatternImportDxfPhaseECadWorkbenchToolButtonV1
-                    icon='hand'
-                    label='Hand'
-                    active={panActive}
-                    pressed={panActive}
-                    dataAttributes={{ 'data-draft-cad-pan-tool': '' }}
+                    icon='select'
+                    label='Arrange pieces'
+                    active={arrangeActive}
+                    pressed={arrangeActive}
+                    dataAttributes={{ 'data-draft-cad-arrange-tool': '' }}
                     onClick={() => {
-                      onArrangeChange(false);
-                      onPanChange(!panActive);
-                    }}
-                  />
-                ) : null}
-                {onConnectChange ? (
-                  <PatternImportDxfPhaseECadWorkbenchToolButtonV1
-                    icon='connect'
-                    label='Connect material edges'
-                    active={connectActive}
-                    pressed={connectActive}
-                    dataAttributes={{ 'data-draft-cad-cross-scope-connect-tool': '' }}
-                    onClick={() => {
-                      onArrangeChange(false);
                       onPanChange?.(false);
-                      onTopologyToolChange?.(null);
-                      onConnectChange(!connectActive);
+                      onArrangeChange(!arrangeActive);
                     }}
                   />
-                ) : null}
+                  {onPanChange ? (
+                    <PatternImportDxfPhaseECadWorkbenchToolButtonV1
+                      icon='hand'
+                      label='Hand'
+                      active={panActive}
+                      pressed={panActive}
+                      dataAttributes={{ 'data-draft-cad-pan-tool': '' }}
+                      onClick={() => {
+                        onArrangeChange(false);
+                        onPanChange(!panActive);
+                      }}
+                    />
+                  ) : null}
+                  {onConnectChange ? (
+                    <PatternImportDxfPhaseECadWorkbenchToolButtonV1
+                      icon='connect'
+                      label='Connect material edges'
+                      active={connectActive}
+                      pressed={connectActive}
+                      dataAttributes={{ 'data-draft-cad-cross-scope-connect-tool': '' }}
+                      onClick={() => {
+                        onArrangeChange(false);
+                        onPanChange?.(false);
+                        onTopologyToolChange?.(null);
+                        onConnectChange(!connectActive);
+                      }}
+                    />
+                  ) : null}
+                </div>
+              ) : null}
+              {PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_TOOL_GROUPS_V1.map((group) => {
+                const GroupIcon = TOOL_GROUP_ICONS[group.id] ?? BoxIcon;
+                const open = openToolGroupId === group.id;
+                return (
+                  <details
+                    key={group.id}
+                    open={open}
+                    data-draft-cad-tool-group={group.id}
+                    data-tool-group-open={open}
+                    onToggle={(event) => {
+                      const nextOpen = event.currentTarget.open;
+                      setOpenToolGroupId((current) =>
+                        nextOpen ? group.id : current === group.id ? null : current,
+                      );
+                    }}
+                    className='group relative border-t border-hairline pt-1 first:border-t-0 first:pt-0'
+                  >
+                    <summary
+                      id={`${toolRailId}-tool-summary-${group.id}`}
+                      ref={(node) => {
+                        if (node) toolGroupSummaryRefs.current.set(group.id, node);
+                        else toolGroupSummaryRefs.current.delete(group.id);
+                      }}
+                      className={`flex h-10 w-10 cursor-pointer list-none items-center justify-center marker:hidden ${
+                        (group.tools as readonly PatternImportDxfPhaseEDraftCadToolV1[]).includes(
+                          activeTool,
+                        ) &&
+                        !panActive &&
+                        !activeTopologyTool &&
+                        !arrangeActive
+                          ? 'bg-textColor text-bgColor'
+                          : 'bg-transparent text-textColor hover:bg-pageBg'
+                      }`}
+                      aria-label={`${group.label} tools`}
+                      aria-controls={`${toolRailId}-tool-flyout-${group.id}`}
+                      aria-expanded={open}
+                      title={`${group.label} tools`}
+                      onPointerDown={() => {
+                        keyboardOpenedToolGroupRef.current = null;
+                      }}
+                      onKeyDown={(event) => {
+                        if ((event.key === 'Enter' || event.key === ' ') && !open)
+                          keyboardOpenedToolGroupRef.current = group.id;
+                      }}
+                    >
+                      <GroupIcon aria-hidden width='16' height='16' />
+                    </summary>
+                  </details>
+                );
+              })}
+              {onTopologyToolChange ? (
+                <div className='flex flex-col gap-1 border-t border-hairline pt-1'>
+                  <details
+                    className='group relative'
+                    data-draft-cad-tool-group='measure'
+                    data-tool-group-open={openToolGroupId === 'measure'}
+                    open={openToolGroupId === 'measure'}
+                    onToggle={(event) => {
+                      const nextOpen = event.currentTarget.open;
+                      setOpenToolGroupId((current) =>
+                        nextOpen ? 'measure' : current === 'measure' ? null : current,
+                      );
+                    }}
+                  >
+                    <summary
+                      id={`${toolRailId}-tool-summary-measure`}
+                      ref={(node) => {
+                        if (node) toolGroupSummaryRefs.current.set('measure', node);
+                        else toolGroupSummaryRefs.current.delete('measure');
+                      }}
+                      className={`flex h-10 w-10 cursor-pointer list-none items-center justify-center marker:hidden ${
+                        activeTopologyTool?.startsWith('measure-')
+                          ? 'bg-textColor text-bgColor'
+                          : 'bg-transparent text-textColor hover:bg-pageBg'
+                      }`}
+                      aria-label='Measure tools'
+                      aria-controls={`${toolRailId}-tool-flyout-measure`}
+                      aria-expanded={openToolGroupId === 'measure'}
+                      title='Measure tools'
+                      onPointerDown={() => {
+                        keyboardOpenedToolGroupRef.current = null;
+                      }}
+                      onKeyDown={(event) => {
+                        if (
+                          (event.key === 'Enter' || event.key === ' ') &&
+                          openToolGroupId !== 'measure'
+                        )
+                          keyboardOpenedToolGroupRef.current = 'measure';
+                      }}
+                    >
+                      <RulerSquareIcon aria-hidden width='16' height='16' />
+                    </summary>
+                  </details>
+                  {(['callout'] as const).map((tool) => (
+                    <PatternImportDxfPhaseECadWorkbenchToolButtonV1
+                      key={tool}
+                      icon={tool}
+                      label={TOPOLOGY_TOOL_LABELS[tool]}
+                      active={activeTopologyTool === tool}
+                      pressed={activeTopologyTool === tool}
+                      dataAttributes={{ 'data-draft-cad-topology-tool': tool }}
+                      onClick={() => {
+                        onArrangeChange?.(false);
+                        onPanChange?.(false);
+                        onTopologyToolChange(activeTopologyTool === tool ? null : tool);
+                      }}
+                    />
+                  ))}
+                </div>
+              ) : null}
+              {workspaceContextControl ? (
+                <div
+                  className='flex flex-col gap-1 border-t border-hairline pt-1'
+                  data-cad-2d-tool-context-slot=''
+                >
+                  {workspaceContextControl}
+                </div>
+              ) : null}
+            </nav>
+            {openProductiveToolGroup ? (
+              <div
+                id={toolFlyoutId}
+                ref={toolFlyoutRef}
+                className='absolute top-1/2 right-[calc(100%+0.5rem)] grid w-52 -translate-y-1/2 grid-cols-4 gap-1 border border-borderColor bg-bgColor p-1.5'
+                data-draft-cad-tool-flyout={openProductiveToolGroup.id}
+                role='group'
+                aria-labelledby={`${toolRailId}-tool-summary-${openProductiveToolGroup.id}`}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    closeToolFlyoutFromKeyboard();
+                  }
+                }}
+              >
+                <Text component='p' size='micro' className='col-span-4 px-1 font-bold'>
+                  {openProductiveToolGroup.label}
+                </Text>
+                {openProductiveToolGroup.tools
+                  .filter((tool) => tool !== 'sharpen-corner' || canSharpenCorner)
+                  .filter((tool) => tool !== 'allowance-offset' || canOffsetAllowance)
+                  .map((tool) => (
+                    <PatternImportDxfPhaseECadWorkbenchToolButtonV1
+                      key={tool}
+                      icon={
+                        tool === 'edge-length' || tool === 'allowance-offset'
+                          ? 'measure-edge'
+                          : tool
+                      }
+                      label={TOOL_LABELS[tool]}
+                      active={
+                        !panActive && !arrangeActive && !activeTopologyTool && activeTool === tool
+                      }
+                      pressed={
+                        !panActive && !arrangeActive && !activeTopologyTool && activeTool === tool
+                      }
+                      dataAttributes={{ 'data-draft-cad-tool': tool }}
+                      onClick={() => {
+                        onArrangeChange?.(false);
+                        onPanChange?.(false);
+                        onToolChange(tool);
+                        setOpenToolGroupId(null);
+                      }}
+                    />
+                  ))}
               </div>
             ) : null}
-            {PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_TOOL_GROUPS_V1.map((group) => {
-              const GroupIcon = TOOL_GROUP_ICONS[group.id] ?? BoxIcon;
-              const open = openToolGroupId === group.id;
-              return (
-                <details
-                  key={group.id}
-                  open={open}
-                  data-draft-cad-tool-group={group.id}
-                  data-tool-group-open={open}
-                  onToggle={(event) => {
-                    const nextOpen = event.currentTarget.open;
-                    setOpenToolGroupId((current) =>
-                      nextOpen ? group.id : current === group.id ? null : current,
-                    );
-                  }}
-                  className='group relative border-t border-hairline pt-1 first:border-t-0 first:pt-0'
-                >
-                  <summary
-                    className={`flex h-10 w-10 cursor-pointer list-none items-center justify-center marker:hidden ${
-                      (group.tools as readonly PatternImportDxfPhaseEDraftCadToolV1[]).includes(
-                        activeTool,
-                      ) &&
-                      !panActive &&
-                      !activeTopologyTool &&
-                      !arrangeActive
-                        ? 'bg-textColor text-bgColor'
-                        : 'bg-transparent text-textColor hover:bg-pageBg'
-                    }`}
-                    aria-label={`${group.label} tools`}
-                    title={`${group.label} tools`}
-                  >
-                    <GroupIcon aria-hidden width='16' height='16' />
-                  </summary>
-                  <div className='absolute top-0 left-[calc(100%+0.5rem)] grid w-52 grid-cols-4 gap-1 border border-borderColor bg-bgColor p-1.5'>
-                    <Text component='p' size='micro' className='col-span-4 px-1 font-bold'>
-                      {group.label}
-                    </Text>
-                    {group.tools.map((tool) => (
-                      <PatternImportDxfPhaseECadWorkbenchToolButtonV1
-                        key={tool}
-                        icon={tool}
-                        label={TOOL_LABELS[tool]}
-                        active={
-                          !panActive && !arrangeActive && !activeTopologyTool && activeTool === tool
-                        }
-                        pressed={
-                          !panActive && !arrangeActive && !activeTopologyTool && activeTool === tool
-                        }
-                        dataAttributes={{ 'data-draft-cad-tool': tool }}
-                        onClick={() => {
-                          onArrangeChange?.(false);
-                          onPanChange?.(false);
-                          onToolChange(tool);
-                          setOpenToolGroupId(null);
-                        }}
-                      />
-                    ))}
-                  </div>
-                </details>
-              );
-            })}
-            {onTopologyToolChange ? (
-              <div className='flex flex-col gap-1 border-t border-hairline pt-1'>
-                <details
-                  className='group relative'
-                  data-draft-cad-tool-group='measure'
-                  data-tool-group-open={openToolGroupId === 'measure'}
-                  open={openToolGroupId === 'measure'}
-                  onToggle={(event) => {
-                    const nextOpen = event.currentTarget.open;
-                    setOpenToolGroupId((current) =>
-                      nextOpen ? 'measure' : current === 'measure' ? null : current,
-                    );
-                  }}
-                >
-                  <summary
-                    className={`flex h-10 w-10 cursor-pointer list-none items-center justify-center marker:hidden ${
-                      activeTopologyTool?.startsWith('measure-')
-                        ? 'bg-textColor text-bgColor'
-                        : 'bg-transparent text-textColor hover:bg-pageBg'
-                    }`}
-                    aria-label='Measure tools'
-                    title='Measure tools'
-                  >
-                    <RulerSquareIcon aria-hidden width='16' height='16' />
-                  </summary>
-                  <div className='absolute top-0 left-[calc(100%+0.5rem)] grid w-40 grid-cols-3 gap-1 border border-borderColor bg-bgColor p-1.5'>
-                    <Text component='p' size='micro' className='col-span-3 px-1 font-bold'>
-                      Measure
-                    </Text>
-                    {(['measure-point', 'measure-line', 'measure-edge'] as const).map((tool) => (
-                      <PatternImportDxfPhaseECadWorkbenchToolButtonV1
-                        key={tool}
-                        icon={tool}
-                        label={TOPOLOGY_TOOL_LABELS[tool]}
-                        active={activeTopologyTool === tool}
-                        pressed={activeTopologyTool === tool}
-                        dataAttributes={{ 'data-draft-cad-topology-tool': tool }}
-                        onClick={() => {
-                          onArrangeChange?.(false);
-                          onPanChange?.(false);
-                          onTopologyToolChange(activeTopologyTool === tool ? null : tool);
-                          setOpenToolGroupId(null);
-                        }}
-                      />
-                    ))}
-                  </div>
-                </details>
-                {(['callout'] as const).map((tool) => (
+            {openToolGroupId === 'measure' && onTopologyToolChange ? (
+              <div
+                id={toolFlyoutId}
+                ref={toolFlyoutRef}
+                className='absolute top-1/2 right-[calc(100%+0.5rem)] grid w-40 -translate-y-1/2 grid-cols-3 gap-1 border border-borderColor bg-bgColor p-1.5'
+                data-draft-cad-tool-flyout='measure'
+                role='group'
+                aria-labelledby={`${toolRailId}-tool-summary-measure`}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    closeToolFlyoutFromKeyboard();
+                  }
+                }}
+              >
+                <Text component='p' size='micro' className='col-span-3 px-1 font-bold'>
+                  Measure
+                </Text>
+                {(['measure-point', 'measure-line', 'measure-edge'] as const).map((tool) => (
                   <PatternImportDxfPhaseECadWorkbenchToolButtonV1
                     key={tool}
                     icon={tool}
@@ -526,20 +642,13 @@ export function PatternImportDxfPhaseEDraftCadEditorShellV1({
                       onArrangeChange?.(false);
                       onPanChange?.(false);
                       onTopologyToolChange(activeTopologyTool === tool ? null : tool);
+                      setOpenToolGroupId(null);
                     }}
                   />
                 ))}
               </div>
             ) : null}
-            {workspaceContextControl ? (
-              <div
-                className='flex flex-col gap-1 border-t border-hairline pt-1'
-                data-cad-2d-tool-context-slot=''
-              >
-                {workspaceContextControl}
-              </div>
-            ) : null}
-          </nav>
+          </div>
 
           <main
             className={`relative flex min-h-[42rem] min-w-0 flex-col overflow-hidden bg-pageBg ${

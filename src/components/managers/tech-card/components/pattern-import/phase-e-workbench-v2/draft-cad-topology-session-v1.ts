@@ -3,6 +3,7 @@ import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/patt
 import {
   createPatternImportDxfPhaseECalloutV1,
   deletePatternImportDxfPhaseECalloutV1,
+  reanchorPatternImportDxfPhaseECalloutV1,
   updatePatternImportDxfPhaseECalloutTextV1,
   type PatternImportDxfPhaseECalloutV1,
 } from './callout-session-v1';
@@ -40,10 +41,16 @@ export type PatternImportDxfPhaseEDraftCadTopologyToolV1 =
   | 'measure-edge'
   | 'callout';
 
+export type PatternImportDxfPhaseEDraftCadAnnotationTargetV1 = Readonly<{
+  collection: 'measurement' | 'callout';
+  id: string;
+}>;
+
 export type PatternImportDxfPhaseEDraftCadTopologySessionV1 = Readonly<{
   schemaVersion: typeof PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_TOPOLOGY_SESSION_V1;
   sourceIdentity: string;
   activeTool: PatternImportDxfPhaseEDraftCadTopologyToolV1 | null;
+  reanchorTarget: PatternImportDxfPhaseEDraftCadAnnotationTargetV1 | null;
   unit: PatternImportDxfPhaseEMeasurementUnitV1;
   pendingAnchors: readonly PatternImportDxfPhaseEVertexAnchorV1[];
   measurements: readonly PatternImportDxfPhaseEMeasurementV1[];
@@ -99,6 +106,7 @@ export function createPatternImportDxfPhaseEDraftCadTopologySessionV1(
   return freezeState({
     sourceIdentity,
     activeTool: null,
+    reanchorTarget: null,
     unit: 'mm',
     pendingAnchors: [],
     measurements: [],
@@ -124,6 +132,7 @@ export function selectPatternImportDxfPhaseEDraftCadTopologyToolV1(
   return freezeState({
     ...state,
     activeTool: tool,
+    reanchorTarget: null,
     pendingAnchors: [],
     blocker: null,
   });
@@ -134,6 +143,78 @@ export function setPatternImportDxfPhaseEDraftCadTopologyUnitV1(
   unit: PatternImportDxfPhaseEMeasurementUnitV1,
 ): PatternImportDxfPhaseEDraftCadTopologySessionV1 {
   return freezeState({ ...state, unit, blocker: null });
+}
+
+export function startPatternImportDxfPhaseEDraftCadAnnotationReanchorV1(
+  state: PatternImportDxfPhaseEDraftCadTopologySessionV1,
+  target: PatternImportDxfPhaseEDraftCadAnnotationTargetV1,
+): PatternImportDxfPhaseEDraftCadTopologySessionV1 {
+  const item =
+    target.collection === 'callout'
+      ? state.callouts.find(({ id }) => id === target.id)
+      : state.measurements.find(({ id }) => id === target.id);
+  const cleared = selectPatternImportDxfPhaseEDraftCadTopologyToolV1(state, null);
+  if (!item)
+    return freezeState({ ...cleared, blocker: 'The annotation is no longer in this draft.' });
+  return freezeState({
+    ...cleared,
+    activeTool: 'kind' in item ? `measure-${item.kind}` : 'callout',
+    reanchorTarget: Object.freeze({ ...target }),
+  });
+}
+
+function reanchorAtVertex(
+  projection: PatternImportDxfProductPhaseEAssemblyProjectionV1,
+  state: PatternImportDxfPhaseEDraftCadTopologySessionV1,
+  target: PatternImportDxfPhaseEDraftCadAnnotationTargetV1,
+  anchor: PatternImportDxfPhaseEVertexAnchorV1,
+): PatternImportDxfPhaseEDraftCadTopologySessionV1 {
+  if (!resolvePatternImportDxfPhaseEVertexV1(projection, anchor))
+    return freezeState({
+      ...state,
+      blocker: 'The replacement vertex is absent from the exact projection.',
+    });
+  if (target.collection === 'callout') {
+    const result = reanchorPatternImportDxfPhaseECalloutV1(
+      projection,
+      state.callouts,
+      target.id,
+      anchor,
+    );
+    return result.ok
+      ? freezeState({
+          ...selectPatternImportDxfPhaseEDraftCadTopologyToolV1(state, null),
+          callouts: result.callouts,
+        })
+      : freezeState({ ...state, blocker: result.blockers[0].detail });
+  }
+  const measurement = state.measurements.find(({ id }) => id === target.id);
+  if (!measurement)
+    return freezeState({ ...state, blocker: 'The measurement is no longer in this draft.' });
+  const first = state.pendingAnchors[0];
+  if (measurement.kind !== 'point' && !first)
+    return freezeState({ ...state, pendingAnchors: [anchor], blocker: null });
+  if (
+    first &&
+    (first.pieceId !== anchor.pieceId ||
+      first.pieceLineKey !== anchor.pieceLineKey ||
+      (first.contourId === anchor.contourId && first.vertexId === anchor.vertexId))
+  )
+    return freezeState({ ...state, blocker: 'Pick a different exact vertex on the same piece.' });
+  const result = buildPatternImportDxfPhaseEMeasurementV1(
+    projection,
+    measurement.id,
+    measurement.kind,
+    first ? [first, anchor] : [anchor],
+  );
+  return result.ok
+    ? freezeState({
+        ...selectPatternImportDxfPhaseEDraftCadTopologyToolV1(state, null),
+        measurements: state.measurements.map((item) =>
+          item.id === measurement.id ? result.measurement : item,
+        ),
+      })
+    : freezeState({ ...state, blocker: result.detail });
 }
 
 function measurementKind(
@@ -155,6 +236,8 @@ export function selectPatternImportDxfPhaseEDraftCadTopologyAnchorV1(
       ...state,
       blocker: 'Choose one topology tool before selecting a vertex.',
     });
+  if (state.reanchorTarget)
+    return reanchorAtVertex(projection, state, state.reanchorTarget, anchor);
   if (state.activeTool === 'callout') {
     const sequence = state.sequence + 1;
     const result = createPatternImportDxfPhaseECalloutV1(projection, state.callouts, {

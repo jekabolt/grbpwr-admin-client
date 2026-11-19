@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mapTriangleStrainToRenderOrderV1 } from './triangle-strain-render-order-v1';
 import {
   getBetaSkirtSavedAnnularObservedPlacementRuntimeSourceLifetimeV1 as sourceLifetime,
   projectBetaSkirtSavedAnnularObservedPlacementRuntimeSourceV1 as projectSource,
@@ -58,11 +59,32 @@ export async function projectSavedObservedStrainHeatmapV1(
     throw new TypeError(
       'The exact observed 32-frame postgates and matching strain output must pass before rendering.',
     );
+  const renderOrder = await mapTriangleStrainToRenderOrderV1({
+    normalizedTopology: frame.normalizedTriangles,
+    continuumTriangleIndices:
+      source.normalizedV5.simulation.constraints.continuumStrain.triangleIndices,
+    triangleValues: frame.strainValues,
+    validityFlags: frame.strainFlags,
+  });
+  current();
+  const strainReport = frame.report.postgate.strain;
+  if (
+    !strainReport ||
+    renderOrder.receipt.continuumTriangleIndicesSha256 !==
+      strainReport.bindings.triangleIndicesSha256 ||
+    renderOrder.receipt.normalizedTopologySha256 !==
+      strainReport.bindings.normalizedTopologySha256 ||
+    renderOrder.receipt.rawTriangleValuesSha256 !== strainReport.valuesSha256 ||
+    renderOrder.receipt.rawValidityFlagsSha256 !== strainReport.flagsSha256
+  )
+    throw new TypeError(
+      'Render triangle permutation differs from the sealed observed strain source.',
+    );
   const heatmap = buildBetaSkirtCanonicalMediumStrainHeatmapGeometryV1({
     positions: frame.finalPositions3M,
     topology: frame.normalizedTriangles,
-    triangleValues: frame.strainValues,
-    validityFlags: frame.strainFlags,
+    triangleValues: renderOrder.orderedTriangleValues,
+    validityFlags: renderOrder.orderedValidityFlags,
   });
   current();
   return Object.freeze({
@@ -71,6 +93,7 @@ export async function projectSavedObservedStrainHeatmapV1(
     bodyPositionsM: source.collisionInput.bodyPositionsM,
     bodyTriangles: source.collisionInput.bodyTriangles,
     heatmap,
+    renderTriangleOrder: renderOrder.receipt,
     finalPositions3M: frame.finalPositions3M,
     normalizedTriangles: frame.normalizedTriangles,
     claims: Object.freeze({
@@ -226,6 +249,7 @@ export async function createSavedObservedStrainHeatmapPreviewV1(
         sourceReportSha256: input.sourceReportSha256,
         frameReportSha256: input.frameReportSha256,
         frames: 32 as const,
+        renderTriangleOrder: input.renderTriangleOrder,
         quantity: 'normalized-green-strain-utilization' as const,
         units: 'dimensionless' as const,
         minimumUtilization: input.heatmap.minimumUtilization,

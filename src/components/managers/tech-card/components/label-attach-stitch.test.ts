@@ -64,8 +64,8 @@ describe('J1 label attachment → step stitch', () => {
     ).toEqual([]);
   });
 
-  const saved = (attachment: string, linked: boolean, stored = '') => {
-    const card = {
+  const cardWithStitch = (attachment: string, linked: boolean, stored = '') =>
+    ({
       id: 1,
       techCard: {
         bomItems: [{ id: 5, lineKey: 'L1', section: 'TECH_CARD_BOM_SECTION_LABEL' }],
@@ -81,7 +81,10 @@ describe('J1 label attachment → step stitch', () => {
           },
         ],
       },
-    } as unknown as common_TechCard;
+    }) as unknown as common_TechCard;
+
+  const saved = (attachment: string, linked: boolean, stored = '') => {
+    const card = cardWithStitch(attachment, linked, stored);
     const form = mapTechCardToForm(card);
     const op = mapFormToTechCardInsert(form).operations?.[0];
     return op?.stitching?.labelAttachStitch ?? S('UNKNOWN');
@@ -94,6 +97,37 @@ describe('J1 label attachment → step stitch', () => {
 
   it('the save keeps the stored stitch of a step with no label linked', () => {
     expect(saved('sewn 4 sides', false, S('CAUGHT_IN_SEAM'))).toBe(S('CAUGHT_IN_SEAM'));
+  });
+
+  it('round-trips an existing conflicting stitch on an unrelated card save', () => {
+    const original = cardWithStitch('sewn 4 sides', true, S('CAUGHT_IN_SEAM'));
+    const form = mapTechCardToForm(original);
+    form.name = 'Edited garment name';
+
+    const wire = mapFormToTechCardInsert(form, original.techCard);
+
+    expect(wire.garmentLabels?.[0].attachment).toBe('sewn 4 sides');
+    expect(wire.operations?.[0].stitching?.labelAttachStitch).toBe(S('CAUGHT_IN_SEAM'));
+  });
+
+  it('updates the operation when the linked label attachment changes', () => {
+    const original = cardWithStitch('sewn 4 sides', true, S('CAUGHT_IN_SEAM'));
+    const form = mapTechCardToForm(original);
+    form.garmentLabels![0].attachment = 'sewn 1 edge';
+
+    expect(
+      mapFormToTechCardInsert(form, original.techCard).operations?.[0].stitching?.labelAttachStitch,
+    ).toBe(S('ONE_EDGE'));
+  });
+
+  it('updates the operation when a previously unlinked label is selected', () => {
+    const original = cardWithStitch('sewn 4 sides', false, S('CAUGHT_IN_SEAM'));
+    const form = mapTechCardToForm(original);
+    form.operations![0].labelKeys = ['LBL1'];
+
+    expect(
+      mapFormToTechCardInsert(form, original.techCard).operations?.[0].stitching?.labelAttachStitch,
+    ).toBe(S('FOUR_SIDES'));
   });
 });
 

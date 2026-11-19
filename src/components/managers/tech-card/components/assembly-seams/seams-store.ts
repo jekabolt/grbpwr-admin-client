@@ -82,23 +82,27 @@ export const useSeamsStore = create<SeamsState>(() => EMPTY);
 function overlay<T extends { seamKey: string }>(
   server: readonly T[],
   pending: Readonly<Record<string, { kind: 'upsert'; row: T } | { kind: 'delete' }>>,
+  committedKey?: string,
 ): T[] {
   const out: T[] = [];
   const seen = new Set<string>();
   for (const r of server) {
     seen.add(r.seamKey);
-    const p = pending[r.seamKey];
+    const p = r.seamKey === committedKey ? undefined : pending[r.seamKey];
     if (p?.kind === 'delete') continue;
     out.push(p?.kind === 'upsert' ? p.row : r);
   }
   for (const [key, p] of Object.entries(pending))
-    if (p.kind === 'upsert' && !seen.has(key)) out.push(p.row);
+    if (p.kind === 'upsert' && key !== committedKey && !seen.has(key)) out.push(p.row);
   return out;
 }
 
-/** Server rows with the optimistic writes laid over them, in server order, new rows last. */
-export function rowsOf(s: Pick<SeamsState, 'server' | 'pending'>): StoredSeam[] {
-  return overlay(s.server, s.pending);
+/** Allow a write guard to compare its own row to the server version while it is optimistic. */
+export function rowsOf(
+  s: Pick<SeamsState, 'server' | 'pending'>,
+  committedKey?: string,
+): StoredSeam[] {
+  return overlay(s.server, s.pending, committedKey);
 }
 
 /** The pose rows (P8) with the optimistic pose writes laid over them — the seams' twin of `rowsOf`. */

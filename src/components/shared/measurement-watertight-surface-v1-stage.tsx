@@ -1,13 +1,19 @@
-import { useEffect, useRef, type KeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, type KeyboardEvent } from 'react';
 import * as THREE from 'three';
+import { MEASUREMENT_SURFACE_PRINCIPAL_STRAIN_SCALE_V1 as principalStrainScale } from './measurement-surface-principal-strain-scale-v1';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { VertexNormalsHelper } from 'three/examples/jsm/helpers/VertexNormalsHelper.js';
 import { cn } from 'lib/utility';
+import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 import {
   updateMeasurementSurfaceLivePositionsV1,
   type MeasurementSurfaceLivePositionUpdateV1,
 } from './measurement-surface-live-positions-v1';
+import {
+  createMeasurementSurfaceSeamOrdinalBadgeBuilderV1,
+  disposeMeasurementSurfaceSeamOrdinalBadgeV1,
+} from './measurement-surface-seam-ordinal-badges-v1';
 import type { MeasurementBodyFrameV2 } from 'lib/cloth/body/measurement-body-frame-v2';
 import type {
   MeasurementSurfaceLodV1,
@@ -67,6 +73,8 @@ export interface MeasurementSurfacePatternPieceSeamV1 {
   readonly side: 'A' | 'B';
   readonly contourId: string;
   readonly colorCss: string | null;
+  readonly operationSeam?: Readonly<{ operationNumber: number; ordinal: number }>;
+  readonly ordinalBadgeVisible?: boolean;
   readonly orderedVertexIds: readonly string[];
   readonly thread: Readonly<{ bomLineKey: string; colorCss: string }> | null;
   readonly pins: readonly Readonly<{ pinId: string; vertexId: string }>[];
@@ -84,6 +92,13 @@ export interface MeasurementSurfacePatternPieceV1 {
   readonly swatchCss: string | null;
   readonly transform: MeasurementSurfacePatternPieceTransformV1 | null;
   readonly seams: readonly MeasurementSurfacePatternPieceSeamV1[];
+  readonly topstitch?: Readonly<{
+    lineKey: string;
+    operationNumber: number;
+    widthMm: number;
+    threadBomLineKey: string;
+    pointsMm: readonly [Readonly<{ x: number; y: number }>, Readonly<{ x: number; y: number }>];
+  }>;
 }
 
 export interface MeasurementSurfacePatternPieceGuideEndpointV1 {
@@ -102,11 +117,26 @@ export interface MeasurementSurfacePatternPieceGuideV1 {
   readonly thread: Readonly<{ bomLineKey: string; colorCss: string }> | null;
 }
 
+export type MeasurementSurfacePatternDragPlaneV1 = 'view' | 'xy' | 'xz' | 'yz';
+
 export interface MeasurementSurfacePatternPieceOverlayV1 {
   /** Exact contour revision. Selection/tool changes intentionally do not mint geometry. */
   readonly revision: string;
   readonly pieces: readonly MeasurementSurfacePatternPieceV1[];
   readonly tool: 'select' | 'translate' | 'rotate';
+  readonly dragPlane?: MeasurementSurfacePatternDragPlaneV1;
+  readonly rotationGroup?: Readonly<{
+    pieceKeys: readonly string[];
+    onRotate: (
+      pivotKey: string,
+      radians: number,
+      displacements: ReadonlyMap<string, readonly [number, number]>,
+    ) => void;
+  }>;
+  readonly translationGroup?: Readonly<{
+    pieceKeys: readonly string[];
+    onTranslateBy: (deltaM: readonly [number, number, number]) => void;
+  }>;
   readonly visibility: Readonly<{
     pieces: boolean;
     edges: boolean;
@@ -116,12 +146,212 @@ export interface MeasurementSurfacePatternPieceOverlayV1 {
   }>;
   readonly guides?: readonly MeasurementSurfacePatternPieceGuideV1[];
   readonly onSelectPiece?: (
-    piece: Pick<MeasurementSurfacePatternPieceV1, 'pieceKey' | 'scopeKey' | 'pieceId'>,
+    piece: Pick<
+      MeasurementSurfacePatternPieceV1,
+      'pieceKey' | 'scopeKey' | 'pieceId' | 'pieceLineKey'
+    >,
   ) => void;
   readonly onTransformPiece?: (
     pieceKey: string,
     transform: MeasurementSurfacePatternPieceTransformV1,
   ) => void;
+}
+
+/** An original named occurrence on an exact saved cut row. */
+export type MeasurementSurfaceAcceptedClothPieceV1 = Readonly<{
+  row: DxfProductSavedRowIdentityV1;
+  sizeToken: string;
+  pieceId: string;
+  pieceLineKey: string;
+  sourceInstancePath: readonly string[];
+}>;
+
+export type MeasurementSurfaceAcceptedClothPointV1 = Readonly<{
+  triangleIndex: number;
+  barycentric: readonly [number, number, number];
+}>;
+
+/** An accepted frame in the displayed body's world-metre geometry. */
+export type MeasurementSurfaceAcceptedClothV1 = Readonly<{
+  positionsM: Float32Array;
+  frameNumber: number;
+  ranges: readonly Readonly<{
+    triangleOffset: number;
+    triangleCount: number;
+    color: number;
+    sourcePiece?: MeasurementSurfaceAcceptedClothPieceV1;
+  }>[];
+  isCurrent: () => boolean;
+  showBackside?: boolean;
+  onSelectPiece?: (piece: MeasurementSurfaceAcceptedClothPieceV1) => void;
+  onMeasurePoint?: (hit: MeasurementSurfaceAcceptedClothPointV1) => void;
+  nativeInternalLines?: Readonly<{
+    frameNumber: number;
+    positionsM: Float32Array;
+    segmentsM: Float32Array;
+  }>;
+  principalStrain?: Readonly<{
+    frameNumber: number;
+    positionsM: Float32Array;
+    valuesInDrawOrder: Float32Array;
+  }>;
+}>;
+
+function sameAcceptedClothFrame(
+  previous: MeasurementSurfaceAcceptedClothV1,
+  next: MeasurementSurfaceAcceptedClothV1,
+) {
+  return (
+    previous.frameNumber === next.frameNumber &&
+    previous.positionsM === next.positionsM &&
+    previous.ranges === next.ranges &&
+    previous.isCurrent === next.isCurrent
+  );
+}
+
+type AcceptedClothMesh = THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial[]>;
+
+export function createMeasurementSurfaceAcceptedInternalLinesV1(
+  cloth: MeasurementSurfaceAcceptedClothV1,
+) {
+  const overlay = cloth.nativeInternalLines;
+  if (
+    !overlay ||
+    overlay.frameNumber !== cloth.frameNumber ||
+    overlay.positionsM !== cloth.positionsM ||
+    overlay.segmentsM.length === 0 ||
+    overlay.segmentsM.length % 6 !== 0 ||
+    !overlay.segmentsM.every(Number.isFinite) ||
+    !cloth.isCurrent()
+  )
+    return null;
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(overlay.segmentsM.slice(), 3));
+  const material = new THREE.LineBasicMaterial({
+    color: 0xee8657,
+    depthWrite: false,
+    toneMapped: false,
+  });
+  const lines = new THREE.LineSegments(geometry, material);
+  lines.renderOrder = 1;
+  return lines;
+}
+
+/** The rendered material side also controls ordinary raycasting against the same mesh. */
+export function updateMeasurementSurfaceAcceptedClothBacksideV1(
+  mesh: AcceptedClothMesh,
+  showBackside = true,
+) {
+  const side = showBackside ? THREE.DoubleSide : THREE.FrontSide;
+  for (const material of mesh.material) {
+    if (material.side === side) continue;
+    material.side = side;
+    material.needsUpdate = true;
+  }
+}
+
+/** Apply the exact frame's scalar data to its existing mesh without replacing geometry or groups. */
+export function updateMeasurementSurfaceAcceptedClothStrainV1(
+  mesh: AcceptedClothMesh,
+  cloth: MeasurementSurfaceAcceptedClothV1,
+): boolean {
+  const overlay = cloth.principalStrain;
+  const positions = mesh.geometry.getAttribute('position');
+  const triangleCount = positions.count / 3;
+  const values = overlay?.valuesInDrawOrder;
+  const show =
+    !!overlay &&
+    overlay.frameNumber === cloth.frameNumber &&
+    overlay.positionsM === cloth.positionsM &&
+    positions.count * 3 === cloth.positionsM.length &&
+    values instanceof Float32Array &&
+    values.length === triangleCount &&
+    values.every(Number.isFinite) &&
+    cloth.isCurrent();
+
+  if (show) {
+    const { clampMagnitude, compression, neutral, extension } = principalStrainScale;
+    let colors = mesh.geometry.getAttribute('color');
+    if (!colors) {
+      colors = new THREE.BufferAttribute(new Float32Array(positions.count * 3), 3);
+      mesh.geometry.setAttribute('color', colors);
+    }
+    const cold = new THREE.Color(compression);
+    const center = new THREE.Color(neutral);
+    const hot = new THREE.Color(extension);
+    const color = new THREE.Color();
+    for (const [index, value] of values.entries()) {
+      const blend = Math.min(Math.abs(value) / clampMagnitude, 1);
+      color.copy(center).lerp(value < 0 ? cold : hot, blend);
+      const first = index * 3;
+      colors.setXYZ(first, color.r, color.g, color.b);
+      colors.setXYZ(first + 1, color.r, color.g, color.b);
+      colors.setXYZ(first + 2, color.r, color.g, color.b);
+    }
+    colors.needsUpdate = true;
+  }
+
+  for (const [index, material] of mesh.material.entries()) {
+    if (material.vertexColors === show) continue;
+    material.color.setHex(show ? 0xffffff : cloth.ranges[index].color);
+    material.vertexColors = show;
+    material.needsUpdate = true;
+  }
+  return show;
+}
+
+function intersectAcceptedCloth(
+  raycaster: THREE.Raycaster,
+  clothMesh: THREE.Mesh,
+  bodyMesh: THREE.Mesh | null,
+  cloth: MeasurementSurfaceAcceptedClothV1,
+) {
+  if (!cloth.isCurrent()) return null;
+  const hit = raycaster.intersectObjects(bodyMesh ? [bodyMesh, clothMesh] : [clothMesh], false)[0];
+  return hit?.object === clothMesh && hit.faceIndex != null && cloth.isCurrent() ? hit : null;
+}
+
+/** Resolve the frontmost accepted triangle's exact source occurrence. */
+export function pickMeasurementSurfaceAcceptedClothPieceV1(
+  raycaster: THREE.Raycaster,
+  clothMesh: THREE.Mesh,
+  bodyMesh: THREE.Mesh | null,
+  cloth: MeasurementSurfaceAcceptedClothV1,
+): MeasurementSurfaceAcceptedClothPieceV1 | null {
+  const triangle = intersectAcceptedCloth(raycaster, clothMesh, bodyMesh, cloth)?.faceIndex;
+  if (triangle == null) return null;
+  return (
+    cloth.ranges.find(
+      ({ triangleOffset, triangleCount }) =>
+        triangle >= triangleOffset && triangle < triangleOffset + triangleCount,
+    )?.sourcePiece ?? null
+  );
+}
+
+/** Pick on the same rendered triangle and camera used for ordinary garment selection. */
+export function pickMeasurementSurfaceAcceptedClothPointV1(
+  raycaster: THREE.Raycaster,
+  clothMesh: THREE.Mesh,
+  bodyMesh: THREE.Mesh | null,
+  cloth: MeasurementSurfaceAcceptedClothV1,
+): MeasurementSurfaceAcceptedClothPointV1 | null {
+  const hit = intersectAcceptedCloth(raycaster, clothMesh, bodyMesh, cloth);
+  const triangleIndex = hit?.faceIndex;
+  if (triangleIndex == null || !hit?.face || triangleIndex * 9 + 8 >= cloth.positionsM.length)
+    return null;
+  const offset = triangleIndex * 9;
+  const weights = THREE.Triangle.getBarycoord(
+    clothMesh.worldToLocal(hit.point.clone()),
+    new THREE.Vector3().fromArray(cloth.positionsM, offset),
+    new THREE.Vector3().fromArray(cloth.positionsM, offset + 3),
+    new THREE.Vector3().fromArray(cloth.positionsM, offset + 6),
+    new THREE.Vector3(),
+  );
+  if (!weights || !weights.toArray().every((value) => value >= -1e-9 && value <= 1 + 1e-9))
+    return null;
+  const [a, b, c] = weights.toArray().map((value) => THREE.MathUtils.clamp(value, 0, 1));
+  const sum = a + b + c;
+  return Object.freeze({ triangleIndex, barycentric: [a / sum, b / sum, c / sum] as const });
 }
 
 export const MEASUREMENT_SURFACE_PATTERN_PIECE_PROJECTED_HIT_RECEIPT_V1 =
@@ -355,6 +585,211 @@ interface MeasurementSurfacePatternPieceSceneBindingV1 {
   readonly vertexLocalPositions: ReadonlyMap<string, THREE.Vector3>;
 }
 
+export function measurementSurfacePatternDragPlaneV1(
+  mode: MeasurementSurfacePatternDragPlaneV1,
+  camera: THREE.Camera,
+  anchor: THREE.Vector3,
+): THREE.Plane {
+  const normal = new THREE.Vector3();
+  switch (mode) {
+    case 'view':
+      camera.getWorldDirection(normal);
+      break;
+    case 'xy':
+      normal.z = 1;
+      break;
+    case 'xz':
+      normal.y = 1;
+      break;
+    case 'yz':
+      normal.x = 1;
+      break;
+  }
+  return new THREE.Plane().setFromNormalAndCoplanarPoint(normal, anchor);
+}
+
+export function measurementSurfacePatternDragIntersectionV1(
+  ray: THREE.Ray,
+  plane: THREE.Plane,
+  camera: Pick<THREE.PerspectiveCamera, 'near' | 'far' | 'matrixWorldInverse'>,
+): THREE.Vector3 | null {
+  const alignment = plane.normal.dot(ray.direction);
+  // At grazing incidence tiny pointer motion would throw the piece across the scene.
+  if (Math.abs(alignment) < Math.sin(Math.PI / 180)) return null;
+  const distance = -plane.distanceToPoint(ray.origin) / alignment;
+  if (!Number.isFinite(distance) || distance <= 0) return null;
+  const point = ray.at(distance, new THREE.Vector3());
+  const depth = -point.clone().applyMatrix4(camera.matrixWorldInverse).z;
+  return depth >= camera.near && depth <= camera.far ? point : null;
+}
+
+export function measurementSurfaceMovePatternOnPlaneV1(
+  ray: THREE.Ray,
+  camera: Pick<THREE.PerspectiveCamera, 'near' | 'far' | 'matrixWorldInverse'>,
+  gesture: { plane: THREE.Plane; startPoint: THREE.Vector3; startPosition: THREE.Vector3 },
+  position: THREE.Vector3,
+): void {
+  const point = measurementSurfacePatternDragIntersectionV1(ray, gesture.plane, camera);
+  if (point)
+    position
+      .copy(gesture.startPosition)
+      .add(point.sub(gesture.startPoint).projectOnPlane(gesture.plane.normal));
+}
+
+export function focusMeasurementSurfacePatternHitV1(
+  overlay: MeasurementSurfacePatternPieceOverlayV1 | undefined,
+  piece: MeasurementSurfacePatternPieceV1,
+) {
+  const group = overlay?.translationGroup;
+  if (overlay?.tool === 'translate' && group?.pieceKeys.includes(piece.pieceKey)) return group;
+  // During a group move the table keeps its full selection and inspector focus.
+  overlay?.onSelectPiece?.(piece);
+  return undefined;
+}
+
+export function captureMeasurementSurfaceTranslationGroupV1(
+  group: NonNullable<MeasurementSurfacePatternPieceOverlayV1['translationGroup']>,
+  bindings: ReadonlyMap<string, { anchor: Pick<THREE.Group, 'position'> }>,
+) {
+  if (group.pieceKeys.length < 2) return null;
+  const starts = new Map<THREE.Vector3, THREE.Vector3>();
+  for (const key of group.pieceKeys) {
+    const position = bindings.get(key)?.anchor.position;
+    if (!position || starts.has(position)) return null;
+    starts.set(position, position.clone());
+  }
+  const delta = new THREE.Vector3();
+  function preview(change: THREE.Vector3) {
+    delta.copy(change);
+    for (const [position, start] of starts) position.copy(start).add(delta);
+  }
+  return {
+    group,
+    preview,
+    finish(commit: boolean) {
+      for (const [position, start] of starts) position.copy(start);
+      if (commit && delta.lengthSq() > 0) group.onTranslateBy([delta.x, delta.y, delta.z]);
+    },
+  };
+}
+
+export function measurementSurfaceRotationGroupForHitV1(
+  overlay: MeasurementSurfacePatternPieceOverlayV1 | undefined,
+  pieceKey: string,
+) {
+  return overlay?.tool === 'rotate' && overlay.rotationGroup?.pieceKeys.includes(pieceKey)
+    ? overlay.rotationGroup
+    : undefined;
+}
+
+export function captureMeasurementSurfaceRotationGroupV1(
+  group: NonNullable<MeasurementSurfacePatternPieceOverlayV1['rotationGroup']>,
+  bindings: ReadonlyMap<
+    string,
+    { anchor: Pick<THREE.Group, 'position'>; content: Pick<THREE.Group, 'rotation'> }
+  >,
+  pivotKey: string,
+  startPoint: THREE.Vector3,
+) {
+  if (group.pieceKeys.length < 2 || !group.pieceKeys.includes(pivotKey)) return null;
+  const pivot = bindings.get(pivotKey)?.anchor.position.clone();
+  if (!pivot) return null;
+  function bearing(point: THREE.Vector3, center: THREE.Vector3) {
+    const x = point.x - center.x;
+    const y = point.y - center.y;
+    // A ray through the pivot does not define an angle.
+    return Number.isFinite(x) && Number.isFinite(y) && Math.hypot(x, y) > 1e-6
+      ? Math.atan2(y, x)
+      : null;
+  }
+  const initial = bearing(startPoint, pivot);
+  if (initial === null) return null;
+  const members = new Map<
+    string,
+    { position: THREE.Vector3; start: THREE.Vector3; rotation: THREE.Euler; angle: number }
+  >();
+  const anchors = new Set<THREE.Vector3>();
+  for (const key of group.pieceKeys) {
+    const binding = bindings.get(key);
+    if (!binding || anchors.has(binding.anchor.position)) return null;
+    anchors.add(binding.anchor.position);
+    members.set(key, {
+      position: binding.anchor.position,
+      start: binding.anchor.position.clone(),
+      rotation: binding.content.rotation,
+      angle: binding.content.rotation.z,
+    });
+  }
+  let previous = initial;
+  let turns = 0;
+  let radians = 0;
+  let finished = false;
+  return {
+    group,
+    preview(point: THREE.Vector3) {
+      if (finished) return;
+      const current = bearing(point, pivot);
+      if (current === null) return;
+      if (current - previous > Math.PI) turns--;
+      else if (current - previous < -Math.PI) turns++;
+      previous = current;
+      const relative = current - initial;
+      radians = relative + 2 * Math.PI * turns;
+      const cos = Math.cos(relative),
+        sin = Math.sin(relative);
+      for (const [key, member] of members) {
+        member.position.copy(member.start);
+        if (key !== pivotKey && relative !== 0) {
+          const x = member.start.x - pivot.x,
+            y = member.start.y - pivot.y;
+          member.position.x = pivot.x + x * cos - y * sin;
+          member.position.y = pivot.y + x * sin + y * cos;
+        }
+        member.rotation.z = member.angle + radians;
+      }
+    },
+    finish(commit: boolean) {
+      if (finished) return;
+      finished = true;
+      const displacements = new Map<string, readonly [number, number]>();
+      for (const [key, member] of members) {
+        displacements.set(key, [
+          member.position.x - member.start.x,
+          member.position.y - member.start.y,
+        ]);
+        member.position.copy(member.start);
+        member.rotation.z = member.angle;
+      }
+      if (commit && radians !== 0) group.onRotate(pivotKey, radians, displacements);
+    },
+  };
+}
+
+export function measurementSurfaceCommittedPatternGestureV1(gesture: {
+  startPosition: THREE.Vector3;
+  startRotation: number;
+  binding: {
+    basePosition: THREE.Vector3;
+    anchor: Pick<THREE.Group, 'position'>;
+    content: Pick<THREE.Group, 'rotation'>;
+    piece: Pick<MeasurementSurfacePatternPieceV1, 'transform'>;
+  };
+}): MeasurementSurfacePatternPieceTransformV1 | null {
+  const { anchor, basePosition, content, piece } = gesture.binding;
+  const rotationRad = content.rotation.z;
+  if (anchor.position.equals(gesture.startPosition) && rotationRad === gesture.startRotation)
+    return null;
+  // World position includes the staging origin. Reuse unchanged local components exactly.
+  const previous = piece.transform?.offsetM ?? [0, 0, 0];
+  const offsetM: [number, number, number] = [...previous];
+  for (const index of [0, 1, 2] as const) {
+    const position = anchor.position.getComponent(index);
+    if (position !== gesture.startPosition.getComponent(index))
+      offsetM[index] = position - basePosition.getComponent(index);
+  }
+  return Object.freeze({ offsetM: Object.freeze(offsetM), rotationRad });
+}
+
 interface MeasurementSurfacePatternPieceSceneGuideBindingV1 {
   readonly line: THREE.Line;
   readonly fromBinding: MeasurementSurfacePatternPieceSceneBindingV1;
@@ -374,8 +809,10 @@ interface StageRuntime {
   readonly sectionPlanes: THREE.Group;
   readonly controls: OrbitControls;
   readonly scene: THREE.Scene;
-  readonly patternPieceBindings: ReadonlyMap<string, MeasurementSurfacePatternPieceSceneBindingV1>;
-  readonly patternPieceGuides: readonly MeasurementSurfacePatternPieceSceneGuideBindingV1[];
+  patternPieceBindings: ReadonlyMap<string, MeasurementSurfacePatternPieceSceneBindingV1>;
+  patternPieceGuides: readonly MeasurementSurfacePatternPieceSceneGuideBindingV1[];
+  readonly syncPatternPieceOverlay: (key: string) => void;
+  readonly syncAcceptedCloth: () => void;
   readonly updateLivePositions: (positions: Float32Array) => MeasurementSurfaceLivePositionUpdateV1;
   readonly syncMeasurementGuide: (
     guide: MeasurementSurfaceActiveMeasurementGuideV1 | undefined,
@@ -669,6 +1106,38 @@ export function measurementSurfaceOrbitControlsEnabledV2(options: {
     (options.unifiedJointInteraction ||
       !measurementSurfaceJointEditorEffectiveEditModeV1(options.editor))
   );
+}
+
+/** Keep camera gestures separate from events owned by the stage and other pointers. */
+export function bindMeasurementSurfaceOrbitPointersV1(
+  canvas: HTMLCanvasElement,
+  isOrbitEnabled: () => boolean,
+): () => void {
+  const active = new Map<number, string>();
+  const down = (event: PointerEvent) => {
+    if (!isOrbitEnabled()) return;
+    const overlapsMouseGesture =
+      active.size > 0 &&
+      (event.pointerType !== 'touch' || [...active.values()].some((type) => type !== 'touch'));
+    if (active.has(event.pointerId) || overlapsMouseGesture) {
+      event.stopImmediatePropagation();
+      return;
+    }
+    active.set(event.pointerId, event.pointerType);
+  };
+  const end = (event: PointerEvent) => {
+    // Pinned OrbitControls assumes any surviving pointer is a tracked touch after an end.
+    if (!active.delete(event.pointerId)) event.stopImmediatePropagation();
+  };
+  canvas.addEventListener('pointerdown', down);
+  canvas.addEventListener('pointerup', end);
+  canvas.addEventListener('pointercancel', end);
+  return () => {
+    canvas.removeEventListener('pointerdown', down);
+    canvas.removeEventListener('pointerup', end);
+    canvas.removeEventListener('pointercancel', end);
+    active.clear();
+  };
 }
 
 export function measurementSurfaceJointGroupsSignatureV1(
@@ -1133,6 +1602,7 @@ function disposePatternPieceLayerV1(layer: THREE.Group | null): void {
       object.geometry.dispose();
       disposeMaterial(object.material);
     }
+    if (object instanceof THREE.Sprite) disposeMeasurementSurfaceSeamOrdinalBadgeV1(object);
   });
 }
 
@@ -1161,13 +1631,19 @@ function createPatternPieceLayerV1(
   if (!Number.isFinite(largestDimensionMm) || largestDimensionMm <= 0) {
     return Object.freeze({ layer: null, bindings: new Map(), guides: Object.freeze([]) });
   }
-  // One shared scale retains real relative piece dimensions while placement remains presentation-only.
-  const scaleMPerMm = (bodyRadiusM * 1.1) / largestDimensionMm;
+  const scaleMPerMm = 0.001;
   const layer = new THREE.Group();
   layer.name = 'measurement-surface-pattern-pieces-v1';
   const bindings = new Map<string, MeasurementSurfacePatternPieceSceneBindingV1>();
+  const addOrdinalBadge = createMeasurementSurfaceSeamOrdinalBadgeBuilderV1();
 
+  const groupKeys = new Set(
+    overlay.tool === 'rotate'
+      ? overlay.rotationGroup?.pieceKeys
+      : overlay.translationGroup?.pieceKeys,
+  );
   for (const piece of overlay.pieces) {
+    const highlighted = piece.selected || groupKeys.has(piece.pieceKey);
     const piecePoints = piece.contours.flatMap((contour) =>
       contour.vertices.map(({ pointMm }) => pointMm),
     );
@@ -1248,9 +1724,9 @@ function createPatternPieceLayerV1(
       const geometry = new THREE.ShapeGeometry(shape);
       const material = new THREE.MeshLambertMaterial({
         color: piece.swatchCss ?? cssColor('--color-bgColor'),
-        emissive: piece.selected ? cssColor('--color-highlightColor') : 0x000000,
-        emissiveIntensity: piece.selected ? 0.2 : 0,
-        opacity: piece.selected ? 0.96 : 0.76,
+        emissive: highlighted ? cssColor('--color-highlightColor') : 0x000000,
+        emissiveIntensity: highlighted ? 0.2 : 0,
+        opacity: highlighted ? 0.96 : 0.76,
         side: THREE.DoubleSide,
         transparent: true,
       });
@@ -1271,7 +1747,7 @@ function createPatternPieceLayerV1(
         if (points.length > 1) points.push(points[0].clone());
         const edge = patternPieceLine(
           points,
-          piece.selected ? cssColor('--color-highlightColor') : cssColor('--color-textColor'),
+          highlighted ? cssColor('--color-highlightColor') : cssColor('--color-textColor'),
           contour.role === 'hole' ? 0.55 : 0.9,
         );
         edge.name = `pattern-piece-edge:${piece.pieceKey}:${contour.contourId}`;
@@ -1297,9 +1773,15 @@ function createPatternPieceLayerV1(
         seamLine.userData.patternPieceKey = piece.pieceKey;
         seamLine.userData.seamId = seam.seamId;
         seamLine.userData.seamSide = seam.side;
+        if (seam.operationSeam) {
+          seamLine.userData.operationNumber = seam.operationSeam.operationNumber;
+          seamLine.userData.seamOrdinal = seam.operationSeam.ordinal;
+        }
         seamLine.userData.contourId = seam.contourId;
         seamLine.userData.orderedVertexIds = seam.orderedVertexIds;
         content.add(seamLine);
+        if (seam.ordinalBadgeVisible)
+          addOrdinalBadge(seamLine, seam, seamPoints, seamColor, cssColor('--color-bgColor'));
         if (overlay.visibility.thread && seam.thread) {
           const threadLine = patternPieceLine(
             seamPoints.map((point) => point.clone().setZ(0.015)),
@@ -1325,6 +1807,18 @@ function createPatternPieceLayerV1(
           });
         }
       });
+    }
+
+    if (overlay.visibility.thread && piece.topstitch) {
+      const { lineKey, operationNumber, widthMm, threadBomLineKey, pointsMm } = piece.topstitch;
+      const line = patternPieceLine(
+        pointsMm.map((point) => localPoint(point, 0.0005)),
+        cssColor('--color-highlightColor'),
+      );
+      line.name = `pattern-piece-topstitch:${lineKey}`;
+      line.userData.topstitch = { lineKey, operationNumber, widthMm, threadBomLineKey };
+      line.userData.patternPieceKey = piece.pieceKey;
+      content.add(line);
     }
 
     if (piece.selected && overlay.tool !== 'select') {
@@ -1483,6 +1977,7 @@ export function MeasurementWatertightSurfaceV1Stage({
   onDisplayedGeometryV1,
   unifiedJointInteraction = false,
   patternPieceOverlay,
+  acceptedCloth,
   measurementGuide,
   measurementGuidePresentation = 'interactive',
   measurementGuideCameraView,
@@ -1516,6 +2011,7 @@ export function MeasurementWatertightSurfaceV1Stage({
   unifiedJointInteraction?: boolean;
   /** Optional caller-owned exact pattern projection rendered inside this existing Three scene. */
   patternPieceOverlay?: MeasurementSurfacePatternPieceOverlayV1;
+  acceptedCloth?: MeasurementSurfaceAcceptedClothV1;
   /** Focus-driven visual measurement line. It is a guide, never a tape or fit claim. */
   measurementGuide?: MeasurementSurfaceActiveMeasurementGuideV1;
   /** Capture-only framing renders the exact guide close-up at a supersampled resolution. */
@@ -1545,6 +2041,7 @@ export function MeasurementWatertightSurfaceV1Stage({
   >(null);
   const observesDisplayedGeometryRef = useRef(onDisplayedGeometryV1 !== undefined);
   const patternPieceOverlayRef = useRef(patternPieceOverlay);
+  const acceptedClothRef = useRef(acceptedCloth);
   const measurementGuideRef = useRef(measurementGuide);
   const measurementGuideCameraViewRef = useRef(measurementGuideCameraView);
   // Survives stage rebuilds so a blur after a rebuild still restores the owner's camera.
@@ -1562,23 +2059,31 @@ export function MeasurementWatertightSurfaceV1Stage({
   if (onDisplayedGeometryV1) onDisplayedGeometryRef.current = onDisplayedGeometryV1;
   observesDisplayedGeometryRef.current = onDisplayedGeometryV1 !== undefined;
   patternPieceOverlayRef.current = patternPieceOverlay;
+  acceptedClothRef.current = acceptedCloth;
   measurementGuideRef.current = measurementGuide;
   measurementGuideCameraViewRef.current = measurementGuideCameraView;
   const patternPieceOverlayRenderKey = patternPieceOverlay
     ? JSON.stringify([
         patternPieceOverlay.revision,
         patternPieceOverlay.tool,
+        patternPieceOverlay.translationGroup?.pieceKeys,
+        patternPieceOverlay.rotationGroup?.pieceKeys,
         patternPieceOverlay.visibility,
         patternPieceOverlay.guides,
-        patternPieceOverlay.pieces.map(({ pieceKey, selected, swatchCss, transform, seams }) => [
-          pieceKey,
-          selected,
-          swatchCss,
-          transform,
-          seams,
-        ]),
+        patternPieceOverlay.pieces.map(
+          ({ pieceKey, selected, swatchCss, transform, seams, topstitch }) => [
+            pieceKey,
+            selected,
+            swatchCss,
+            transform,
+            seams,
+            topstitch,
+          ],
+        ),
       ])
     : '';
+  const patternPieceOverlayRenderKeyRef = useRef(patternPieceOverlayRenderKey);
+  patternPieceOverlayRenderKeyRef.current = patternPieceOverlayRenderKey;
 
   useEffect(() => {
     displayedGeometryReadyRef.current = false;
@@ -1599,6 +2104,7 @@ export function MeasurementWatertightSurfaceV1Stage({
     let renderCount = 0;
     let resizeObserver: ResizeObserver | null = null;
     let controls: OrbitControls | null = null;
+    let removeOrbitPointerGuard: (() => void) | null = null;
     let renderer: THREE.WebGLRenderer | null = null;
     let geometry: THREE.BufferGeometry | null = null;
     let surfaceMaterial: THREE.MeshLambertMaterial | null = null;
@@ -1643,7 +2149,53 @@ export function MeasurementWatertightSurfaceV1Stage({
     let camera: THREE.PerspectiveCamera | null = null;
     let bodyCenter: THREE.Vector3 | null = null;
     let bodyRadius = 0;
+    let cameraFitRadius = 0;
     let patternPieceLayer: THREE.Group | null = null;
+    let acceptedClothMesh: AcceptedClothMesh | null = null;
+    let acceptedClothInternalLines: ReturnType<
+      typeof createMeasurementSurfaceAcceptedInternalLinesV1
+    > = null;
+    let mountedCloth: MeasurementSurfaceAcceptedClothV1 | undefined;
+    let acceptedClothPointer: {
+      id: number;
+      x: number;
+      y: number;
+      frame: MeasurementSurfaceAcceptedClothV1;
+    } | null = null;
+    const trackAcceptedClothPointer = (event: PointerEvent) => {
+      const pointer = acceptedClothPointer;
+      if (!pointer || pointer.id !== event.pointerId) return null;
+      if (Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y) > 4) {
+        acceptedClothPointer = null;
+        return null;
+      }
+      return pointer;
+    };
+    const removeAcceptedClothInternalLines = () => {
+      const lines = acceptedClothInternalLines;
+      acceptedClothInternalLines = null;
+      delete canvas.dataset.acceptedClothInternalLinesFrame;
+      if (lines) {
+        lines.removeFromParent();
+        lines.geometry.dispose();
+        lines.material.dispose();
+      }
+    };
+    const removeAcceptedCloth = () => {
+      const previous = acceptedClothMesh;
+      acceptedClothMesh = null;
+      mountedCloth = undefined;
+      acceptedClothPointer = null;
+      delete canvas.dataset.acceptedClothFrame;
+      delete canvas.dataset.acceptedClothOverlay;
+      delete canvas.dataset.acceptedClothOverlayFrame;
+      removeAcceptedClothInternalLines();
+      if (!previous) return;
+      previous.removeFromParent();
+      previous.geometry.dispose();
+      for (const material of previous.material) material.dispose();
+    };
+    let mountedPatternPieceKey = patternPieceOverlayRenderKeyRef.current;
     let measurementGuideLayer: THREE.Group | null = null;
     let measurementGuideBindings: readonly MeasurementSurfaceGuideSceneBindingV1[] = Object.freeze(
       [],
@@ -1658,10 +2210,16 @@ export function MeasurementWatertightSurfaceV1Stage({
     let patternPiecePointerDownHandler: ((event: PointerEvent) => void) | null = null;
     let patternPiecePointerMoveHandler: ((event: PointerEvent) => void) | null = null;
     let patternPiecePointerFinishHandler: ((event: PointerEvent) => void) | null = null;
+    let cancelledPatternPointer: AbortController | null = null;
     let patternPieceGesture: Readonly<{
       pointerId: number;
+      overlayKey: string;
+      onTransform: NonNullable<MeasurementSurfacePatternPieceOverlayV1['onTransformPiece']>;
       binding: MeasurementSurfacePatternPieceSceneBindingV1;
       tool: 'translate' | 'rotate';
+      groupMove: ReturnType<typeof captureMeasurementSurfaceTranslationGroupV1>;
+      groupRotation: ReturnType<typeof captureMeasurementSurfaceRotationGroupV1>;
+      dragPlane: MeasurementSurfacePatternDragPlaneV1;
       plane: THREE.Plane;
       startPoint: THREE.Vector3;
       startPosition: THREE.Vector3;
@@ -1806,6 +2364,48 @@ export function MeasurementWatertightSurfaceV1Stage({
       contextCanvas.dataset.patternPieceHitReceipt = JSON.stringify(receipt);
     }
 
+    function publishPatternPieceMetadata(bindingCount: number) {
+      if (!contextCanvas) return;
+      const overlay = patternPieceOverlayRef.current;
+      const guides = overlay?.guides ?? [];
+      contextCanvas.dataset.patternPieceCount = String(bindingCount);
+      contextCanvas.dataset.patternSeamSides = [
+        ...new Set(overlay?.pieces.flatMap(({ seams }) => seams.map(({ side }) => side)) ?? []),
+      ]
+        .sort()
+        .join(',');
+      contextCanvas.dataset.patternCorrespondenceGuideCount = String(
+        guides.filter(({ kind }) => kind === 'correspondence').length,
+      );
+      contextCanvas.dataset.patternThreadGuideCount = String(
+        guides.filter(({ kind }) => kind === 'thread').length,
+      );
+      contextCanvas.dataset.patternThreadColors = [
+        ...new Set(guides.flatMap(({ thread }) => (thread ? [thread.colorCss] : []))),
+      ].join(',');
+      const topstitch = overlay?.pieces.find((piece) => piece.topstitch)?.topstitch;
+      const line =
+        topstitch &&
+        patternPieceLayer?.getObjectByName(`pattern-piece-topstitch:${topstitch.lineKey}`);
+      if (line instanceof THREE.Line) {
+        const positions = line.geometry.getAttribute('position');
+        const start = new THREE.Vector3(positions.getX(0), positions.getY(0), positions.getZ(0));
+        const end = new THREE.Vector3(positions.getX(1), positions.getY(1), positions.getZ(1));
+        contextCanvas.dataset.patternTopstitch = JSON.stringify({
+          ...line.userData.topstitch,
+          pieceKey: line.userData.patternPieceKey,
+          lengthMm: 1000 * start.distanceTo(end),
+          startM: line.localToWorld(start).toArray(),
+          endM: line.localToWorld(end).toArray(),
+        });
+      } else {
+        delete contextCanvas.dataset.patternTopstitch;
+      }
+      contextCanvas.dataset.selectedPatternPiece =
+        overlay?.pieces.find(({ selected }) => selected)?.pieceId ?? '';
+      contextCanvas.dataset.patternPieceTool = overlay?.tool ?? 'off';
+    }
+
     function pointerAngleAroundPatternPiece(
       event: PointerEvent,
       binding: MeasurementSurfacePatternPieceSceneBindingV1,
@@ -1818,27 +2418,70 @@ export function MeasurementWatertightSurfaceV1Stage({
       return Math.atan2(event.clientY - centerY, event.clientX - centerX);
     }
 
-    function finishPatternPieceGesture() {
+    function suppressCancelledPatternPointer(pointerId: number) {
+      cancelledPatternPointer?.abort();
+      const suppression = new AbortController();
+      cancelledPatternPointer = suppression;
+      const swallow = (event: PointerEvent) => {
+        if (event.pointerId !== pointerId) return;
+        // The next real press can reuse this pointer ID.
+        if (event.type === 'pointerdown') {
+          suppression.abort();
+          return;
+        }
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (event.type === 'click') suppression.abort();
+      };
+      const options = { capture: true, signal: suppression.signal };
+      window.addEventListener('pointerdown', swallow, options);
+      window.addEventListener('pointerup', swallow, options);
+      window.addEventListener('click', swallow, options);
+    }
+
+    function isPatternPieceGestureCurrent(gesture: NonNullable<typeof patternPieceGesture>) {
+      return (
+        gesture.overlayKey === patternPieceOverlayRenderKeyRef.current &&
+        (!gesture.groupRotation ||
+          gesture.groupRotation.group === patternPieceOverlayRef.current?.rotationGroup) &&
+        (!gesture.groupMove ||
+          gesture.groupMove.group === patternPieceOverlayRef.current?.translationGroup) &&
+        (gesture.tool !== 'translate' ||
+          gesture.dragPlane === (patternPieceOverlayRef.current?.dragPlane ?? 'view')) &&
+        gesture.onTransform === patternPieceOverlayRef.current?.onTransformPiece
+      );
+    }
+
+    function finishPatternPieceGesture(outcome: 'commit' | 'cancel') {
       const gesture = patternPieceGesture;
       if (!gesture) return;
       patternPieceGesture = null;
+      const commit = outcome === 'commit' && isPatternPieceGestureCurrent(gesture);
+      if (!commit) {
+        gesture.binding.anchor.position.copy(gesture.startPosition);
+        gesture.binding.content.rotation.z = gesture.startRotation;
+        suppressCancelledPatternPointer(gesture.pointerId);
+      }
       if (contextCanvas?.hasPointerCapture(gesture.pointerId)) {
         contextCanvas.releasePointerCapture(gesture.pointerId);
       }
       if (controls) controls.enabled = interactive;
-      const offset = gesture.binding.anchor.position.clone().sub(gesture.binding.basePosition);
-      patternPieceOverlayRef.current?.onTransformPiece?.(
-        gesture.binding.piece.pieceKey,
-        Object.freeze({
-          offsetM: Object.freeze(offset.toArray() as [number, number, number]),
-          rotationRad: gesture.binding.content.rotation.z,
-        }),
-      );
+      const transform = commit ? measurementSurfaceCommittedPatternGestureV1(gesture) : null;
+      if (gesture.groupRotation) gesture.groupRotation.finish(commit);
+      else if (gesture.groupMove) gesture.groupMove.finish(commit);
+      else if (transform) gesture.onTransform(gesture.binding.piece.pieceKey, transform);
       if (contextCanvas) {
         contextCanvas.dataset.patternPieceGesture = 'idle';
         contextCanvas.style.cursor = '';
       }
       scheduleRender();
+    }
+
+    function cancelPatternPieceOnEscape(event: globalThis.KeyboardEvent) {
+      if (event.key !== 'Escape' || !patternPieceGesture) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      finishPatternPieceGesture('cancel');
     }
 
     function projectedJointMarkerId(
@@ -2119,13 +2762,14 @@ export function MeasurementWatertightSurfaceV1Stage({
     }
 
     function snapshotStageCamera(): MeasurementSurfaceCameraStateV10 | null {
-      if (!camera || !controls || !bodyCenter || bodyRadius <= 0 || !contextCanvas) return null;
+      if (!camera || !controls || !bodyCenter || cameraFitRadius <= 0 || !contextCanvas)
+        return null;
       return measurementSurfaceSnapshotCameraV10({
         positionM: camera.position.toArray() as [number, number, number],
         targetM: controls.target.toArray() as [number, number, number],
         centerM: bodyCenter.toArray() as [number, number, number],
         up: camera.up.toArray() as [number, number, number],
-        radiusM: bodyRadius,
+        radiusM: cameraFitRadius,
         viewPreset:
           contextCanvas.dataset.viewPreset === 'side' || contextCanvas.dataset.viewPreset === 'back'
             ? contextCanvas.dataset.viewPreset
@@ -2168,7 +2812,8 @@ export function MeasurementWatertightSurfaceV1Stage({
       onDisplayedGeometryRef.current?.(null);
       finishRotationGizmo('cancel');
       finishPositionDrag('cancel');
-      patternPieceGesture = null;
+      finishPatternPieceGesture('cancel');
+      cancelledPatternPointer?.abort();
       // A rebuild mid-turn keeps the turned end pose, so the rebuilt stage does not swing again.
       stopGuideCameraAnimation(true);
       if (interactive) {
@@ -2186,6 +2831,7 @@ export function MeasurementWatertightSurfaceV1Stage({
         if (controlsStartHandler) controls.removeEventListener('start', controlsStartHandler);
         controls.dispose();
       }
+      removeOrbitPointerGuard?.();
       if (contextCanvas && contextLostHandler) {
         contextCanvas.removeEventListener('webglcontextlost', contextLostHandler);
       }
@@ -2227,7 +2873,9 @@ export function MeasurementWatertightSurfaceV1Stage({
       if (contextCanvas && patternPiecePointerFinishHandler) {
         contextCanvas.removeEventListener('pointerup', patternPiecePointerFinishHandler);
         contextCanvas.removeEventListener('pointercancel', patternPiecePointerFinishHandler);
+        contextCanvas.removeEventListener('lostpointercapture', patternPiecePointerFinishHandler);
       }
+      window.removeEventListener('keydown', cancelPatternPieceOnEscape, true);
       if (rotationEscapeHandler) window.removeEventListener('keydown', rotationEscapeHandler);
       if (rotationBlurHandler) window.removeEventListener('blur', rotationBlurHandler);
       if (rotationVisibilityHandler) {
@@ -2245,6 +2893,7 @@ export function MeasurementWatertightSurfaceV1Stage({
       transformAnchor?.removeFromParent();
       disposeJointEditorLayer(runtime?.jointLayer ?? null);
       disposePatternPieceLayerV1(patternPieceLayer);
+      removeAcceptedCloth();
       disposeMeasurementSurfaceGuideLayerV1(measurementGuideLayer);
       geometry?.dispose();
       surfaceMaterial?.dispose();
@@ -2424,7 +3073,20 @@ export function MeasurementWatertightSurfaceV1Stage({
       );
       patternPieceLayer = patternPieceScene.layer;
       if (patternPieceLayer) scene.add(patternPieceLayer);
-      const radius = patternPieceLayer ? bodyGeometryRadius * 1.68 : bodyGeometryRadius;
+      const fitRadius = () => {
+        if (!patternPieceLayer) return bodyGeometryRadius;
+        const patternSphere = new THREE.Box3()
+          .setFromObject(patternPieceLayer)
+          .getBoundingSphere(new THREE.Sphere());
+        return patternSphere.isEmpty()
+          ? bodyGeometryRadius
+          : Math.max(
+              bodyGeometryRadius,
+              patternSphere.center.distanceTo(center) + patternSphere.radius,
+            );
+      };
+      let radius = fitRadius();
+      cameraFitRadius = radius;
 
       landmarks = createLandmarks(frame);
       sectionPlanes = createSectionPlanes(frame, box);
@@ -2483,35 +3145,7 @@ export function MeasurementWatertightSurfaceV1Stage({
       contextCanvas.dataset.hoveredJointGroup = '';
       contextCanvas.dataset.selectedJointVisibility = 'none';
       contextCanvas.dataset.transformHoverAxis = 'none';
-      contextCanvas.dataset.patternPieceCount = String(patternPieceScene.bindings.size);
-      contextCanvas.dataset.patternSeamSides = [
-        ...new Set(
-          patternPieceOverlayRef.current?.pieces.flatMap(({ seams }) =>
-            seams.map(({ side }) => side),
-          ) ?? [],
-        ),
-      ]
-        .sort()
-        .join(',');
-      contextCanvas.dataset.patternCorrespondenceGuideCount = String(
-        (patternPieceOverlayRef.current?.guides ?? []).filter(
-          ({ kind }) => kind === 'correspondence',
-        ).length,
-      );
-      contextCanvas.dataset.patternThreadGuideCount = String(
-        (patternPieceOverlayRef.current?.guides ?? []).filter(({ kind }) => kind === 'thread')
-          .length,
-      );
-      contextCanvas.dataset.patternThreadColors = [
-        ...new Set(
-          (patternPieceOverlayRef.current?.guides ?? []).flatMap(({ thread }) =>
-            thread ? [thread.colorCss] : [],
-          ),
-        ),
-      ].join(',');
-      contextCanvas.dataset.selectedPatternPiece =
-        patternPieceOverlayRef.current?.pieces.find(({ selected }) => selected)?.pieceId ?? '';
-      contextCanvas.dataset.patternPieceTool = patternPieceOverlayRef.current?.tool ?? 'off';
+      publishPatternPieceMetadata(patternPieceScene.bindings.size);
       contextCanvas.dataset.patternPieceGesture = 'idle';
 
       contextLostHandler = (event) => {
@@ -2769,33 +3403,87 @@ export function MeasurementWatertightSurfaceV1Stage({
       document.addEventListener('visibilitychange', rotationVisibilityHandler);
 
       patternPiecePointerDownHandler = (event) => {
-        if (event.button !== 0 || !camera) return;
+        if (event.button !== 0 || !camera || patternPieceGesture) return;
+        if (
+          event.isPrimary &&
+          interactive &&
+          (mountedCloth?.onSelectPiece || mountedCloth?.onMeasurePoint) &&
+          mountedCloth === acceptedClothRef.current &&
+          mountedCloth.isCurrent()
+        ) {
+          acceptedClothPointer = {
+            id: event.pointerId,
+            x: event.clientX,
+            y: event.clientY,
+            frame: mountedCloth,
+          };
+          return;
+        }
+        if (mountedPatternPieceKey !== patternPieceOverlayRenderKeyRef.current) return;
         const binding = patternPieceHit(event);
         if (!binding) return;
         const overlay = patternPieceOverlayRef.current;
-        overlay?.onSelectPiece?.(binding.piece);
         const tool = overlay?.tool ?? 'select';
-        if (!binding.piece.selected || tool === 'select') {
+        const rotateGroup = measurementSurfaceRotationGroupForHitV1(
+          overlay,
+          binding.piece.pieceKey,
+        );
+        const group = rotateGroup
+          ? undefined
+          : focusMeasurementSurfacePatternHitV1(overlay, binding.piece);
+        const onTransform = overlay?.onTransformPiece;
+        if (
+          (!binding.piece.selected && !group && !rotateGroup) ||
+          tool === 'select' ||
+          !onTransform
+        ) {
           event.preventDefault();
           event.stopImmediatePropagation();
           scheduleRender();
           return;
         }
-        const planeNormal = camera.getWorldDirection(new THREE.Vector3()).normalize();
-        const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(
-          planeNormal,
+        const dragPlane = rotateGroup
+          ? 'xy'
+          : tool === 'translate'
+            ? overlay?.dragPlane ?? 'view'
+            : 'view';
+        const plane = measurementSurfacePatternDragPlaneV1(
+          dragPlane,
+          camera,
           binding.anchor.position,
         );
         const pointer = normalizedTransformPointer(event, event.button);
         if (!pointer) return;
         const raycaster = new THREE.Raycaster();
         raycaster.setFromCamera(new THREE.Vector2(pointer.x, pointer.y), camera);
-        const startPoint = new THREE.Vector3();
-        if (!raycaster.ray.intersectPlane(plane, startPoint)) return;
+        const startPoint = measurementSurfacePatternDragIntersectionV1(
+          raycaster.ray,
+          plane,
+          camera,
+        );
+        if (!startPoint) return;
+        const bindings = runtimeRef.current?.patternPieceBindings;
+        const groupMove =
+          group && bindings ? captureMeasurementSurfaceTranslationGroupV1(group, bindings) : null;
+        const groupRotation =
+          rotateGroup && bindings
+            ? captureMeasurementSurfaceRotationGroupV1(
+                rotateGroup,
+                bindings,
+                binding.piece.pieceKey,
+                startPoint,
+              )
+            : null;
+        if ((group && !groupMove) || (rotateGroup && !groupRotation)) return;
         patternPieceGesture = Object.freeze({
           pointerId: event.pointerId,
+          overlayKey: mountedPatternPieceKey,
+          onTransform,
           binding,
           tool,
+          groupMove,
+          groupRotation,
+          dragPlane,
           plane,
           startPoint,
           startPosition: binding.anchor.position.clone(),
@@ -2812,38 +3500,100 @@ export function MeasurementWatertightSurfaceV1Stage({
         event.stopImmediatePropagation();
       };
       patternPiecePointerMoveHandler = (event) => {
+        trackAcceptedClothPointer(event);
         const gesture = patternPieceGesture;
         if (!gesture || gesture.pointerId !== event.pointerId || !camera) return;
-        if (gesture.tool === 'translate') {
+        if (!isPatternPieceGestureCurrent(gesture)) {
+          finishPatternPieceGesture('cancel');
+          return;
+        }
+        if (gesture.tool === 'translate' || gesture.groupRotation) {
           const pointer = normalizedTransformPointer(event, -1);
           if (!pointer) return;
           const raycaster = new THREE.Raycaster();
           raycaster.setFromCamera(new THREE.Vector2(pointer.x, pointer.y), camera);
-          const point = new THREE.Vector3();
-          if (raycaster.ray.intersectPlane(gesture.plane, point)) {
-            gesture.binding.anchor.position
-              .copy(gesture.startPosition)
-              .add(point.sub(gesture.startPoint));
+          if (gesture.groupRotation) {
+            const point = measurementSurfacePatternDragIntersectionV1(
+              raycaster.ray,
+              gesture.plane,
+              camera,
+            );
+            if (point) gesture.groupRotation.preview(point);
+          } else {
+            measurementSurfaceMovePatternOnPlaneV1(
+              raycaster.ray,
+              camera,
+              gesture,
+              gesture.binding.anchor.position,
+            );
+            gesture.groupMove?.preview(
+              gesture.binding.anchor.position.clone().sub(gesture.startPosition),
+            );
           }
         } else {
           const angle = pointerAngleAroundPatternPiece(event, gesture.binding);
-          gesture.binding.content.rotation.z = gesture.startRotation + angle - gesture.startAngle;
+          gesture.binding.content.rotation.z = gesture.startRotation + (angle - gesture.startAngle);
         }
         event.preventDefault();
         event.stopImmediatePropagation();
         scheduleRender();
       };
       patternPiecePointerFinishHandler = (event) => {
+        if (acceptedClothPointer?.id === event.pointerId) {
+          const captured = trackAcceptedClothPointer(event);
+          acceptedClothPointer = null;
+          if (
+            event.type !== 'pointerup' ||
+            !captured ||
+            !camera ||
+            !acceptedClothMesh ||
+            !mountedCloth ||
+            mountedCloth !== acceptedClothRef.current ||
+            !sameAcceptedClothFrame(captured.frame, mountedCloth) ||
+            captured.frame.onMeasurePoint !== mountedCloth.onMeasurePoint
+          )
+            return;
+          const point = normalizedTransformPointer(event, event.button);
+          if (!point || Math.abs(point.x) > 1 || Math.abs(point.y) > 1) return;
+          camera.updateMatrixWorld();
+          const raycaster = new THREE.Raycaster();
+          raycaster.setFromCamera(new THREE.Vector2(point.x, point.y), camera);
+          if (mountedCloth.onMeasurePoint) {
+            const hit = pickMeasurementSurfaceAcceptedClothPointV1(
+              raycaster,
+              acceptedClothMesh,
+              surface,
+              mountedCloth,
+            );
+            if (hit) mountedCloth.onMeasurePoint(hit);
+            return;
+          }
+          const piece = pickMeasurementSurfaceAcceptedClothPieceV1(
+            raycaster,
+            acceptedClothMesh,
+            surface,
+            mountedCloth,
+          );
+          if (piece) mountedCloth.onSelectPiece?.(piece);
+          return;
+        }
         if (!patternPieceGesture || patternPieceGesture.pointerId !== event.pointerId) return;
         event.preventDefault();
         event.stopImmediatePropagation();
-        finishPatternPieceGesture();
+        finishPatternPieceGesture(event.type === 'pointerup' ? 'commit' : 'cancel');
       };
       contextCanvas.addEventListener('pointerdown', patternPiecePointerDownHandler);
       contextCanvas.addEventListener('pointermove', patternPiecePointerMoveHandler);
       contextCanvas.addEventListener('pointerup', patternPiecePointerFinishHandler);
       contextCanvas.addEventListener('pointercancel', patternPiecePointerFinishHandler);
+      contextCanvas.addEventListener('lostpointercapture', patternPiecePointerFinishHandler);
+      window.addEventListener('keydown', cancelPatternPieceOnEscape, true);
 
+      // Stage-specific pointer handlers get the event before the orbit controller.
+      removeOrbitPointerGuard = bindMeasurementSurfaceOrbitPointersV1(
+        renderer.domElement,
+        () => controls?.enabled === true,
+      );
       controls = new OrbitControls(camera, renderer.domElement);
       controls.enabled = interactive;
       controls.enableDamping = false;
@@ -2947,6 +3697,130 @@ export function MeasurementWatertightSurfaceV1Stage({
         controls.update();
         renderer.domElement.dataset.viewPreset = state.viewPreset;
         scheduleRender();
+      };
+
+      const syncAcceptedClothStrain = (
+        mesh: AcceptedClothMesh,
+        frame: MeasurementSurfaceAcceptedClothV1,
+      ) => {
+        if (updateMeasurementSurfaceAcceptedClothStrainV1(mesh, frame)) {
+          canvas.dataset.acceptedClothOverlay = 'principal-strain';
+          canvas.dataset.acceptedClothOverlayFrame = String(frame.frameNumber);
+        } else {
+          delete canvas.dataset.acceptedClothOverlay;
+          delete canvas.dataset.acceptedClothOverlayFrame;
+        }
+      };
+      const syncAcceptedClothInternalLines = (frame: MeasurementSurfaceAcceptedClothV1) => {
+        removeAcceptedClothInternalLines();
+        const lines = createMeasurementSurfaceAcceptedInternalLinesV1(frame);
+        if (!lines) return;
+        acceptedClothInternalLines = lines;
+        scene?.add(lines);
+        canvas.dataset.acceptedClothInternalLinesFrame = String(frame.frameNumber);
+      };
+
+      const syncAcceptedCloth = () => {
+        if (disposed || !scene) return;
+        const source = acceptedClothRef.current;
+        const next = source?.isCurrent() === true ? source : undefined;
+        if (next === mountedCloth) return;
+        if (
+          next &&
+          mountedCloth &&
+          acceptedClothMesh &&
+          sameAcceptedClothFrame(mountedCloth, next)
+        ) {
+          const strainChanged = mountedCloth.principalStrain !== next.principalStrain;
+          const backsideChanged = mountedCloth.showBackside !== next.showBackside;
+          const internalLinesChanged =
+            mountedCloth.nativeInternalLines !== next.nativeInternalLines;
+          if (strainChanged) syncAcceptedClothStrain(acceptedClothMesh, next);
+          if (backsideChanged)
+            updateMeasurementSurfaceAcceptedClothBacksideV1(acceptedClothMesh, next.showBackside);
+          if (internalLinesChanged) syncAcceptedClothInternalLines(next);
+          if (strainChanged || backsideChanged || internalLinesChanged) scheduleRender();
+          mountedCloth = next;
+          return;
+        }
+        removeAcceptedCloth();
+        if (!next || !next.positionsM.length || next.positionsM.length % 9 !== 0) {
+          scheduleRender();
+          return;
+        }
+        let triangle = 0;
+        if (
+          !next.positionsM.every(Number.isFinite) ||
+          !next.ranges.length ||
+          next.ranges.some((range) => {
+            if (
+              range.triangleOffset !== triangle ||
+              range.triangleCount <= 0 ||
+              !Number.isSafeInteger(range.triangleCount)
+            )
+              return true;
+            triangle += range.triangleCount;
+            return false;
+          }) ||
+          triangle * 9 !== next.positionsM.length
+        ) {
+          scheduleRender();
+          return;
+        }
+        const clothGeometry = new THREE.BufferGeometry();
+        clothGeometry.setAttribute(
+          'position',
+          new THREE.BufferAttribute(next.positionsM.slice(), 3),
+        );
+        clothGeometry.computeVertexNormals();
+        const materials = next.ranges.map(({ triangleOffset, triangleCount, color }, index) => {
+          clothGeometry.addGroup(triangleOffset * 3, triangleCount * 3, index);
+          return new THREE.MeshStandardMaterial({ color, roughness: 0.75 });
+        });
+        acceptedClothMesh = new THREE.Mesh(clothGeometry, materials);
+        updateMeasurementSurfaceAcceptedClothBacksideV1(acceptedClothMesh, next.showBackside);
+        syncAcceptedClothStrain(acceptedClothMesh, next);
+        scene.add(acceptedClothMesh);
+        syncAcceptedClothInternalLines(next);
+        canvas.dataset.acceptedClothFrame = String(next.frameNumber);
+        mountedCloth = next;
+        scheduleRender();
+      };
+
+      const syncPatternPieceOverlay = (key: string) => {
+        const runtime = runtimeRef.current;
+        if (disposed || !runtime || !controls || !scene) return;
+        if (patternPieceGesture && !isPatternPieceGestureCurrent(patternPieceGesture))
+          finishPatternPieceGesture('cancel');
+        if (key === mountedPatternPieceKey) return;
+        try {
+          const replacement = createPatternPieceLayerV1(
+            patternPieceOverlayRef.current,
+            center,
+            bodyGeometryRadius,
+          );
+          finishPatternPieceGesture('cancel');
+          const savedCamera = snapshotStageCamera();
+          if (patternPieceLayer) scene.remove(patternPieceLayer);
+          disposePatternPieceLayerV1(patternPieceLayer);
+          patternPieceLayer = replacement.layer;
+          if (patternPieceLayer) scene.add(patternPieceLayer);
+          runtime.patternPieceBindings = replacement.bindings;
+          runtime.patternPieceGuides = replacement.guides;
+          mountedPatternPieceKey = key;
+          publishPatternPieceMetadata(replacement.bindings.size);
+
+          const previousRadius = radius;
+          radius = fitRadius();
+          cameraFitRadius = radius;
+          controls.minDistance = radius * 1.15;
+          controls.maxDistance = radius * 12;
+          if (savedCamera && radius !== previousRadius) restoreCamera(savedCamera);
+          scheduleRender();
+        } catch (reason: unknown) {
+          cleanup();
+          onStatusRef.current('error', reason instanceof Error ? reason.message : String(reason));
+        }
       };
 
       const zoomBy = (factor: number) => {
@@ -3128,6 +4002,8 @@ export function MeasurementWatertightSurfaceV1Stage({
         scene,
         patternPieceBindings: patternPieceScene.bindings,
         patternPieceGuides: patternPieceScene.guides,
+        syncPatternPieceOverlay,
+        syncAcceptedCloth,
         updateLivePositions,
         syncMeasurementGuide,
         syncGuideCamera: () => syncGuideCamera(),
@@ -3146,6 +4022,7 @@ export function MeasurementWatertightSurfaceV1Stage({
         updateLivePositions(liveDisplayPositionsRef.current);
       }
       syncMeasurementGuide(measurementGuideRef.current);
+      syncAcceptedCloth();
       wire.visible = overlays.wireframe;
       normals.visible = overlays.normals;
       landmarks.visible = overlays.landmarks;
@@ -3170,9 +4047,18 @@ export function MeasurementWatertightSurfaceV1Stage({
     frame,
     interactive,
     lod,
-    patternPieceOverlayRenderKey,
     measurementGuidePresentation,
     retainVisibleCanvasOnRebuild,
+  ]);
+
+  useEffect(() => {
+    runtimeRef.current?.syncPatternPieceOverlay(patternPieceOverlayRenderKey);
+  }, [
+    patternPieceOverlayRenderKey,
+    patternPieceOverlay?.onTransformPiece,
+    patternPieceOverlay?.translationGroup,
+    patternPieceOverlay?.rotationGroup,
+    patternPieceOverlay?.dragPlane,
   ]);
 
   useEffect(() => {
@@ -3194,6 +4080,8 @@ export function MeasurementWatertightSurfaceV1Stage({
       });
     };
   }, [exclusiveContextGroup]);
+
+  useLayoutEffect(() => runtimeRef.current?.syncAcceptedCloth(), [acceptedCloth]);
 
   useEffect(() => {
     runtimeRef.current?.releaseGuideCamera();

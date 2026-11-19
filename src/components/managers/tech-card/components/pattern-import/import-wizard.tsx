@@ -6,6 +6,7 @@
 // glyph each; a stage behind is a door back (contract: `back{to}` keeps that step's inputs, drops
 // the outputs after it). The footer is three things only: ← back · the one question (a link to
 // the control that answers it, `data-ask` in ui-bits.tsx) · the one primary, named by what it does.
+import { describeSavedJoinFile } from './phase-e-workbench-v2/draft-cad-saved-join-file';
 import * as Dialog from '@radix-ui/react-dialog';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ImportSession, SeedId, WizardStep } from 'lib/pattern-import/types';
@@ -38,6 +39,7 @@ import { createAiNamer } from './ai-namer';
 import { cardBuildDraft } from './card-apply';
 import { setRefusalSink } from './refusal-report';
 import { ApplyStep } from './steps/apply';
+import { isSavedFixedEndReviewFileV1 } from './phase-e-workbench-v2/draft-cad-saved-dart-tip-file-v1';
 import {
   assemblyImpact,
   blockingCount,
@@ -121,6 +123,9 @@ type WizardProps = {
   initialFiles?: File[];
   /** The slot the files were dropped on: every piece defaults to this fabric scope. */
   initialScopeKey?: string;
+  /** Explicit review entry always requires the operator to confirm the final Apply. */
+  requireManualApply?: boolean;
+  savedCopyFile?: File;
 };
 
 /**
@@ -185,6 +190,8 @@ function WizardBody({
   onReviewPieces,
   initialFiles,
   initialScopeKey,
+  requireManualApply = false,
+  savedCopyFile,
   kit,
   onToggleStub,
 }: WizardProps & { kit: StubKit | null; onToggleStub?: () => void }) {
@@ -239,6 +246,7 @@ function WizardBody({
       applyDraft,
       pageRoles,
       pinScopeKey: initialScopeKey,
+      savedCopyFile,
     }),
   );
   latest.current = api.session;
@@ -254,7 +262,7 @@ function WizardBody({
 
   // ── A10 autopilot: read files → the drive with the autopilot's resolver → on a green gate the
   // explicit gated apply. A stop says why on the footer's ask line; the primary resumes it.
-  const [autopilot, setAutopilot] = useState(readAutopilotPref);
+  const [autopilot, setAutopilot] = useState(() => !requireManualApply && readAutopilotPref());
   const apiRef = useRef(api);
   apiRef.current = api;
   const resolve = useMemo(() => resolverFor(card, () => apiRef.current), [card]);
@@ -278,6 +286,7 @@ function WizardBody({
       card: apiRef.current.runCard,
       baseSeeds: apiRef.current.baseSeeds,
       presegmented: !!apiRef.current.extracted.presegmented,
+      dxfImportScopeKey: apiRef.current.dxfImportScopeKey,
     });
     const log = {
       miss: (m: ReplayMiss) =>
@@ -302,7 +311,14 @@ function WizardBody({
   useEffect(() => {
     // the drive stops on check: a green gate goes to the card by the explicit gated path
     const d = api.driveStop;
-    if (!autopilot || !d || d.why !== 'auto-stop' || session.step !== 'check' || session.busy)
+    if (
+      requireManualApply ||
+      !autopilot ||
+      !d ||
+      d.why !== 'auto-stop' ||
+      session.step !== 'check' ||
+      session.busy
+    )
       return;
     if (applying.current === session.sessionId) return;
     applying.current = session.sessionId;
@@ -310,7 +326,7 @@ function WizardBody({
       if (!o.ok) setApStop(o.reason);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autopilot, api.driveStop, session.step, session.busy, session.sessionId]);
+  }, [autopilot, api.driveStop, requireManualApply, session.step, session.busy, session.sessionId]);
   const autopilotStop =
     autopilot && started.current === session.sessionId
       ? apStop ??
@@ -604,6 +620,10 @@ function WizardBody({
   const [override, setOverride] = useState<PrimaryOverride | null>(null);
   const draft = session.draft;
   const created = createdCount(draft);
+  const reviewsFixedEnd =
+    requireManualApply &&
+    api.inputs.fileList.length === 1 &&
+    api.inputs.fileList.some(isSavedFixedEndReviewFileV1);
   // T4: answers the apply step's assembly tiles still owe (apply waits for them)
   const impactOpen =
     session.step === 'apply' && !card.downloadOnly
@@ -665,14 +685,20 @@ function WizardBody({
       if (impactOpen && !applyRunning)
         return { label: `answer ${impactOpen}`, onClick: onAsk, title: blocker ?? undefined };
       return {
-        label: applyRunningLabel(api.apply) ?? `apply ${plural(created, 'piece')} to the card`,
+        label:
+          applyRunningLabel(api.apply) ??
+          (reviewsFixedEnd
+            ? 'Save new DXF revision'
+            : `apply ${plural(created, 'piece')} to the card`),
         onClick: blocked ? onAsk : () => void api.dispatch({ type: 'apply' }),
         disabled: !draft || applyRunning,
         loading: applyRunning,
         overlay: true,
-        title: draft
-          ? `uploads ${plural(draft.scopes.filter((s) => !s.alreadyOnCard).length, 'file')}, then adds the pieces`
-          : undefined,
+        title: reviewsFixedEnd
+          ? 'Replace the reviewed DXF in its existing pattern row'
+          : draft
+            ? `uploads ${plural(draft.scopes.filter((s) => !s.alreadyOnCard).length, 'file')}, then adds the pieces`
+            : undefined,
       };
     }
     // check: the way to the apply screen (replace / add, what goes up) — the ellipsis says one
@@ -681,7 +707,9 @@ function WizardBody({
       return {
         label: card.downloadOnly
           ? `download .dxf (${draft?.downloads.length ?? 0})…`
-          : `apply ${plural(created, 'piece')} to the card…`,
+          : reviewsFixedEnd
+            ? 'Review the DXF revision'
+            : `apply ${plural(created, 'piece')} to the card…`,
         onClick: blocked ? onAsk : () => void api.next(),
         disabled: !nextStep,
         title: blocked
@@ -806,6 +834,7 @@ function WizardBody({
       case 'apply':
         return (
           <ApplyStep
+            join={describeSavedJoinFile(savedCopyFile)}
             api={api}
             card={card}
             stub={client.kind === 'stub'}
@@ -995,7 +1024,7 @@ function WizardBody({
                     // switched on mid-run: it drives from the next "continue", not at once
                     if (on && session.step !== 'files') started.current = session.sessionId;
                     setAutopilot(on);
-                    writeAutopilotPref(on);
+                    if (!requireManualApply) writeAutopilotPref(on);
                   }}
                 >
                   autopilot {autopilot ? 'on' : 'off'}
@@ -1137,6 +1166,24 @@ function WizardBody({
                   base size only
                 </Button>
               )}
+              {requireManualApply &&
+              !reviewsFixedEnd &&
+              session.step === 'apply' &&
+              !applied &&
+              !card.downloadOnly &&
+              draft?.scopes.length === 1 &&
+              draft.scopes[0]?.alreadyOnCard ? (
+                <Button
+                  variant='secondary'
+                  size='sm'
+                  className='shrink-0'
+                  title='Replace the matching DXF in the same pattern row and save a new revision'
+                  disabled={applyRunning || Boolean(session.busy) || Boolean(blocker)}
+                  onClick={() => void api.dispatch({ type: 'apply', replaceMatchingFile: true })}
+                >
+                  Save new DXF revision
+                </Button>
+              ) : null}
               {(nextStep || session.step === 'apply') && (
                 <Button
                   ref={primaryRef}

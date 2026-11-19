@@ -27,9 +27,7 @@ type SavedPrepared = Extract<
 >;
 
 function exactScopeNames(techCardId: 6 | 11): readonly string[] {
-  return techCardId === 6
-    ? ['TECH_CARD_BOM_PURPOSE_MAIN', 'TECH_CARD_BOM_PURPOSE_POCKETING']
-    : ['TECH_CARD_BOM_PURPOSE_MAIN', 'TECH_CARD_BOM_PURPOSE_LINING'];
+  return techCardId === 6 ? ['main', 'pocketing'] : ['main', 'lining'];
 }
 
 async function genuineSavedPrepared(
@@ -187,9 +185,7 @@ describe('cards 6 and 11 sanitized saved-card production contracts', () => {
 
   it('preserves card 11 purpose-first LINING over its hostile legacy POCKETING line', async () => {
     const fixture = PATTERN_IMPORT_DXF_PHASE_E_GOLDEN_SAVED_CARD_FIXTURES_V1[1];
-    const lining = fixture.scopes.find(
-      ({ scopeKey }) => scopeKey === 'TECH_CARD_BOM_PURPOSE_LINING',
-    )!;
+    const lining = fixture.scopes.find(({ scopeKey }) => scopeKey === 'lining')!;
     const pattern = fixture.card.techCard!.patterns!.find(
       ({ lineKey }) => lineKey === lining.patternLineKey,
     )!;
@@ -223,9 +219,7 @@ describe('cards 6 and 11 sanitized saved-card production contracts', () => {
 
   it('requires the explicit card 11 PCK_BACK_L_1 to PCK_BACK_R alias', () => {
     const fixture = PATTERN_IMPORT_DXF_PHASE_E_GOLDEN_SAVED_CARD_FIXTURES_V1[1];
-    const lining = fixture.scopes.find(
-      ({ scopeKey }) => scopeKey === 'TECH_CARD_BOM_PURPOSE_LINING',
-    )!;
+    const lining = fixture.scopes.find(({ scopeKey }) => scopeKey === 'lining')!;
     const exact = lining.aliases.find(({ blockName }) => blockName === 'PCK_BACK_L_1');
     expect(fixture.pieces.find(({ lineKey }) => lineKey === exact?.pieceLineKey)?.name).toBe(
       'PCK_BACK_R',
@@ -241,14 +235,14 @@ describe('cards 6 and 11 sanitized saved-card production contracts', () => {
       const items = hostile.techCard!.pieceDxfAliases!.items!;
       const target = items.find(
         ({ blockName, fabricPurpose }) =>
-          blockName === scope.sourceIdentities[0] && fabricPurpose === scope.scopeKey,
+          blockName === scope.sourceIdentities[0] && fabricPurpose === scope.purpose,
       )!;
       if (mode === 'missing')
         hostile.techCard!.pieceDxfAliases!.items = items.filter((alias) => alias !== target);
       else if (mode === 'duplicate') items.push({ ...target });
       else {
         const otherScope = fixture.scopes[1];
-        target.fabricPurpose = otherScope.scopeKey as typeof target.fabricPurpose;
+        target.fabricPurpose = otherScope.purpose as typeof target.fabricPurpose;
         target.bomLineKey = otherScope.bomLineKey;
       }
       const context = buildPatternImportDxfPhaseESavedCardContextV1(

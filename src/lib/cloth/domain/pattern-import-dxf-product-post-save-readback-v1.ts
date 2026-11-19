@@ -38,11 +38,19 @@ export type PatternImportDxfProductPostSaveReadbackReceiptV1 = Readonly<{
     mappingSha256: string;
     mappingCompositionSha256: string;
   }>;
-  card: Readonly<{
-    techCardId: number;
-    previousLockVersion: number;
-    observedLockVersion: number;
-  }>;
+  card: Readonly<
+    {
+      techCardId: number;
+      observedLockVersion: number;
+    } & (
+      | { previousLockVersion: number; lockBasis?: undefined; capturedLockVersion?: undefined }
+      | {
+          lockBasis: 'current-saved-row';
+          capturedLockVersion: number;
+          previousLockVersion?: undefined;
+        }
+    )
+  >;
   pattern: PatternImportDxfPostSaveCardObservationV1['pattern'];
   pieceLineKeys: readonly string[];
   aliases: PatternImportDxfPostSaveCardObservationV1['aliases'];
@@ -107,7 +115,12 @@ export type PatternImportDxfProductPostSaveReadbackResultV1 =
       receipt: PatternImportDxfProductPostSaveReadbackReceiptV1;
       seal: PatternImportDxfProductPostSaveReadbackSealV1;
       blockers: readonly [];
-      claims: typeof PATTERN_IMPORT_DXF_PRODUCT_POST_SAVE_READBACK_CLAIMS_V1;
+      claims: Readonly<
+        Omit<
+          typeof PATTERN_IMPORT_DXF_PRODUCT_POST_SAVE_READBACK_CLAIMS_V1,
+          'lockVersionAdvanced'
+        > & { lockVersionAdvanced: boolean }
+      >;
     }>
   | Readonly<{
       ok: false;
@@ -232,6 +245,7 @@ export async function readBackPatternImportDxfProductMappingV1(
       },
       evidence.productExportSha256,
       getTechCard,
+      evidence.lockBasis === 'current-saved-row' ? 'current' : 'advanced',
     );
     if (!verified.ok)
       return blocked(
@@ -239,7 +253,7 @@ export async function readBackPatternImportDxfProductMappingV1(
         verified.blockers.map(({ code, detail }) => `${code}: ${detail}`).join('; '),
       );
 
-    const expectedSavedRow = input.expectedSavedRow;
+    const expectedSavedRow = input.expectedSavedRow ?? input.compositionInput.expectedSavedRow;
     if (
       expectedSavedRow &&
       (expectedSavedRow.techCardId !== input.compositionInput.draft.techCardId ||
@@ -266,8 +280,10 @@ export async function readBackPatternImportDxfProductMappingV1(
       },
       card: {
         techCardId: input.compositionInput.draft.techCardId,
-        previousLockVersion: evidence.previousLockVersion,
         observedLockVersion: verified.observation.lockVersion,
+        ...(evidence.lockBasis
+          ? { lockBasis: evidence.lockBasis, capturedLockVersion: evidence.previousLockVersion }
+          : { previousLockVersion: evidence.previousLockVersion }),
       },
       pattern: verified.observation.pattern,
       pieceLineKeys: verified.observation.pieceLineKeys,
@@ -289,7 +305,9 @@ export async function readBackPatternImportDxfProductMappingV1(
         productionReady: false as const,
       },
       blockers: [] as const,
-      claims: PATTERN_IMPORT_DXF_PRODUCT_POST_SAVE_READBACK_CLAIMS_V1,
+      claims: evidence.lockBasis
+        ? { ...PATTERN_IMPORT_DXF_PRODUCT_POST_SAVE_READBACK_CLAIMS_V1, lockVersionAdvanced: false }
+        : PATTERN_IMPORT_DXF_PRODUCT_POST_SAVE_READBACK_CLAIMS_V1,
     });
   } catch {
     return blocked('invalid-input', 'Product readback input was inaccessible or non-canonical.');

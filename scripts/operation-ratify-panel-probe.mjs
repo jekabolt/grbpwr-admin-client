@@ -228,6 +228,8 @@ const ENTER_BROKEN = `    void rows;`;
 // ЗАМОРОЗКА — ДВЕ НЕЗАВИСИМЫЕ ПОЛОВИНЫ, И МУТИРУЮТСЯ ОНИ ПОРОЗНЬ (см. шапку).
 const FROZEN_RENDER_FIX = `  if (!props.open || props.frozen) return null;`;
 const FROZEN_RENDER_BROKEN = `  if (!props.open) return null;`;
+const FROZEN_PARENT_FIX = 'open={ratifyOpen && !editorFrozen}';
+const FROZEN_PARENT_BROKEN = 'open={ratifyOpen}';
 const FROZEN_APPLY_FIX = `      if (frozen) return;
       const index = row.index;`;
 const FROZEN_APPLY_BROKEN = `      const index = row.index;`;
@@ -305,6 +307,9 @@ const mutations = () => {
   // СПАЙ ПЕРВЫМ И ВСЕГДА: `onLoad` первого плагина, вернувшего результат, забирает файл себе, и
   // спай обязан жить в том же плагине, что и мутация писателя, если бы та когда-нибудь завелась.
   const out = [patcher('spy', WRITER, [[SPY_FIX, SPY_BROKEN]], 'ts')];
+  if (MUTATE_FROZEN_BLIND || MUTATE_FROZEN_RENDER_ONLY) {
+    out.push(patcher('frozen-parent-render', FIELD, [[FROZEN_PARENT_FIX, FROZEN_PARENT_BROKEN]], 'tsx'));
+  }
   if (MUTATE_FROZEN_BLIND)
     out.push(
       patcher(
@@ -768,51 +773,26 @@ async function mount(ops, { frozen = false, mode = 'list', bom = [] } = {}) {
 // (`action: frozen ? undefined : …`). Поэтому дверь считается, ОТКРЫВ поповер счётчика: в закрытом
 // поповере её нет никогда, и «0» без открытия было бы ложной зеленью.
 const RATIFY_DOOR = 'button[aria-label$=": ratify names"]';
-const WARN_TRIGGER = '[data-unnamed-steps] button[aria-haspopup="dialog"]';
-//
-// ВЫПУЩЕННАЯ КАРТОЧКА: `lift`. Поповер живёт ВНУТРИ внешнего `<fieldset disabled>` (стенд повторяет
-// экран), и его триггер — нативная кнопка, то есть на выпуске он мёртв, и список не открыть вовсе.
-// «Двери нет» тогда зеленело бы над закрытым поповером при ЛЮБОМ коде пункта — ровно та
-// неразличимость «кнопки нет» и «кнопка мертва», от которой стенд и ставит fieldset. Поэтому на
-// выпуске проба снимает `disabled` с fieldset ТОЛЬКО на время чтения списка (карточка остаётся
-// выпущенной пропом `frozen`, который и решает, есть ли у пункта действие) и возвращает его назад.
-/** Двери в поповере счётчика: число и подпись. -1 — поповер не открылся (а значит, и не проверено). */
-async function ratifyDoors({ keepOpen = false, lift = false } = {}) {
-  if ((await page.locator(WARN_TRIGGER).count()) === 0) return { count: 0, label: null };
-  const trigger = page.locator(WARN_TRIGGER).first();
-  const lifted = lift
-    ? await trigger.evaluate((el) => {
-        const fs = el.closest('fieldset[disabled]');
-        if (!fs) return false;
-        fs.removeAttribute('disabled');
-        return true;
-      })
-    : false;
-  const restore = async () => {
-    if (!lifted) return;
-    await trigger.evaluate((el) => el.closest('fieldset')?.setAttribute('disabled', ''));
-  };
+const WARN_TRIGGER = '[data-unnamed-steps] [role="button"][aria-haspopup="dialog"]';
+
+async function ratifyDoors({ keepOpen = false } = {}) {
+  const trigger = page.locator(WARN_TRIGGER);
+  if ((await trigger.count()) === 0) return { count: 0, label: null, warning: null };
+  const dialog = page.getByRole('dialog').filter({ has: page.getByText('warnings', { exact: true }) });
   if ((await trigger.getAttribute('aria-expanded')) !== 'true') {
-    const opened = await trigger
-      .click({ timeout: 3000 })
-      .then(() => true)
-      .catch(() => false);
-    if (!opened) {
-      await restore();
-      return { count: -1, label: 'поповер предупреждений не открылся' };
-    }
-    await page.waitForSelector('[role="dialog"]', { timeout: 3000 }).catch(() => {});
-    await page.waitForTimeout(100);
+    const opened = await trigger.click({ timeout: 3000 }).then(() => true).catch(() => false);
+    if (!opened) return { count: -1, label: 'поповер предупреждений не открылся', warning: null };
   }
-  const doors = page.locator(RATIFY_DOOR);
+  await dialog.waitFor({ timeout: 3000 });
+  const doors = dialog.locator(RATIFY_DOOR);
   const count = await doors.count();
   const label = count ? await doors.first().getAttribute('aria-label') : null;
-  if (!keepOpen || lifted) {
+  const warning = await dialog.getByRole('listitem').filter({ hasText: /step(?:s)? not named$/ }).allTextContents();
+  if (!keepOpen) {
     await page.keyboard.press('Escape');
-    await page.waitForTimeout(100);
+    await dialog.waitFor({ state: 'hidden', timeout: 3000 });
   }
-  await restore();
-  return { count, label };
+  return { count, label, warning: warning.length === 1 ? warning[0].trim() : null };
 }
 
 const openPanel = async () => {
@@ -848,11 +828,12 @@ const text = (sel) =>
     return n ? (n.textContent ?? '').replace(/\s+/g, ' ').trim() : null;
   }, sel);
 
-const railTitle = (index) =>
-  page.evaluate((i) => {
-    const n = document.querySelector(`[data-rail-step="${i}"]`);
-    return n ? n.getAttribute('title') : null;
-  }, index);
+const railTitle = async (index) => {
+  const title = page.locator(`[data-rail-step="${index}"] > span:last-child > span[title]`);
+  if ((await title.count()) !== 1 || !(await title.isVisible())) return null;
+  const visible = (await title.textContent())?.trim() ?? '';
+  return visible === (await title.getAttribute('title')) ? visible : null;
+};
 
 /**
  * ПОСЛЕДНИЙ ВЫЗОВ ЕДИНСТВЕННОГО ПИСАТЕЛЯ — СНЯТЫЙ СПАЕМ С ЖИВОГО КОДА.
@@ -947,11 +928,16 @@ ck(
   'на выпущенной карточке счётчик ЕСТЬ — это факт, а не задача',
 );
 {
-  const door = await ratifyDoors({ lift: true });
+  const door = await ratifyDoors();
   ck(
     door.count === 0,
     'а кнопки НЕТ: панель пишет, в выпущенную карточку писать нельзя',
     String(door.label ?? door.count),
+  );
+  ck(
+    door.warning === '9 of 12 steps not named',
+    'выпущенная карточка открывает предупреждение для чтения',
+    String(door.warning),
   );
 }
 
@@ -1458,7 +1444,7 @@ await mount(TWELVE, { mode: 'schematic' });
 // и панель открыть нечем. Здесь панель открыта на ЧЕРНОВИКЕ и выпуск случается под ней — стенд
 // переключает `frozen` на живом дереве (`window.__ratifyPanel.freeze()`), не перемонтируя ничего:
 // перемонтирование закрыло бы панель само и доказывало бы не то.
-head('ЦМОРОЗ · панель, открытая на черновике, переживает выпуск карточки — и не пишет ни байта');
+head('ЦМОРОЗ · выпуск закрывает панель, а форма сохраняет те же байты');
 await mount(TWELVE);
 await openPanel();
 {
@@ -1479,7 +1465,7 @@ await openPanel();
 
   {
     // Поповер открывается только когда модалки панели нет; не открылся — это -1 и красная.
-    const door = await ratifyDoors({ lift: true });
+    const door = await ratifyDoors();
     ck(
       door.count === 0,
       'карточка выпущена: кнопки открытия панели больше нет',
