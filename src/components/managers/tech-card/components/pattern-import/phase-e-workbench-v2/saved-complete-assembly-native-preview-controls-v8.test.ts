@@ -1,8 +1,10 @@
 import { act, createElement, type ComponentProps } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
+import type { XpbdDeviceLease } from 'lib/cloth/runtime/webgpu/xpbd-device-session';
 import type { MeasurementSurfaceAcceptedClothV1 } from 'components/shared/measurement-watertight-surface-v1-stage';
 import type { SourceCutPrincipalStrainV1 } from 'lib/cloth/runtime/cpu/source-cut-principal-strain-v1';
+import { resolveCadTableSavedReviewSizeV1 } from './cad-table-zero-operation-production-mount-v1';
 import type { CadWorkbenchBoundedClothPreviewHostV1 } from './cad-workbench-preview-lifecycle-v1';
 import SavedCompleteAssemblyNativePreviewControlsV8 from './saved-complete-assembly-native-preview-controls-v8';
 import type { SavedWholeAssemblyPreviewProgressV1 } from './saved-whole-assembly-staged-preview-v1';
@@ -11,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   run: vi.fn(),
   start: vi.fn(),
   cancel: vi.fn(),
+  createLifecycle: vi.fn(),
   invalidate: vi.fn(),
 }));
 
@@ -18,7 +21,8 @@ vi.mock('./saved-whole-assembly-staged-preview-v1', () => ({
   runSavedWholeAssemblyStagedPreviewV1: mocks.run,
 }));
 vi.mock('./cad-workbench-preview-lifecycle-v1', () => ({
-  createCadWorkbenchPreviewLifecycleV1: () => ({ start: mocks.start, cancel: mocks.cancel }),
+  createCadWorkbenchPreviewLifecycleV1: () =>
+    mocks.createLifecycle() ?? { start: mocks.start, cancel: mocks.cancel },
 }));
 vi.mock('components/cloth-simulation-spike/model-displayed-triangle-body-input-v1', () => ({
   projectCurrentModelDisplayedTriangleBodyInputV1: () => ({}),
@@ -96,10 +100,13 @@ function mountTestRoot() {
   vi.stubGlobal('window', { ...view, document });
   vi.stubGlobal('document', document);
   const host = new Node('main');
+  const button = (title: string) =>
+    host.find((node) => node.tagName === 'BUTTON' && node.text() === title);
   return {
     root: createRoot(host as unknown as HTMLElement),
+    button,
     click(title: string) {
-      const target = host.find((node) => node.tagName === 'BUTTON' && node.text() === title);
+      const target = button(title);
       if (!target) throw new Error(`Missing mounted button ${title}.`);
       document.activeElement = target;
       host.listeners.get('click/false')?.({ target, type: 'click', button: 0 });
@@ -146,7 +153,7 @@ function frame(number: number, isCurrent: () => boolean) {
 }
 
 afterEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -320,6 +327,220 @@ it('measures two points on the displayed accepted frame and cancels on mannequin
     expect(page.element('data-whole-assembly-tape')).toBeUndefined();
     expect(mocks.start).toHaveBeenCalledTimes(1);
   } finally {
+    await act(async () => page.root.unmount());
+  }
+});
+
+it('resumes on a fresh lease and permanently retires the accepted source when Pattern set size is changed and restored', async () => {
+  const { createCadWorkbenchPreviewLifecycleV1 } = await vi.importActual<
+    typeof import('./cad-workbench-preview-lifecycle-v1')
+  >('./cad-workbench-preview-lifecycle-v1');
+  const page = mountTestRoot();
+  function device() {
+    const release = vi.fn();
+    const drain = vi.fn(async () => {});
+    const lease = {
+      release,
+      device: { queue: { onSubmittedWorkDone: drain } },
+    } as unknown as XpbdDeviceLease;
+    const dispose = vi.fn(async () => ({
+      contextUnconfigured: true as const,
+      deviceDestroyed: true as const,
+      releasedLeaseCount: 1,
+    }));
+    return { acquireExclusive: () => lease, dispose, drain, release, lease };
+  }
+  const firstDevice = device();
+  const nextDevice = device();
+  const openDevice = vi
+    .fn<() => Promise<ReturnType<typeof device>>>()
+    .mockResolvedValueOnce(firstDevice)
+    .mockResolvedValueOnce(nextDevice);
+  mocks.createLifecycle.mockReturnValueOnce(createCadWorkbenchPreviewLifecycleV1(openDevice));
+
+  type Props = ComponentProps<typeof SavedCompleteAssemblyNativePreviewControlsV8>;
+  const body = { isCurrent: () => true } as NonNullable<Props['body']>;
+  const m = { sizeId: 58, sizeToken: 'M', label: 'm_32bo_m', rank: 2 };
+  const l = { sizeId: 59, sizeToken: 'L', label: 'l_34bo_m', rank: 3 };
+  const patternSize: Props['review']['patternSize'] = {
+    row: {
+      techCardId: 2,
+      scopeKey: 'main',
+      patternLineKey: '01M5HJEQ163VWKDHWH5Y2XV5H6',
+      revision: 2,
+      cardLockVersion: 6,
+      url: 'https://cdn.roundtrip.test/tech-card-patterns/20261118225736744e4db.dxf',
+      sizeBytes: 1_178_320,
+      sha256: '7768166262f2cb48ccb505756ae426b4b9e0ae965f5082329999e0f7945abd2d',
+    },
+    operationNumber: 170,
+    sizeId: m.sizeId,
+    sizeToken: m.sizeToken,
+  };
+  const review: Props['review'] = {
+    cardId: patternSize.row.techCardId,
+    lockVersion: patternSize.row.cardLockVersion,
+    operationNumber: patternSize.operationNumber,
+    sha256: 'f31c7f64fbd4027d8da69e69ac1228a4b91afd30e8b71a5671d59147327927c9',
+    patternSize,
+    load: vi.fn(),
+    verify: vi.fn(),
+    wholeAssembly: { load: vi.fn().mockResolvedValue({}), prepare: vi.fn() },
+  };
+  // First native cut draw face reprojected from the accepted Card11/M frame 1 and 29 downloads
+  // (SHA 285eb194…d49 and 62a4dad9…fd5) with the same pinned runtime candidate 128cb777…bb1.
+  const f1 = Float32Array.of(
+    0.21822403371334076,
+    0.8139187693595886,
+    0.024524759501218796,
+    0.21816596388816833,
+    0.8137776255607605,
+    0.024577345699071884,
+    0.2181069552898407,
+    0.8136361241340637,
+    0.024625858291983604,
+  );
+  const f29 = Float32Array.of(
+    0.21838906407356262,
+    0.813962996006012,
+    0.024578187614679337,
+    0.21833117306232452,
+    0.8138214349746704,
+    0.024631060659885406,
+    0.21827232837677002,
+    0.8136796355247498,
+    0.024679867550730705,
+  );
+  const pausedOne = { lastAcceptedFrame: 1 };
+  const pausedNext = { lastAcceptedFrame: 29 };
+  const releaseFirstPause = Promise.withResolvers<void>();
+  const releaseNextPause = Promise.withResolvers<void>();
+  const strain = Promise.withResolvers<SourceCutPrincipalStrainV1 | null>();
+  const readStrain = vi.fn<(signal: AbortSignal) => Promise<SourceCutPrincipalStrainV1 | null>>(
+    () => strain.promise,
+  );
+  let accepted: MeasurementSurfaceAcceptedClothV1 | undefined;
+  const onAcceptedCloth: Props['onAcceptedCloth'] = (value) => {
+    accepted = value;
+  };
+  type Run =
+    typeof import('./saved-whole-assembly-staged-preview-v1').runSavedWholeAssemblyStagedPreviewV1;
+  function replay(
+    paused: typeof pausedOne,
+    positionsM: Float32Array,
+    pauseBoundary: Promise<void>,
+  ): Run {
+    return async ({ onAccepted, isCurrent, pauseAfterAccepted }) => {
+      const { progress } = frame(paused.lastAcceptedFrame, isCurrent);
+      const exact = {
+        ...progress,
+        cloth: { ...progress.cloth, positionsM },
+        readPrincipalStrain: readStrain,
+      };
+      onAccepted(exact);
+      await pauseBoundary;
+      if (!pauseAfterAccepted?.()) throw new Error('The operator must request pause.');
+      return { ...exact, paused };
+    };
+  }
+  mocks.run
+    .mockImplementationOnce(replay(pausedOne, f1, releaseFirstPause.promise))
+    .mockImplementationOnce(replay(pausedNext, f29, releaseNextPause.promise));
+
+  const selectSize = (sizeId: number) => {
+    const choice = { sizeId, review: patternSize };
+    const { matchesReview } = resolveCadTableSavedReviewSizeV1([m, l], choice, patternSize);
+    return act(async () =>
+      page.root.render(
+        createElement(SavedCompleteAssemblyNativePreviewControlsV8, {
+          review,
+          body,
+          disabled: !matchesReview,
+          onAcceptedCloth,
+        }),
+      ),
+    );
+  };
+  const frameStatus = () => page.element('data-whole-assembly-frame');
+
+  try {
+    await selectSize(m.sizeId);
+    await act(async () => page.click('Preview full layout'));
+    const first = accepted;
+    const retainedStatus = frameStatus();
+    const [[initialRun, runSignal]] = mocks.run.mock.calls as Parameters<Run>[];
+    expect(initialRun.ownedLease).toBe(firstDevice.lease);
+    expect(initialRun.resume).toBeUndefined();
+    expect(first?.positionsM).toBe(f1);
+    expect(retainedStatus?.attrs.get('data-whole-assembly-frame')).toBe('1');
+    await act(async () => page.click('Pause after frame'));
+    await act(async () => releaseFirstPause.resolve());
+    expect(page.text()).toContain('Paused after accepted frame 1.');
+    expect(firstDevice.drain).toHaveBeenCalledOnce();
+    expect(firstDevice.release).toHaveBeenCalledOnce();
+    expect(firstDevice.dispose).toHaveBeenCalledOnce();
+    expect(runSignal.aborted).toBe(false);
+    expect(first?.isCurrent()).toBe(true);
+
+    await selectSize(m.sizeId);
+    expect(accepted).toBe(first);
+    expect(frameStatus()).toBe(retainedStatus);
+    expect(page.text()).toContain('Resume full layout');
+
+    await act(async () => page.click('Resume full layout'));
+    const [, [nextRun, nextSignal]] = mocks.run.mock.calls as Parameters<Run>[];
+    const resumed = accepted;
+    expect(nextRun.resume).toBe(pausedOne);
+    expect(nextRun.ownedLease).toBe(nextDevice.lease);
+    expect(nextSignal).toBe(runSignal);
+    expect(nextSignal.aborted).toBe(false);
+    expect(resumed?.positionsM).toBe(f29);
+    expect(frameStatus()?.attrs.get('data-whole-assembly-frame')).toBe('29');
+    await act(async () => page.click('Pause after frame'));
+    await act(async () => releaseNextPause.resolve());
+    expect(page.text()).toContain('Paused after accepted frame 29.');
+    expect(nextDevice.drain).toHaveBeenCalledOnce();
+    expect(nextDevice.release).toHaveBeenCalledOnce();
+    expect(nextDevice.dispose).toHaveBeenCalledOnce();
+    expect(resumed?.isCurrent()).toBe(true);
+    await act(async () => page.click('Principal strain'));
+    const [[strainSignal]] = readStrain.mock.calls;
+    expect(strainSignal.aborted).toBe(false);
+
+    await selectSize(l.sizeId);
+    expect(body.isCurrent()).toBe(true);
+    expect(runSignal.aborted).toBe(true);
+    expect(resumed?.isCurrent()).toBe(false);
+    expect(strainSignal.aborted).toBe(true);
+    expect(accepted).toBeUndefined();
+    expect(frameStatus()).toBeUndefined();
+    expect(page.text()).not.toContain('Resume full layout');
+    expect(page.button('Step one frame')?.attrs.get('disabled')).toBe('');
+
+    await selectSize(m.sizeId);
+    await act(async () =>
+      strain.resolve({
+        valuesInDrawOrder: Float32Array.of(0.1),
+        summary: { minimum: 0.1, maximum: 0.1, triangleCount: 1, carrierFaceCount: 1 },
+      }),
+    );
+    expect(accepted).toBeUndefined();
+    expect(frameStatus()).toBeUndefined();
+    expect(page.element('data-whole-assembly-strain-frame')).toBeUndefined();
+    expect(page.button('Step one frame')?.attrs.has('disabled')).toBe(false);
+    expect(page.text()).not.toContain('Resume full layout');
+    expect(first?.isCurrent()).toBe(false);
+    expect(resumed?.isCurrent()).toBe(false);
+    expect(openDevice).toHaveBeenCalledTimes(2);
+    expect(mocks.run).toHaveBeenCalledTimes(2);
+    for (const current of [firstDevice, nextDevice]) {
+      expect(current.release).toHaveBeenCalledOnce();
+      expect(current.dispose).toHaveBeenCalledOnce();
+    }
+  } finally {
+    releaseFirstPause.resolve();
+    releaseNextPause.resolve();
+    strain.resolve(null);
     await act(async () => page.root.unmount());
   }
 });

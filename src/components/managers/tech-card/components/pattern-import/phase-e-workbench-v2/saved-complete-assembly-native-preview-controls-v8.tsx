@@ -166,7 +166,7 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
             ownedLease: lease,
             prepare: whole.prepare,
             savedPlacement: whole.saved,
-            isCurrent: isCurrentSource,
+            isCurrent,
             pauseAfterAccepted: () => stepOnce || pauseRequested.current,
             async verifySource(verifiedSource, active) {
               if (
