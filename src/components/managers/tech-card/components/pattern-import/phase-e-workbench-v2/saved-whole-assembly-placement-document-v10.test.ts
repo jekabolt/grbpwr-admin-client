@@ -115,8 +115,9 @@ function snapshotText(serverAssemblyRevision = revision) {
 }
 
 async function readSource(
-  semanticSidecar: TechCardPatternSemanticSidecar,
+  semanticSidecar: TechCardPatternSemanticSidecar | undefined,
   serverAssemblyRevision = revision,
+  sourceOnly?: true,
 ) {
   const [main, ...rest] = rows.map((row) => ({ ...row, downloadUrl: row.url }));
   const sourceText = snapshotText(serverAssemblyRevision);
@@ -135,9 +136,14 @@ async function readSource(
     },
   } as unknown as GetTechCardSavedAssemblySnapshotResponse;
   return readCompleteSavedAssemblySourceV1(
-    { GetTechCardSavedAssemblySnapshot: async () => reply },
+    {
+      GetTechCardSavedAssemblySnapshot: async (request) => {
+        expect(request.sourceOnly).toBe(sourceOnly);
+        return reply;
+      },
+    },
     anchor,
-    {},
+    { sourceOnly },
     signal,
   );
 }
@@ -353,6 +359,15 @@ function withWorld(world: SavedWholeAssemblyPlacementResultV10['world']) {
 }
 
 describe('saved whole assembly placement V10', () => {
+  it('reads the same sealed Assembly source without admitting a carrier when requested', async () => {
+    const ordinary = await readSource(v8);
+    const sourceOnly = await readSource(undefined, revision, true);
+    expect(sourceOnly.sourceOnly).toBe(true);
+    expect(sourceOnly.sourceSha256).toBe(ordinary.sourceSha256);
+    expect(sourceOnly.priorCarrier).toBeNull();
+    await expect(readSource(v8, revision, true)).rejects.toThrow('source-only Assembly read');
+  });
+
   it('round trips exact little-endian XYZ from the verified V8 slot and seals original V8 bytes', async () => {
     const read = await readPlaced();
     expect(read).toEqual(placed);

@@ -45,6 +45,7 @@ import {
 } from './cad-table-press-authoring-v1';
 import { CadTablePressControlV1 } from './cad-table-press-control-v1';
 import type { CadTableSavedTopstitchOverlayV1 } from './cad-table-saved-topstitch-overlay-v1';
+import type { SavedPointClosureOperationTargetV1 } from './cad-table-saved-point-closure-panel-v1';
 import {
   bindPatternImportDxfPhaseECadTableZeroOperationFreshToSavedAuthorityV1,
   capturePatternImportDxfPhaseECadTableZeroOperationSavedRebindExpectationV1,
@@ -103,6 +104,7 @@ import {
 
 const SavedGeneratedFusingView = lazy(() => import('./saved-generated-fusing-view'));
 const SavedRankedPointEdit = lazy(() => import('./cad-table-saved-ranked-point-edit-v1'));
+const SavedPointClosurePanel = lazy(() => import('./cad-table-saved-point-closure-panel-v1'));
 
 export const PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_OPERATION_PRODUCTION_MOUNT_V1 =
   'pattern-import-dxf-phase-e-cad-table-zero-operation-production-mount/1' as const;
@@ -703,6 +705,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
   savedReviewSize,
   defaultOperationsMode = 'collapsed',
   sourceSurface,
+  pointClosureTarget,
 }: Readonly<{
   techCardId?: number;
   cardSession: PatternImportDxfPhaseECardSessionV1 | null;
@@ -721,6 +724,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
   savedReviewSize?: CadWorkbenchSavedReviewSizeV1;
   defaultOperationsMode?: PatternImportDxfPhaseECadWorkbenchOperationsModeV1;
   sourceSurface?: 'explicit-native-drawn-sewing';
+  pointClosureTarget?: SavedPointClosureOperationTargetV1;
 }>) {
   const savePieceRename = useGuardedPieceRename();
   const generation = cardSession?.importGeneration ?? 0;
@@ -826,7 +830,10 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
     effectiveSavedCard,
     selection.operationNumber,
   );
-  const choices = sourceSurface || currentReviewSize ? explicitSavedChoices : sourceRoute.choices;
+  const choices =
+    sourceSurface || currentReviewSize || pointClosureTarget
+      ? explicitSavedChoices
+      : sourceRoute.choices;
   const [chosenScopeKey, setChosenScopeKey] = useState('');
   const [chosenSize, setChosenSize] = useState<TableSizeChoice | null>(null);
   const defaultScope = choices.ok
@@ -845,6 +852,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
   const tableSizeMatchesReview = !disabled && (!savedReviewSize || matchesReview);
   const sizeToken = selectedSize?.sizeToken ?? '';
   const useFreshSession =
+    !pointClosureTarget &&
     !currentReviewSize &&
     hasMatchingFreshPatternChoiceV1(
       freshChoices,
@@ -1108,6 +1116,17 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
     );
   }, [cardSession, prepared, selectedScope?.label]);
   const resolvedSavedCard = currentPreparation?.resolvedSavedCard ?? effectiveSavedCard;
+  const fasteningRow =
+    pointClosureTarget &&
+    resolvedSavedCard &&
+    resolvedSource === 'saved' &&
+    prepared &&
+    'authoringAuthority' in prepared &&
+    isPatternImportDxfPhaseEZeroConnectPreparedAuthorityV1(prepared.authoringAuthority) &&
+    prepared.authoringAuthority.selectedRank.sizeId === selectedSize?.sizeId &&
+    prepared.authoringAuthority.row.cardLockVersion === resolvedSavedCard.lockVersion
+      ? prepared.authoringAuthority.row
+      : null;
   const [savedTopstitch, setSavedTopstitch] = useState<{
     key: string;
     overlay?: CadTableSavedTopstitchOverlayV1;
@@ -1581,13 +1600,43 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
             : undefined,
       })}
       operationsPanel={
-        operationsPanel ?? (
-          <div className='space-y-1 p-3' data-cad-zero-operation-current-operation='absent'>
-            <p className='text-micro font-bold uppercase'>No current operation</p>
-            <p className='text-micro text-labelColor'>
-              Connect two exact edges on the table to create the first Assembly Order draft.
-            </p>
-          </div>
+        pointClosureTarget ? (
+          <>
+            {fasteningRow && selectedSize && resolvedSavedCard && (
+              <Suspense fallback={null}>
+                <SavedPointClosurePanel
+                  key={JSON.stringify([
+                    fasteningRow.techCardId,
+                    fasteningRow.patternLineKey,
+                    fasteningRow.cardLockVersion,
+                    fasteningRow.revision,
+                    fasteningRow.sha256,
+                    selectedSize.sizeId,
+                    selectedSize.sizeToken,
+                    pointClosureTarget.operationNumber,
+                    pointClosureTarget.historyKey,
+                  ])}
+                  row={fasteningRow}
+                  savedCard={resolvedSavedCard}
+                  size={selectedSize}
+                  operation={pointClosureTarget}
+                  orderSizeIds={orderSizeIds}
+                  sizeNameById={sizeNameById}
+                  disabled={disabled}
+                />
+              </Suspense>
+            )}
+            {operationsPanel}
+          </>
+        ) : (
+          operationsPanel ?? (
+            <div className='space-y-1 p-3' data-cad-zero-operation-current-operation='absent'>
+              <p className='text-micro font-bold uppercase'>No current operation</p>
+              <p className='text-micro text-labelColor'>
+                Connect two exact edges on the table to create the first Assembly Order draft.
+              </p>
+            </div>
+          )
         )
       }
     />
@@ -1606,6 +1655,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
   operationIssueCount,
   defaultOperationsMode,
   sourceSurface,
+  pointClosureTarget,
 }: Readonly<{
   techCardId?: number;
   physicalHost?: CadWorkbenchPhysicalHostV1;
@@ -1617,6 +1667,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
   operationIssueCount?: number;
   defaultOperationsMode?: PatternImportDxfPhaseECadWorkbenchOperationsModeV1;
   sourceSurface?: 'explicit-native-drawn-sewing';
+  pointClosureTarget?: SavedPointClosureOperationTargetV1;
 }>) {
   const subscribe = useCallback(
     (listener: () => void) => subscribePatternImportDxfPhaseECardSessionV1(techCardId, listener),
@@ -1654,6 +1705,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
       savedReviewSize={physicalHost?.savedReviewSize}
       defaultOperationsMode={defaultOperationsMode}
       sourceSurface={sourceSurface}
+      pointClosureTarget={pointClosureTarget}
       mannequin={({
         sources,
         activeScopeKey,

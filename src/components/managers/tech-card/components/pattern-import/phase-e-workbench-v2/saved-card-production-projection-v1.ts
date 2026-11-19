@@ -180,6 +180,7 @@ function exactPiecePair(
     const left = sideA[0]?.pieceLineKey?.trim() ?? '';
     const right = sideB[0]?.pieceLineKey?.trim() ?? '';
     if (
+      seam.kind === 'TECH_CARD_SEAM_KIND_POINT_CLOSURE' ||
       seam.status !== 'TECH_CARD_SEAM_STATUS_CONFIRMED' ||
       seam.stale ||
       sideA.length !== 1 ||

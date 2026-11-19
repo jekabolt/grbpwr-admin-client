@@ -108,6 +108,7 @@ import {
 } from '../phase-e-workbench-v2/zero-connect-durable-composite-v4';
 import { projectPatternImportDxfPhaseECadWorkbenchColorwaysV1 } from '../phase-e-workbench-v2/cad-workbench-bom-visual-authority-v1';
 import { PatternImportDxfPhaseECadTableZeroOperationProductionMountV1 } from '../phase-e-workbench-v2/cad-table-zero-operation-production-mount-v1';
+import { POINT_CLOSURE_KIND } from '../phase-e-workbench-v2/saved-point-closure-authoring-v1';
 import { resolvePatternImportDxfPhaseEZeroConnectExistingLinkedN1TargetV1 } from '../phase-e-workbench-v2/cad-table-zero-connect-existing-linked-operation-rebind-v1';
 import { preparePatternImportDxfPhaseECadMannequinSavedAllScopeStagingV1 } from '../phase-e-workbench-v2/cad-mannequin-saved-all-scope-staging-v1';
 import {
@@ -2714,6 +2715,18 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
   const storedOperation = persisted?.techCard?.operations?.find(
     (operation) => operation.operationNumber === selectedOperationNumber,
   );
+  const pointClosureTarget =
+    workbenchRequested &&
+    persisted &&
+    persisted.id === techCardId &&
+    storedOperation?.work === 'button_attach' &&
+    selected.work === storedOperation.work &&
+    selected.historyKey &&
+    (storedOperation.seamKeys ?? []).every((key) =>
+      persisted.seams?.some(({ seamKey, kind }) => seamKey === key && kind === POINT_CLOSURE_KIND),
+    )
+      ? { operationNumber: selectedOperationNumber, historyKey: selected.historyKey }
+      : undefined;
   let savedCrossMaterialActions: ReactNode = null;
   if (
     workbenchRequested &&
@@ -2775,12 +2788,13 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
   }
   // Confirmed cross-material rows have review authority but no selected-row V3/V4 prepared scene.
   // Use the existing saved-pattern table and its real mannequin stage for that operation.
-  if (savedBrowseFallback || savedCrossMaterialActions) {
+  if (savedBrowseFallback || savedCrossMaterialActions || pointClosureTarget) {
     const savedEmptyOperation =
+      !pointClosureTarget &&
       exactSavedEmptyOperation &&
       !savedProjection.ok &&
       savedProjection.blockers[0]?.code === 'saved-operation-not-two-seam';
-    const savedLinkedN1 = exactSavedLinkedN1Target.ok;
+    const savedLinkedN1 = !pointClosureTarget && exactSavedLinkedN1Target.ok;
     const emptyOperationKey = `${techCardId}:${savedCard.data?.lockVersion}:${selectedOperationNumber}`;
     const emptyOperationSewingSource =
       savedEmptyOperation && emptyOperationSewingSourceKey === emptyOperationKey;
@@ -2817,6 +2831,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
           source.selectedOperationNumber,
         )}
         defaultOperationsMode='docked'
+        pointClosureTarget={pointClosureTarget}
         operationsPanel={
           <>
             {savedCrossMaterialActions}
@@ -2838,7 +2853,10 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
                 Use saved sewing edges
               </Button>
             ) : null}
-            {!savedCrossMaterialActions && !savedEmptyOperation && !savedLinkedN1 ? (
+            {!pointClosureTarget &&
+            !savedCrossMaterialActions &&
+            !savedEmptyOperation &&
+            !savedLinkedN1 ? (
               <CalloutBox
                 tone='note'
                 className='mb-2'
@@ -2851,7 +2869,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
                 </Text>
               </CalloutBox>
             ) : null}
-            {!savedCrossMaterialActions && durableReloadBlocker ? (
+            {!pointClosureTarget && !savedCrossMaterialActions && durableReloadBlocker ? (
               <CalloutBox tone={durableReloadBlocker.retryable ? 'error' : 'note'} className='mb-2'>
                 <div className='flex flex-wrap items-center justify-between gap-2'>
                   <Text
@@ -2878,7 +2896,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
             ) : null}
             <PatternImportDxfPhaseECadTableDraftOperationsPanelV1
               editor={operationsPanel}
-              result={savedCrossMaterialActions ? null : fallbackResult}
+              result={savedCrossMaterialActions || pointClosureTarget ? null : fallbackResult}
               operationNumber={source.selectedOperationNumber}
               navigation={operationNavigation}
               stitchVisual={stitchVisual}

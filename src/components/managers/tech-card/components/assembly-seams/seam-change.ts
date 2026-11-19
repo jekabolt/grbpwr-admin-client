@@ -294,7 +294,11 @@ export function runSeamChange(
 }
 
 const emptyChange = (c: SeamChange) =>
-  !c.upsert?.length && !c.delete?.length && !c.link?.length && !c.detach?.length;
+  !c.upsert?.length &&
+  !c.upsertPointClosures?.length &&
+  !c.delete?.length &&
+  !c.link?.length &&
+  !c.detach?.length;
 
 /** The card read after lock_version_moved: its rows into the store at its version. */
 function takeRead(cardId: number, card: common_TechCard) {

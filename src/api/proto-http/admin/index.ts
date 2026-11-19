@@ -10277,6 +10277,7 @@ export type common_TechCardSeamAnchor = {
   // Which way THIS anchor's piece lies against the other side's pieces in the step that sews the
   // row (the owner's under/over switch). UNKNOWN = unset: the client's own rule, as before.
   layer: common_TechCardSeamLayer | undefined;
+  pointClosure?: common_TechCardSeamPointClosureAnchor;
 };
 
 // TechCardSeamSample is one point of an edge's shape, in the piece's own bbox-normalised frame
@@ -10301,6 +10302,32 @@ export type common_TechCardSeamLayer =
   | "TECH_CARD_SEAM_LAYER_UNKNOWN"
   | "TECH_CARD_SEAM_LAYER_UNDER"
   | "TECH_CARD_SEAM_LAYER_OVER";
+// The exact original L8 mark of one piece in one saved size. The point is derived from the signed
+// DXF after reading. A decoded PathId by itself is not a durable entity identity.
+export type common_TechCardSeamPointClosureAnchor = {
+  patternLineKey: string | undefined;
+  savedRowRevision: number | undefined;
+  dxfSha256: string | undefined;
+  sizeId: number | undefined;
+  aliasBlockName: string | undefined;
+  nativeBlockName: string | undefined;
+  sourceInstancePath: string[] | undefined;
+  sourceEntityOp?: number;
+  role: common_TechCardSeamPointClosureRole | undefined;
+  // The buttonhole side holds the owner's choice, independent of physical closure in a frame.
+  intent: common_TechCardSeamPointClosureIntent | undefined;
+  buttonholeOperationNumber: number | undefined;
+  buttonOperationNumber: number | undefined;
+};
+
+export type common_TechCardSeamPointClosureRole =
+  | "TECH_CARD_SEAM_POINT_CLOSURE_ROLE_UNKNOWN"
+  | "TECH_CARD_SEAM_POINT_CLOSURE_ROLE_BUTTONHOLE_MIDPOINT"
+  | "TECH_CARD_SEAM_POINT_CLOSURE_ROLE_BUTTON_MARK_CENTER";
+export type common_TechCardSeamPointClosureIntent =
+  | "TECH_CARD_SEAM_POINT_CLOSURE_INTENT_UNKNOWN"
+  | "TECH_CARD_SEAM_POINT_CLOSURE_INTENT_OPEN"
+  | "TECH_CARD_SEAM_POINT_CLOSURE_INTENT_CLOSED";
 // One size of a measured topstitch line.
 export type common_TechCardTopstitchLineSize = {
   sizeId: number | undefined;
@@ -11962,7 +11989,8 @@ export type common_TechCardSeamKind =
   | "TECH_CARD_SEAM_KIND_COMPOSITE"
   | "TECH_CARD_SEAM_KIND_SURFACE"
   | "TECH_CARD_SEAM_KIND_CLOSURE"
-  | "TECH_CARD_SEAM_KIND_POSE";
+  | "TECH_CARD_SEAM_KIND_POSE"
+  | "TECH_CARD_SEAM_KIND_POINT_CLOSURE";
 // TechCardSeamDirection is how the two sides walk against each other. REVERSED is the normal seam
 // (face-up pieces walk a shared seam oppositely); SAME when one side is a flipped instance. UNKNOWN
 // is legal on write: the reader then picks the pairing itself.
@@ -14978,6 +15006,8 @@ export type GetTechCardSavedAssemblySnapshotRequest = {
   // Required for the authored-fold profile. A current card size ID from the size dictionary.
   selectedSizeId?: number;
   expectedAuthoredFoldSourceSha256?: string;
+  // Complete source only. Do not read or admit a stored placement or review carrier.
+  sourceOnly?: boolean;
 };
 
 export type TechCardSavedAssemblySourceAliasV1 = {
@@ -15106,6 +15136,8 @@ export type ChangeTechCardSeamsRequest = {
   link: SeamLink[] | undefined;
   // Links to remove; keys may name rows of this request's upsert by their sent key.
   detach: SeamLink[] | undefined;
+  // Required for changes to a POINT_CLOSURE, including its operation link or intent.
+  expectedServerAssemblyRevision?: string;
 };
 
 export type ChangeTechCardSeamsResponse = {

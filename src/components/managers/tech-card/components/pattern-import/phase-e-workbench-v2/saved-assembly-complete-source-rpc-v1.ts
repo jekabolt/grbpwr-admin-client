@@ -55,6 +55,7 @@ export type CompleteSavedAssemblySourceV1 = Readonly<{
   garmentLabels: Readonly<PresentSource<'garmentLabels'>>;
   cutStrips?: readonly SavedAssemblyCutStripSourceV1[];
   priorCarrier: Readonly<TechCardPatternSemanticSidecar> | null;
+  sourceOnly?: true;
   authoredFolds?: SavedAssemblyAuthoredFoldsV1;
 }>;
 
@@ -76,6 +77,7 @@ type SourceReadOptions = Readonly<{
   expectedServerAssemblyRevision?: string;
   expectedCompleteSourceSha256?: string;
   authoredFolds?: AuthoredFoldSelection;
+  sourceOnly?: true;
 }>;
 
 export function completeSavedAssemblyRowIdentityV1(row: ExactPatternRow): ExactPatternRow {
@@ -391,6 +393,8 @@ export async function readCompleteSavedAssemblySourceV1(
     wireProjection,
     signal,
   );
+  if (options.sourceOnly && response.semanticSidecar)
+    throw new TypeError('The source-only Assembly read returned a placement or review.');
   const authored = authoredFolds
     ? await readAuthoredFolds(
         response.authoredFoldSourceV1,
@@ -411,6 +415,7 @@ export async function readCompleteSavedAssemblySourceV1(
     garmentLabels: source.garmentLabels,
     ...(cutStrips.length && { cutStrips }),
     priorCarrier,
+    ...(options.sourceOnly && { sourceOnly: true as const }),
     ...(authored && { authoredFolds: authored }),
   });
   verifiedSources.add(verified);
@@ -427,6 +432,7 @@ export function createCompleteSavedAssemblyRowReaderV1(
   const expectedSource = {
     expectedServerAssemblyRevision: source.serverAssemblyRevision,
     expectedCompleteSourceSha256: source.sourceSha256,
+    ...(source.sourceOnly && { sourceOnly: true as const }),
   };
   return async (expected: ExactPatternRow, signal: AbortSignal) => {
     const currentExpected = completeSavedAssemblyRowIdentityV1(expected);
