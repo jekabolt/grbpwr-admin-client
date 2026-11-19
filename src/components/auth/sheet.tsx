@@ -312,7 +312,8 @@ export function AccountSide({ email, onLogOut }: { email: string; onLogOut?: () 
         variant='label'
         tracking='label'
         component='span'
-        className='block break-all'
+        className='block min-w-0 truncate'
+        title={email}
       >
         {email}
       </Text>
