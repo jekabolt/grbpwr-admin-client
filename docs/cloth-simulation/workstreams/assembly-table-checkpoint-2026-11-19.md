@@ -4,7 +4,7 @@ The linked source revisions are the tested local integration snapshot.
 
 | Repository | Code revision |
 | --- | --- |
-| Admin client | `d74daa7b58fbefdfa42ee487737e53812daa4e73` |
+| Admin client | `6caefa5cc147eaf720f9a2cf34f36c2ab965dc85` |
 | Products manager | `341297e6f87fd935d794445a872ef938821fe854` |
 | Protocol | `fcd245b2f607423181718048bdfc0b4387437df9` |
 
@@ -16,7 +16,7 @@ Local verification covers 26 of 48 criteria. Beta qualification covers 0 of 48. 
 - Card6 operation 610 saved its explicit orientation and reopened with 14 active stations in M. Changing the size to L retired those stations.
 - Card169 stored a single-turn hem and a cut-on facing on independent copies. Two further copies saved the 10 mm paired allowance with either fixed end during a 1 mm straight-edge extension. Fresh Workbench sessions reopened both exact edited edges and measured 60.999939 mm and 61.000061 mm respectively.
 - Card169 fixed a race in which delayed reads could restore an older cloth document and transforms after the card advanced. Regression tests cover stale responses before and after the saved-arrangement request.
-- Card169 saved Square at the selected PCK_L_2 corner in all five sizes and reopened the same named corner in a fresh Workbench session. The guard admitted one update, and the independent signed read verified all five intact L14 rings and the ten untouched DXF blocks byte for byte. Mitre and Auto passed guarded Apply and fresh owner reads in process. Their ordinary browser Save and cold reload, Foldback and Clip remain open.
+- Card169 saved Square, Mitre, Auto and Clip from ordinary Workbench sessions on separate archive copies. Each treatment reopened with its own name and exact signed native bytes. Square and Clip changed only the selected L1 corner in five sizes. All five L14 rings and the ten untouched DXF blocks matched byte for byte. Mitre and Auto each restored all 15 original blocks from the saved Square copy and retained their distinct treatments. Clip covers the proved convex right-angle case. Foldback and wider corner and curve coverage remain open.
 - Card169 saved a fish-eye as one closed four-vertex L8 feature on PCK_L_1 M. The ordinary Apply and separate cold Patterns view retained all ten original Level 15 labels, the other nine blocks and all five signed sizes. The existing AO and raw seam records remained present. The three prior source bindings were marked stale and the prior carrier was retired. Fish-eye edit variants and the other AC-16 effects remain open.
 - The guarded pattern writer checks the Assembly revision inside the existing card write transaction. A stale request received HTTP 409 and its fresh counterpart received HTTP 200 on an isolated MySQL schema.
 
