@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import {
   Accordion,
+  AddDoor,
   Board,
   BoardCard,
   BoardColumn,
@@ -186,6 +187,16 @@ function TilesDemo() {
       <Tile media={<Placeholder aspect='square' dashed />} name='dashed' sub='empty' dashed />
       <Tile media={<Placeholder aspect='square' tone='error' />} name='error' tone='error' />
       <Tile media={<Placeholder aspect='square' />} name='clickable' onClick={() => undefined} />
+      <Tile
+        media={<Placeholder aspect='square' />}
+        name='lowercase'
+        sub='owner'
+        lowercase
+        onClick={() => undefined}
+      />
+      <AddDoor shape='tile' lowercase className='min-h-40'>
+        new team
+      </AddDoor>
     </Tiles>
   );
 }

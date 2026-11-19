@@ -11,6 +11,12 @@ type Props = {
   items: Item[];
   disabled?: boolean;
   className?: string;
+  /**
+   * The quiet strip: lowercase body-size words, the unchosen ones in label grey that ink on hover,
+   * no grey hover backing, a 24px row. A chosen-but-disabled item reads as hairline, not ink.
+   * Absent — the strip renders exactly as before.
+   */
+  lowercase?: boolean;
 };
 
 // Single-select segmented control bound to react-hook-form — the exclusive-choice counterpart to
@@ -25,6 +31,7 @@ export default function SegmentedField({
   items,
   disabled,
   className,
+  lowercase,
 }: Props) {
   const { control } = useFormContext();
 
@@ -45,12 +52,21 @@ export default function SegmentedField({
                   disabled={disabled}
                   aria-pressed={selected}
                   onClick={() => field.onChange(item.value)}
-                  className={cn(
-                    '-ml-px flex-1 border border-borderColor px-2 py-1 text-textBaseSize uppercase first:ml-0 disabled:opacity-50',
-                    selected
-                      ? 'border-textColor bg-textColor text-bgColor'
-                      : 'bg-bgColor text-textColor hover:bg-borderColor/20',
-                  )}
+                  className={
+                    lowercase
+                      ? cn(
+                          '-ml-px h-6 min-w-0 flex-1 border border-borderColor px-1 text-textBaseSize first:ml-0 disabled:cursor-not-allowed',
+                          selected
+                            ? 'relative z-[1] border-textColor bg-textColor text-bgColor disabled:border-borderColor disabled:bg-hairline disabled:text-labelColor'
+                            : 'bg-bgColor text-labelColor hover:text-textColor disabled:text-borderColor disabled:hover:text-borderColor',
+                        )
+                      : cn(
+                          '-ml-px flex-1 border border-borderColor px-2 py-1 text-textBaseSize uppercase first:ml-0 disabled:opacity-50',
+                          selected
+                            ? 'border-textColor bg-textColor text-bgColor'
+                            : 'bg-bgColor text-textColor hover:bg-borderColor/20',
+                        )
+                  }
                 >
                   {item.label}
                 </button>
