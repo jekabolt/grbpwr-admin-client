@@ -1591,6 +1591,9 @@ const SavedCompleteAssemblyNativeReviewActionV8 = lazy(
 const SavedCompleteAssemblyNativePreviewControlsV8 = lazy(
   () => import('../phase-e-workbench-v2/saved-complete-assembly-native-preview-controls-v8'),
 );
+const CadWorkbenchPressOpenDiagnosticV1 = lazy(
+  () => import('../phase-e-workbench-v2/cad-workbench-press-open-diagnostic-v1'),
+);
 
 /** Real Assembly Order mount. No fresh session is invented after a saved-card reload. */
 export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
@@ -2378,6 +2381,8 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
   const [acceptedCloth, setAcceptedCloth] = useState<CadWorkbenchPhysicalHostV1['acceptedCloth']>();
   const [registeredCutCloth, setRegisteredCutCloth] =
     useState<CadWorkbenchPhysicalHostV1['acceptedCloth']>();
+  const [pressOpenCloth, setPressOpenCloth] =
+    useState<CadWorkbenchPhysicalHostV1['acceptedCloth']>();
   const onDisplayedBodyInputV1 = useCallback<CadWorkbenchPhysicalHostV1['onDisplayedBodyInputV1']>(
     (body) => {
       setDisplayedBodyInput(body);
@@ -2422,16 +2427,43 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
         </>
       )
     : undefined;
+  const savedPressOpen =
+    !frozen &&
+    savedCard.data?.techCard?.operations?.some(
+      (operation) =>
+        operation.operationNumber === selectedOperationNumber &&
+        operation.operationType === 'TECH_CARD_OPERATION_TYPE_PRESS_OPEN' &&
+        operation.work === 'press_open',
+    );
+  const pressOpenControls: CadWorkbenchPhysicalHostV1['panel'] = savedPressOpen
+    ? (_, currentPattern) => (
+        <Suspense fallback={null}>
+          <CadWorkbenchPressOpenDiagnosticV1
+            key={selectedOperationNumber}
+            operationNumber={selectedOperationNumber}
+            pattern={currentPattern}
+            authority={savedAllScopeAuthority}
+            orderSizeIds={orderSizeIds}
+            sizeNameById={sizeNameById}
+            body={displayedBodyInput}
+            disabled={frozen}
+            onAcceptedCloth={setPressOpenCloth}
+          />
+        </Suspense>
+      )
+    : undefined;
   const physicalHost: CadWorkbenchPhysicalHostV1 = {
     onDisplayedBodyInputV1,
     acceptedCloth:
       activeCrossMaterialReview && acceptedCloth?.isCurrent()
         ? acceptedCloth
-        : registeredCutCloth?.isCurrent()
-          ? registeredCutCloth
-          : undefined,
+        : savedPressOpen && pressOpenCloth?.isCurrent()
+          ? pressOpenCloth
+          : registeredCutCloth?.isCurrent()
+            ? registeredCutCloth
+            : undefined,
     savedReviewSize: activeCrossMaterialReview?.patternSize,
-    panel: crossMaterialPreviewControls,
+    panel: pressOpenControls ?? crossMaterialPreviewControls,
     arrangementSourceKey: JSON.stringify([
       physicalRow,
       savedProjection.ok ? savedProjection.selectedOperationNumber : null,

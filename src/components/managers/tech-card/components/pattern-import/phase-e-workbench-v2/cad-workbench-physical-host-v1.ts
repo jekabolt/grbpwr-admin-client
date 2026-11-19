@@ -86,6 +86,11 @@ export type CadWorkbenchSavedReviewSizeV1 = Readonly<{
   sizeToken: string;
 }>;
 
+export type CadWorkbenchSavedPatternScopeV1 = Readonly<{
+  row: DxfProductSavedRowIdentityV1;
+  sizeToken: string;
+}>;
+
 /** One mounted CAD route supplies the current picker input and its in-viewport cloth preview. */
 export type CadWorkbenchPhysicalHostV1 = Readonly<{
   onDisplayedBodyInputV1: (input: ModelDisplayedTriangleBodyOwnedInputV1 | null) => void;
@@ -103,5 +108,8 @@ export type CadWorkbenchPhysicalHostV1 = Readonly<{
   viewport?: (interaction: CadWorkbenchPhysicalPreviewInteractionV1 | null) => ReactNode;
   savedReviewSize?: CadWorkbenchSavedReviewSizeV1;
   /** The separate saved-pattern table owns whether its exact size matches the reviewed grade. */
-  panel?: (tableSizeMatches: boolean) => ReactNode;
+  panel?: (
+    tableSizeMatches: boolean,
+    currentPattern?: CadWorkbenchSavedPatternScopeV1,
+  ) => ReactNode;
 }>;

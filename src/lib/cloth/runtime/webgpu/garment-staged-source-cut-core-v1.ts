@@ -5,7 +5,9 @@ import {
   TRIANGLE_REST_FRAME_GPU_V1,
 } from '../../compiler/material-package';
 import {
+  compileAuthoredPressHingeRestV1,
   compilePressedCreaseBendRestV1,
+  type AuthoredPressHingeTargetV1,
   type PressedCreaseV1,
 } from '../../compiler/pressed-crease-bend-rest-v1';
 import {
@@ -60,6 +62,7 @@ type Input = Readonly<{
   continuumMaterials: readonly ContinuumStrainMaterialInputV1[];
   currentPositionsMInvMass: Float32Array;
   pressedCreases?: readonly PressedCreaseV1[];
+  pressHingeTargets?: readonly AuthoredPressHingeTargetV1[];
   parameters: GarmentMaterialRunParametersV1;
   budgets: GarmentMaterialRunBudgetsV1;
 }>;
@@ -311,7 +314,10 @@ function buildCore(input: Input, signal?: AbortSignal) {
         input.pressedCreases,
       )
     : bend.restAnglesRad;
-  const cutBendRest = packXpbdEmbeddedCutBendRestV1(bendRest, coverage);
+  const authoredBendRest = input.pressHingeTargets?.length
+    ? compileAuthoredPressHingeRestV1(mesh, bend, coverage, bendRest, input.pressHingeTargets)
+    : bendRest;
+  const cutBendRest = packXpbdEmbeddedCutBendRestV1(authoredBendRest, coverage);
   const uploads = {
     positions,
     previousPositions: positions.slice(),

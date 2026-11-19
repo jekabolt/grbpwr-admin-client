@@ -96,6 +96,7 @@ import {
 } from './cad-workbench-split-shell-v1';
 import type {
   CadWorkbenchPhysicalHostV1,
+  CadWorkbenchSavedPatternScopeV1,
   CadWorkbenchSavedReviewSizeV1,
 } from './cad-workbench-physical-host-v1';
 import {
@@ -197,6 +198,7 @@ export type PatternImportDxfPhaseECadTableZeroOperationMannequinContextV1 = Read
   stagingBlocked: boolean;
   acceptedCloth?: CadWorkbenchPhysicalHostV1['acceptedCloth'];
   sizeMatches: boolean;
+  currentSavedPattern?: CadWorkbenchSavedPatternScopeV1;
 }>;
 
 type SavedFailoverResult = Readonly<{
@@ -1123,9 +1125,8 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
     savedTopstitchSizeId,
     sizeNameById,
   ]);
-  const currentTopstitch = savedTopstitchKey && savedTopstitch?.key === savedTopstitchKey
-    ? savedTopstitch
-    : null;
+  const currentTopstitch =
+    savedTopstitchKey && savedTopstitch?.key === savedTopstitchKey ? savedTopstitch : null;
   const resolvedSavedChoices = useMemo(
     () =>
       listPatternImportDxfPhaseECadTableZeroOperationSavedChoicesV1(
@@ -1222,7 +1223,9 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
             techCardId: prepared.techCardId,
             projection: prepared.projection,
             scopeKey: prepared.scopeKey,
-            readPieceScopeKeys: (pieceLineKey) => [...(pressScopeKeysByPiece.get(pieceLineKey) ?? [])],
+            readPieceScopeKeys: (pieceLineKey) => [
+              ...(pressScopeKeysByPiece.get(pieceLineKey) ?? []),
+            ],
             selectedPieceIds,
             pressAction,
             pressEquipment,
@@ -1483,6 +1486,16 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
         stagingBlocked: mannequinStaging?.key === mannequinStagingKey && mannequinStaging.blocked,
         acceptedCloth: selectableCloth,
         sizeMatches: tableSizeMatchesReview,
+        currentSavedPattern:
+          resolvedSource === 'saved' &&
+          prepared &&
+          'authoringAuthority' in prepared &&
+          prepared.authoringAuthority
+            ? {
+                row: prepared.authoringAuthority.row,
+                sizeToken: prepared.projection.sizeToken,
+              }
+            : undefined,
       })}
       operationsPanel={
         operationsPanel ?? (
@@ -1564,6 +1577,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
         stagingBlocked,
         acceptedCloth,
         sizeMatches,
+        currentSavedPattern,
       }) => (
         <div className='flex h-full min-h-0 flex-col'>
           {physicalHost?.panel ? (
@@ -1573,7 +1587,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
               tabIndex={0}
               className='max-h-[min(11rem,30%)] shrink-0 overflow-y-auto overscroll-y-contain'
             >
-              {physicalHost.panel(sizeMatches)}
+              {physicalHost.panel(sizeMatches, currentSavedPattern)}
             </div>
           ) : null}
           <div className='min-h-0 flex-1'>

@@ -109,3 +109,51 @@ export function compilePressedCreaseBendRestV1(
   }
   return rest;
 }
+
+export type AuthoredPressHingeTargetV1 = Readonly<{
+  pieceId: string;
+  /** Piece-local indices from the constrained material triangulation. */
+  edges: readonly (readonly [number, number])[];
+  /** Target signed dihedral, zero for a flattened hinge. */
+  angleRad: number;
+}>;
+
+/** Replace the rest angle only on the exact, material-covered authored hinges. */
+export function compileAuthoredPressHingeRestV1(
+  mesh: ClothMeshIR,
+  bend: CompiledBendConstraints,
+  coverage: Float64Array,
+  baseRest: Float32Array,
+  targets: readonly AuthoredPressHingeTargetV1[],
+) {
+  const rest = baseRest.slice();
+  const edgeKey = (a: number, b: number) => `${Math.min(a, b)}:${Math.max(a, b)}`;
+  const indexByEdge = new Map<string, number>();
+  for (let i = 0; i < bend.constraintCount; i++) {
+    indexByEdge.set(edgeKey(bend.vertexQuads[4 * i], bend.vertexQuads[4 * i + 1]), i);
+  }
+  const assigned = new Set<number>();
+  for (const { pieceId, edges, angleRad } of targets) {
+    const range = mesh.pieceRanges.find((piece) => piece.pieceId === pieceId);
+    if (!range || !edges.length || !Number.isFinite(angleRad) || Math.abs(angleRad) > Math.PI)
+      throw new RangeError('A press target requires a known cut piece, hinge edges and angle.');
+    const { vertexOffset, vertexCount } = range;
+    for (const [a, b] of edges) {
+      if (![a, b].every((v) => Number.isSafeInteger(v) && v >= 0 && v < vertexCount) || a === b)
+        throw new RangeError('A press target references an invalid piece-local hinge.');
+      const index = indexByEdge.get(edgeKey(vertexOffset + a, vertexOffset + b));
+      if (
+        index === undefined ||
+        assigned.has(index) ||
+        !(coverage[index] >= 1 - 1e-12) ||
+        !bend.vertexQuads
+          .subarray(4 * index, 4 * index + 4)
+          .every((v) => v >= vertexOffset && v < vertexOffset + vertexCount)
+      )
+        throw new RangeError('A press target requires a unique fully covered interior hinge.');
+      assigned.add(index);
+      rest[index] = angleRad === 0 ? 0 : angleRad;
+    }
+  }
+  return rest;
+}

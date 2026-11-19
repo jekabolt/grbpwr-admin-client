@@ -64,7 +64,7 @@ export function prepareRegisteredSourceCutPreviewV1(
       return [pieceId, placement] as const;
     }),
   );
-  const { mesh, cuts, materialPositionsMm } = compileRegularSourceCutCarrierV1(
+  const { mesh, cuts, materialPositionsMm, pressHingeTargets } = compileRegularSourceCutCarrierV1(
     { sourceFingerprint, spacingMm, maximumTriangleTests: 2_000_000, pieces },
     signal,
   );
@@ -139,6 +139,7 @@ export function prepareRegisteredSourceCutPreviewV1(
       cutTolerances,
       currentPositionsMInvMass: clearance?.positions ?? world,
       parameters,
+      pressHingeTargets,
       budgets: {
         maxParticles: 2_000,
         maxTriangles: 5_000,

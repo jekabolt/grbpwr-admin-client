@@ -1,7 +1,14 @@
 import cdt2d from 'cdt2d';
+import robustOrientation from 'robust-orientation';
 
+import type { AuthoredPressHingeTargetV1 } from './pressed-crease-bend-rest-v1';
+import { seamSegmentIsCoveredByMeshV1 } from '../mesh/triangulation/seam-point-embedding-v1';
 import type { Vec2Mm } from '../domain/garment-assembly-ir';
-import { CLOTH_MESH_IR_VERSION, type ClothMeshIR } from '../mesh/cloth-mesh-ir';
+import {
+  CLOTH_MESH_IR_VERSION,
+  measureClothMeshQuality,
+  type ClothMeshIR,
+} from '../mesh/cloth-mesh-ir';
 import type { SourceCutMassTransferMeshV1 } from '../mesh/triangulation/source-cut-mass-transfer-v1';
 
 type Piece = Readonly<{
@@ -11,6 +18,11 @@ type Piece = Readonly<{
   angleDeg: number;
   phaseX: number;
   phaseY: number;
+  pressAxes?: readonly Readonly<{
+    lineMm: readonly [Vec2Mm, Vec2Mm];
+    angleRad: number;
+    maximumHingeLengthMm: number;
+  }>[];
 }>;
 
 const side = (a: Vec2Mm, b: Vec2Mm, c: Vec2Mm) =>
@@ -54,6 +66,86 @@ function bounds(points: readonly Vec2Mm[]) {
   };
 }
 
+function refinePressCarrier(
+  grid: [number, number][],
+  axes: NonNullable<Piece['pressAxes']>,
+  pieceId: string,
+  cut: SourceCutMassTransferMeshV1,
+  hasMaterial: (face: readonly Vec2Mm[]) => boolean,
+  remainingTests: number,
+) {
+  const ids = new Map(grid.map(([x, y], i) => [`${x}:${y}`, i]));
+  const add = ([x, y]: Vec2Mm) => {
+    const key = `${x}:${y}`;
+    const current = ids.get(key);
+    if (current !== undefined) return current;
+    const next = grid.length;
+    ids.set(key, next);
+    grid.push([x, y]);
+    return next;
+  };
+  const targets = axes.map(({ lineMm: [a, b], maximumHingeLengthMm, angleRad }) => {
+    const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const count = Math.ceil(length / maximumHingeLengthMm);
+    if (
+      !Number.isSafeInteger(count) ||
+      count < 1 ||
+      count > 512 ||
+      !seamSegmentIsCoveredByMeshV1(cut.verticesMm, cut.triangles, a, b)
+    )
+      throw new RangeError('The press axis must be a bounded line inside its original cut.');
+    const axis = Math.abs(b[0] - a[0]) >= Math.abs(b[1] - a[1]) ? 0 : 1;
+    const along = grid.flatMap((point, i) => {
+      const t = (point[axis] - a[axis]) / (b[axis] - a[axis]);
+      return t > 0 && t < 1 && robustOrientation(a, b, point) === 0 ? [{ t, i }] : [];
+    });
+    for (let i = 0; i <= count; i++) {
+      const t = i / count;
+      const point =
+        i === 0
+          ? a
+          : i === count
+            ? b
+            : ([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t] as const);
+      along.push({ t, i: add(point) });
+    }
+    const walk = [...new Set(along.sort((p, q) => p.t - q.t).map(({ i }) => i))];
+    return {
+      pieceId,
+      angleRad,
+      edges: walk.slice(1).map((end, i) => [walk[i], end] as [number, number]),
+    };
+  });
+  const hingeEdges = targets.flatMap((target) => target.edges);
+  const extraTests = (grid.length * 2 * cut.triangles.length) / 3;
+  if (extraTests > remainingTests)
+    throw new RangeError('Press hinge refinement exceeds the carrier candidate work budget.');
+  const faces = cdt2d(grid, hingeEdges, { delaunay: true, interior: true, exterior: true });
+  // Open axes constrain edges without delimiting material. Clip only against the original cut.
+  const retained = faces.filter((face) => hasMaterial(face.map((id) => grid[id])));
+  const used = new Set(retained.flat());
+  const remap = new Map<number, number>();
+  const verticesMm: Vec2Mm[] = [];
+  for (const [id, point] of grid.entries()) {
+    if (!used.has(id)) continue;
+    remap.set(id, remap.size);
+    verticesMm.push(point);
+  }
+  const facesLocal = retained.flatMap((face) => face.map((id) => remap.get(id)!));
+  const hingeTargets: AuthoredPressHingeTargetV1[] = [];
+  for (const target of targets) {
+    const edges = target.edges.map(([a, b]) => {
+      const from = remap.get(a),
+        to = remap.get(b);
+      if (from === undefined || to === undefined)
+        throw new RangeError('The press axis was not retained on its material carrier.');
+      return [from, to] as const;
+    });
+    hingeTargets.push({ ...target, edges });
+  }
+  return { verticesMm, facesLocal, hingeTargets, triangleTests: extraTests };
+}
+
 /** Start from the native cuts and keep exactly the occupied faces of the regular carrier. */
 export function compileRegularSourceCutCarrierV1(
   input: Readonly<{
@@ -80,9 +172,10 @@ export function compileRegularSourceCutCarrierV1(
   const positions: number[] = [];
   const triangles: number[] = [];
   const cuts = new Map<string, { cut: SourceCutMassTransferMeshV1; maxSurfaceTriangles: number }>();
+  const pressHingeTargets: AuthoredPressHingeTargetV1[] = [];
   let admittedTests = 0;
 
-  for (const { pieceId, ringMm, angleDeg, phaseX, phaseY } of pieces) {
+  for (const { pieceId, ringMm, angleDeg, phaseX, phaseY, pressAxes } of pieces) {
     signal?.throwIfAborted();
     if (
       !pieceId ||
@@ -126,6 +219,17 @@ export function compileRegularSourceCutCarrierV1(
       const points = ids.map((id) => rotated[id]);
       return { points, ...bounds(points) };
     });
+    const hasMaterial = (triangle: readonly Vec2Mm[]) => {
+      const box = bounds(triangle);
+      return source.some(
+        (face) =>
+          face.minX <= box.maxX &&
+          face.maxX >= box.minX &&
+          face.minY <= box.maxY &&
+          face.maxY >= box.minY &&
+          enclosedArea(intersect(face.points, triangle)) > 0,
+      );
+    };
     const vertexOffset = positions.length / 2;
     const triangleOffset = triangles.length / 3;
     const gridVertices = new Map<string, number>();
@@ -146,16 +250,7 @@ export function compileRegularSourceCutCarrierV1(
           [p, q, s],
           [q, r, s],
         ]) {
-          const box = bounds(triangle);
-          const occupied = source.some(
-            (face) =>
-              face.minX <= box.maxX &&
-              face.maxX >= box.minX &&
-              face.minY <= box.maxY &&
-              face.maxY >= box.minY &&
-              enclosedArea(intersect(face.points, triangle)) > 0,
-          );
-          if (!occupied) continue;
+          if (!hasMaterial(triangle)) continue;
           for (const [nx, ny] of triangle) {
             const key = nx + ':' + ny;
             let index = gridVertices.get(key);
@@ -169,35 +264,64 @@ export function compileRegularSourceCutCarrierV1(
         }
       }
     }
+    const cut = { verticesMm: native, triangles: Uint32Array.from(sourceFaces.flat()) };
+    if (pressAxes && pressAxes.length > 8)
+      throw new RangeError('Press hinge refinement exceeds the per-piece axis budget.');
+    let vertexCount = gridVertices.size;
+    if (pressAxes?.length) {
+      const grid: [number, number][] = Array.from({ length: gridVertices.size }, (_, i) => [
+        positions[2 * (vertexOffset + i)],
+        positions[2 * (vertexOffset + i) + 1],
+      ]);
+      const refined = refinePressCarrier(
+        grid,
+        pressAxes,
+        pieceId,
+        cut,
+        (face) => hasMaterial(face.map(([x, y]) => [x * cos + y * sin, -x * sin + y * cos])),
+        maximumTriangleTests - admittedTests,
+      );
+      admittedTests += refined.triangleTests;
+      positions.length = vertexOffset * 2;
+      triangles.length = triangleOffset * 3;
+      for (const point of refined.verticesMm) positions.push(...point);
+      for (const index of refined.facesLocal) triangles.push(vertexOffset + index);
+      pressHingeTargets.push(...refined.hingeTargets);
+      vertexCount = refined.verticesMm.length;
+    }
     const triangleCount = triangles.length / 3 - triangleOffset;
     if (triangleCount < 1) throw new RangeError('The source cut has no occupied carrier faces.');
     pieceRanges.push({
       pieceId,
       vertexOffset,
-      vertexCount: gridVertices.size,
+      vertexCount,
       triangleOffset,
       triangleCount,
     });
     cuts.set(pieceId, {
-      cut: { verticesMm: native, triangles: Uint32Array.from(sourceFaces.flat()) },
+      cut,
       maxSurfaceTriangles: 20_000,
     });
   }
+  const restPositions2Mm = Float32Array.from(positions);
+  const faceIndices = Uint32Array.from(triangles);
   const mesh: ClothMeshIR = {
     schemaVersion: CLOTH_MESH_IR_VERSION,
     sourceAssemblyFingerprint: sourceFingerprint,
     sourceUnits: 'mm',
-    restPositions2Mm: Float32Array.from(positions),
-    triangles: Uint32Array.from(triangles),
+    restPositions2Mm,
+    triangles: faceIndices,
     pieceRanges,
     boundarySamples: [],
     seams: [],
-    quality: {
-      degenerateTriangles: 0,
-      minTriangleAngleDegrees: 59.99,
-      maxEdgeRatio: 1.00001,
-      maxBoundaryErrorMm: 0,
-    },
+    quality: pressHingeTargets.length
+      ? measureClothMeshQuality(restPositions2Mm, faceIndices)
+      : {
+          degenerateTriangles: 0,
+          minTriangleAngleDegrees: 59.99,
+          maxEdgeRatio: 1.00001,
+          maxBoundaryErrorMm: 0,
+        },
   };
-  return { mesh, cuts, materialPositionsMm: Float64Array.from(positions) };
+  return { mesh, cuts, materialPositionsMm: Float64Array.from(positions), pressHingeTargets };
 }
