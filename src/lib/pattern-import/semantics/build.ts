@@ -184,6 +184,7 @@ type DxfExtra = {
     block?: string;
     group?: number;
     identity?: string;
+    savedDisplayName?: string;
     outerIsSeam?: boolean;
     zeroAllowanceSeam?: true;
     authoredAllowanceCorner?: PieceSizeSpec['authoredAllowanceCorner'];
@@ -958,6 +959,7 @@ export function buildPieceSpecsDetailed(
     const name = readName({
       override: ov,
       dxfIdentity: sorted[0].dxf?.identity ?? null,
+      dxfDisplayName: sorted[0].dxf?.savedDisplayName,
       texts,
       isSizeToken,
       isTitle: titleTest(top, textById),

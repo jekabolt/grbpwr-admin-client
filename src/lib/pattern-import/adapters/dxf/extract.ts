@@ -2116,12 +2116,20 @@ async function readDxfInternal(
     pages: [page],
     warnings: b.warnings,
   };
+  let pieceNamesByBlock: DxfMeta['pieceNamesByBlock'];
   let halfFoldBlocks: DxfMeta['halfFoldBlocks'];
   let zeroAllowanceSeamBlocks: DxfMeta['zeroAllowanceSeamBlocks'];
   let authoredInternalByBlock: DxfMeta['authoredInternalByBlock'];
   let authoredTextByBlock: DxfMeta['authoredTextByBlock'];
   let authoredNotchesByBlock: DxfMeta['authoredNotchesByBlock'];
   if (conversion) {
+    const piecesByIdentity = new Map(conversion.pieces.map((piece) => [piece.identity, piece]));
+    pieceNamesByBlock = new Map(
+      conversion.blocks.flatMap(({ block, identity }) => {
+        const piece = piecesByIdentity.get(identity);
+        return piece ? [[block, { identity, displayName: piece.displayName }]] : [];
+      }),
+    );
     const halfIdentities = new Set(
       conversion.pieces
         .filter((p) => p.halfFold && !p.unfoldedFold && !p.pairOf && p.piecesPerGarment === 1)
@@ -2166,6 +2174,7 @@ async function readDxfInternal(
     binary: dec.binary,
     units,
     manifest,
+    ...(pieceNamesByBlock?.size ? { pieceNamesByBlock } : {}),
     ...(halfFoldBlocks?.size ? { halfFoldBlocks } : {}),
     ...(zeroAllowanceSeamBlocks?.size ? { zeroAllowanceSeamBlocks } : {}),
     ...(authoredInternalByBlock?.size ? { authoredInternalByBlock } : {}),

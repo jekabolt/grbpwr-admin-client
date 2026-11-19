@@ -461,6 +461,7 @@ function candidateOf(
     }
   }
   const area = outer?.areaMm2 ?? 0;
+  const savedName = read.meta.pieceNamesByBlock?.get(p.block);
   const cand: DxfPieceCandidate = {
     seed,
     rank: Math.max(0, rank),
@@ -481,6 +482,7 @@ function candidateOf(
       block: p.block,
       group: p.group,
       identity: p.identity,
+      ...(savedName?.identity === p.identity ? { savedDisplayName: savedName.displayName } : {}),
       size: p.size,
       sizeSource: p.sizeSource,
       identitySource: p.identitySource,

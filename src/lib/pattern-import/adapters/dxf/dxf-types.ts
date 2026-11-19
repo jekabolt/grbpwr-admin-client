@@ -106,6 +106,8 @@ export type DxfMeta = {
   binary: 'r12' | 'r13+' | null;
   units: DxfUnits;
   manifest: boolean;
+  /** Display names from the validated product manifest, bound to exact native blocks. */
+  pieceNamesByBlock?: ReadonlyMap<string, { identity: string; displayName: string }>;
   /** Blocks marked as confirmed single half-on-fold in the validated product manifest. */
   halfFoldBlocks?: ReadonlySet<string>;
   /** Manifest blocks explicitly emitted with a sewing boundary and zero allowance. */
@@ -397,6 +399,7 @@ export type DxfPieceCandidate = PieceCandidate & {
     block: string;
     group: number;
     identity: string;
+    savedDisplayName?: string;
     size: string;
     /** Whether the size came from an explicit label or the block-name tail. */
     sizeSource?: DxfBlockPiece['sizeSource'];

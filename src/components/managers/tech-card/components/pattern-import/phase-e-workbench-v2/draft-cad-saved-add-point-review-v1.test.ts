@@ -1902,6 +1902,10 @@ it('preserves the two dart types in both DXF dialects, including a small fish-ey
     const findSize = (job: typeof compiled.artifact.compiledJob) =>
       job.pieces.find(({ identity }) => identity === target.pieceId)!.sizes[0]!;
     const original = findSize(compiled.artifact.compiledJob);
+    const originalNames = compiled.artifact.compiledJob.pieces.map(
+      ({ identity }) => [identity, `Original ${identity} panel`] as const,
+    );
+    const displayNames = new Map(originalNames);
     const checkDarts = (size: typeof original) => {
       expect(size.drills).toHaveLength(original.drills.length);
       expect(size.cutLoops).toEqual(original.cutLoops);
@@ -1912,7 +1916,14 @@ it('preserves the two dart types in both DXF dialects, including a small fish-ey
       ).toEqual(expected);
     };
     for (const dialect of ['r12', 'r2000'] as const) {
-      const written = writeDxfDetailed({ ...compiled.artifact.compiledJob, dialect });
+      const written = writeDxfDetailed({
+        ...compiled.artifact.compiledJob,
+        dialect,
+        pieces: compiled.artifact.compiledJob.pieces.map((piece) => ({
+          ...piece,
+          displayName: displayNames.get(piece.identity)!,
+        })),
+      });
       const metadata = written.manifest.blocks.find(({ identity }) => identity === target.pieceId)!;
       expect(
         metadata.authoredInternal?.map(({ label, closed, vertices }) => ({
@@ -1925,6 +1936,9 @@ it('preserves the two dart types in both DXF dialects, including a small fish-ey
       const reviewed = await draftThroughWizardStages(file, f.current.card, worker);
       const scope = reviewed.scopes[0]!;
       expect(scope.manifest.gate?.passed).toBe(true);
+      expect(
+        scope.manifest.pieces.map(({ identity, displayName }) => [identity, displayName]),
+      ).toEqual(originalNames);
       checkDarts(findSize(scope.writerReplay!.job));
       const bytes = new TextEncoder().encode(scope.dxfText);
       const row = {
@@ -1942,7 +1956,11 @@ it('preserves the two dart types in both DXF dialects, including a small fish-ey
       );
       try {
         expect(reopened.native.row).toEqual(row);
-        checkDarts(findSize(reopened.native.draft.scopes[0]!.writerReplay!.job));
+        const reopenedScope = reopened.native.draft.scopes[0]!;
+        expect(
+          reopenedScope.manifest.pieces.map(({ identity, displayName }) => [identity, displayName]),
+        ).toEqual(originalNames);
+        checkDarts(findSize(reopenedScope.writerReplay!.job));
       } finally {
         reopened.dispose();
       }
