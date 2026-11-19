@@ -21,6 +21,8 @@ function Input({ type = 'text', className, name, ref, ...props }: InputProps) {
   return (
     <input
       id={name}
+      // react-hook-form's register() finds the field by event.target.name
+      name={name}
       type={type}
       ref={ref}
       className={cn(
