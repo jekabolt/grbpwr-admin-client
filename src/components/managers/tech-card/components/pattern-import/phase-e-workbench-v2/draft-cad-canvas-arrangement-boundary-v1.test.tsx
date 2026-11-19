@@ -8,7 +8,10 @@ import { projectPatternImportDxfProductPhaseEAssemblyV1 } from 'lib/pattern-impo
 import type { SheetViewport } from '../sheet-viewport';
 import { createPatternImportDxfPhaseEDraftCadArrangementScopeV1 } from './draft-cad-arrangement-v1';
 import { createPatternImportDxfPhaseEBoundDraftCadSessionV1 } from './draft-cad-binding-v1';
-import { PatternImportDxfPhaseEDraftCadCanvasV1 } from './draft-cad-canvas-v1';
+import {
+  PatternImportDxfPhaseEDraftCadCanvasV1,
+  recordPatternImportDxfPhaseEDraftCadCanvasPointV1,
+} from './draft-cad-canvas-v1';
 import { createPatternImportDxfPhaseEDraftCadTopologySessionV1 } from './draft-cad-topology-session-v1';
 
 let sheet: ComponentProps<typeof SheetViewport>;
@@ -101,4 +104,26 @@ it('keeps Arrange rotation, flip and translation out of exact geometry picks and
   expect(onSessionChange.mock.calls[1]![0].history).toEqual(afterArrange.history);
   expect(afterArrange.source).toEqual(bound.session.source);
   expect(projected.projection).toEqual(geometryBefore);
+
+  const createCurve = recordPatternImportDxfPhaseEDraftCadCanvasPointV1({
+    session: bound.session,
+    projection: projected.projection,
+    activePieceIndex: 0,
+    activeTool: 'french-curve',
+    sequence: 0,
+    pendingPoints: [
+      { x: 10, y: 20 },
+      { x: 30, y: 42 },
+    ],
+    pointMm: { x: 45, y: 20 },
+  });
+  expect(createCurve.recorded).toBe(true);
+  const curve = { ...props, session: createCurve.session, activeTool: 'french-curve' as const };
+  const curveEditor = renderToStaticMarkup(<PatternImportDxfPhaseEDraftCadCanvasV1 {...curve} />);
+  expect(curveEditor).toContain('d="M 10 -20 Q 30 -42 45 -20"');
+  expect(curveEditor.match(/data-draft-cad-french-curve-handle=/g)).toHaveLength(3);
+  expect(curveEditor).toContain('aria-label="French curve control point"');
+  expect(
+    renderToStaticMarkup(<PatternImportDxfPhaseEDraftCadCanvasV1 {...curve} arrangeActive />),
+  ).not.toContain('data-draft-cad-french-curve-handle');
 });

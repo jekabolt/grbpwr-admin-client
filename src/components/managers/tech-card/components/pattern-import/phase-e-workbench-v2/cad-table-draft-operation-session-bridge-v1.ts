@@ -17,6 +17,7 @@ import {
 } from './cad-table-draft-operation-planner-v1';
 import type { PatternImportDxfPhaseEDraftOperationConnectionIntentV1 } from './draft-operation-from-connection-v1';
 import {
+  activeDraftCadTransactionsV1,
   PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_PRODUCTIVE_TOOLS_V1,
   PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_SESSION_V1,
   type PatternImportDxfPhaseEDraftCadCommandV1,
@@ -647,7 +648,7 @@ export function buildPatternImportDxfPhaseECadCommandDraftOperationsV1(input: {
   const targetKeys = new Set(
     input.catalog.pieces.map(({ pieceId, pieceLineKey }) => `${pieceId}\u0000${pieceLineKey}`),
   );
-  const activeTransactions = session.history.slice(0, session.cursor);
+  const activeTransactions = activeDraftCadTransactionsV1(session);
   const transactionIds = new Set<string>();
   const commandIds = new Set<string>();
   const entityIds = new Set<string>();

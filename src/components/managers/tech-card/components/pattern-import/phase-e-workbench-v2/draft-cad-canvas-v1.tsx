@@ -1,5 +1,6 @@
 import { parallelOpeningAxisV1, validParallelDisplacementV1 } from './draft-cad-session-v1';
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -26,7 +27,9 @@ import {
   DRAFT_CAD_CROSS_MARK_HALF_SPAN_MM,
   listActiveDraftCadNewPiecesV1,
   permitsDraftCadLocalPieceEditV1,
+  recordDraftCadFrenchCurveHandleV1,
   recordPatternImportDxfPhaseEDraftCadTransactionV1,
+  type DraftCadFrenchCurveHandleV1,
   type PatternImportDxfPhaseEDraftCadCommandV1,
   type PatternImportDxfPhaseEDraftCadSessionV1,
   type PatternImportDxfPhaseEDraftCadToolV1,
@@ -1348,7 +1351,7 @@ export function patternImportDxfPhaseEDraftCadArrangementSvgTransformV1(
 }
 
 function pointerSvgPoint(
-  event: ReactPointerEvent<SVGGElement>,
+  event: ReactPointerEvent<SVGElement>,
 ): Readonly<{ x: number; y: number }> | null {
   const svg = event.currentTarget.ownerSVGElement;
   const matrix = svg?.getScreenCTM();
@@ -1357,7 +1360,9 @@ function pointerSvgPoint(
   point.x = event.clientX;
   point.y = event.clientY;
   const transformed = point.matrixTransform(matrix.inverse());
-  return Object.freeze({ x: transformed.x, y: transformed.y });
+  return Number.isFinite(transformed.x) && Number.isFinite(transformed.y)
+    ? Object.freeze({ x: transformed.x, y: transformed.y })
+    : null;
 }
 
 export function selectPatternImportDxfPhaseEDraftCadPiecesInLassoV1(
@@ -1543,6 +1548,151 @@ function PreviewPrimitive({
   }
 }
 
+type FrenchCurvePrimitive = Extract<
+  PatternImportDxfPhaseEDraftCadPreviewPrimitiveV1,
+  { kind: 'curve' }
+>;
+
+const FRENCH_HANDLES = [
+  { index: 0, label: 'French curve start point' },
+  { index: 1, label: 'French curve control point' },
+  { index: 2, label: 'French curve end point' },
+] as const;
+
+function EditableFrenchCurve({
+  primitive,
+  unit,
+  session,
+  onEdit,
+}: {
+  primitive: FrenchCurvePrimitive;
+  unit: number;
+  session: PatternImportDxfPhaseEDraftCadSessionV1;
+  onEdit: (handle: DraftCadFrenchCurveHandleV1, point: PtMm) => void;
+}) {
+  const drag = useRef<{
+    handle: DraftCadFrenchCurveHandleV1;
+    session: PatternImportDxfPhaseEDraftCadSessionV1;
+    pointerId: number;
+    startSvg: PtMm;
+    clientX: number;
+    clientY: number;
+  } | null>(null);
+  const [preview, setPreview] = useState<{
+    handle: DraftCadFrenchCurveHandleV1;
+    point: PtMm;
+  } | null>(null);
+  const controls = primitive.controlPointsMm.map((point, i) =>
+    preview?.handle === i ? preview.point : point,
+  );
+  const cancel = useCallback(() => {
+    drag.current = null;
+    setPreview(null);
+  }, []);
+  useEffect(cancel, [cancel, session]);
+  const cancelPointer = (event: ReactPointerEvent<SVGElement>) => {
+    if (drag.current?.pointerId === event.pointerId) cancel();
+  };
+  const position = (event: ReactPointerEvent<SVGElement>) => {
+    const current = drag.current;
+    if (current?.pointerId !== event.pointerId || current.session !== session) return null;
+    const cursor = pointerSvgPoint(event);
+    const original = primitive.controlPointsMm[current.handle];
+    if (!cursor || !original) return null;
+    return {
+      handle: current.handle,
+      point: {
+        x: original.x + cursor.x - current.startSvg.x,
+        y: original.y - cursor.y + current.startSvg.y,
+      },
+    };
+  };
+  return (
+    <g data-draft-cad-french-curve={primitive.commandId}>
+      <PreviewPrimitive primitive={{ ...primitive, controlPointsMm: controls }} unit={unit} />
+      <polyline
+        points={ptsAttr(controls)}
+        fill='none'
+        stroke={SHEET_INK.blue}
+        strokeOpacity={0.6}
+        strokeDasharray={`${unit * 4} ${unit * 4}`}
+        pointerEvents='none'
+      />
+      {FRENCH_HANDLES.map(({ index, label }) => (
+        <circle
+          key={index}
+          role='button'
+          tabIndex={0}
+          aria-label={label}
+          aria-keyshortcuts='ArrowUp ArrowDown ArrowLeft ArrowRight'
+          data-draft-cad-french-curve-handle={index}
+          cx={controls[index].x}
+          cy={vy(controls[index].y)}
+          r={unit * 6}
+          className='cursor-move fill-bgColor focus:outline-none focus:fill-textColor'
+          stroke={SHEET_INK.blue}
+          strokeWidth={1.5}
+          vectorEffect='non-scaling-stroke'
+          onPointerDown={(event) => {
+            if (event.button !== 0 || drag.current) return;
+            const startSvg = pointerSvgPoint(event);
+            if (!startSvg) return;
+            event.stopPropagation();
+            event.currentTarget.focus();
+            event.currentTarget.setPointerCapture(event.pointerId);
+            drag.current = {
+              handle: index,
+              session,
+              pointerId: event.pointerId,
+              startSvg,
+              clientX: event.clientX,
+              clientY: event.clientY,
+            };
+          }}
+          onPointerMove={(event) => {
+            const next = position(event);
+            if (next) setPreview(next);
+          }}
+          onPointerUp={(event) => {
+            const current = drag.current;
+            if (current?.pointerId !== event.pointerId) return;
+            event.stopPropagation();
+            const next = position(event);
+            cancel();
+            if (
+              next &&
+              Math.hypot(event.clientX - current.clientX, event.clientY - current.clientY) >= 2
+            )
+              onEdit(next.handle, next.point);
+          }}
+          onPointerCancel={cancelPointer}
+          onLostPointerCapture={cancelPointer}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape' && drag.current) {
+              event.preventDefault();
+              event.stopPropagation();
+              cancel();
+              return;
+            }
+            const offset: Partial<Record<string, PtMm>> = {
+              ArrowLeft: { x: -1, y: 0 },
+              ArrowRight: { x: 1, y: 0 },
+              ArrowUp: { x: 0, y: 1 },
+              ArrowDown: { x: 0, y: -1 },
+            };
+            const delta = offset[event.key];
+            if (!delta || drag.current || event.altKey || event.metaKey || event.ctrlKey) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const point = primitive.controlPointsMm[index];
+            onEdit(index, { x: point.x + delta.x, y: point.y + delta.y });
+          }}
+        />
+      ))}
+    </g>
+  );
+}
+
 function toolInstruction(tool: PatternImportDxfPhaseEDraftCadToolV1, sizeToken: string): string {
   if (tool === 'pen')
     return `Place at least three corners, then close the outline to create a piece in size ${sizeToken}.`;
@@ -1556,7 +1706,7 @@ function toolInstruction(tool: PatternImportDxfPhaseEDraftCadToolV1, sizeToken: 
   if (tool === 'pattern-line')
     return `Click two points to add a pattern line in size ${sizeToken}.`;
   if (tool === 'french-curve')
-    return `Click the start, control and end points to add a French curve in size ${sizeToken}.`;
+    return `Click the start, control and end points to add a French curve in size ${sizeToken}. Drag a handle to edit it.`;
   if (tool === 'ellipse')
     return 'Click the centre, major-axis point and minor-radius point to record one ellipse intent.';
   if (tool === 'delete-point')
@@ -1762,6 +1912,34 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
     setInputError(result.blocker);
     sequence.current = result.sequence;
     if (result.recorded) onSessionChange(result.session);
+  };
+  const editFrenchCurve = (
+    primitive: FrenchCurvePrimitive,
+    handle: DraftCadFrenchCurveHandleV1,
+    point: PtMm,
+  ) => {
+    if (
+      !interactionEnabled ||
+      activeTool !== 'french-curve' ||
+      pendingPoints.length ||
+      !Number.isFinite(point.x) ||
+      !Number.isFinite(point.y)
+    )
+      return;
+    const ids = nextIds(session, sequence.current);
+    const result = recordDraftCadFrenchCurveHandleV1(session, {
+      transactionId: ids.transactionId,
+      commandId: primitive.commandId,
+      target: primitive.target,
+      handle,
+      expected: primitive.controlPointsMm,
+      pointMm: { x: Number(dxfCoordinate(point.x)), y: Number(dxfCoordinate(point.y)) },
+    });
+    setInputError(result.ok ? null : result.blocker.detail);
+    if (result.ok && result.session !== session) {
+      sequence.current = ids.sequence;
+      onSessionChange(result.session);
+    }
   };
   const chooseOutlinePoint = (option: PatternImportDxfPhaseEDraftCadExactVertexOptionV1 | null) => {
     setOutlinePointInput(
@@ -2250,13 +2428,29 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
                 }
               >
                 <g data-draft-cad-committed-preview=''>
-                  {primitives.map((primitive) => (
-                    <PreviewPrimitive
-                      key={`${primitive.commandId}:${primitive.entityId}`}
-                      primitive={primitive}
-                      unit={unit}
-                    />
-                  ))}
+                  {primitives.map((primitive) =>
+                    primitive.kind === 'curve' &&
+                    primitive.controlPointsMm.length === 3 &&
+                    activeTool === 'french-curve' &&
+                    interactionEnabled &&
+                    !activeTopologyTool &&
+                    !crossScopeConnectActive &&
+                    !pendingPoints.length ? (
+                      <EditableFrenchCurve
+                        key={`${primitive.commandId}:${primitive.entityId}`}
+                        primitive={primitive}
+                        unit={unit}
+                        session={session}
+                        onEdit={(handle, point) => editFrenchCurve(primitive, handle, point)}
+                      />
+                    ) : (
+                      <PreviewPrimitive
+                        key={`${primitive.commandId}:${primitive.entityId}`}
+                        primitive={primitive}
+                        unit={unit}
+                      />
+                    ),
+                  )}
                 </g>
                 {piece ? (
                   <PatternImportDxfPhaseEDraftCadTopologyOverlayV1

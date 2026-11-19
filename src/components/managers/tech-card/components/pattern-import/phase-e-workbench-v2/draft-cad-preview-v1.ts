@@ -1,5 +1,5 @@
 import { movedSavedFishEyePointsV1 } from './draft-cad-saved-dart-tip-v1';
-import { parallelOpeningAxisV1 } from './draft-cad-session-v1';
+import { activeDraftCadTransactionsV1, parallelOpeningAxisV1 } from './draft-cad-session-v1';
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 import { signedArea } from 'lib/pattern-import/semantics/geom';
 import type { AuthoredNotchShape, PtMm } from 'lib/pattern-import/types';
@@ -299,9 +299,7 @@ export function buildPatternImportDxfPhaseEDraftCadPreviewV1(
       previewReady: false,
     });
 
-  const commands = session.history
-    .slice(0, session.cursor)
-    .flatMap((transaction) => transaction.commands);
+  const commands = activeDraftCadTransactionsV1(session).flatMap(({ commands }) => commands);
   const primitives: PatternImportDxfPhaseEDraftCadPreviewPrimitiveV1[] = [];
   const blockers: PatternImportDxfPhaseEDraftCadPreviewBlockerV1[] = [];
   let bounds: MutableBounds | null = null;

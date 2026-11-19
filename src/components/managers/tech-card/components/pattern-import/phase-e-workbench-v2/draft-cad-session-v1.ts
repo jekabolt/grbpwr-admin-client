@@ -326,6 +326,8 @@ export type PatternImportDxfPhaseEDraftCadTransactionV1 = Readonly<{
   label: string;
   status: 'intent-only';
   commands: readonly PatternImportDxfPhaseEDraftCadCommandV1[];
+  /** A local handle revision replays in the original command's slot. */
+  revisesFrenchCurveCommandId?: string;
 }>;
 
 export type PatternImportDxfPhaseEDraftCadBlockerV1 = Readonly<{
@@ -723,6 +725,103 @@ export function listActiveDraftCadNewPiecesV1(session: PatternImportDxfPhaseEDra
       return [];
     }),
   );
+}
+
+export type DraftCadFrenchCurveHandleV1 = 0 | 1 | 2;
+
+export function activeDraftCadTransactionsV1(
+  current: PatternImportDxfPhaseEDraftCadSessionV1,
+): readonly PatternImportDxfPhaseEDraftCadTransactionV1[] {
+  const active = current.history.slice(0, current.cursor);
+  if (!recordedSessions.has(current)) return active;
+
+  const revisions = new Map<string, PatternImportDxfPhaseEDraftCadCommandV1>();
+  for (const tx of active)
+    if (tx.revisesFrenchCurveCommandId)
+      revisions.set(tx.revisesFrenchCurveCommandId, tx.commands[0]);
+  if (!revisions.size) return active;
+
+  return active.flatMap((tx) =>
+    tx.revisesFrenchCurveCommandId
+      ? []
+      : [
+          {
+            ...tx,
+            commands: tx.commands.map((command) => revisions.get(command.commandId) ?? command),
+          },
+        ],
+  );
+}
+
+export function recordDraftCadFrenchCurveHandleV1(
+  current: PatternImportDxfPhaseEDraftCadSessionV1,
+  input: Readonly<{
+    transactionId: string;
+    commandId: string;
+    target: PatternImportDxfPhaseEDraftCadTargetV1;
+    handle: DraftCadFrenchCurveHandleV1;
+    expected: readonly PtMm[];
+    pointMm: PtMm;
+  }>,
+): PatternImportDxfPhaseEDraftCadSessionResultV1 {
+  const refuse = (detail: string) =>
+    Object.freeze({
+      ok: false as const,
+      session: current,
+      blocker: blocker('invalid-command', detail),
+    });
+  const active = current.history.slice(0, current.cursor);
+  if (
+    !recordedSessions.has(current) ||
+    !stableId(input.transactionId) ||
+    active.some(({ transactionId }) => transactionId === input.transactionId) ||
+    ![0, 1, 2].includes(input.handle) ||
+    !target(input.target) ||
+    !point(input.pointMm) ||
+    !points(input.expected, 3) ||
+    input.expected.length !== 3
+  )
+    return refuse('Move a curve handle in the current recorded Draft.');
+
+  const matching = activeDraftCadTransactionsV1(current)
+    .flatMap(({ commands }) => commands)
+    .filter(({ commandId }) => commandId === input.commandId);
+  const [curve] = matching;
+  if (
+    matching.length !== 1 ||
+    curve.tool !== 'french-curve' ||
+    curve.target.pieceId !== input.target.pieceId ||
+    curve.target.pieceLineKey !== input.target.pieceLineKey ||
+    curve.payload.controlPointsMm.length !== 3 ||
+    !curve.payload.controlPointsMm.every(
+      ({ x, y }, index) => x === input.expected[index].x && y === input.expected[index].y,
+    )
+  )
+    return refuse('The active French curve or its control points changed.');
+
+  const controlPointsMm = curve.payload.controlPointsMm.map((original, index) =>
+    index === input.handle ? { ...input.pointMm } : original,
+  );
+  const original = curve.payload.controlPointsMm[input.handle];
+  if (original.x === input.pointMm.x && original.y === input.pointMm.y)
+    return Object.freeze({ ok: true, session: current, blocker: null });
+  if (controlPointsMm.every(({ x, y }) => x === controlPointsMm[0].x && y === controlPointsMm[0].y))
+    return refuse('French curve control points must span a nonzero path.');
+
+  const revision = deepFreeze({
+    transactionId: input.transactionId,
+    label: 'Move French curve handle',
+    status: 'intent-only' as const,
+    revisesFrenchCurveCommandId: curve.commandId,
+    commands: [{ ...curve, payload: { ...curve.payload, controlPointsMm } }],
+  });
+  const next = session(
+    current.source,
+    Object.freeze([...active, revision]),
+    active.length + 1,
+    current,
+  );
+  return Object.freeze({ ok: true, session: next, blocker: null });
 }
 
 export function permitsDraftCadLocalPieceEditV1(

@@ -21,7 +21,10 @@ import { selectPatternImportDxfProductDraftPhaseDSizeV1 } from 'lib/cloth/domain
 import { buildPatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import { projectPatternImportDxfProductPhaseEAssemblyV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 import {
+  activeDraftCadTransactionsV1,
   createPatternImportDxfPhaseEDraftCadSessionV1,
+  recordDraftCadFrenchCurveHandleV1,
+  redoPatternImportDxfPhaseEDraftCadSessionV1,
   recordPatternImportDxfPhaseEDraftCadTransactionV1,
   undoPatternImportDxfPhaseEDraftCadSessionV1,
   type PatternImportDxfPhaseEDraftCadCommandV1,
@@ -1558,8 +1561,60 @@ it.each(['internal-line', 'pattern-line', 'french-curve', 'guideline', 'cross'] 
         f.source.native.draft,
       );
       if (!compileSource) throw Error('Fixture lacks a current writer source.');
+      let current = edit.session;
+      if (tool === 'french-curve') {
+        const command = current.history[0]!.commands[0]!;
+        if (command.tool !== 'french-curve') throw Error('Expected a recorded French curve.');
+        const moved = { x: control.x, y: minY + height * 0.81 };
+        const input = {
+          transactionId: 'move-french-control-point',
+          commandId: command.commandId,
+          target: command.target,
+          handle: 1 as const,
+          expected: command.payload.controlPointsMm,
+          pointMm: moved,
+        };
+        const revised = recordDraftCadFrenchCurveHandleV1(current, input);
+        expect(revised.ok).toBe(true);
+        if (!revised.ok) throw Error(revised.blocker.detail);
+        expect(revised.session.cursor).toBe(2);
+        expect(activeDraftCadTransactionsV1(revised.session)).toHaveLength(1);
+        const commands = activeDraftCadTransactionsV1(revised.session)[0]!.commands;
+        expect(commands).toMatchObject([
+          {
+            commandId: command.commandId,
+            payload: {
+              entityId: command.payload.entityId,
+              controlPointsMm: [start, moved, end],
+            },
+          },
+        ]);
+        expect(
+          recordDraftCadFrenchCurveHandleV1(revised.session, { ...input, transactionId: 'stale' })
+            .ok,
+        ).toBe(false);
+        expect(recordDraftCadFrenchCurveHandleV1(structuredClone(current), input).ok).toBe(false);
+        const undone = undoPatternImportDxfPhaseEDraftCadSessionV1(revised.session);
+        if (!undone.ok) throw Error(undone.blocker.detail);
+        expect(activeDraftCadTransactionsV1(undone.session)[0]!.commands).toEqual([command]);
+        const redone = redoPatternImportDxfPhaseEDraftCadSessionV1(undone.session);
+        if (!redone.ok) throw Error(redone.blocker.detail);
+        expect(activeDraftCadTransactionsV1(redone.session)[0]!.commands).toEqual(commands);
+        expect(
+          compilePatternImportDxfPhaseEDraftCadGeometryV1({
+            session: structuredClone(redone.session),
+            projection,
+            selection,
+            compileSource,
+          }),
+        ).toMatchObject({
+          ok: false,
+          blockers: [{ code: 'invalid-input' }],
+        });
+        current = redone.session;
+      }
       const compiled = compilePatternImportDxfPhaseEDraftCadGeometryV1({
-        session: edit.session,
+        session: current,
         projection,
         selection,
         compileSource,
@@ -1567,6 +1622,21 @@ it.each(['internal-line', 'pattern-line', 'french-curve', 'guideline', 'cross'] 
       if (!compiled.ok) throw Error(JSON.stringify(compiled.blockers));
       const label = `draft-cad:${tool}`;
       const first = compiled.artifact.manifest.blocks.find(({ identity }) => identity === pieceId)!;
+      if (tool === 'french-curve') {
+        const original = compilePatternImportDxfPhaseEDraftCadGeometryV1({
+          session: edit.session,
+          projection,
+          selection,
+          compileSource,
+        });
+        if (!original.ok) throw Error(JSON.stringify(original.blockers));
+        const sourcePath = original.artifact.manifest.blocks.find(
+          ({ identity }) => identity === pieceId,
+        )?.authoredInternal?.[0]?.vertices;
+        expect(sourcePath).toBeDefined();
+        expect(first.authoredInternal?.[0]?.vertices).not.toEqual(sourcePath);
+      }
+
       expect(first.authoredInternal).toHaveLength(1);
       expect(first.authoredInternal?.[0]?.label).toBe(label);
       const file = new File([compiled.artifact.dxfText], 'main-cad-compiled.dxf', {

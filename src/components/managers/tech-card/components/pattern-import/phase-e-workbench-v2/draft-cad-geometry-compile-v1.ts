@@ -47,6 +47,7 @@ import type {
   PatternImportDxfPhaseEDraftCadToolV1,
 } from './draft-cad-session-v1';
 import {
+  activeDraftCadTransactionsV1,
   DRAFT_CAD_CROSS_MARK_HALF_SPAN_MM,
   PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_PRODUCTIVE_TOOLS_V1,
   permitsDraftCadLocalPieceEditV1,
@@ -261,7 +262,7 @@ function canonical(value: unknown): string {
 function activeCommands(
   session: PatternImportDxfPhaseEDraftCadSessionV1,
 ): readonly PatternImportDxfPhaseEDraftCadCommandV1[] {
-  return session.history.slice(0, session.cursor).flatMap(({ commands }) => commands);
+  return activeDraftCadTransactionsV1(session).flatMap(({ commands }) => commands);
 }
 
 function supported(command: PatternImportDxfPhaseEDraftCadCommandV1): boolean {
@@ -500,21 +501,27 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
 ): PatternImportDxfPhaseEDraftCadGeometryCompileResultV1 {
   let detached: PatternImportDxfPhaseEDraftCadGeometryCompileInputV1;
   try {
-    detached = structuredClone(input);
+    const original = input.session;
+    if (
+      !original ||
+      !Number.isSafeInteger(original.cursor) ||
+      original.cursor < 0 ||
+      original.cursor > original.history.length
+    )
+      return blocked('invalid-input', 'Draft CAD compile requires complete V1 session inputs.');
+    // Resolve authenticated handle revisions before detaching loses local session ownership.
+    const history = activeDraftCadTransactionsV1(original);
+    detached = structuredClone(
+      history.length === original.cursor
+        ? input
+        : { ...input, session: { ...original, history, cursor: history.length } },
+    );
   } catch {
     return blocked('invalid-input', 'Draft CAD compile input could not be detached safely.');
   }
 
   const { session, projection, selection, compileSource } = detached;
-  if (
-    !session ||
-    !projection ||
-    selection?.ok !== true ||
-    !compileSource ||
-    !Number.isSafeInteger(session.cursor) ||
-    session.cursor < 0 ||
-    session.cursor > session.history.length
-  )
+  if (!projection || selection?.ok !== true || !compileSource)
     return blocked('invalid-input', 'Draft CAD compile requires complete V1 session inputs.');
 
   const commands = activeCommands(session);
