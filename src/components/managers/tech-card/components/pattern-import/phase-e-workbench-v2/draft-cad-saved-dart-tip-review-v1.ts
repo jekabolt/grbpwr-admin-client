@@ -21,6 +21,7 @@ import {
   readCompiledPairedAllowanceReviewV1,
   type PatternImportDxfPhaseEDraftCadGeometryCompileInputV1 as CompileInput,
   type PatternImportDxfPhaseEDraftCadGeometryCompileArtifactV1 as Artifact,
+  type PatternImportDxfPhaseEDraftCadGeometryCompileResultV1 as CompileResult,
 } from './draft-cad-geometry-compile-v1';
 import type {
   prepareSavedAddPointReviewV1,
@@ -193,7 +194,7 @@ export async function compileSavedDraftGeometryReviewV1(
   }: Pick<Parameters<typeof prepareSavedAddPointReviewV1>[0], 'sourceOwner' | 'sourceRequest'> &
     Readonly<{ readCurrent: () => SavedGeometryCurrentV1 | null }>,
   verifyCurrentRow: () => Promise<void>,
-) {
+): Promise<CompileResult> {
   const opening = readCurrent();
   requireSavedEdit(
     opening && isRecordedDraftCadSessionV1(opening.session),

@@ -66,6 +66,7 @@ const TOOL_LABELS = Object.freeze({
   'delete-point': 'Delete point',
   'sharpen-corner': 'Sharpen corner',
   'round-corner': 'Round corner',
+  'allowance-corner': 'Corner treatment',
   'edge-length': 'Edge length',
   'allowance-offset': 'Offset allowance',
   'internal-line': 'Internal line',
