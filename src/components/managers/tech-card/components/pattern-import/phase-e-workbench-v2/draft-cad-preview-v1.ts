@@ -719,7 +719,7 @@ export function buildPatternImportDxfPhaseEDraftCadPreviewV1(
             commandBlocker(
               command,
               'anchor-unavailable',
-              'Choose an exact side of the rectangular cut outline and a representable offset.',
+              'Choose a cut edge with two exact right-angle joins and a representable offset.',
             ),
           );
           break;

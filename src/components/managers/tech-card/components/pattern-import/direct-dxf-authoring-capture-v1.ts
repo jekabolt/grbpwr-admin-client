@@ -2,10 +2,11 @@ import {
   isSavedJoinFile,
   bindJoinWizardScope,
 } from './phase-e-workbench-v2/draft-cad-saved-join-file';
-import { savedReviewLabelV1 } from './phase-e-workbench-v2/draft-cad-saved-dart-tip-file-v1';
 import {
   isSavedDartTipReviewFileV1,
   bindSavedDartTipWizardScopeV1,
+  readSavedAllowanceOffsetHeadingV1,
+  savedReviewLabelV1,
   verifySavedDartTipApplyV1,
 } from './phase-e-workbench-v2/draft-cad-saved-dart-tip-file-v1';
 import { acceptCurrentFindings } from './steps/accepted-findings';
@@ -60,23 +61,30 @@ export function markUnlinkedPieceCopyFileV1(file: File, heading?: UnlinkedCopyHe
   if (heading) unlinkedCopyHeadings.set(file, heading);
 }
 
-/** Preserve the verified own-format names on a heading-copy review through ordinary semantics. */
+/** Preserve the verified own-format names through ordinary semantics for the bound review File. */
 export async function runOrdinaryDxfReviewSemanticsV1(
   files: readonly File[],
   card: Readonly<{ techCardId: number; scopeKey?: string }>,
   input: StageIO['semantics']['in'],
   run: (input: StageIO['semantics']['in']) => Promise<StageIO['semantics']['out']>,
 ) {
-  const heading = files.length === 1 && unlinkedCopyHeadings.get(files[0]!);
+  const file = files.length === 1 ? files[0] : undefined;
+  const allowance = file && readSavedAllowanceOffsetHeadingV1(file);
+  const heading = allowance ?? (file && unlinkedCopyHeadings.get(file));
   if (!heading) return run(input);
   if (heading.scopeKey !== card.scopeKey || heading.manifest.techCardId !== card.techCardId)
-    throw new Error('The reviewed unlinked copy belongs to another card or material scope.');
+    throw new Error(
+      allowance
+        ? 'The reviewed allowance offset belongs to another card or material scope.'
+        : 'The reviewed unlinked copy belongs to another card or material scope.',
+    );
   const {
     buildPatternImportDxfExactManifestPieceOverridesV1,
     buildPatternImportDxfSavedManifestAllowanceV1,
   } = await import('./phase-e-workbench-v2/saved-dxf-reprocess-host-v1');
   const fileAllowance = buildPatternImportDxfSavedManifestAllowanceV1(heading.manifest);
   const initial = await run({ ...input, fileAllowance });
+  if (allowance && initial.blocked.length) return initial;
   const exact = buildPatternImportDxfExactManifestPieceOverridesV1(initial, heading.manifest);
   const pieceOverrides = { ...input.pieceOverrides };
   for (const [seed, override] of Object.entries(exact)) {

@@ -30,75 +30,106 @@ function openRing(points: readonly PtMm[]) {
     : points;
 }
 
-function rectangle(points: readonly PtMm[]) {
+type GridPoint = Readonly<{ x: bigint; y: bigint }>;
+
+function exactPoint({ x, y }: PtMm): GridPoint | null {
+  const u = grid(x),
+    v = grid(y);
+  return u === null || v === null ? null : { x: BigInt(u), y: BigInt(v) };
+}
+
+function turn(a: GridPoint, b: GridPoint, p: GridPoint, denominator = 1n) {
+  return (b.x - a.x) * (p.y - a.y * denominator) - (b.y - a.y) * (p.x - a.x * denominator);
+}
+
+function convexQuad(points: readonly PtMm[]) {
   const ring = openRing(points);
   if (ring.length !== 4 || new Set(ring.map(({ x, y }) => `${x},${y}`)).size !== 4) return null;
-  const bounds = bboxOf(ring);
-  return ring.every(
-    ({ x, y }, index) =>
-      grid(x) !== null &&
-      grid(y) !== null &&
-      (x === bounds.minX || x === bounds.maxX) &&
-      (y === bounds.minY || y === bounds.maxY) &&
-      parallelOpeningAxisV1([ring[index]!, ring[(index + 1) % 4]!]),
+  const vertices = ring.map(exactPoint);
+  if (!vertices.every((vertex): vertex is GridPoint => vertex !== null)) return null;
+  const first = turn(vertices[0]!, vertices[1]!, vertices[2]!);
+  const winding = first > 0n ? 1n : -1n;
+  return vertices.every(
+    (a, i) => winding * turn(a, vertices[(i + 1) % 4]!, vertices[(i + 2) % 4]!) > 0n,
   )
-    ? { ring, bounds }
+    ? { ring, vertices, winding }
     : null;
 }
 
-export function isDraftRectangularCutOutlineV1(contour: Contour | undefined): boolean {
-  return Boolean(
-    contour?.closed &&
-      contour.role === 'cut-boundary' &&
-      contour.vertices.length === 4 &&
-      rectangle(contour.vertices.map(({ pointMm }) => pointMm)),
-  );
+type ConvexQuad = NonNullable<ReturnType<typeof convexQuad>>;
+
+function supports(contour: Contour | undefined, edge: readonly [string, string]) {
+  if (!contour?.closed || contour.role !== 'cut-boundary' || contour.vertices.length !== 4)
+    return null;
+  const { vertices } = contour;
+  const index = vertices.findIndex(({ vertexId }) => vertexId === edge[0]);
+  const next = (index + 1) % 4;
+  if (index < 0 || vertices[next]?.vertexId !== edge[1]) return null;
+  const original = convexQuad(vertices.map(({ pointMm }) => pointMm));
+  if (!original) return null;
+  const from = original.ring[index]!,
+    to = original.ring[next]!;
+  const before = original.ring[(index + 3) % 4]!,
+    after = original.ring[(next + 1) % 4]!;
+  const fixed = parallelOpeningAxisV1([from, to]);
+  if (fixed !== 'x' && fixed !== 'y') return null;
+  const axis: 'x' | 'y' = fixed;
+  const along = axis === 'x' ? 'y' : 'x';
+  if (
+    parallelOpeningAxisV1([before, from]) !== along ||
+    parallelOpeningAxisV1([to, after]) !== along
+  )
+    return null;
+  const support = from[axis];
+  const sign = support > before[axis] ? 1 : -1;
+  return { original, index, next, axis, support, sign };
 }
 
-/** Moves one identified support line. Its perpendicular neighbors have unique exact joins. */
+export function hasDraftCutAllowanceJoinsV1(
+  contour: Contour | undefined,
+  edge: readonly [string, string],
+) {
+  return supports(contour, edge) !== null;
+}
+
+/** Moves only the selected support, preserving the two exact right-angle joins and the far side. */
 export function selectDraftCutAllowanceOffsetV1(
   contour: Contour | undefined,
   edge: readonly [string, string],
   offsetMm: number,
 ) {
-  if (
-    !contour?.closed ||
-    contour.role !== 'cut-boundary' ||
-    contour.vertices.length !== 4 ||
-    !validParallelDisplacementV1(offsetMm)
-  )
-    return null;
-  const { vertices } = contour;
-  const index = vertices.findIndex(({ vertexId }) => vertexId === edge[0]);
-  const next = (index + 1) % vertices.length;
-  if (index < 0 || vertices[next]?.vertexId !== edge[1]) return null;
-  const original = rectangle(vertices.map(({ pointMm }) => pointMm));
+  if (!validParallelDisplacementV1(offsetMm)) return null;
+  const selected = supports(contour, edge);
   const amount = grid(offsetMm);
-  if (!original || amount === null) return null;
-  const from = original.ring[index]!,
-    to = original.ring[next]!;
-  const axis: 'x' | 'y' = from.x === to.x ? 'x' : 'y';
-  const support = from[axis];
-  const minimum = axis === 'x' ? original.bounds.minX : original.bounds.minY;
-  const maximum = axis === 'x' ? original.bounds.maxX : original.bounds.maxY;
-  const sign = support === minimum ? -1 : 1;
+  if (!selected || amount === null) return null;
+  const { original, index, next, axis, support, sign } = selected;
   const moved = grid(support)! + sign * amount;
   if (!Number.isSafeInteger(moved)) return null;
   const movedSupport = moved / dxfScale;
-  if (
-    grid(movedSupport) !== moved ||
-    (sign === -1 ? movedSupport >= maximum : movedSupport <= minimum)
-  )
-    return null;
-  const ring = original.ring.map((point) =>
-    point[axis] === support ? { ...point, [axis]: movedSupport } : point,
+  if (grid(movedSupport) !== moved) return null;
+  const edited = convexQuad(
+    original.ring.map((point, i) =>
+      i === index || i === next ? { ...point, [axis]: movedSupport } : point,
+    ),
   );
-  return {
-    original: original.ring,
-    ring,
-    axis,
-    support,
-  };
+  return edited?.winding === original.winding
+    ? { original, edited, ring: edited.ring, axis, support }
+    : null;
+}
+
+function contains(quad: ConvexQuad, point: GridPoint, denominator = 1n) {
+  return quad.vertices.every(
+    (a, i) => quad.winding * turn(a, quad.vertices[(i + 1) % 4]!, point, denominator) > 0n,
+  );
+}
+
+function onSide(quad: ConvexQuad, point: GridPoint) {
+  return quad.vertices.some((a, i) => {
+    const b = quad.vertices[(i + 1) % 4]!;
+    const along = (point.x - a.x) * (b.x - a.x) + (point.y - a.y) * (b.y - a.y);
+    const lengthSquared = (b.x - a.x) ** 2n + (b.y - a.y) ** 2n;
+    return turn(a, b, point) === 0n && along > 0n && along < lengthSquared;
+  });
 }
 
 type Result =
@@ -133,7 +164,7 @@ export function offsetDraftCadSelectedSizeAllowanceV1(
     source.repair ||
     source.kinks?.length
   )
-    return { ok: false, detail: 'Choose a straight side of the native rectangular cut outline.' };
+    return { ok: false, detail: 'Choose a native cut edge with two exact right-angle joins.' };
   if (!proof)
     return {
       ok: false,
@@ -148,58 +179,58 @@ export function offsetDraftCadSelectedSizeAllowanceV1(
     proof.sizeToken !== sizeToken ||
     !sameDraftAllowanceRingV1(source.cut, proof.cut) ||
     !sameDraftAllowanceRingV1(source.seam, proof.seam) ||
-    !sameDraftAllowanceRingV1(moved.original, proof.cut)
+    !sameDraftAllowanceRingV1(moved.original.ring, proof.cut)
   )
     return { ok: false, detail: 'The offset does not match the verified native outline pair.' };
-  const sewing = rectangle(source.seam);
+  const { original, edited } = moved;
+  const sewing = convexQuad(source.seam);
   const bounds = bboxOf(moved.ring);
-  const originalBounds = bboxOf(moved.original);
-  const inside = (point: PtMm, box = bounds) =>
-    point.x > box.minX && point.x < box.maxX && point.y > box.minY && point.y < box.maxY;
-  if (!sewing || !sewing.ring.every((point) => inside(point, originalBounds) && inside(point)))
-    return { ok: false, detail: 'The native sewing rectangle must stay strictly inside the cut.' };
+  if (
+    !sewing ||
+    !sewing.vertices.every((point) => contains(original, point) && contains(edited, point))
+  )
+    return { ok: false, detail: 'The native sewing outline must stay strictly inside both cuts.' };
   const interior = [
     ...(source.cutLoops ?? []).flat(),
     ...source.internal.flatMap(({ pts }) => pts),
-    ...source.drills.flatMap(({ at, form, sizeMm }) => {
-      if (form === 'point') return [at];
-      const radius = (form === 'circle' && sizeMm ? sizeMm : DRILL_SQUARE_MM) / 2;
-      return [
-        { x: at.x - radius, y: at.y - radius },
-        { x: at.x + radius, y: at.y + radius },
-      ];
-    }),
     ...(source.textMarks ?? []).map(({ at }) => at),
     ...(source.pointMarks ?? []).map(({ at }) => at),
   ];
   // The ordinary writer fixes the arrow length and only refits when its midpoint leaves the cut.
-  const grainMiddle = source.grain
-    ? {
-        x: (source.grain.a.x + source.grain.b.x) / 2,
-        y: (source.grain.a.y + source.grain.b.y) / 2,
-      }
-    : null;
-  const onSide = (point: PtMm, ring: readonly PtMm[]) =>
-    ring.some((a, i) => {
-      const b = ring[(i + 1) % 4]!;
-      const fixed = parallelOpeningAxisV1([a, b])!;
-      const along = fixed === 'x' ? 'y' : 'x';
-      return (
-        point[fixed] === a[fixed] &&
-        point[along] > Math.min(a[along], b[along]) &&
-        point[along] < Math.max(a[along], b[along])
-      );
-    });
+  const grainA = source.grain && exactPoint(source.grain.a);
+  const grainB = source.grain && exactPoint(source.grain.b);
+  const grainMiddle = grainA && grainB && { x: grainA.x + grainB.x, y: grainA.y + grainB.y };
+  const inside = (point: GridPoint, denominator = 1n) =>
+    contains(original, point, denominator) && contains(edited, point, denominator);
   if (
-    interior.some((point) => !inside(point)) ||
-    (grainMiddle && (!inside(grainMiddle, originalBounds) || !inside(grainMiddle))) ||
-    source.notches.some(
-      ({ at, seg }) =>
+    interior.some((point) => {
+      const exact = exactPoint(point);
+      return !exact || !inside(exact);
+    }) ||
+    (source.grain && (!grainMiddle || !inside(grainMiddle, 2n))) ||
+    source.drills.some(({ at, form, sizeMm }) => {
+      const point = exactPoint(at);
+      const diameter = grid(
+        form === 'point' ? 0 : form === 'circle' && sizeMm ? sizeMm : DRILL_SQUARE_MM,
+      );
+      if (!point || diameter === null || diameter < 0) return true;
+      const d = BigInt(diameter);
+      return [-d, d].some((u) =>
+        [-d, d].some((v) => !inside({ x: 2n * point.x + u, y: 2n * point.y + v }, 2n)),
+      );
+    }) ||
+    source.notches.some(({ at, seg }) => {
+      const start = exactPoint(at),
+        tip = exactPoint(seg[1]);
+      return (
+        !start ||
+        !tip ||
         at[moved.axis] === moved.support ||
-        !onSide(at, moved.original) ||
-        !onSide(at, moved.ring) ||
-        (inside(seg[1], originalBounds) && !inside(seg[1])),
-    )
+        !onSide(original, start) ||
+        !onSide(edited, start) ||
+        (contains(original, tip) && !contains(edited, tip))
+      );
+    })
   )
     return {
       ok: false,

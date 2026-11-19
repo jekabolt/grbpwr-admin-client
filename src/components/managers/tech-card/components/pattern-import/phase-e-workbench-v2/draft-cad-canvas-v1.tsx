@@ -1,6 +1,6 @@
 import { selectDraftSharpCornerV1 } from './draft-cad-edge-length-geometry-v1';
 import {
-  isDraftRectangularCutOutlineV1,
+  hasDraftCutAllowanceJoinsV1,
   selectDraftCutAllowanceOffsetV1,
 } from './draft-cad-allowance-offset-geometry-v1';
 import { parallelOpeningAxisV1, validParallelDisplacementV1 } from './draft-cad-session-v1';
@@ -610,7 +610,7 @@ export function recordPatternImportDxfPhaseEDraftCadCanvasBoundaryPickV1(
         sequence: input.sequence,
         recorded: false,
         blocker:
-          'Choose a rectangular cut edge and enter a nonzero offset with up to six decimals.',
+          'Choose a cut edge with two right-angle joins and enter a nonzero offset with up to six decimals.',
       };
     label = 'Offset seam allowance';
     command = {
@@ -1927,7 +1927,7 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
     return bases.filter(({ anchor }) => {
       const contour = piece?.contours.find(({ contourId }) => contourId === anchor.contourId);
       return activeTool === 'allowance-offset'
-        ? isDraftRectangularCutOutlineV1(contour)
+        ? hasDraftCutAllowanceJoinsV1(contour, anchor.boundaryVertexIds)
         : Boolean(selectDraftSharpCornerV1(contour, anchor.boundaryVertexIds));
     });
   }, [activePieceIndex, activeTool, crossScopeConnectActive, projection, session]);

@@ -1,9 +1,11 @@
-import type { CardDraft } from 'lib/pattern-import/types';
+import type { CardDraft, ConversionManifest } from 'lib/pattern-import/types';
 
 type Scope = CardDraft['scopes'][number];
 type Verify = (draft: CardDraft, scope: Scope, isCurrent: () => boolean) => Promise<void>;
 const files = new WeakMap<File, Verify | null>();
 const scopes = new WeakMap<Scope, { file: File; text: string }>();
+type AllowanceHeading = Readonly<{ scopeKey: string; manifest: ConversionManifest }>;
+const allowanceHeadings = new WeakMap<File, AllowanceHeading>();
 
 type SavedGeometryReviewLabel =
   | 'saved dart'
@@ -17,11 +19,16 @@ export function registerSavedDartTipFileV1(
   file: File,
   verify: Verify,
   label: SavedGeometryReviewLabel = 'saved dart',
+  allowanceHeading?: AllowanceHeading,
 ) {
   if (files.has(file)) throw new Error('This dart review File is already bound.');
   labels.set(file, label);
   files.set(file, verify);
+  if (label === 'saved allowance offset' && allowanceHeading)
+    allowanceHeadings.set(file, allowanceHeading);
 }
+export const readSavedAllowanceOffsetHeadingV1 = (file: File) =>
+  files.get(file) ? allowanceHeadings.get(file) : undefined;
 export const isSavedDartTipReviewFileV1 = (file: File) => files.has(file);
 export function cancelSavedDartTipReviewV1(file?: File) {
   if (file && files.has(file)) files.set(file, null);

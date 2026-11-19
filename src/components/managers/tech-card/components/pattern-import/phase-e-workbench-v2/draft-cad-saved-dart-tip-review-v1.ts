@@ -64,6 +64,16 @@ function markers(manifest: ConversionManifest) {
       .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
   );
 }
+
+function headings(manifest: ConversionManifest) {
+  return JSON.stringify(
+    manifest.pieces.map(({ identity, displayName, nameOrigin }) => [
+      identity,
+      displayName,
+      nameOrigin,
+    ]),
+  );
+}
 // Compare what can be written in every size. Worker-local path ids are allocated anew on reopen.
 function geometry(job: WriteJob) {
   return JSON.stringify(
@@ -631,6 +641,8 @@ export function openSavedDraftGeometryFileV1(artifact: Artifact, name: string) {
           scope.target.scopeKey === review.scopeKey &&
           scope.manifest.gate?.passed &&
           markers(scope.manifest) === markers(review.manifest) &&
+          (review.kind !== 'saved allowance offset' ||
+            headings(scope.manifest) === headings(review.manifest)) &&
           scope.writerReplay &&
           (review.kind === 'saved allowance offset'
             ? openingGeometry(scope.writerReplay.job, 'grade')
@@ -648,6 +660,9 @@ export function openSavedDraftGeometryFileV1(artifact: Artifact, name: string) {
       );
     },
     review.kind,
+    review.kind === 'saved allowance offset'
+      ? { scopeKey: review.scopeKey, manifest: review.manifest }
+      : undefined,
   );
   return file;
 }
