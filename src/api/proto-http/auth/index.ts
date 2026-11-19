@@ -161,7 +161,15 @@ export type SignInRequest = {
 export type SignInResponse = {
   token: string | undefined;
   teams: TeamRef[] | undefined;
+  // account_deleted_until is set, with no token and no teams, when the password is right but the account is
+  // deleted and can still be restored until this time (RequestAccountRestore).
+  accountDeletedUntil: wellKnownTimestamp | undefined;
 };
+
+// Encoded using RFC 3339, where generated output will always be Z-normalized
+// and uses 0, 3, 6 or 9 fractional digits.
+// Offsets other than "Z" are also accepted.
+type wellKnownTimestamp = string;
 
 export type IssueHandoffRequest = {
   teamSlug: string | undefined;
@@ -322,12 +330,10 @@ export type MyProfile = {
   // sole_owner_teams are the teams where the person is the only active owner and others are members;
   // DeleteMyAccount is refused while this is not empty.
   soleOwnerTeams: TeamRef[] | undefined;
+  // closing_teams are the teams where the person is the only active member: they close with the account
+  // and come back with it while its 30 days run.
+  closingTeams: TeamRef[] | undefined;
 };
-
-// Encoded using RFC 3339, where generated output will always be Z-normalized
-// and uses 0, 3, 6 or 9 fractional digits.
-// Offsets other than "Z" are also accepted.
-type wellKnownTimestamp = string;
 
 // MySession is one signed-in device: a root session plus the team sessions opened from it.
 export type MySession = {
@@ -431,6 +437,8 @@ export type DeleteMyAccountRequest = {
 };
 
 export type DeleteMyAccountResponse = {
+  // purge_at is when the account is erased; until then RestoreAccount brings it back.
+  purgeAt: wellKnownTimestamp | undefined;
 };
 
 export type FinishTeamEntryRequest = {
@@ -439,16 +447,41 @@ export type FinishTeamEntryRequest = {
 export type FinishTeamEntryResponse = {
 };
 
+export type RequestAccountRestoreRequest = {
+  // login is an email, a handle or an @username.
+  login: string | undefined;
+};
+
+export type RequestAccountRestoreResponse = {
+};
+
+export type RestoreAccountRequest = {
+  // token is the restore letter's link token; without it, login + code from the same letter.
+  token: string | undefined;
+  // login is an email, a handle or an @username.
+  login: string | undefined;
+  code: string | undefined;
+};
+
+export type RestoreAccountResponse = {
+  // root_token is a root token, valid for 30 days.
+  rootToken: string | undefined;
+  // teams are the account's teams after the restore, the teams that closed with it included.
+  teams: TeamRef[] | undefined;
+};
+
 // AuthService. Plain HTTP routes of the same /api/auth mount that are not RPCs (no gateway, no session):
 // POST /api/auth/oauth/{google|apple}/start  (HTML form: target signin|invite; for an invite
 // invite_token and terms_accepted) starts a provider sign-in;
 // GET  /api/auth/oauth/google/callback and POST /api/auth/oauth/apple/callback end it with a 303 to
 // https://<base>/auth/oauth#code=<one-time code for ExchangeSignInCode> or #error=<fixed key>
-// (cancelled, expired, unverified, invite_mismatch, disabled, try_again);
+// (cancelled, expired, unverified, invite_mismatch, disabled, try_again, account_deleted — the
+// account is deleted and can still be restored: RequestAccountRestore);
 // GET  /api/auth/team-logo/{slug} serves a team's logo as PNG (public; 404 when there is none);
 // GET|HEAD /api/auth/avatar/{sha256} serves an account avatar as PNG (public, immutable; 404 when gone).
 // Google connect: StartGoogleLink, then the HTML form POST /api/auth/oauth/google/start with
 // target=link&ticket=<ticket>; the callback redirects to https://<slug>.<base>/profile?google=linked|taken|unverified.
+// Restore letters link to https://<base>/restore#token=<token> (RestoreAccount).
 // "root session" below = a Bearer token from SignIn target root or ExchangeSignInCode.
 export interface AuthService {
   // Authenticate a user. Returns a JWT token if the user is authenticated.
@@ -495,6 +528,12 @@ export interface AuthService {
   ExchangeSignInCode(request: ExchangeSignInCodeRequest): Promise<ExchangeSignInCodeResponse>;
   // SetTeamLogo sets or removes the logo of the calling team (team session, owner only).
   SetTeamLogo(request: SetTeamLogoRequest): Promise<SetTeamLogoResponse>;
+  // RequestAccountRestore emails a restore letter (code + link, 1 hour) when login names an account deleted
+  // less than 30 days ago (public; always {}, whatever the login is; on the per-email letter cap).
+  RequestAccountRestore(request: RequestAccountRestoreRequest): Promise<RequestAccountRestoreResponse>;
+  // RestoreAccount brings a deleted account back while its 30 days run, by the restore letter's link token
+  // or by (login, code), and signs the person in on the root site (public). Errors: invalid or expired code.
+  RestoreAccount(request: RestoreAccountRequest): Promise<RestoreAccountResponse>;
   // GetMyProfile returns the calling person's own account profile.
   GetMyProfile(request: GetMyProfileRequest): Promise<GetMyProfileResponse>;
   // UpdateMyProfile sets first/last name and @username. Errors: bad_username, username_taken, name_too_long.
@@ -514,7 +553,9 @@ export interface AuthService {
   StartGoogleLink(request: StartGoogleLinkRequest): Promise<StartGoogleLinkResponse>;
   // UnlinkMyGoogle disconnects Google from the account. Errors: only_sign_in.
   UnlinkMyGoogle(request: UnlinkMyGoogleRequest): Promise<UnlinkMyGoogleResponse>;
-  // DeleteMyAccount deletes the calling person's account. Errors: bad_confirm, sole_owner.
+  // DeleteMyAccount deletes the calling person's account: sign-in closes at once, the teams where the person
+  // is the only member close with it, and RestoreAccount brings everything back for 30 days.
+  // Errors: bad_confirm, sole_owner, try_again (a closing team is still provisioning), operator.
   DeleteMyAccount(request: DeleteMyAccountRequest): Promise<DeleteMyAccountResponse>;
   // FinishTeamEntry ends the first-entry screen of the calling team (team token only).
   FinishTeamEntry(request: FinishTeamEntryRequest): Promise<FinishTeamEntryResponse>;
@@ -894,6 +935,40 @@ export function createAuthServiceClient(
         service: "AuthService",
         method: "SetTeamLogo",
       }) as Promise<SetTeamLogoResponse>;
+    },
+    RequestAccountRestore(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/auth/request-account-restore`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AuthService",
+        method: "RequestAccountRestore",
+      }) as Promise<RequestAccountRestoreResponse>;
+    },
+    RestoreAccount(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/auth/restore-account`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AuthService",
+        method: "RestoreAccount",
+      }) as Promise<RestoreAccountResponse>;
     },
     GetMyProfile(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/auth/get-my-profile`; // eslint-disable-line quotes
