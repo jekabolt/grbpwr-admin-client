@@ -12095,12 +12095,14 @@ export type UpdateTechCardRequest = {
   // UUID minted when the edit screen opens. Non-empty ordinary saves coalesce their pre-images into
   // one autosave snapshot per server-side five-minute bucket; absent keeps legacy save behaviour.
   saveSessionId: string | undefined;
-  // Name-only Workbench edit. Send without tech_card so an older server cannot execute a
-  // full document rewrite after ignoring this field.
+  // Name-only Workbench edit. Send without tech_card. Linked cards require the three
+  // additional authority fields inside this message; older servers still refuse linked cards.
   guardedPieceRename: GuardedZeroOperationPieceRename | undefined;
   guardedPieceJoin: GuardedNativePieceJoin | undefined;
 };
 
+// Pins a display name edit to a saved DXF row. With no attached authority fields,
+// a card must have zero operations and no protected attachments.
 export type GuardedZeroOperationPieceRename = {
   pieceLineKey: string | undefined;
   expectedName: string | undefined;
@@ -12109,9 +12111,13 @@ export type GuardedZeroOperationPieceRename = {
   patternLineKey: string | undefined;
   expectedSavedRowRevision: number | undefined;
   expectedDxfSha256: string | undefined;
+  // All three fields opt into an attached-card rename. The exact current V10 is
+  // retained as historical placement; the rename advances the card and Assembly clocks.
+  expectedServerAssemblyRevision?: string;
+  expectedCompleteSourceSha256?: string;
+  expectedCurrentSidecarSha256?: string;
 };
 
-// Pins a display name change to a current zero-operation card and exact saved DXF row.
 // Explicit, single-size saved native boundary Join. The server constructs the document delta.
 export type GuardedNativePieceJoin = {
   expectedRow: TechCardSavedPatternRowIdentity | undefined;
