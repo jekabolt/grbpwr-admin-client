@@ -1,5 +1,6 @@
 import { act, useLayoutEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { Button } from 'ui';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   PatternImportDxfPhaseECadWorkbenchSplitShellV1,
@@ -138,7 +139,7 @@ describe('preview retention in compact Workbench', () => {
       }, []);
       return (
         <>
-          <button
+          <Button
             type='button'
             onClick={() => {
               retain(true);
@@ -146,7 +147,7 @@ describe('preview retention in compact Workbench', () => {
             }}
           >
             Start preview
-          </button>
+          </Button>
           <canvas />
         </>
       );
