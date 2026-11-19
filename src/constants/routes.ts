@@ -16,6 +16,8 @@ export type NavItem = {
   // The team switch the item lives under (design §8). Hidden when the team has it off; `core`
   // is never off. No workspace (a backend before teams) leaves every item on.
   feature?: FeatureKey;
+  // Not on a team host: the team's people live on `/workspace` there (wave «teams»).
+  legacyOnly?: boolean;
 };
 
 // A labeled group of destinations. On desktop each group is a dropdown in the top
@@ -202,8 +204,10 @@ export enum ROUTES {
   accountingPeriods = '/accounting/periods',
   accountingEvents = '/accounting/events',
   employees = '/employees',
-  // Team members and invites (lane C2). On team hosts only.
+  // Old address of the team's people; redirects to `/workspace`.
   people = '/people',
+  // The team's brand and people (wave «teams»). On team hosts only.
+  workspace = '/workspace',
   // lekalo hosts: the root sheet and the team host's own entry points (design §5).
   signIn = '/login',
   confirm = '/confirm',
@@ -371,7 +375,13 @@ export const ADMIN_GROUP: NavGroup = {
       section: SECTION.shipping,
       feature: FEATURE.settings,
     },
-    { label: 'accounts', route: ROUTES.accounts, section: SECTION.accounts, feature: FEATURE.core },
+    {
+      label: 'accounts',
+      route: ROUTES.accounts,
+      section: SECTION.accounts,
+      feature: FEATURE.core,
+      legacyOnly: true,
+    },
     // Keys, routes and the spend report are money: every AiProviders RPC is SuperOnly on the
     // server (no section, owner decision D-03), so the entry is drawn for super accounts only.
     // Last in the last group, and skipped by `homeRoute` for everyone else, so it can never

@@ -17,20 +17,30 @@ export function MobileNavMenu() {
 
   // Same grouped source and same filter as desktop: drop unreadable items and, for a non-super
   // account, super-only ones; then drop empty groups.
+  const team = currentHost().kind === 'team';
+  // A team host: `workspace` closes the admin group (wave «teams»), words as written.
   const groups = [...NAV_GROUPS, ADMIN_GROUP]
     .map((group) => ({
       ...group,
-      items: group.items.filter((item) => canSee(item)),
+      items: [
+        ...group.items.filter((item) => canSee(item)),
+        ...(team && group === ADMIN_GROUP ? [{ label: 'workspace', route: ROUTES.workspace }] : []),
+      ],
     }))
     .filter((group) => group.items.length > 0);
+  const tile = (active: boolean) =>
+    cn(
+      'flex min-h-12 items-center justify-center border border-borderColor px-2 py-3 text-center leading-tight transition-colors active:opacity-80',
+      !team && 'uppercase',
+      active ? 'bg-textColor text-bgColor' : 'hover:bg-textColor hover:text-bgColor',
+    );
+  const caps = team ? undefined : 'uppercase';
 
   // «Мой профиль» — вне гейтов и вне `groups`: он не привязан ни к какой секции, и человек
   // без единого выданного раздела (у которого весь список выше пуст) обязан видеть в ящике
   // хотя бы его. На десктопе тот же пункт живёт в шапке рядом с «logout»; здесь шапка занята
   // тремя элементами, поэтому он приходит последней плиткой.
   const profileActive = isActiveRoute(pathname, ROUTES.me);
-  const peopleActive = isActiveRoute(pathname, ROUTES.people);
-  const team = currentHost().kind === 'team';
 
   return (
     <DialogPrimitives.Root open={open} onOpenChange={setOpen}>
@@ -44,7 +54,7 @@ export function MobileNavMenu() {
         <DialogPrimitives.Content className='fixed inset-x-2 bottom-2 top-2 z-[var(--z-nav)] flex flex-col border border-borderColor bg-bgColor'>
           <div className='flex items-center justify-between border-b border-borderColor px-2.5 py-3'>
             <DialogPrimitives.Title asChild>
-              <Text variant='uppercase'>menu</Text>
+              <Text variant={caps}>menu</Text>
             </DialogPrimitives.Title>
             <DialogPrimitives.Close asChild>
               <Close />
@@ -57,7 +67,7 @@ export function MobileNavMenu() {
                   {/* Заголовок группы — 10px серый (система: «group titles» = Label), а плитки
                       под ним 12px ink. Пока тело наследовало браузерные 16px, разницу держал
                       размер плиток; теперь её держит размер ЗАГОЛОВКА, как и задумано. */}
-                  <Text variant='uppercase' size='micro' className='text-labelColor'>
+                  <Text variant={caps} size='micro' className='text-labelColor'>
                     {group.label}
                   </Text>
                   <div className='mt-2 grid grid-cols-2 gap-2'>
@@ -68,12 +78,7 @@ export function MobileNavMenu() {
                           <Link
                             to={item.route}
                             aria-current={active ? 'page' : undefined}
-                            className={cn(
-                              'flex min-h-12 items-center justify-center border border-borderColor px-2 py-3 text-center leading-tight uppercase transition-colors active:opacity-80',
-                              active
-                                ? 'bg-textColor text-bgColor'
-                                : 'hover:bg-textColor hover:text-bgColor',
-                            )}
+                            className={tile(active)}
                           >
                             {item.label}
                           </Link>
@@ -85,40 +90,19 @@ export function MobileNavMenu() {
               ))}
 
               <section>
-                <Text variant='uppercase' size='micro' className='text-labelColor'>
-                  {account?.username ? `account · ${account.username}` : 'account'}
+                <Text variant={caps} size='micro' className='text-labelColor'>
+                  {account?.username && !team ? `account · ${account.username}` : 'account'}
                 </Text>
                 <div className='mt-2 grid grid-cols-2 gap-2'>
                   <DialogPrimitives.Close asChild>
                     <Link
                       to={ROUTES.me}
                       aria-current={profileActive ? 'page' : undefined}
-                      className={cn(
-                        'flex min-h-12 items-center justify-center border border-borderColor px-2 py-3 text-center leading-tight uppercase transition-colors active:opacity-80',
-                        profileActive
-                          ? 'bg-textColor text-bgColor'
-                          : 'hover:bg-textColor hover:text-bgColor',
-                      )}
+                      className={tile(profileActive)}
                     >
                       my profile
                     </Link>
                   </DialogPrimitives.Close>
-                  {team && (
-                    <DialogPrimitives.Close asChild>
-                      <Link
-                        to={ROUTES.people}
-                        aria-current={peopleActive ? 'page' : undefined}
-                        className={cn(
-                          'flex min-h-12 items-center justify-center border border-borderColor px-2 py-3 text-center leading-tight uppercase transition-colors active:opacity-80',
-                          peopleActive
-                            ? 'bg-textColor text-bgColor'
-                            : 'hover:bg-textColor hover:text-bgColor',
-                        )}
-                      >
-                        people
-                      </Link>
-                    </DialogPrimitives.Close>
-                  )}
                 </div>
               </section>
             </div>

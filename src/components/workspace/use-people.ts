@@ -1,6 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
-import type { ListTeamMembersResponse, TeamInvite, TeamMember } from 'api/proto-http/admin';
+import type {
+  AdminPermission,
+  ListTeamMembersResponse,
+  TeamInvite,
+  TeamMember,
+} from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { isOwnerOnly, memberRefusal, normalEmail } from './model';
 
@@ -71,10 +76,30 @@ export function usePeopleActions() {
     onError: (e) => isOwnerOnly(e) && void reload(),
   });
 
-  const resend = useMutation({
-    mutationFn: (inviteRef: string) => adminService.ResendTeamInvite({ inviteRef }),
-    onSuccess: () => reload(),
-    onError: (e) => refused(e, 'not sent'),
+  /** The full set of a member's sections (one left out = none); the strip moves at once. */
+  const setAccess = useMutation({
+    mutationFn: (v: { username: string; permissions: AdminPermission[] }) =>
+      adminService.SetTeamMemberAccess(v),
+    onMutate: async (v) => {
+      await hold();
+      const was = qc
+        .getQueryData<ListTeamMembersResponse>(key)
+        ?.members?.find((m) => m.username === v.username)?.permissions;
+      patchMembers((ms) =>
+        ms.map((m) => (m.username === v.username ? { ...m, permissions: v.permissions } : m)),
+      );
+      return { was };
+    },
+    onSuccess: (r, v) => {
+      const fresh = r.member;
+      if (fresh) patchMembers((ms) => ms.map((m) => (m.username === v.username ? fresh : m)));
+    },
+    onError: (e, v, ctx) => {
+      patchMembers((ms) =>
+        ms.map((m) => (m.username === v.username ? { ...m, permissions: ctx?.was } : m)),
+      );
+      refused(e);
+    },
   });
 
   const revoke = useMutation({
@@ -83,5 +108,5 @@ export function usePeopleActions() {
     onError: (e) => refused(e, 'not revoked'),
   });
 
-  return { setRole, remove, invite, resend, revoke };
+  return { setRole, setAccess, remove, invite, revoke };
 }
