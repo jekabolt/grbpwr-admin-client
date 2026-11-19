@@ -1,10 +1,20 @@
-import { useId, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+} from 'react';
 import {
   projectCurrentModelDisplayedTriangleBodyInputV1,
   subscribeModelDisplayedTriangleBodyInputInvalidationV1,
   type ModelDisplayedTriangleBodyOwnedInputV1,
 } from 'components/cloth-simulation-spike/model-displayed-triangle-body-input-v1';
+import { MEASUREMENT_SURFACE_PRINCIPAL_STRAIN_SCALE_V1 as principalStrainScale } from 'components/shared/measurement-surface-principal-strain-scale-v1';
 import type { MeasurementSurfaceAcceptedClothV1 } from 'components/shared/measurement-watertight-surface-v1-stage';
+import type { SourceCutPrincipalStrainV1 } from 'lib/cloth/runtime/cpu/source-cut-principal-strain-v1';
 import { Button, Input, Text } from 'ui';
 import { CAD_WORKBENCH_SEAM_SIDE_COLORS } from './cad-workbench-seam-colors-v1';
 import { useCadWorkbenchRetainMannequinPreviewV1 } from './cad-workbench-split-shell-v1';
@@ -22,6 +32,12 @@ import type {
 } from './saved-whole-assembly-staged-preview-v1';
 
 type PreviewKind = 'seam' | 'whole';
+
+const signedStrainPercent = new Intl.NumberFormat('en', {
+  style: 'percent',
+  signDisplay: 'exceptZero',
+  maximumFractionDigits: 2,
+});
 
 export default function SavedCompleteAssemblyNativePreviewControlsV8({
   review,
@@ -42,6 +58,12 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
   const resumeRequested = useRef(false);
   const stepRequested = useRef(false);
   const pausedCheckpoint = useRef<SavedWholeAssemblyResumeV1 | null>(null);
+  const activeWholeCloth = useRef<MeasurementSurfaceAcceptedClothV1 | null>(null);
+  const [showStrain, setShowStrain] = useState(false);
+  const [strainReading, setStrainReading] = useState<Readonly<{
+    cloth: MeasurementSurfaceAcceptedClothV1;
+    value: SourceCutPrincipalStrainV1 | null;
+  }> | null>(null);
   const [pausing, setPausing] = useState(false);
   const [lifecycle] = useState(() => createCadWorkbenchPreviewLifecycleV1());
   const [status, setStatus] = useState<CadWorkbenchPreviewStatusV1>({
@@ -140,7 +162,7 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
               await review.verify(active, verifiedSource.authoredFoldSourceSha256);
             },
             onAccepted(progress) {
-              onAcceptedCloth(progress.cloth);
+              activeWholeCloth.current = progress.cloth;
               setAcceptedFrame({ number: progress.cloth.frameNumber, kind: 'whole' });
               setWholeProgress(progress);
             },
@@ -240,6 +262,9 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
       },
       async stopPreview() {
         pausedCheckpoint.current = null;
+        activeWholeCloth.current = null;
+        setShowStrain(false);
+        setStrainReading(null);
         pauseRequested.current = false;
         setPausing(false);
         onAcceptedCloth(undefined);
@@ -255,6 +280,9 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
       placementSave.current?.abort();
       placementSave.current = null;
       setPlacementStatus({ pending: false, error: null });
+      activeWholeCloth.current = null;
+      setShowStrain(false);
+      setStrainReading(null);
       onAcceptedCloth(undefined);
       setAcceptedFrame(null);
       setWholeProgress(null);
@@ -268,6 +296,42 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
       cancel();
     };
   }, [body, disabled, host, lifecycle, onAcceptedCloth]);
+
+  const wholeCloth = wholeProgress?.cloth;
+  const readPrincipalStrain = wholeProgress?.readPrincipalStrain;
+  const currentStrainReading =
+    showStrain && strainReading?.cloth === wholeCloth ? strainReading : null;
+  const displayedStrain = currentStrainReading?.value;
+  useLayoutEffect(() => {
+    if (!wholeCloth?.isCurrent() || activeWholeCloth.current !== wholeCloth) return;
+    onAcceptedCloth(
+      displayedStrain
+        ? Object.freeze({
+            ...wholeCloth,
+            principalStrain: Object.freeze({
+              frameNumber: wholeCloth.frameNumber,
+              positionsM: wholeCloth.positionsM,
+              valuesInDrawOrder: displayedStrain.valuesInDrawOrder,
+            }),
+          })
+        : wholeCloth,
+    );
+  }, [displayedStrain, onAcceptedCloth, wholeCloth]);
+
+  useEffect(() => {
+    if (!showStrain || !readPrincipalStrain || !wholeCloth?.isCurrent()) return;
+    const controller = new AbortController();
+    const publish = (value: SourceCutPrincipalStrainV1 | null) => {
+      if (
+        !controller.signal.aborted &&
+        activeWholeCloth.current === wholeCloth &&
+        wholeCloth.isCurrent()
+      )
+        setStrainReading({ cloth: wholeCloth, value });
+    };
+    void readPrincipalStrain(controller.signal).then(publish, () => publish(null));
+    return () => controller.abort();
+  }, [readPrincipalStrain, showStrain, wholeCloth]);
 
   const preview = (kind: PreviewKind, options: { resume?: boolean; step?: boolean } = {}) => {
     const resumeSuspended = options.resume === true;
@@ -452,6 +516,21 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
               Step one frame
             </Button>
           )}
+        {wholeCloth?.isCurrent() && (
+          <Button
+            type='button'
+            variant={showStrain ? 'main' : 'secondary'}
+            size='xs'
+            aria-pressed={showStrain}
+            data-whole-assembly-strain-toggle=''
+            onClick={() => {
+              setShowStrain(!showStrain);
+              if (showStrain) setStrainReading(null);
+            }}
+          >
+            Principal strain
+          </Button>
+        )}
         {(wholeProgress || (status.pending && previewKind.current === 'whole')) && (
           <Button
             type='button'
@@ -577,6 +656,55 @@ export default function SavedCompleteAssemblyNativePreviewControlsV8({
             {wholeProgress.contact.bodyIntersections} · Pairs with unproved body clearance{' '}
             {wholeProgress.contact.bodyPairsWithoutClearance}
           </Text>
+          {showStrain &&
+            (displayedStrain ? (
+              <div
+                className='space-y-1'
+                data-whole-assembly-strain-frame={wholeProgress.cloth.frameNumber}
+                data-strain-minimum={displayedStrain.summary.minimum}
+                data-strain-maximum={displayedStrain.summary.maximum}
+                data-strain-triangles={displayedStrain.summary.triangleCount}
+              >
+                <Text component='p' size='micro'>
+                  Maximum principal engineering strain · dimensionless
+                </Text>
+                <div className='flex flex-wrap gap-x-2 gap-y-1'>
+                  {[
+                    [
+                      principalStrainScale.compression,
+                      `≤${signedStrainPercent.format(-principalStrainScale.clampMagnitude)}`,
+                    ],
+                    [principalStrainScale.neutral, '0%'],
+                    [
+                      principalStrainScale.extension,
+                      `≥${signedStrainPercent.format(principalStrainScale.clampMagnitude)}`,
+                    ],
+                  ].map(([color, label]) => (
+                    <span key={label} className='inline-flex items-center gap-1'>
+                      <span
+                        aria-hidden='true'
+                        className='h-2 w-2 border border-borderColor'
+                        style={{ backgroundColor: color }}
+                      />
+                      <Text component='span' size='micro'>
+                        {label}
+                      </Text>
+                    </span>
+                  ))}
+                </div>
+                <Text component='p' size='micro'>
+                  Color clamped at ±{principalStrainScale.clampMagnitude * 100}% · Measured range{' '}
+                  {signedStrainPercent.format(displayedStrain.summary.minimum)} to{' '}
+                  {signedStrainPercent.format(displayedStrain.summary.maximum)}
+                </Text>
+              </div>
+            ) : (
+              <Text component='p' size='micro' role='status'>
+                {currentStrainReading
+                  ? 'Principal strain is unavailable for this accepted frame.'
+                  : 'Measuring principal strain…'}
+              </Text>
+            ))}
           {wholeProgress.stopped && (
             <>
               <Text component='p' size='micro' role='alert'>

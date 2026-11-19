@@ -8,6 +8,7 @@ import type {
   runStagedSourceCutFramesV1,
 } from 'components/cloth-simulation-spike/run-staged-source-cut-frames-v1';
 import type { MeasurementSurfaceAcceptedClothV1 } from 'components/shared/measurement-watertight-surface-v1-stage';
+import type { SourceCutPrincipalStrainV1 } from 'lib/cloth/runtime/cpu/source-cut-principal-strain-v1';
 import { inspectOwnedActiveXpbdDeviceLeaseV1 } from 'lib/cloth/runtime/webgpu/xpbd-device-session';
 import type { SavedCompleteAssemblyNativeStitchAnchorsV1 } from './saved-complete-assembly-native-stitch-anchors-v1';
 import type { RestoredWholeSourceCutPlacementV1 } from 'components/cloth-simulation-spike/prepare-saved-complete-whole-source-cut-v1';
@@ -79,6 +80,7 @@ export type SavedWholeAssemblyPreviewProgressV1 = Readonly<{
   maximumGapOperationNumber: number | null;
   totalStages: number;
   frameWork: FrameWork;
+  readPrincipalStrain: (signal: AbortSignal) => Promise<SourceCutPrincipalStrainV1 | null>;
   paused?: SavedWholeAssemblyResumeV1;
   stopped?: Readonly<{ operationNumber: number; detail: string }>;
 }>;
@@ -190,6 +192,9 @@ export async function readCurrentWholeAssemblyInitialPlacementV1(
 type SurfaceProjection = ReturnType<
   typeof import('lib/cloth/runtime/cpu/source-cut-surface-projection-v1').prepareSourceCutSurfaceProjectionV1
 >;
+type PrincipalStrainEvaluator = ReturnType<
+  typeof import('lib/cloth/runtime/cpu/source-cut-principal-strain-v1').prepareSourceCutPrincipalStrainV1
+>;
 type PausedRun = Readonly<{
   source: Source;
   body: ModelDisplayedTriangleBodyOwnedInputV1;
@@ -199,6 +204,7 @@ type PausedRun = Readonly<{
   receipt: Receipt;
   nextCommand: number;
   surface: SurfaceProjection;
+  readStrainEvaluator: () => Promise<PrincipalStrainEvaluator>;
   ranges: MeasurementSurfaceAcceptedClothV1['ranges'];
   last: SavedWholeAssemblyPreviewProgressV1;
 }>;
@@ -270,6 +276,15 @@ export async function runSavedWholeAssemblyStagedPreviewV1(
       ]);
     const cut = snapshotGarmentStagedSourceCutCoreV1(plan.frame.material).cut;
     const surface = prepareSourceCutSurfaceProjectionV1(cut, plan.maxSurfaceTriangles);
+    const maxSurfaceTriangles = plan.maxSurfaceTriangles;
+    let strainEvaluator: PrincipalStrainEvaluator | undefined;
+    const readStrainEvaluator = async () => {
+      if (strainEvaluator) return strainEvaluator;
+      const { prepareSourceCutPrincipalStrainV1 } = await import(
+        'lib/cloth/runtime/cpu/source-cut-principal-strain-v1'
+      );
+      return (strainEvaluator ??= prepareSourceCutPrincipalStrainV1(cut, maxSurfaceTriangles));
+    };
     const uniqueCuts = new Map<string, Source['sourceCuts'][number] | null>();
     for (const cut of source.sourceCuts) {
       uniqueCuts.set(cut.pieceLineKey, uniqueCuts.has(cut.pieceLineKey) ? null : cut);
@@ -305,13 +320,15 @@ export async function runSavedWholeAssemblyStagedPreviewV1(
       plan,
       commands,
       surface,
+      readStrainEvaluator,
       ranges,
       observedBody: plan.observedBody,
       totalStages: plan.frame.seams.stages.length,
     };
   }
   const initial = prior ? undefined : await initialize(source);
-  const { commands, surface, ranges, observedBody, totalStages } = prior ?? initial!;
+  const { commands, surface, readStrainEvaluator, ranges, observedBody, totalStages } =
+    prior ?? initial!;
 
   await verifySource(source, signal);
   requireCurrent();
@@ -362,7 +379,8 @@ export async function runSavedWholeAssemblyStagedPreviewV1(
 
     const frame = receipt.validated.at(-1);
     if (!frame) throw new Error('The whole-assembly run did not accept a display frame.');
-    const positionsM = surface.project(receipt.positionsMInvMass);
+    const carrierPositions = receipt.positionsMInvMass;
+    const positionsM = surface.project(carrierPositions);
     await verifySource(source, signal);
     requireCurrent();
     const step = receipt.safeguardedSteps.at(-1);
@@ -399,8 +417,21 @@ export async function runSavedWholeAssemblyStagedPreviewV1(
       stitchStations += seam.constraintCount;
       squaredGapSumM2 += seam.constraintCount * seam.rmsGapM ** 2;
     }
+    let strain: SourceCutPrincipalStrainV1 | undefined;
     last = Object.freeze({
       cloth: Object.freeze({ positionsM, frameNumber: frame.frame, ranges, isCurrent }),
+      async readPrincipalStrain(active: AbortSignal) {
+        active.throwIfAborted();
+        if (!isCurrent()) return null;
+        if (strain) return strain;
+        const evaluator = await readStrainEvaluator();
+        active.throwIfAborted();
+        if (!isCurrent()) return null;
+        const result = strain ?? evaluator.evaluate(carrierPositions);
+        if (result.valuesInDrawOrder.length !== positionsM.length / 9)
+          throw new Error('The strain and displayed cut surface have different triangle counts.');
+        return (strain = result);
+      },
       frameWork,
       action: command.action,
       activeSeams: frame.activeSeams,
@@ -426,6 +457,7 @@ export async function runSavedWholeAssemblyStagedPreviewV1(
         commands,
         nextCommand: index + 1,
         surface,
+        readStrainEvaluator,
         ranges,
         last,
       });

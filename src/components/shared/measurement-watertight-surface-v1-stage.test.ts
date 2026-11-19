@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   BufferAttribute,
   BufferGeometry,
+  Color,
   Group,
   Mesh,
   MeshBasicMaterial,
+  MeshStandardMaterial,
   PerspectiveCamera,
   Raycaster,
   TorusGeometry,
@@ -30,6 +32,7 @@ import {
   measurementSurfacePatternPieceTransformReceiptV1,
   measurementSurfaceRestoreCameraV10,
   pickMeasurementSurfaceAcceptedClothPieceV1,
+  updateMeasurementSurfaceAcceptedClothStrainV1,
   measurementSurfaceRotationGizmoMatrixV6,
   measurementSurfaceRotationGizmoSignatureV6,
   measurementSurfaceSelectedJointOcclusionSamplesV10,
@@ -41,6 +44,77 @@ import {
   type MeasurementSurfacePatternPieceOverlayV1,
   type MeasurementSurfaceAcceptedClothV1,
 } from './measurement-watertight-surface-v1-stage';
+
+it('applies accepted-frame signed color without replacing positions, triangle groups or materials', () => {
+  const geometry = new BufferGeometry();
+  const positions = new Float32Array(27);
+  const position = new BufferAttribute(positions, 3);
+  geometry.setAttribute('position', position);
+  geometry.addGroup(0, 9, 0);
+  const material = new MeshStandardMaterial({ color: 0x405060 });
+  const mesh = new Mesh(geometry, [material]);
+  let active = true;
+  const cloth: MeasurementSurfaceAcceptedClothV1 = {
+    positionsM: positions,
+    frameNumber: 29,
+    ranges: [{ triangleOffset: 0, triangleCount: 3, color: 0x405060 }],
+    isCurrent: () => active,
+  };
+  const overlay = {
+    frameNumber: 29,
+    positionsM: positions,
+    valuesInDrawOrder: Float32Array.of(-0.5, 0, 0.8),
+  };
+
+  expect(updateMeasurementSurfaceAcceptedClothStrainV1(mesh, cloth)).toBe(false);
+  expect(geometry.getAttribute('color')).toBeUndefined();
+  expect(
+    updateMeasurementSurfaceAcceptedClothStrainV1(mesh, { ...cloth, principalStrain: overlay }),
+  ).toBe(true);
+  const colors = geometry.getAttribute('color');
+  const rgb = (i: number) =>
+    new Color(colors.getX(i), colors.getY(i), colors.getZ(i)).getHexString();
+  expect(Array.from({ length: 9 }, (_, i) => rgb(i))).toEqual([
+    '2166ac',
+    '2166ac',
+    '2166ac',
+    'f3f4f6',
+    'f3f4f6',
+    'f3f4f6',
+    'b2182b',
+    'b2182b',
+    'b2182b',
+  ]);
+  expect(mesh.geometry).toBe(geometry);
+  expect(geometry.getAttribute('position')).toBe(position);
+  expect(geometry.groups).toEqual([{ start: 0, count: 9, materialIndex: 0 }]);
+  expect(mesh.material[0]).toBe(material);
+  expect(material.vertexColors).toBe(true);
+  expect(material.color.getHex()).toBe(0xffffff);
+
+  for (const invalid of [
+    { ...overlay, frameNumber: 28 },
+    { ...overlay, positionsM: positions.slice() },
+    { ...overlay, valuesInDrawOrder: Float32Array.of(0, 0) },
+    { ...overlay, valuesInDrawOrder: Float32Array.of(0, NaN, 0) },
+  ]) {
+    expect(
+      updateMeasurementSurfaceAcceptedClothStrainV1(mesh, { ...cloth, principalStrain: invalid }),
+    ).toBe(false);
+    expect(material.vertexColors).toBe(false);
+    expect(material.color.getHex()).toBe(0x405060);
+  }
+  expect(
+    updateMeasurementSurfaceAcceptedClothStrainV1(mesh, { ...cloth, principalStrain: overlay }),
+  ).toBe(true);
+  expect(geometry.getAttribute('color')).toBe(colors);
+  active = false;
+  expect(
+    updateMeasurementSurfaceAcceptedClothStrainV1(mesh, { ...cloth, principalStrain: overlay }),
+  ).toBe(false);
+  expect(material.vertexColors).toBe(false);
+  expect(material.color.getHex()).toBe(0x405060);
+});
 
 it('uses the existing visible accepted cloth triangle ranges and rejects occluded or revoked hits', () => {
   const first = {

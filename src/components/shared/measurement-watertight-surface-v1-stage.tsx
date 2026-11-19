@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, type KeyboardEvent } from 'react';
 import * as THREE from 'three';
+import { MEASUREMENT_SURFACE_PRINCIPAL_STRAIN_SCALE_V1 as principalStrainScale } from './measurement-surface-principal-strain-scale-v1';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { VertexNormalsHelper } from 'three/examples/jsm/helpers/VertexNormalsHelper.js';
@@ -161,7 +162,76 @@ export type MeasurementSurfaceAcceptedClothV1 = Readonly<{
   }>[];
   isCurrent: () => boolean;
   onSelectPiece?: (piece: MeasurementSurfaceAcceptedClothPieceV1) => void;
+  principalStrain?: Readonly<{
+    frameNumber: number;
+    positionsM: Float32Array;
+    valuesInDrawOrder: Float32Array;
+  }>;
 }>;
+
+function sameAcceptedClothFrame(
+  previous: MeasurementSurfaceAcceptedClothV1,
+  next: MeasurementSurfaceAcceptedClothV1,
+) {
+  return (
+    previous.frameNumber === next.frameNumber &&
+    previous.positionsM === next.positionsM &&
+    previous.ranges === next.ranges &&
+    previous.isCurrent === next.isCurrent
+  );
+}
+
+type AcceptedClothMesh = THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial[]>;
+
+/** Apply the exact frame's scalar data to its existing mesh without replacing geometry or groups. */
+export function updateMeasurementSurfaceAcceptedClothStrainV1(
+  mesh: AcceptedClothMesh,
+  cloth: MeasurementSurfaceAcceptedClothV1,
+): boolean {
+  const overlay = cloth.principalStrain;
+  const positions = mesh.geometry.getAttribute('position');
+  const triangleCount = positions.count / 3;
+  const values = overlay?.valuesInDrawOrder;
+  const show =
+    !!overlay &&
+    overlay.frameNumber === cloth.frameNumber &&
+    overlay.positionsM === cloth.positionsM &&
+    positions.count * 3 === cloth.positionsM.length &&
+    values instanceof Float32Array &&
+    values.length === triangleCount &&
+    values.every(Number.isFinite) &&
+    cloth.isCurrent();
+
+  if (show) {
+    const { clampMagnitude, compression, neutral, extension } = principalStrainScale;
+    let colors = mesh.geometry.getAttribute('color');
+    if (!colors) {
+      colors = new THREE.BufferAttribute(new Float32Array(positions.count * 3), 3);
+      mesh.geometry.setAttribute('color', colors);
+    }
+    const cold = new THREE.Color(compression);
+    const center = new THREE.Color(neutral);
+    const hot = new THREE.Color(extension);
+    const color = new THREE.Color();
+    for (const [index, value] of values.entries()) {
+      const blend = Math.min(Math.abs(value) / clampMagnitude, 1);
+      color.copy(center).lerp(value < 0 ? cold : hot, blend);
+      const first = index * 3;
+      colors.setXYZ(first, color.r, color.g, color.b);
+      colors.setXYZ(first + 1, color.r, color.g, color.b);
+      colors.setXYZ(first + 2, color.r, color.g, color.b);
+    }
+    colors.needsUpdate = true;
+  }
+
+  for (const [index, material] of mesh.material.entries()) {
+    if (material.vertexColors === show) continue;
+    material.color.setHex(show ? 0xffffff : cloth.ranges[index].color);
+    material.vertexColors = show;
+    material.needsUpdate = true;
+  }
+  return show;
+}
 
 /** Resolve the frontmost accepted triangle's exact source occurrence. */
 export function pickMeasurementSurfaceAcceptedClothPieceV1(
@@ -1763,8 +1833,7 @@ export function MeasurementWatertightSurfaceV1Stage({
     let bodyRadius = 0;
     let cameraFitRadius = 0;
     let patternPieceLayer: THREE.Group | null = null;
-    let acceptedClothMesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial[]> | null =
-      null;
+    let acceptedClothMesh: AcceptedClothMesh | null = null;
     let mountedCloth: MeasurementSurfaceAcceptedClothV1 | undefined;
     let acceptedClothPointer: {
       id: number;
@@ -1787,6 +1856,8 @@ export function MeasurementWatertightSurfaceV1Stage({
       mountedCloth = undefined;
       acceptedClothPointer = null;
       delete canvas.dataset.acceptedClothFrame;
+      delete canvas.dataset.acceptedClothOverlay;
+      delete canvas.dataset.acceptedClothOverlayFrame;
       if (!previous) return;
       previous.removeFromParent();
       previous.geometry.dispose();
@@ -3088,8 +3159,9 @@ export function MeasurementWatertightSurfaceV1Stage({
             !captured ||
             !camera ||
             !acceptedClothMesh ||
-            captured.frame !== mountedCloth ||
-            captured.frame !== acceptedClothRef.current
+            !mountedCloth ||
+            mountedCloth !== acceptedClothRef.current ||
+            !sameAcceptedClothFrame(captured.frame, mountedCloth)
           )
             return;
           const point = normalizedTransformPointer(event, event.button);
@@ -3101,9 +3173,9 @@ export function MeasurementWatertightSurfaceV1Stage({
             raycaster,
             acceptedClothMesh,
             surface,
-            captured.frame,
+            mountedCloth,
           );
-          if (piece) captured.frame.onSelectPiece?.(piece);
+          if (piece) mountedCloth.onSelectPiece?.(piece);
           return;
         }
         if (!patternPieceGesture || patternPieceGesture.pointerId !== event.pointerId) return;
@@ -3228,11 +3300,37 @@ export function MeasurementWatertightSurfaceV1Stage({
         scheduleRender();
       };
 
+      const syncAcceptedClothStrain = (
+        mesh: AcceptedClothMesh,
+        frame: MeasurementSurfaceAcceptedClothV1,
+      ) => {
+        if (updateMeasurementSurfaceAcceptedClothStrainV1(mesh, frame)) {
+          canvas.dataset.acceptedClothOverlay = 'principal-strain';
+          canvas.dataset.acceptedClothOverlayFrame = String(frame.frameNumber);
+        } else {
+          delete canvas.dataset.acceptedClothOverlay;
+          delete canvas.dataset.acceptedClothOverlayFrame;
+        }
+      };
+
       const syncAcceptedCloth = () => {
         if (disposed || !scene) return;
         const source = acceptedClothRef.current;
         const next = source?.isCurrent() === true ? source : undefined;
         if (next === mountedCloth) return;
+        if (
+          next &&
+          mountedCloth &&
+          acceptedClothMesh &&
+          sameAcceptedClothFrame(mountedCloth, next)
+        ) {
+          if (mountedCloth.principalStrain !== next.principalStrain) {
+            syncAcceptedClothStrain(acceptedClothMesh, next);
+            scheduleRender();
+          }
+          mountedCloth = next;
+          return;
+        }
         removeAcceptedCloth();
         if (!next || !next.positionsM.length || next.positionsM.length % 9 !== 0) {
           scheduleRender();
@@ -3268,6 +3366,7 @@ export function MeasurementWatertightSurfaceV1Stage({
           return new THREE.MeshStandardMaterial({ color, roughness: 0.75, side: THREE.DoubleSide });
         });
         acceptedClothMesh = new THREE.Mesh(clothGeometry, materials);
+        syncAcceptedClothStrain(acceptedClothMesh, next);
         scene.add(acceptedClothMesh);
         canvas.dataset.acceptedClothFrame = String(next.frameNumber);
         mountedCloth = next;

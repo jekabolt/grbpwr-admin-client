@@ -6,6 +6,8 @@ const calls = vi.hoisted(() => ({
   advance: vi.fn(),
   resume: vi.fn(),
   projectBody: vi.fn(),
+  prepareStrain: vi.fn(),
+  evaluateStrain: vi.fn(),
 }));
 
 vi.mock('components/cloth-simulation-spike/model-displayed-triangle-body-input-v1', () => ({
@@ -22,8 +24,12 @@ vi.mock('lib/cloth/runtime/webgpu/garment-staged-source-cut-core-v1', () => ({
 vi.mock('lib/cloth/runtime/cpu/source-cut-surface-projection-v1', () => ({
   prepareSourceCutSurfaceProjectionV1: () => ({
     drawRanges: [{ pieceId: 'piece', triangleOffset: 0, triangleCount: 1 }],
-    project: (positions: Float32Array) => positions.slice(),
+    project: (positions: Float32Array) => Float32Array.of(positions[0], 0, 0, 0, 1, 0, 0, 0, 1),
   }),
+}));
+
+vi.mock('lib/cloth/runtime/cpu/source-cut-principal-strain-v1', () => ({
+  prepareSourceCutPrincipalStrainV1: calls.prepareStrain,
 }));
 
 type Request = Parameters<typeof runSavedWholeAssemblyStagedPreviewV1>[0];
@@ -173,6 +179,76 @@ describe('same Workbench staged checkpoint', () => {
           : undefined,
       );
     }
+  });
+
+  it('lazily measures exact accepted poses and reuses the source operator on a new lease', async () => {
+    const first = frame(1);
+    const next = frame(2);
+    calls.start.mockResolvedValue(first);
+    calls.resume.mockResolvedValue(next);
+    calls.prepareStrain.mockReturnValue({ evaluate: calls.evaluateStrain });
+    calls.evaluateStrain.mockImplementation((positions: Float32Array) => ({
+      valuesInDrawOrder: Float32Array.of(positions[0] / 10),
+    }));
+    const { request } = fixture();
+    let bodyCurrent = true;
+    const body = { ...request.body, isCurrent: () => bodyCurrent };
+    const run = new AbortController();
+    const paused = await runSavedWholeAssemblyStagedPreviewV1(
+      { ...request, body, pauseAfterAccepted: () => true },
+      run.signal,
+    );
+    run.abort();
+    expect(calls.prepareStrain).not.toHaveBeenCalled();
+    expect(calls.evaluateStrain).not.toHaveBeenCalled();
+
+    const canceled = new AbortController();
+    const discarded = paused.readPrincipalStrain(canceled.signal);
+    canceled.abort();
+    await expect(discarded).rejects.toMatchObject({ name: 'AbortError' });
+    expect(calls.evaluateStrain).not.toHaveBeenCalled();
+
+    const rendered = new AbortController();
+    const measured = await paused.readPrincipalStrain(rendered.signal);
+    await expect(paused.readPrincipalStrain(rendered.signal)).resolves.toBe(measured);
+    expect(calls.evaluateStrain).toHaveBeenCalledExactlyOnceWith(first.positionsMInvMass);
+    expect(calls.advance).not.toHaveBeenCalled();
+    expect(measured?.valuesInDrawOrder[0]).toBeCloseTo(0.1);
+
+    const { source: _source, ...resumeRequest } = request;
+    const accepted = await runSavedWholeAssemblyStagedPreviewV1(
+      { ...resumeRequest, body, resume: paused.paused!, pauseAfterAccepted: () => true },
+      new AbortController().signal,
+    );
+    const newer = await accepted.readPrincipalStrain(rendered.signal);
+    expect(accepted.cloth.frameNumber).toBe(2);
+    expect(newer?.valuesInDrawOrder[0]).toBeCloseTo(0.2);
+    expect(calls.evaluateStrain).toHaveBeenNthCalledWith(2, next.positionsMInvMass);
+    expect(calls.prepareStrain).toHaveBeenCalledTimes(1);
+    expect(calls.start).toHaveBeenCalledTimes(1);
+    expect(calls.resume).toHaveBeenCalledTimes(1);
+
+    bodyCurrent = false;
+    await expect(accepted.readPrincipalStrain(rendered.signal)).resolves.toBeNull();
+    expect(calls.evaluateStrain).toHaveBeenCalledTimes(2);
+  });
+
+  it('refuses a mismatched strain draw order without discarding the accepted cloth', async () => {
+    calls.start.mockResolvedValue(frame(1));
+    calls.prepareStrain.mockReturnValue({ evaluate: calls.evaluateStrain });
+    calls.evaluateStrain.mockReturnValue({ valuesInDrawOrder: Float32Array.of(0, 0) });
+    const { request } = fixture();
+    const signal = new AbortController().signal;
+    const accepted = await runSavedWholeAssemblyStagedPreviewV1(
+      { ...request, pauseAfterAccepted: () => true },
+      signal,
+    );
+
+    await expect(accepted.readPrincipalStrain(signal)).rejects.toThrow('different triangle counts');
+    await expect(accepted.readPrincipalStrain(signal)).rejects.toThrow('different triangle counts');
+    expect(accepted.cloth.isCurrent()).toBe(true);
+    expect(accepted.cloth.frameNumber).toBe(1);
+    expect(request.onAccepted).toHaveBeenCalledTimes(1);
   });
 
   it('honors a queued pause after presenting a frame and before advancing', async () => {
