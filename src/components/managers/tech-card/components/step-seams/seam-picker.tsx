@@ -56,6 +56,7 @@ import { useOperationWorkCatalog } from '../useOperationWorkCatalog';
 import { moveRow, orderOfRows, windowRows, type LayerMove } from './layers-window';
 import { LayersMenu, LayersWindow } from './layers-window-view';
 import { PairNo } from './pair-no';
+import { SavedExistingSeamLinkControl } from './saved-existing-seam-link-control';
 import {
   captureSavedSurfaceDirection,
   isPlacedSurfaceDirectionSeam,
@@ -1570,6 +1571,55 @@ export function SeamPickerBody({
               }
             />
           )}
+
+        {!frozen &&
+          !topstitchMode &&
+          !bindingMode &&
+          !pick.a.length &&
+          !pick.b.length &&
+          scene.ctx?.techCard &&
+          op?.operationNumber &&
+          (() => {
+            const card = scene.ctx.techCard;
+            const writers = scene.ctx.writes;
+            const operationNumber = op.operationNumber;
+            const historyKey = form.getValues(`operations.${index}.historyKey`);
+            const storedOperation = card.techCard?.operations?.find(
+              (item) => item.operationNumber === operationNumber,
+            );
+            if (!historyKey || !storedOperation) return null;
+            const current = () => {
+              const state = useSeamsStore.getState();
+              const operation = form.getValues(`operations.${index}`);
+              return (
+                canEditSavedDirection &&
+                state.cardId === card.id &&
+                state.serverVersion === card.lockVersion &&
+                autosave.getBaseLockVersion() === card.lockVersion &&
+                !Object.keys(state.pending).length &&
+                !Object.keys(state.posePending).length &&
+                operation?.historyKey === historyKey &&
+                operation?.operationNumber === operationNumber &&
+                operation.work === storedOperation.work &&
+                JSON.stringify(operation.inputKeys ?? []) ===
+                  JSON.stringify(storedOperation.inputKeys ?? []) &&
+                JSON.stringify(operation.seamKeys ?? []) ===
+                  JSON.stringify(storedOperation.seamKeys ?? [])
+              );
+            };
+            return (
+              <SavedExistingSeamLinkControl
+                key={`${card.id}:${card.lockVersion}:${historyKey}`}
+                card={card}
+                operationNumber={operationNumber}
+                historyKey={historyKey}
+                disabled={!current()}
+                isCurrent={current}
+                change={writers.change}
+                nameOf={nameOf}
+              />
+            );
+          })()}
 
         <div
           className='sticky bottom-0 box-content flex h-21 flex-none flex-wrap content-center items-center gap-x-3 border-t border-hairline bg-bgColor px-3 pb-[env(safe-area-inset-bottom)] md:gap-4.5 md:px-5'
