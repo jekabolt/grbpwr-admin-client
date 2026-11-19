@@ -2852,13 +2852,15 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
               </CalloutBox>
             ) : null}
             {!savedCrossMaterialActions && durableReloadBlocker ? (
-              <CalloutBox
-                tone={durableReloadBlocker.retryable ? 'error' : 'note'}
-                className='mb-2'
-                data-durable-reload-blocker={durableReloadBlocker.code}
-              >
+              <CalloutBox tone={durableReloadBlocker.retryable ? 'error' : 'note'} className='mb-2'>
                 <div className='flex flex-wrap items-center justify-between gap-2'>
-                  <Text component='p' size='micro' className='min-w-0 flex-1'>
+                  <Text
+                    component='p'
+                    size='micro'
+                    role={durableReloadBlocker.retryable ? 'alert' : 'status'}
+                    className='min-w-0 flex-1'
+                    data-durable-reload-blocker={durableReloadBlocker.code}
+                  >
                     {durableReloadBlocker.detail}
                   </Text>
                   {durableReloadBlocker.retryable ? (
