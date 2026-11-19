@@ -4,7 +4,7 @@ The linked source revisions are the tested local integration snapshot.
 
 | Repository | Code revision |
 | --- | --- |
-| Admin client | `966fa0163553239063a46f5685f43f920f4d3902` |
+| Admin client | `573710c9fd620134ea45ff30c1d3bd0f38258fe1` |
 | Products manager | `341297e6f87fd935d794445a872ef938821fe854` |
 | Protocol | `fcd245b2f607423181718048bdfc0b4387437df9` |
 
@@ -13,7 +13,13 @@ Local verification covers 26 of 48 criteria. Beta qualification covers 0 of 48. 
 - Card169 B1 was saved and reopened through the ordinary Workbench and reached a physical 3D frame on the selected mannequin.
 - Card11 saved and cold-restored exact V10 `35b4f5648664503cdf151db7256ba96f086599e66f3d0d8f02dfd3e0bcb6c18c`. ROOT's ordinary WebGPU frame 29 had all 27 pieces and 2,216 active stations, zero cloth and body intersections, and a maximum gap of 11.858 mm at operation 560.
 - Card6 operation 970 retained the original left seam first and linked the existing right seam second. One guarded write and a separate cold read confirmed both links with all 40 raw seam rows and all three signed DXFs retained.
-- Card169 stored a single-turn hem and a cut-on facing on independent copies. A further two separate copies saved the 10 mm paired allowance with either fixed end during a 1 mm straight-edge extension. Native SQL and signed cold reads agree. Reopening the edited edge in the editor still needs an eligibility fix.
+- Card6 operation 610 saved its explicit orientation and reopened with 14 active stations in M. Changing the size to L retired those stations.
+- Card169 stored a single-turn hem and a cut-on facing on independent copies. Two further copies saved the 10 mm paired allowance with either fixed end during a 1 mm straight-edge extension. Fresh Workbench sessions reopened both exact edited edges and measured 60.999939 mm and 61.000061 mm respectively.
+- Card169 fixed a race in which delayed reads could restore an older cloth document and transforms after the card advanced. Regression tests cover stale responses before and after the saved-arrangement request.
+- Card169 now supports explicit Square, Mitre and Auto treatments at the selected PCK_L_2 corner across five sizes. The archived signed-DXF replay exercised guarded Apply in process, then repeated the owner read. The three treatments still need ordinary browser Save and cold reload. Foldback and Clip remain open.
+- A Card169 fish-eye draft reached ordinary Apply. Its captured upload also removed ten existing Level 15 DXF labels, so the write was held before reaching persistence.
 - The guarded pattern writer checks the Assembly revision inside the existing card write transaction. A stale request received HTTP 409 and its fresh counterpart received HTTP 200 on an isolated MySQL schema.
+
+The separate Card11 display experiment is committed as `3f9d34feafec50ba04eac89d3c6fb37786e9022e` against the previously verified 4197 fixture source. Its isolated read-only build at loopback port 4207 verified the four signed Open attachments against the exact accepted frame 29 bytes in unit tests. The build and local HTTP checks passed. ROOT's browser verification is pending.
 
 The acceptance ledger and receipts are maintained in the local TABLE handoff at `~/.codex/handoffs/assembly-table-2026-11-17/`. Full seam closure, complete Card6 qualification and beta delivery remain open.
