@@ -1,5 +1,4 @@
 import { cn } from 'lib/utility';
-import { useEffect, useRef, useState } from 'react';
 import { Button, Text } from 'ui';
 
 import { type PickedLogo, readLogo } from './logo';
@@ -51,14 +50,6 @@ export function LogoStep({
   onBack: () => void;
   onSend: (withLogo: boolean) => void;
 }) {
-  const input = useRef<HTMLInputElement>(null);
-  const [focusPick, setFocusPick] = useState(true);
-
-  useEffect(() => {
-    if (focusPick) input.current?.focus();
-    setFocusPick(false);
-  }, [focusPick]);
-
   const pick = async (file: File | undefined) => {
     if (!file) return;
     const read = await readLogo(file);
@@ -80,12 +71,11 @@ export function LogoStep({
       <div className='flex items-end gap-3 pb-2 pt-3.5'>
         <label
           className={cn(
-            'relative flex size-28 flex-none cursor-pointer items-center justify-center border bg-bgColor p-2 transition-colors duration-150 ease-out hover:border-textColor focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-textColor max-sm:size-30',
+            'relative flex size-28 flex-none cursor-pointer items-center justify-center border bg-bgColor p-2 transition-colors duration-150 ease-out hover:border-textColor has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-textColor max-sm:size-30',
             bad ? 'border-error' : 'border-borderColor',
           )}
         >
           <input
-            ref={input}
             type='file'
             accept='image/png,image/jpeg'
             aria-label='logo'
@@ -104,16 +94,7 @@ export function LogoStep({
             </Text>
           )}
         </label>
-        {logo && (
-          <SheetLink
-            onClick={() => {
-              onLogo(null);
-              setFocusPick(true);
-            }}
-          >
-            remove
-          </SheetLink>
-        )}
+        {logo && <SheetLink onClick={() => onLogo(null)}>remove</SheetLink>}
       </div>
       <SheetFoot left={<SheetLink onClick={onBack}>back</SheetLink>}>
         <span className='flex flex-row-reverse flex-wrap items-center gap-2 max-sm:w-full max-sm:flex-col'>
