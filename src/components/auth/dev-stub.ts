@@ -4,6 +4,8 @@
 
 import { currentHost } from 'lib/host';
 
+import { STUB_LOGOS } from './stub-logos';
+
 const TOKEN = 'eyJhbGciOiJub25lIn0.eyJleHAiOjQxMDI0NDQ4MDB9.stub';
 const TAKEN = new Set(['atelier-nord', 'studio', 'console', 'www', 'api', 'admin']);
 const TEAMS = [
@@ -23,6 +25,36 @@ const DEFAULT_FEATURES = [
 ];
 
 const WAITING = { slug: 'linea', name: 'linea', awaitingApproval: true };
+
+// `your teams` (mockup): own team with a logo, member teams with and without one, one waiting.
+const MY_TEAMS = [
+  { slug: 'ostra', name: 'ostra', role: 'owner', ready: true, logoUrl: STUB_LOGOS.ostra },
+  {
+    slug: 'atelier-nord',
+    name: 'atelier nord',
+    role: 'member',
+    ready: true,
+    logoUrl: STUB_LOGOS['atelier-nord'],
+  },
+  { slug: 'vela', name: 'vela', role: 'member', ready: true, logoUrl: '' },
+  {
+    slug: 'linea',
+    name: 'linea',
+    role: 'owner',
+    awaitingApproval: true,
+    logoUrl: STUB_LOGOS.linea,
+  },
+];
+const created: Record<string, unknown>[] = [];
+
+/** localStorage knobs: stub.teams=empty (first time), stub.signin=google|none (default: both). */
+function knob(key: string): string {
+  try {
+    return localStorage.getItem(key) ?? '';
+  } catch {
+    return '';
+  }
+}
 
 function terms(body: string | null): boolean {
   return !!body && (JSON.parse(body) as { termsAccepted?: boolean }).termsAccepted === true;
@@ -67,6 +99,38 @@ export async function stubAnswer(method: string, body: string | null): Promise<u
                 : [...TEAMS, WAITING]
             : [],
       };
+    case 'GetSignInOptions': {
+      const s = knob('stub.signin');
+      return { google: s !== 'none', apple: s === '' || s === 'all' };
+    }
+    case 'ExchangeSignInCode':
+      if (req.code === 'bad') refuse(400, 'invalid code');
+      return { token: TOKEN, teams: [], enterTeamSlug: '' };
+    case 'ListMyTeams': {
+      const first = knob('stub.teams') === 'empty';
+      return {
+        email: 'mira@ostra.studio',
+        teams: [...(first ? [] : MY_TEAMS), ...created],
+        canCreateTeam: true,
+        termsNeeded: first && created.length === 0,
+      };
+    }
+    case 'CreateTeam': {
+      if (TAKEN.has(req.teamSlug) || MY_TEAMS.some((t) => t.slug === req.teamSlug))
+        refuse(409, 'slug taken');
+      if (req.teamSlug === 'badlogo' && req.logo) refuse(400, 'bad_logo');
+      const team = {
+        slug: req.teamSlug,
+        name: req.teamName,
+        role: 'owner',
+        awaitingApproval: true,
+        logoUrl: req.logo
+          ? `data:${req.logo.startsWith('/9j/') ? 'image/jpeg' : 'image/png'};base64,${req.logo}`
+          : '',
+      };
+      created.push(team);
+      return { team };
+    }
     case 'IssueHandoff':
       return { url: '', code: 'stub-code' };
     case 'ExchangeHandoff':
