@@ -1,5 +1,6 @@
 import type { PatternImportDxfProductPhaseEAssemblyProjectionContourV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
-import type { PtMm } from 'lib/pattern-import/types';
+import type { PieceSpec, PtMm } from 'lib/pattern-import/types';
+import { blockNameOf } from 'lib/pattern-import/write/plan';
 import type { PatternImportDxfPhaseEDraftCadCommandV1 } from './draft-cad-session-v1';
 
 export type DraftOutlineMoveV1 = Extract<
@@ -42,4 +43,15 @@ export function draftOutlineMovePositionsV1(
     positions.set(payload.vertexId, payload.pointMm);
   }
   return positions;
+}
+
+/** The authoring rank remains the persisted label. The writer still emits one shared UNI block. */
+export function sharedOutlineBlockForWriterPieceV1(
+  piece: PieceSpec | undefined,
+  sizeToken: string,
+) {
+  const size = piece?.sizes[0];
+  return piece?.ungraded && piece.sizes.length === 1 && size?.sizeToken === sizeToken
+    ? blockNameOf(piece, size)
+    : null;
 }

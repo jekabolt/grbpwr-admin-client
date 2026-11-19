@@ -122,6 +122,7 @@ export type PatternImportDxfPhaseEDraftCadCanvasPropsV1 = Readonly<{
     pointsMm: readonly PtMm[];
   }>[];
   savedFrenchCurveOnly?: boolean;
+  moveSharedOutline?: boolean;
   savedFrenchCurve?: Readonly<{
     key: string;
     primitive: FrenchCurvePrimitive;
@@ -1838,6 +1839,7 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
   savedDartPaths = [],
   savedFrenchCurve,
   savedFrenchCurveOnly = false,
+  moveSharedOutline = false,
   arrangeActive = false,
   panActive = false,
   crossScopeConnectActive = false,
@@ -1990,7 +1992,9 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
 
   const activeToolInstruction = savedFrenchCurveOnly
     ? 'Move a start, control or end point.'
-    : toolInstruction(activeTool, projection.sizeToken);
+    : activeTool === 'move-point' && moveSharedOutline
+      ? 'Drag an outline point or click it to enter X and Y in millimetres.'
+      : toolInstruction(activeTool, projection.sizeToken);
   const unavailable = sourceMismatch
     ? 'The exact projection does not match this Draft session source.'
     : !projectedPiece || !target

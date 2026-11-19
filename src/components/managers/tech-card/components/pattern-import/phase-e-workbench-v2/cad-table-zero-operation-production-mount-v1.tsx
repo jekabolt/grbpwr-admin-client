@@ -45,6 +45,8 @@ import {
   matchesCadTableClothFocusInstanceV1,
   resolveCadTableClothFocusScopeV1,
 } from './cad-table-accepted-cloth-focus-v1';
+import { sharedOutlineBlockForWriterPieceV1 } from './draft-cad-outline-move-history-v1';
+import { sameDraftAllowanceRingV1 } from './draft-cad-paired-allowance-authority-v1';
 import { sameSavedDraftRowV1 } from './draft-cad-saved-source-selection-v1';
 import { hasDraftCutAllowanceJoinsV1 } from './draft-cad-allowance-offset-geometry-v1';
 import type { SavedNativeSeamRangeDraftV1 } from './cad-table-saved-seam-range-handles-v1';
@@ -117,6 +119,7 @@ const SavedGeneratedFusingView = lazy(() => import('./saved-generated-fusing-vie
 const SavedRankedPointEdit = lazy(() => import('./cad-table-saved-ranked-point-edit-v1'));
 const SavedFrenchCurveEdit = lazy(() => import('./cad-table-saved-french-curve-edit-v1'));
 const SavedAllowanceEdit = lazy(() => import('./cad-table-saved-allowance-edit-v1'));
+const SavedSharedOutlineEdit = lazy(() => import('./cad-table-saved-shared-outline-edit-v1'));
 const SavedPointClosurePanel = lazy(() => import('./cad-table-saved-point-closure-panel-v1'));
 const SavedSeamSubrangePanel = lazy(() => import('./cad-table-saved-seam-subrange-panel-v1'));
 
@@ -1160,6 +1163,42 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
       ? index
       : -1;
   }, [nativeEditPrepared, pickedPointPiece]);
+  const sharedOutline = useMemo(() => {
+    if (!nativeEditPrepared || !pickedPointPiece) return null;
+    const { catalog, projection, sizeToken, scopeKey, authoringAuthority } = nativeEditPrepared;
+    const pieceIndex = catalog.pieces.findIndex(
+      ({ pieceId, pieceLineKey }) =>
+        pieceId === pickedPointPiece.pieceId && pieceLineKey === pickedPointPiece.pieceLineKey,
+    );
+    const cut = projection.pieces[pieceIndex]?.contours.filter(
+      ({ role }) => role === 'cut-boundary',
+    );
+    const pieces = nativeEditPrepared.draftCadCompileSource.scopes
+      .filter(({ target }) => target.scopeKey === scopeKey)
+      .flatMap(({ writerReplay }) => writerReplay?.job.pieces ?? []);
+    const own = pieces.filter(({ identity }) => identity === pickedPointPiece.pieceId);
+    const [writer] = own;
+    const block = sharedOutlineBlockForWriterPieceV1(writer, sizeToken);
+    const size = writer?.sizes[0];
+    if (
+      own.length !== 1 ||
+      !writer ||
+      !block ||
+      writer.pairOf ||
+      pieces.some(({ pairOf }) => pairOf === writer.identity) ||
+      size?.sizeId !== authoringAuthority.selectedRank.sizeId ||
+      !size.seam ||
+      !sameDraftAllowanceRingV1(size.cut, size.seam) ||
+      cut?.length !== 1 ||
+      !cut[0]?.closed ||
+      !sameDraftAllowanceRingV1(
+        cut[0].vertices.map(({ pointMm }) => pointMm),
+        size.cut,
+      )
+    )
+      return null;
+    return { pieceIndex, block };
+  }, [nativeEditPrepared, pickedPointPiece]);
   const [frenchEdit, setFrenchEdit] = useState<Readonly<{
     candidate: NonNullable<typeof frenchCurve>;
     generation: number;
@@ -1211,7 +1250,21 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
   useEffect(() => {
     if (allowanceEdit && !activeAllowanceEdit) setAllowanceEdit(null);
   }, [activeAllowanceEdit, allowanceEdit]);
-  const editingSavedGeometry = Boolean(activePointEdit || activeFrenchEdit || activeAllowanceEdit);
+  const [sharedOutlineEdit, setSharedOutlineEdit] = useState<typeof pointEdit>(null);
+  const activeSharedOutlineEdit =
+    sharedOutlineEdit &&
+    sharedOutlineEdit.prepared === nativeEditPrepared &&
+    sharedOutlineEdit.pieceIndex === sharedOutline?.pieceIndex &&
+    sharedOutlineEdit.generation === generation &&
+    sharedOutlineEdit.operationNumber === selection.operationNumber
+      ? sharedOutlineEdit
+      : null;
+  useEffect(() => {
+    if (sharedOutlineEdit && !activeSharedOutlineEdit) setSharedOutlineEdit(null);
+  }, [activeSharedOutlineEdit, sharedOutlineEdit]);
+  const editingSavedGeometry = Boolean(
+    activePointEdit || activeFrenchEdit || activeAllowanceEdit || activeSharedOutlineEdit,
+  );
   useLayoutEffect(() => {
     if (!clothFocus) return;
     if (!currentClothFocus) {
@@ -1770,6 +1823,23 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
                   Edit French curve
                 </Button>
               )}
+              {nativeEditPrepared && sharedOutline && !editingSavedGeometry && (
+                <Button
+                  type='button'
+                  variant='secondary'
+                  size='xs'
+                  onClick={() =>
+                    setSharedOutlineEdit({
+                      prepared: nativeEditPrepared,
+                      pieceIndex: sharedOutline.pieceIndex,
+                      generation,
+                      operationNumber: selection.operationNumber,
+                    })
+                  }
+                >
+                  Move points for all sizes
+                </Button>
+              )}
               {nativeEditPrepared && allowancePieceIndex >= 0 && !editingSavedGeometry && (
                 <Button
                   type='button'
@@ -1873,6 +1943,24 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
                 generation={activeAllowanceEdit.generation}
                 authority={savedAuthority}
                 onClose={() => setAllowanceEdit(null)}
+              />
+            </Suspense>
+          )}
+          {activeSharedOutlineEdit && sharedOutline && savedAuthority && (
+            <Suspense
+              fallback={
+                <Text component='p' size='micro' role='status'>
+                  Opening outline editor…
+                </Text>
+              }
+            >
+              <SavedSharedOutlineEdit
+                prepared={activeSharedOutlineEdit.prepared}
+                pieceIndex={activeSharedOutlineEdit.pieceIndex}
+                block={sharedOutline.block}
+                generation={activeSharedOutlineEdit.generation}
+                authority={savedAuthority}
+                onClose={() => setSharedOutlineEdit(null)}
               />
             </Suspense>
           )}

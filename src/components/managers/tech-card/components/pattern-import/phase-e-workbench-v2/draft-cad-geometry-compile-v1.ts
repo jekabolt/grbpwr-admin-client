@@ -1,6 +1,9 @@
 import { draftOutlineMoveHistoryV1 } from './draft-cad-outline-move-history-v1';
 import { applyDraftParallelSpreadV1 } from './draft-cad-parallel-spread-v1';
-import { hasSavedDraftGeometrySourceV1 } from './draft-cad-saved-dart-tip-review-v1';
+import {
+  hasSavedDraftGeometrySourceV1,
+  readSavedSharedOutlineBlockV1,
+} from './draft-cad-saved-dart-tip-review-v1';
 import { sameDartVertices } from './draft-cad-saved-dart-tip-v1';
 import { applyAffine, closestOnPolyline, pointInPolygon } from 'lib/pattern-import/semantics/geom';
 import {
@@ -624,7 +627,9 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
   }
 
   const moveHistory = draftOutlineMoveHistoryV1(commands);
-  const orderedMoves = moveHistory && moveHistory.length > 1 ? moveHistory : null;
+  const sharedOutlineBlock = readSavedSharedOutlineBlockV1(input);
+  const orderedMoves =
+    moveHistory && (moveHistory.length > 1 || sharedOutlineBlock) ? moveHistory : null;
   if (orderedMoves && !hasSavedDraftGeometrySourceV1(input))
     return blocked(
       'move-point-geometry-blocked',
@@ -967,6 +972,12 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
       command.tool === 'delete-point' ||
       command.tool === 'sharpen-corner'
     ) {
+      if (command.tool === 'move-point' && writerPieces[0]!.ungraded && !sharedOutlineBlock)
+        return blocked(
+          'move-point-geometry-blocked',
+          'Open this shared outline to review its point moves for all sizes.',
+          command,
+        );
       if (
         command.tool === 'sharpen-corner' &&
         (!hasSavedDraftGeometrySourceV1(input) || commands.length !== 1)
@@ -1450,6 +1461,8 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
       const retained = orderedMoves
         ? size &&
           block.seam &&
+          (!sharedOutlineBlock ||
+            (block.name === sharedOutlineBlock && block.sizeToken === 'UNI')) &&
           sameDraftAllowanceRingV1(
             block.cut,
             size.cut.map((point) => applyAffine(block.transform, point)),

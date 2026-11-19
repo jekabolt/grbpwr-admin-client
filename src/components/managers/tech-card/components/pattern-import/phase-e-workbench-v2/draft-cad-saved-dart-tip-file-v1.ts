@@ -13,6 +13,7 @@ type SavedGeometryReviewLabel =
   | 'saved French curve'
   | 'saved corner'
   | 'saved outline points'
+  | 'saved shared outline'
   | 'saved allowance offset';
 const labels = new WeakMap<File, SavedGeometryReviewLabel>();
 export const savedReviewLabelV1 = (file: File) => labels.get(file) ?? 'saved geometry';
@@ -25,7 +26,12 @@ export function registerSavedDartTipFileV1(
   if (files.has(file)) throw new Error('This dart review File is already bound.');
   labels.set(file, label);
   files.set(file, verify);
-  if (pieceHeading && (label === 'saved allowance offset' || label === 'saved outline points'))
+  if (
+    pieceHeading &&
+    (label === 'saved allowance offset' ||
+      label === 'saved outline points' ||
+      label === 'saved shared outline')
+  )
     pieceHeadings.set(file, pieceHeading);
 }
 export const readSavedGeometryPieceHeadingV1 = (file: File) =>

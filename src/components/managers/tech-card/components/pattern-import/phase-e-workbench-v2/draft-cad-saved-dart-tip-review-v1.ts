@@ -12,13 +12,17 @@ import {
   decodeAuthoredQuadratic,
 } from 'lib/pattern-import/manifest/authored-internal';
 import type { ConversionManifest, WriteJob } from 'lib/pattern-import/types';
+import { UNI_TOKEN } from 'lib/pattern-import/write/plan';
 import { createPatternImportDxfPhaseEDraftCadCompileSourceV1 } from './draft-cad-compile-source-v1';
 import {
   readCompiledPairedAllowanceReviewV1,
   type PatternImportDxfPhaseEDraftCadGeometryCompileInputV1 as CompileInput,
   type PatternImportDxfPhaseEDraftCadGeometryCompileArtifactV1 as Artifact,
 } from './draft-cad-geometry-compile-v1';
-import type { prepareSavedAddPointReviewV1 } from './draft-cad-saved-add-point-review-v1';
+import type {
+  prepareSavedAddPointReviewV1,
+  SavedAddPointCurrentV1,
+} from './draft-cad-saved-add-point-review-v1';
 import {
   sameSavedDraftRowV1,
   selectMatchingSavedDraftV1,
@@ -34,11 +38,21 @@ import {
   sameDartVertices,
 } from './draft-cad-saved-dart-tip-v1';
 
-import { draftOutlineMoveHistoryV1 } from './draft-cad-outline-move-history-v1';
+import {
+  draftOutlineMoveHistoryV1,
+  sharedOutlineBlockForWriterPieceV1,
+} from './draft-cad-outline-move-history-v1';
 import { selectSavedFrenchCurveV1 } from './draft-cad-saved-french-curve-v1';
 
-const prepared = new WeakSet<CompileInput>();
+export type SavedGeometryCurrentV1 = SavedAddPointCurrentV1 &
+  Readonly<{
+    sharedOutlineBlock?: string;
+  }>;
+
+const prepared = new WeakMap<CompileInput, Readonly<{ sharedOutlineBlock?: string }>>();
 export const hasSavedDraftGeometrySourceV1 = (input: CompileInput) => prepared.has(input);
+export const readSavedSharedOutlineBlockV1 = (input: CompileInput) =>
+  prepared.get(input)?.sharedOutlineBlock;
 function requireSavedEdit(ok: unknown, detail: string): asserts ok {
   if (!ok) throw new Error(detail);
 }
@@ -50,6 +64,7 @@ type Review = {
     | 'saved French curve'
     | 'saved corner'
     | 'saved outline points'
+    | 'saved shared outline'
     | 'saved allowance offset';
   current: () => boolean;
   verifyCurrentRow: () => Promise<void>;
@@ -144,10 +159,8 @@ export async function compileSavedDraftGeometryReviewV1(
     readCurrent,
     sourceOwner,
     sourceRequest,
-  }: Pick<
-    Parameters<typeof prepareSavedAddPointReviewV1>[0],
-    'readCurrent' | 'sourceOwner' | 'sourceRequest'
-  >,
+  }: Pick<Parameters<typeof prepareSavedAddPointReviewV1>[0], 'sourceOwner' | 'sourceRequest'> &
+    Readonly<{ readCurrent: () => SavedGeometryCurrentV1 | null }>,
   verifyCurrentRow: () => Promise<void>,
 ) {
   const opening = readCurrent();
@@ -155,7 +168,7 @@ export async function compileSavedDraftGeometryReviewV1(
     opening && isRecordedDraftCadSessionV1(opening.session),
     'Record the saved geometry edit again.',
   );
-  const { session, generation, sizeToken } = opening,
+  const { session, generation, sizeToken, sharedOutlineBlock } = opening,
     row = structuredClone(opening.row);
   const commands = activeDraftCadTransactionsV1(session).flatMap((tx) => tx.commands);
   const command = commands[0],
@@ -173,7 +186,12 @@ export async function compileSavedDraftGeometryReviewV1(
   const savedDart = savedTip ?? savedMove;
   const savedCurve = command?.tool === 'french-curve' ? command.payload.savedCurve : undefined;
   const sharpen = command?.tool === 'sharpen-corner';
-  const orderedMoves = commands.length > 1 ? draftOutlineMoveHistoryV1(commands) : null;
+  const orderedMoves =
+    commands.length > 1 || sharedOutlineBlock ? draftOutlineMoveHistoryV1(commands) : null;
+  requireSavedEdit(
+    !sharedOutlineBlock || orderedMoves,
+    'Review only point moves on the shared outline.',
+  );
   const contourId = sharpen ? command.payload.edge.contourId : orderedMoves?.[0]?.payload.contourId;
   requireSavedEdit(
     command &&
@@ -181,7 +199,7 @@ export async function compileSavedDraftGeometryReviewV1(
     'Record saved outline points, a corner, curve, dart or parallel opening edit.',
   );
   const { pieceId, pieceLineKey } = command.target;
-  let affectedBlockNames = [pieceId + '_' + sizeToken];
+  let affectedBlockNames = [sharedOutlineBlock ?? pieceId + '_' + sizeToken];
   const current = () => {
     const now = readCurrent();
     if (
@@ -189,6 +207,7 @@ export async function compileSavedDraftGeometryReviewV1(
       now.session !== session ||
       now.generation !== generation ||
       now.sizeToken !== sizeToken ||
+      now.sharedOutlineBlock !== sharedOutlineBlock ||
       !sameSavedDraftRowV1(now.row, row) ||
       now.card.techCardId !== row.techCardId
     )
@@ -201,9 +220,15 @@ export async function compileSavedDraftGeometryReviewV1(
       ) ?? [];
     return (
       aliases.length > 0 &&
-      affectedBlockNames.every((name) =>
-        aliases.some((a) => a.blockName === pieceId || a.blockName === name),
-      ) &&
+      (sharedOutlineBlock
+        ? aliases.length === 1 &&
+          aliases[0]?.blockName === sharedOutlineBlock &&
+          now.card.existingAliases?.filter(
+            (alias) => alias.scopeKey === row.scopeKey && alias.pieceLineKey === pieceLineKey,
+          ).length === 1
+        : affectedBlockNames.every((name) =>
+            aliases.some((a) => a.blockName === pieceId || a.blockName === name),
+          )) &&
       new Set(aliases.map((a) => a.blockName)).size === aliases.length &&
       aliases.every((a) => a.pieceLineKey === pieceLineKey) &&
       now.card.existingPieces.filter((p) => p.lineKey === pieceLineKey).length === 1
@@ -247,10 +272,32 @@ export async function compileSavedDraftGeometryReviewV1(
     await checkSavedParallelSpreadSourceV1(source.value, pieceId);
   } else if (contourId) {
     const scope = one(draft.scopes.filter((s) => s.target.scopeKey === row.scopeKey));
+    const blocks = scope?.manifest.blocks.filter((b) => b.identity === pieceId) ?? [];
     const block = one(
-      scope?.manifest.blocks.filter((b) => b.identity === pieceId && b.sizeToken === sizeToken) ??
-        [],
+      sharedOutlineBlock ? blocks : blocks.filter((b) => b.sizeToken === sizeToken),
     );
+    if (sharedOutlineBlock) {
+      const savedPiece = one(scope?.manifest.pieces.filter((p) => p.identity === pieceId) ?? []);
+      const writerPiece = one(
+        scope?.writerReplay?.job.pieces.filter((p) => p.identity === pieceId) ?? [],
+      );
+      const size = writerPiece?.sizes[0];
+      const authoringRank = one(
+        scope?.manifest.sizes.filter(
+          (rank) =>
+            rank.token === sizeToken && rank.sizeId === size?.sizeId && rank.rank === size?.rank,
+        ) ?? [],
+      );
+      requireSavedEdit(
+        savedPiece?.ungraded === true &&
+          sharedOutlineBlockForWriterPieceV1(writerPiece, sizeToken) === sharedOutlineBlock &&
+          block?.block === sharedOutlineBlock &&
+          block.sizeToken === UNI_TOKEN &&
+          block.sizeId === authoringRank?.sizeId &&
+          authoringRank,
+        'The shared outline no longer matches its saved UNI block and authoring rank.',
+      );
+    }
     const selectedCut = one(
       selection.selection.phaseD.contours.filter(
         (c) =>
@@ -586,7 +633,7 @@ export async function compileSavedDraftGeometryReviewV1(
     './draft-cad-geometry-compile-v1'
   );
   requireSavedEdit(current(), 'The saved geometry changed before compiling.');
-  prepared.add(compileInput);
+  prepared.set(compileInput, { sharedOutlineBlock });
   try {
     const result = compilePatternImportDxfPhaseEDraftCadGeometryV1(compileInput);
     if (result.ok)
@@ -597,7 +644,9 @@ export async function compileSavedDraftGeometryReviewV1(
           : sharpen
             ? 'saved corner'
             : orderedMoves
-              ? 'saved outline points'
+              ? sharedOutlineBlock
+                ? 'saved shared outline'
+                : 'saved outline points'
               : savedCurve
                 ? 'saved French curve'
                 : 'saved dart',
@@ -639,7 +688,9 @@ export function openSavedDraftGeometryFileV1(artifact: Artifact, name: string) {
   requireSavedEdit(review && review.current(), 'Compile the current saved geometry again.');
   const file = new File([artifact.dxfText], name, { type: 'image/vnd.dxf' });
   const preserveHeadings =
-    review.kind === 'saved allowance offset' || review.kind === 'saved outline points';
+    review.kind === 'saved allowance offset' ||
+    review.kind === 'saved outline points' ||
+    review.kind === 'saved shared outline';
   registerSavedDartTipFileV1(
     file,
     async (draft, scope, isCurrent) => {

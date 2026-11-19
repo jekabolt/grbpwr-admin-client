@@ -1,4 +1,5 @@
 import { draftOutlineMoveHistoryV1 } from './draft-cad-outline-move-history-v1';
+import type { SavedGeometryCurrentV1 } from './draft-cad-saved-dart-tip-review-v1';
 import { activeDraftCadTransactionsV1 } from './draft-cad-session-v1';
 import type { NativePieceCopyMode } from 'lib/pattern-import/fabrics/native-piece-copy-review';
 import type { CopyReview, SavedCopyCurrentV1 } from './draft-cad-unlinked-piece-copy-review-v1';
@@ -97,7 +98,7 @@ export type PatternImportDxfPhaseESavedRowProductionRuntimeV1 = Readonly<{
   >;
   prepareSavedGeometryReview?: (
     row: DxfProductSavedRowIdentityV1,
-    readCurrent: () => Omit<SavedAddPointCurrentV1, 'card'> | null,
+    readCurrent: () => Omit<SavedGeometryCurrentV1, 'card'> | null,
   ) => ReturnType<
     typeof import('./draft-cad-saved-dart-tip-review-v1').compileSavedDraftGeometryReviewV1
   >;
@@ -383,7 +384,7 @@ function createSavedDraftSourceReaderV1(deps: SavedDraftSourceReaderDepsV1) {
         (command?.tool === 'french-curve' && command.payload.savedCurve) ||
         command?.tool === 'cut' ||
         command?.tool === 'sharpen-corner' ||
-        (commands.length > 1 && draftOutlineMoveHistoryV1(commands))
+        ((commands.length > 1 || opening.sharedOutlineBlock) && draftOutlineMoveHistoryV1(commands))
       )
     )
       throw new Error('Select the original saved geometry.');
@@ -403,6 +404,7 @@ function createSavedDraftSourceReaderV1(deps: SavedDraftSourceReaderDepsV1) {
                 current?.session === opening.session &&
                 current.generation === opening.generation &&
                 current.sizeToken === opening.sizeToken &&
+                current.sharedOutlineBlock === opening.sharedOutlineBlock &&
                 sameSavedDraftRowV1(row, current.row)
                 ? { ...current, card }
                 : null;
