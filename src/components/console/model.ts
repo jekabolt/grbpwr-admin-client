@@ -1,0 +1,149 @@
+import type { FeatureInfo, PlatformTeam } from 'api/proto-http/admin';
+
+// Pure console logic: which teams show, in what order, and how numbers read. No React, no api.
+
+export const STATUS = {
+  active: 'active',
+  readOnly: 'read_only',
+  provisioning: 'provisioning',
+  /** unconfirmed sign-up: never listed */
+  pending: 'pending',
+  /** confirmed sign-up waiting for the operator */
+  review: 'review',
+} as const;
+
+export type Tab = 'all' | 'active' | 'read_only';
+export type Sort = 'newest' | 'name' | 'people';
+
+export interface Board {
+  teams: PlatformTeam[];
+  requests: PlatformTeam[];
+}
+
+/** Server rows → listed teams and waiting sign-ups. */
+export function splitBoard(rows: PlatformTeam[] | undefined): Board {
+  const teams: PlatformTeam[] = [];
+  const requests: PlatformTeam[] = [];
+  for (const t of rows ?? []) {
+    if (t.status === STATUS.review) requests.push(t);
+    else if (t.status !== STATUS.pending) teams.push(t);
+  }
+  return { teams, requests };
+}
+
+export const isReadOnly = (t: PlatformTeam) => t.status === STATUS.readOnly;
+
+export function tabCounts(teams: PlatformTeam[]): Record<Tab, number> {
+  const ro = teams.filter(isReadOnly).length;
+  return { all: teams.length, active: teams.length - ro, read_only: ro };
+}
+
+const time = (ts: string | undefined) => (ts ? Date.parse(ts) || 0 : 0);
+
+export function visibleTeams(
+  teams: PlatformTeam[],
+  { q, tab, sort }: { q: string; tab: Tab; sort: Sort },
+): PlatformTeam[] {
+  const needle = q.trim().toLowerCase();
+  const list = teams.filter((t) => {
+    if (tab === 'active' && isReadOnly(t)) return false;
+    if (tab === 'read_only' && !isReadOnly(t)) return false;
+    if (!needle) return true;
+    return (
+      (t.slug ?? '').toLowerCase().includes(needle) || (t.name ?? '').toLowerCase().includes(needle)
+    );
+  });
+  if (sort === 'name') list.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''));
+  else if (sort === 'people') list.sort((a, b) => (b.people ?? 0) - (a.people ?? 0));
+  else list.sort((a, b) => time(b.createdAt) - time(a.createdAt));
+  return list;
+}
+
+/** `$184.20`; zero, empty or junk reads `$0`. */
+export function usd(amount: string | undefined): string {
+  const n = Number(amount);
+  return !amount || !Number.isFinite(n) || n === 0 ? '$0' : `$${n.toFixed(2)}`;
+}
+
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+/** `nov 18`; `—` when unknown. */
+export function shortDate(ts: string | undefined): string {
+  const t = time(ts);
+  if (!t) return '—';
+  const d = new Date(t);
+  return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
+}
+
+/** Last seen: `now`, `12 min`, `5 h`, `yesterday`, then the date. */
+export function seenWord(ts: string | undefined, now = Date.now()): string {
+  const t = time(ts);
+  if (!t) return '—';
+  const min = Math.floor((now - t) / 60_000);
+  if (min < 2) return 'now';
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h} h`;
+  if (h < 48) return 'yesterday';
+  return shortDate(ts);
+}
+
+export interface FeatureGroup {
+  group: string;
+  items: FeatureInfo[];
+}
+
+/** The catalog in its own order, cut into runs of one group. */
+export function featureGroups(catalog: FeatureInfo[]): FeatureGroup[] {
+  const out: FeatureGroup[] = [];
+  for (const f of catalog) {
+    const g = f.group ?? '';
+    const last = out[out.length - 1];
+    if (last && last.group === g) last.items.push(f);
+    else out.push({ group: g, items: [f] });
+  }
+  return out;
+}
+
+/** Switched-on features that the catalog knows. */
+export function onCount(team: PlatformTeam, catalog: FeatureInfo[]): number {
+  const keys = new Set(catalog.map((f) => f.key));
+  return (team.features ?? []).filter((k) => keys.has(k)).length;
+}
+
+/**
+ * Team #1 is the only team that can have a team-one-only feature on; the server also refuses its
+ * read-only switch (`team_one`), so this only greys the switch in advance.
+ */
+export function teamOneSlug(teams: PlatformTeam[], catalog: FeatureInfo[]): string {
+  const only = new Set(catalog.filter((f) => f.teamOneOnly).map((f) => f.key));
+  return teams.find((t) => (t.features ?? []).some((k) => only.has(k)))?.slug ?? '';
+}
+
+export function withFeature(team: PlatformTeam, key: string, on: boolean): PlatformTeam {
+  const rest = (team.features ?? []).filter((k) => k !== key);
+  return { ...team, features: on ? [...rest, key] : rest };
+}
+
+export function withReadOnly(team: PlatformTeam, readOnly: boolean): PlatformTeam {
+  return { ...team, status: readOnly ? STATUS.readOnly : STATUS.active };
+}
+
+/** Replace one team (by slug) in a list. */
+export function patchTeam(
+  rows: PlatformTeam[] | undefined,
+  slug: string,
+  fn: (t: PlatformTeam) => PlatformTeam,
+): PlatformTeam[] {
+  return (rows ?? []).map((t) => (t.slug === slug ? fn(t) : t));
+}
+
+/** The word a refusal shows; server reasons first, then the generic one. */
+export function refusalWord(e: unknown, fallback = 'not saved'): string {
+  const msg = e instanceof Error ? e.message : String(e ?? '');
+  if (msg.includes('team_one_only')) return 'team one only';
+  if (msg.includes('team_one')) return 'team one';
+  if (msg.includes('last_owner')) return 'last owner';
+  if (msg.includes('read_only') || msg.includes('read only')) return 'read only';
+  return fallback;
+}

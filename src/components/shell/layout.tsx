@@ -3,11 +3,11 @@ import { authService } from 'api/api';
 import { clearAuthToken } from 'api/auth-headers';
 import { accountsKeys } from 'components/managers/accounts/utils/hooks';
 import { ADMIN_GROUP, ROUTES } from 'constants/routes';
-import { isLekaloHost } from 'lib/host';
+import { currentHost, isLekaloHost } from 'lib/host';
 import { cn } from 'lib/utility';
 import { useWorkspace } from 'lib/workspace/use-workspace';
 import { FC, ReactNode, useCallback, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Button, HeaderNote, Pill } from 'ui';
 import { CommandPalette, PALETTE_KEY_HINT, useCommandPaletteShortcut } from './command-palette';
 import { LeftSideNavMenu } from './left-side-nav-menu';
@@ -27,6 +27,8 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
   const queryClient = useQueryClient();
   const { workspace, gate } = useWorkspace();
   const lekalo = isLekaloHost();
+  const team = currentHost().kind === 'team';
+  const { pathname } = useLocation();
   const title = lekalo ? workspace?.name || '' : 'grbpwr';
 
   const handleLogout = () => {
@@ -86,6 +88,19 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
               cva собирает строку через clsx без tailwind-merge, и `hidden` на кнопке оставил бы
               в разметке оба display-класса, разводя их только порядком правил в таблице стилей.
               Тот же приём, что у соседнего выпадающего «admin». */}
+          {team && (
+            <div className='hidden lg:block'>
+              <Button
+                asChild
+                className={cn(
+                  'px-2 underline-offset-2 transition-colors hover:underline hover:opacity-70',
+                  pathname === ROUTES.people && 'underline',
+                )}
+              >
+                <Link to={ROUTES.people}>people</Link>
+              </Button>
+            </div>
+          )}
           <div className='hidden lg:block'>
             <Button
               asChild
