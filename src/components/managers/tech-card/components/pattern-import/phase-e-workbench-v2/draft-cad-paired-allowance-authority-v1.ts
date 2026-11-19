@@ -54,6 +54,17 @@ const samePoint = (a: PtMm, b: PtMm) => Math.hypot(a.x - b.x, a.y - b.y) <= 1e-7
 const offsetGridPoint = (a: PtMm, b: PtMm) =>
   Math.round(a.x * OFFSET_SCALE) === Math.round(b.x * OFFSET_SCALE) &&
   Math.round(a.y * OFFSET_SCALE) === Math.round(b.y * OFFSET_SCALE);
+/** The complete sewing ring must equal the existing offset owner's lattice result. */
+export function matchesSavedDraftConstantAllowanceV1(
+  cut: readonly PtMm[],
+  seam: readonly PtMm[],
+  widthMm: number,
+): boolean {
+  if (!Number.isFinite(widthMm) || widthMm <= 0) return false;
+  const expected = offsetContour(cut, -widthMm);
+  return expected.report.ok && sameDraftAllowanceRingV1(seam, expected.pts, offsetGridPoint);
+}
+
 const one = <T>(values: readonly T[]) => (values.length === 1 ? values[0] : undefined);
 
 /** Full ring comparison with only winding and cyclic start normalization. */
@@ -332,13 +343,11 @@ export async function prepareSavedDraftPairedAllowanceAuthorityV1(
   );
   const widthMm = piece.allowance.allowanceMm;
   // Edge length reconstructs a constant inset. Offset edits use the independently drawn pair.
-  if (command.tool === 'edge-length') {
-    const expected = offsetContour(size.cut, -widthMm);
+  if (command.tool === 'edge-length')
     requirePair(
-      expected.report.ok && sameDraftAllowanceRingV1(size.seam, expected.pts, offsetGridPoint),
+      matchesSavedDraftConstantAllowanceV1(size.cut, size.seam, widthMm),
       'the drawn sewing outline does not match the known constant allowance',
     );
-  }
   await verifyCurrentRow?.();
   requirePair(current(), 'the saved row or Draft changed during allowance review');
   const owner: SavedDraftPairedAllowanceAuthorityV1 = Object.freeze({

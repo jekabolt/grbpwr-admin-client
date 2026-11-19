@@ -31,12 +31,16 @@ type SavedPrepared = Extract<
 export default function CadTableSavedAllowanceEditV1({
   prepared,
   pieceIndex,
+  canOffset,
+  canSetLength,
   generation,
   authority,
   onClose,
 }: Readonly<{
   prepared: SavedPrepared;
   pieceIndex: number;
+  canOffset: boolean;
+  canSetLength: boolean;
   generation: number;
   authority: PatternImportDxfPhaseEZeroOperationSavedCardAuthorityRuntimeV1;
   onClose: () => void;
@@ -67,9 +71,9 @@ export default function CadTableSavedAllowanceEditV1({
     [catalog],
   );
   const [session, setSession] = useState(initial.session);
-  const [activeTool, setActiveTool] = useState<'allowance-offset' | 'edge-length'>(
-    'allowance-offset',
-  );
+  const [tool, setActiveTool] = useState<'allowance-offset' | 'edge-length'>('allowance-offset');
+  const activeTool =
+    canOffset && canSetLength ? tool : canOffset ? 'allowance-offset' : 'edge-length';
   const sessionRef = useRef(session);
   const pending = useRef(false);
   const capture = useRef<AbortController | null>(null);
@@ -198,7 +202,7 @@ export default function CadTableSavedAllowanceEditV1({
     >
       <div className='border-b border-borderColor'>
         <div className='flex flex-wrap items-center gap-2 px-2 py-1'>
-          {!savedTurn && (
+          {canOffset && canSetLength && (
             <div role='group' aria-label='Allowance edit'>
               <Selector
                 label='Allowance edit'
@@ -262,7 +266,7 @@ export default function CadTableSavedAllowanceEditV1({
         scopeKey={scopeKey}
         activePieceIndex={pieceIndex}
         activeTool={activeTool}
-        savedTurnAllowance={!savedTurn}
+        savedTurnAllowance={canOffset && !savedTurn}
         panActive={session.cursor === 1}
         topologySession={topology}
         activeTopologyTool={null}

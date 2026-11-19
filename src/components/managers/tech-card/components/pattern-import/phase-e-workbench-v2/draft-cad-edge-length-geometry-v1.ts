@@ -59,6 +59,56 @@ function strictlyConvex(points: readonly PtMm[]) {
 type ProjectedContour =
   PatternImportDxfProductPhaseEAssemblyProjectionV1['pieces'][number]['contours'][number];
 
+export function hasDraftNativeStraightOutlineV1(
+  phaseD: SelectedSizePhaseD,
+  targetPieceId: string,
+  sizeToken: string,
+  contour: ProjectedContour,
+): boolean {
+  const nativeContour = phaseD.contours.find(
+    ({ pieceId, contourId, sizeToken: token }) =>
+      pieceId === targetPieceId && contourId === contour.contourId && token === sizeToken,
+  );
+  const path =
+    nativeContour?.lineage.sourcePathIds.length === 1
+      ? phaseD.source.paths.find(({ pathId }) => pathId === nativeContour.lineage.sourcePathIds[0])
+      : undefined;
+  const samples = path?.provenance.samples;
+  const sampleIds = new Set(samples?.map(({ vertexId }) => vertexId));
+  return Boolean(
+    path?.closed &&
+      samples &&
+      samples.length === contour.vertices.length &&
+      !samples.some(
+        ({ parameterSpace, sourceCurveT }) => parameterSpace !== 'unit' || sourceCurveT !== 0,
+      ) &&
+      new Set(samples.map(({ sourceCurveId }) => sourceCurveId)).size === samples.length &&
+      contour.vertices.every(({ vertexId }) => sampleIds.has(vertexId)),
+  );
+}
+
+/** The same closed, distinct convex pair required by the native Edge length writer. */
+export function canResizeDraftPairedCutAllowanceV1(source: PieceSizeSpec): boolean {
+  const cut = ring(source.cut);
+  const seam = source.seam && ring(source.seam);
+  return Boolean(
+    seam &&
+      !source.fold &&
+      !source.notches.length &&
+      !source.cutLoops?.length &&
+      !source.internal.length &&
+      !source.offset &&
+      !source.continuity &&
+      !source.repair &&
+      !source.kinks?.length &&
+      !source.authoredOutlineCorner &&
+      seam.length === cut.length &&
+      !sameDraftAllowanceRingV1(cut, seam) &&
+      strictlyConvex(cut) &&
+      strictlyConvex(seam),
+  );
+}
+
 /** Intersect the two native supporting lines of an exactly selected convex bevel. */
 export function selectDraftSharpCornerV1(
   contour: ProjectedContour | undefined,
@@ -153,26 +203,7 @@ function editExactOutlineVertex(
   const contour = pieces.length === 1 && contours?.length === 1 ? contours[0] : null;
   if (!contour?.closed || contour.role === 'hole')
     return { ok: false, detail: 'Choose one exact closed cut or sewing outline.' };
-  const nativeContour = phaseD.contours.find(
-    ({ pieceId, contourId, sizeToken: token }) =>
-      pieceId === command.target.pieceId && contourId === contour.contourId && token === sizeToken,
-  );
-  const path =
-    nativeContour?.lineage.sourcePathIds.length === 1
-      ? phaseD.source.paths.find(({ pathId }) => pathId === nativeContour.lineage.sourcePathIds[0])
-      : undefined;
-  const samples = path?.provenance.samples;
-  const sampleIds = new Set(samples?.map(({ vertexId }) => vertexId));
-  if (
-    !path?.closed ||
-    !samples ||
-    samples.length !== contour.vertices.length ||
-    samples.some(
-      ({ parameterSpace, sourceCurveT }) => parameterSpace !== 'unit' || sourceCurveT !== 0,
-    ) ||
-    new Set(samples.map(({ sourceCurveId }) => sourceCurveId)).size !== samples.length ||
-    !contour.vertices.every(({ vertexId }) => sampleIds.has(vertexId))
-  )
+  if (!hasDraftNativeStraightOutlineV1(phaseD, command.target.pieceId, sizeToken, contour))
     return { ok: false, detail: 'Choose a native outline with straight segments.' };
   const fromId = hasEdge ? command.payload.edge.boundaryVertexIds[0] : command.payload.vertexId;
   const start = contour.vertices.findIndex(({ vertexId }) => vertexId === fromId);
@@ -215,17 +246,11 @@ function editExactOutlineVertex(
     return { ok: false, detail: 'Rounding needs exactly coincident cut and sewing outlines.' };
   let allowanceWidthMm: number | null = null;
   if (separate) {
-    const supportedCut =
-      command.tool === 'edge-length' &&
-      contour.role === 'cut-boundary' &&
-      !source.fold &&
-      !source.notches.length &&
-      !source.cutLoops?.length &&
-      !source.internal.length &&
-      strictlyConvex(cut) &&
-      seam?.length === cut.length &&
-      strictlyConvex(seam);
-    if (!supportedCut)
+    if (
+      command.tool !== 'edge-length' ||
+      contour.role !== 'cut-boundary' ||
+      !canResizeDraftPairedCutAllowanceV1(source)
+    )
       return {
         ok: false,
         detail: 'This saved cut and sewing pair requires its retained allowance editor.',

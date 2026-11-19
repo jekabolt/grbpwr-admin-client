@@ -46,7 +46,14 @@ import {
   resolveCadTableClothFocusScopeV1,
 } from './cad-table-accepted-cloth-focus-v1';
 import { sharedOutlineBlockForWriterPieceV1 } from './draft-cad-outline-move-history-v1';
-import { sameDraftAllowanceRingV1 } from './draft-cad-paired-allowance-authority-v1';
+import {
+  matchesSavedDraftConstantAllowanceV1,
+  sameDraftAllowanceRingV1,
+} from './draft-cad-paired-allowance-authority-v1';
+import {
+  canResizeDraftPairedCutAllowanceV1,
+  hasDraftNativeStraightOutlineV1,
+} from './draft-cad-edge-length-geometry-v1';
 import { sameSavedDraftRowV1 } from './draft-cad-saved-source-selection-v1';
 import { hasDraftCutAllowanceJoinsV1 } from './draft-cad-allowance-offset-geometry-v1';
 import type { SavedNativeSeamRangeDraftV1 } from './cad-table-saved-seam-range-handles-v1';
@@ -1133,35 +1140,45 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
         : null,
     [nativeEditPrepared, frenchRow, pickedPointPiece],
   );
-  const allowancePieceIndex = useMemo(() => {
-    if (!nativeEditPrepared || !pickedPointPiece) return -1;
+  const allowanceTarget = useMemo(() => {
+    if (!nativeEditPrepared || !pickedPointPiece) return null;
     const matchesPiece = (piece: Pick<typeof pickedPointPiece, 'pieceId' | 'pieceLineKey'>) =>
       piece.pieceId === pickedPointPiece.pieceId &&
       piece.pieceLineKey === pickedPointPiece.pieceLineKey;
-    const index = nativeEditPrepared.catalog.pieces.findIndex(matchesPiece);
-    const piece = nativeEditPrepared.projection.pieces[index];
-    if (!piece || !matchesPiece(piece)) return -1;
+    const pieceIndex = nativeEditPrepared.catalog.pieces.findIndex(matchesPiece);
+    const piece = nativeEditPrepared.projection.pieces[pieceIndex];
+    if (!piece || !matchesPiece(piece)) return null;
     const cuts = piece.contours.filter(({ role }) => role === 'cut-boundary');
-    const writerSizes = nativeEditPrepared.draftCadCompileSource.scopes
+    const writerPieces = nativeEditPrepared.draftCadCompileSource.scopes
       .filter(({ target }) => target.scopeKey === nativeEditPrepared.scopeKey)
       .flatMap(({ writerReplay }) => writerReplay?.job.pieces ?? [])
-      .filter(({ identity }) => identity === piece.pieceId)
-      .flatMap(({ sizes }) => sizes)
-      .filter(
-        ({ sizeToken, sizeId }) =>
-          sizeToken === nativeEditPrepared.sizeToken &&
-          sizeId === nativeEditPrepared.authoringAuthority.selectedRank.sizeId,
-      );
-    if (cuts.length !== 1 || writerSizes.length !== 1 || !writerSizes[0].seam) return -1;
-    const [cut] = cuts;
-    return cut?.vertices.some(({ vertexId }, position, vertices) =>
+      .filter(({ identity }) => identity === piece.pieceId);
+    const writer = writerPieces.length === 1 ? writerPieces[0] : undefined;
+    const writerSizes = writer?.sizes.filter(
+      ({ sizeToken, sizeId }) =>
+        sizeToken === nativeEditPrepared.sizeToken &&
+        sizeId === nativeEditPrepared.authoringAuthority.selectedRank.sizeId,
+    );
+    const size = writerSizes?.length === 1 ? writerSizes[0] : undefined;
+    const cut = cuts.length === 1 ? cuts[0] : undefined;
+    if (!writer || !size?.seam || !cut) return null;
+    const canOffset = cut.vertices.some(({ vertexId }, position, vertices) =>
       hasDraftCutAllowanceJoinsV1(cut, [
         vertexId,
         vertices[(position + 1) % vertices.length].vertexId,
       ]),
-    )
-      ? index
-      : -1;
+    );
+    const canSetLength =
+      writer.allowance.origin !== 'default' &&
+      canResizeDraftPairedCutAllowanceV1(size) &&
+      hasDraftNativeStraightOutlineV1(
+        nativeEditPrepared.selection.phaseD,
+        piece.pieceId,
+        nativeEditPrepared.sizeToken,
+        cut,
+      ) &&
+      matchesSavedDraftConstantAllowanceV1(size.cut, size.seam, writer.allowance.allowanceMm);
+    return canOffset || canSetLength ? { pieceIndex, canOffset, canSetLength } : null;
   }, [nativeEditPrepared, pickedPointPiece]);
   const sharedOutline = useMemo(() => {
     if (!nativeEditPrepared || !pickedPointPiece) return null;
@@ -1242,7 +1259,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
   const activeAllowanceEdit =
     allowanceEdit &&
     allowanceEdit.prepared === nativeEditPrepared &&
-    allowanceEdit.pieceIndex === allowancePieceIndex &&
+    allowanceEdit.pieceIndex === allowanceTarget?.pieceIndex &&
     allowanceEdit.generation === generation &&
     allowanceEdit.operationNumber === selection.operationNumber
       ? allowanceEdit
@@ -1840,7 +1857,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
                   Move points for all sizes
                 </Button>
               )}
-              {nativeEditPrepared && allowancePieceIndex >= 0 && !editingSavedGeometry && (
+              {nativeEditPrepared && allowanceTarget && !editingSavedGeometry && (
                 <Button
                   type='button'
                   variant='secondary'
@@ -1848,7 +1865,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
                   onClick={() =>
                     setAllowanceEdit({
                       prepared: nativeEditPrepared,
-                      pieceIndex: allowancePieceIndex,
+                      pieceIndex: allowanceTarget.pieceIndex,
                       generation,
                       operationNumber: selection.operationNumber,
                     })
@@ -1929,7 +1946,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
               />
             </Suspense>
           )}
-          {activeAllowanceEdit && savedAuthority && (
+          {activeAllowanceEdit && allowanceTarget && savedAuthority && (
             <Suspense
               fallback={
                 <Text component='p' size='micro' role='status'>
@@ -1940,6 +1957,8 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
               <SavedAllowanceEdit
                 prepared={activeAllowanceEdit.prepared}
                 pieceIndex={activeAllowanceEdit.pieceIndex}
+                canOffset={allowanceTarget.canOffset}
+                canSetLength={allowanceTarget.canSetLength}
                 generation={activeAllowanceEdit.generation}
                 authority={savedAuthority}
                 onClose={() => setAllowanceEdit(null)}
