@@ -2,6 +2,7 @@ import { abortableAdminService } from 'api/api';
 import type { DxfProductSavedReprocessResultV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 import { fromWire, toWire, type StoredSeam } from 'lib/seams';
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -13,6 +14,7 @@ import { Button, Input, Text } from 'ui';
 import { capturedSeamWriteOptions } from '../../assembly-seams/seam-change';
 import { useSeamsStore } from '../../assembly-seams/seams-store';
 import { useSeamWrites } from '../../assembly-seams/use-seam-decisions';
+import type { SavedNativeSeamRangeDraftV1 } from './cad-table-saved-seam-range-handles-v1';
 import { readCompleteSavedAssemblySourceV1 } from './saved-assembly-complete-source-rpc-v1';
 import {
   isVerifiedSavedAssemblyNativeDirectedSubrangeReceiptV1,
@@ -40,9 +42,17 @@ function millimetres(value: number) {
 
 type Ranges = Parameters<typeof reviseSavedAssemblyNativeDirectedSubrangeV1>[2];
 type Fields = [[string, string], [string, string]];
+type RangeDraftChange = (draft: SavedNativeSeamRangeDraftV1 | null) => void;
 
 function parsePercentage(value: string) {
   return /^(?:\d+(?:\.\d{0,2})?|\.\d{1,2})$/u.test(value) ? Math.round(Number(value) * 100) : NaN;
+}
+
+function readFields(fields: Fields): Ranges {
+  return [
+    [parsePercentage(fields[0][0]), parsePercentage(fields[0][1])],
+    [parsePercentage(fields[1][0]), parsePercentage(fields[1][1])],
+  ];
 }
 
 function sameSavedSeamEdit(expected: StoredSeam, actual: StoredSeam) {
@@ -67,9 +77,11 @@ function sameSavedSeamEdit(expected: StoredSeam, actual: StoredSeam) {
 function SavedRangeEdit({
   receipt,
   disabled,
+  onDraftChange,
 }: Readonly<{
   receipt: SavedAssemblyNativeDirectedSubrangeReceiptV1;
   disabled: boolean;
+  onDraftChange?: RangeDraftChange;
 }>) {
   const { techCardId, cardLockVersion } = receipt.row;
   const { sides, seamKey } = receipt.orderedSeams[0]!;
@@ -82,6 +94,7 @@ function SavedRangeEdit({
     return [initial(0), initial(1)];
   });
   const [saving, setSaving] = useState(false);
+  const [open, setOpen] = useState(false);
   const [feedback, setFeedback] = useState('');
   const pending = useRef(false);
   const editable = useRef(!disabled);
@@ -92,21 +105,28 @@ function SavedRangeEdit({
     };
   }, [disabled]);
 
-  const update = (side: 0 | 1, endpoint: 0 | 1, value: string) => {
+  const update = useCallback((side: 0 | 1, endpoint: 0 | 1, value: string) => {
     setFields((current) => {
       const next: Fields = [[...current[0]], [...current[1]]];
       next[side][endpoint] = value;
       return next;
     });
     setFeedback('');
-  };
+  }, []);
+  const move = useCallback(
+    (side: 0 | 1, endpoint: 0 | 1, tick: number) => update(side, endpoint, String(tick / 100)),
+    [update],
+  );
+  useLayoutEffect(() => {
+    const ranges = readFields(fields);
+    const valid = ranges.every(([a, b]) => a >= 0 && b <= 10_000 && a < b);
+    onDraftChange?.(open && !disabled && !saving && valid ? { receipt, ranges, move } : null);
+  }, [disabled, fields, move, onDraftChange, open, receipt, saving]);
+  useLayoutEffect(() => () => onDraftChange?.(null), [onDraftChange]);
 
   async function save() {
     if (!editable.current || pending.current) return;
-    const ranges: Ranges = [
-      [parsePercentage(fields[0][0]), parsePercentage(fields[0][1])],
-      [parsePercentage(fields[1][0]), parsePercentage(fields[1][1])],
-    ];
+    const ranges = readFields(fields);
     const currentRow = () => {
       const store = useSeamsStore.getState();
       return store.cardId === techCardId && store.serverVersion === cardLockVersion
@@ -166,7 +186,11 @@ function SavedRangeEdit({
   }
 
   return (
-    <details className='space-y-2' data-cad-saved-seam-range-editor=''>
+    <details
+      className='space-y-2'
+      data-cad-saved-seam-range-editor=''
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
       <summary className='cursor-pointer text-micro'>Edit seam range</summary>
       {([0, 1] as const).map((side) => {
         const label = side === 0 ? 'Side A' : 'Side B';
@@ -230,11 +254,13 @@ export default function CadTableSavedSeamSubrangePanelV1({
   replay,
   catalogCanonicalSha256,
   disabled,
+  onDraftChange,
 }: Readonly<{
   target: SavedSeamSubrangeTargetV1;
   replay: Extract<DxfProductSavedReprocessResultV1, { ok: true }>;
   catalogCanonicalSha256: string;
   disabled: boolean;
+  onDraftChange?: RangeDraftChange;
 }>) {
   const [result, setResult] = useState<ReadState>({ status: 'loading' });
   useEffect(() => {
@@ -302,6 +328,7 @@ export default function CadTableSavedSeamSubrangePanelV1({
               key={result.receipt.canonicalSha256}
               receipt={result.receipt}
               disabled={disabled}
+              onDraftChange={onDraftChange}
             />
           )}
         </>

@@ -47,6 +47,7 @@ import {
 } from './cad-table-accepted-cloth-focus-v1';
 import { sameSavedDraftRowV1 } from './draft-cad-saved-source-selection-v1';
 import { hasDraftCutAllowanceJoinsV1 } from './draft-cad-allowance-offset-geometry-v1';
+import type { SavedNativeSeamRangeDraftV1 } from './cad-table-saved-seam-range-handles-v1';
 import { projectCadTablePieceFeatures } from './cad-table-piece-features-v1';
 import {
   planPatternImportDxfPhaseECadTablePressForProjectionV1,
@@ -1323,6 +1324,19 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
     prepared.verifiedNativeReplay?.row.cardLockVersion === savedSeamSubrangeTarget.cardLockVersion
       ? prepared.verifiedNativeReplay
       : undefined;
+  const [seamRangeDraft, setSeamRangeDraft] = useState<SavedNativeSeamRangeDraftV1 | null>(null);
+  const currentSeamRangeDraft =
+    !disabled &&
+    seamRangeDraft &&
+    verifiedSubrangeReplay &&
+    savedSeamSubrangeTarget &&
+    seamRangeDraft.receipt.sizeToken === sizeToken &&
+    seamRangeDraft.receipt.operationNumber === savedSeamSubrangeTarget.operationNumber &&
+    seamRangeDraft.receipt.orderedSeams[0]?.seamKey === savedSeamSubrangeTarget.seamKey &&
+    seamRangeDraft.receipt.catalogCanonicalSha256 === prepared?.catalog.canonicalSha256 &&
+    sameSavedDraftRowV1(seamRangeDraft.receipt.row, verifiedSubrangeReplay.row)
+      ? seamRangeDraft
+      : undefined;
   const fasteningRow =
     pointClosureTarget &&
     resolvedSavedCard &&
@@ -1875,6 +1889,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
               authoringAuthority={authoringReady ? authoringPrepared?.authoringAuthority : null}
               authoringAuthorityRefresh={authoringReady ? authoringAuthorityRefresh : null}
               zeroConnectAuthoringHandoff={authoringReady ? zeroConnectAuthoringHandoff : undefined}
+              savedSeamRangeDraft={currentSeamRangeDraft}
               disabled={disabled || !authoringReady}
             />
           )}
@@ -1959,6 +1974,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
                   replay={verifiedSubrangeReplay}
                   catalogCanonicalSha256={prepared.catalog.canonicalSha256}
                   disabled={disabled}
+                  onDraftChange={setSeamRangeDraft}
                 />
               </Suspense>
             ) : prepared ? (

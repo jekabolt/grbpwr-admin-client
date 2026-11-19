@@ -62,6 +62,10 @@ import type { CadTableSavedTopstitchOverlayV1 } from './cad-table-saved-topstitc
 import { PatternImportDxfPhaseEDraftCadGridRulersV1 } from './draft-cad-grid-rulers-v1';
 import { PatternImportDxfPhaseECadWorkbenchToolButtonV1 } from './cad-workbench-tool-button-v1';
 import { CAD_WORKBENCH_SEAM_SIDE_COLORS } from './cad-workbench-seam-colors-v1';
+import {
+  CadTableSavedSeamRangeHandlesV1,
+  type SavedNativeSeamRangeDraftV1,
+} from './cad-table-saved-seam-range-handles-v1';
 import { PatternImportDxfPhaseEDraftCadTopologyOverlayV1 } from './draft-cad-topology-overlay-v1';
 import { usePatternImportDxfPhaseECadWorkbenchMeasurementUnitV1 } from './cad-workbench-split-shell-v1';
 import { formatPatternImportDxfPhaseEMeasurementValueV1 } from './measurement-units-v1';
@@ -105,6 +109,7 @@ export type PatternImportDxfPhaseECadTableZeroConnectCanvasPropsV1 = Readonly<{
   savedAnnotations?: PatternImportDxfPhaseETopologyAnnotationDraftV5;
   savedAnnotationBlocker?: string;
   savedAnnotationEditControl?: ReactNode;
+  savedSeamRangeDraft?: SavedNativeSeamRangeDraftV1;
   savedSeam?: Readonly<{
     seamId: string;
     operationNumber: number;
@@ -126,7 +131,10 @@ export type PatternImportDxfPhaseECadTableZeroConnectCanvasPropsV1 = Readonly<{
 type SavedSeam = NonNullable<PatternImportDxfPhaseECadTableZeroConnectCanvasPropsV1['savedSeam']>;
 
 function sameSavedSeamEdge(
-  side: SavedSeam['sides'][number],
+  side: Pick<
+    SavedSeam['sides'][number],
+    'pieceId' | 'pieceLineKey' | 'contourId' | 'boundaryVertexIds'
+  >,
   segment: PatternImportDxfPhaseECadTableConnectEdgeSegmentV1,
 ) {
   const [first, second] = side.boundaryVertexIds;
@@ -382,6 +390,7 @@ function CadTableZeroCanvas({
   zeroConnectAuthoringHandoff,
   disabled = false,
   savedSeam,
+  savedSeamRangeDraft,
   savedAnnotations,
   savedAnnotationBlocker,
   savedAnnotationEditControl,
@@ -1024,6 +1033,36 @@ function CadTableZeroCanvas({
                             {`${savedSeam.ordinal} ${savedSide}`}
                           </text>
                         ) : null}
+                      </g>
+                    );
+                  })
+                : null}
+              {savedSeamRangeDraft && activeTool === 'select'
+                ? ([0, 1] as const).map((index) => {
+                    const side = savedSeamRangeDraft.receipt.orderedSeams[0]?.sides[index];
+                    if (!side) return null;
+                    const matching = segments.filter(
+                      (segment) =>
+                        segment.contourRole === 'sewing-boundary' &&
+                        sameSavedSeamEdge(side, segment),
+                    );
+                    const segment = matching.length === 1 ? matching[0] : undefined;
+                    const placed = segment && pieceLayout(layout, segment);
+                    if (!segment || !placed) return null;
+                    const [a, b] = segment.pointsMm;
+                    const forward = side.boundaryVertexIds[0] === segment.boundaryVertexIds[0];
+                    return (
+                      <g
+                        key={segment.viewKey}
+                        transform={cadTablePieceSvgTransformV1(placed, 'inverted')}
+                      >
+                        <CadTableSavedSeamRangeHandlesV1
+                          from={forward ? a : b}
+                          to={forward ? b : a}
+                          side={index}
+                          unit={unit}
+                          draft={savedSeamRangeDraft}
+                        />
                       </g>
                     );
                   })
