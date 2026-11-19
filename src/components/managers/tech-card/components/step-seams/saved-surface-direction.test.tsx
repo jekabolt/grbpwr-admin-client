@@ -295,8 +295,20 @@ it.each(['lock', 'selection', 'cancel', 'server-clock'] as const)(
 );
 
 it('captures both signed rows on a freshly imported card with lock version zero', () => {
-  const captured = captureSavedSurfaceDirection({ ...card, lockVersion: 0 }, 570, seam);
+  const fresh = {
+    ...card,
+    lockVersion: 0,
+    techCard: {
+      ...card.techCard,
+      patterns: card.techCard!.patterns!.map((pattern) => ({
+        ...pattern,
+        sizeBytes: String(pattern.sizeBytes),
+      })),
+    },
+  } as unknown as common_TechCard;
+  const captured = captureSavedSurfaceDirection(fresh, 570, seam);
   expect(captured.rows.map((row) => row.cardLockVersion)).toEqual([0, 0]);
+  expect(captured.rows.map((row) => row.sizeBytes)).toEqual([2083, 2083]);
   expect(() => captureSavedSurfaceDirection({ ...card, lockVersion: -1 }, 570, seam)).toThrow();
 });
 

@@ -127,7 +127,7 @@ export function captureSavedSurfaceDirection(
       patternLineKey: pattern.lineKey,
       revision: pattern.savedRowRevision ?? 0,
       url: pattern.url,
-      sizeBytes: pattern.sizeBytes ?? 0,
+      sizeBytes: Number(pattern.sizeBytes ?? 0),
       sha256: pattern.sha256 ?? '',
     };
     rows.push(assertExactZeroOperationSavedPatternRowV1(card, expected).row);
