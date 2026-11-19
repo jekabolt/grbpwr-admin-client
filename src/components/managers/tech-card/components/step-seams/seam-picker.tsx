@@ -51,6 +51,7 @@ import {
   type TopstitchBomLine,
   type TopstitchLine,
 } from '../topstitch-lines';
+import { pieceRefKey } from '../piece-block-refs';
 import { useOperationWorkCatalog } from '../useOperationWorkCatalog';
 import { moveRow, orderOfRows, windowRows, type LayerMove } from './layers-window';
 import { LayersMenu, LayersWindow } from './layers-window-view';
@@ -512,16 +513,23 @@ export function SeamPickerBody({
     (clicked: Sel) => {
       const s = orderedPickSides(clicked, geoms);
       const ranged = Object.keys(clicked.spans.a).length || Object.keys(clicked.spans.b).length;
+      const sizes = new Set(
+        [...s.a, ...s.b].map(
+          (target) => geo?.shapes.shapeByKey?.get(pieceRefKey(pieceOfTarget(target)))?.size,
+        ),
+      );
+      // Only stamp a size shared by all the actual DXF pieces in this pick.
+      const [size] = sizes;
       return edgeRowOfPick(
         s,
         geoms,
-        anchorCtx,
+        sizes.size === 1 && size ? { ...anchorCtx, size } : anchorCtx,
         ranged
           ? { a: sideParts(s.a, clicked.spans.a), b: sideParts(s.b, clicked.spans.b) }
           : undefined,
       );
     },
-    [geoms, anchorCtx],
+    [geoms, anchorCtx, geo?.shapes.shapeByKey],
   );
 
   const buildRow = useCallback(
