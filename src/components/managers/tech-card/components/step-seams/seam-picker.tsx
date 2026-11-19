@@ -56,6 +56,12 @@ import { useOperationWorkCatalog } from '../useOperationWorkCatalog';
 import { moveRow, orderOfRows, windowRows, type LayerMove } from './layers-window';
 import { LayersMenu, LayersWindow } from './layers-window-view';
 import { PairNo } from './pair-no';
+import {
+  captureSavedSurfaceDirection,
+  isPlacedSurfaceDirectionSeam,
+  samePlacedSurfaceSeam,
+  SavedSurfaceDirection,
+} from './saved-surface-direction';
 import { recordSeamDecision } from './seam-decisions';
 import { NO_STEP_EDGES, NO_STEP_PARTS } from './step-highlight';
 import {
@@ -1117,6 +1123,34 @@ export function SeamPickerBody({
     (repeatsTopstitch ? 'already picked' : '') ||
     (topstitchMode && !topstitchBomLineKey ? 'thread missing' : '');
   const shownActive = stored.find((s) => s.key === activeSeam);
+  const savedDirectionRow = useSeamsStore((state) =>
+    state.cardId === cardId
+      ? state.server.find(({ seamKey }) => seamKey === activeSeam)
+      : undefined,
+  );
+  const savedDirectionCard = scene.ctx?.techCard;
+  const operationNumber = op?.operationNumber;
+  const savedDirectionCapture = useMemo(() => {
+    if (!savedDirectionCard || !operationNumber || !isPlacedSurfaceDirectionSeam(savedDirectionRow))
+      return null;
+    try {
+      return captureSavedSurfaceDirection(savedDirectionCard, operationNumber, savedDirectionRow);
+    } catch {
+      return null;
+    }
+  }, [savedDirectionCard, operationNumber, savedDirectionRow]);
+  const savedDirectionPending = useSeamsStore(
+    (state) => !!(activeSeam && state.pending[activeSeam]),
+  );
+  const canEditSavedDirection =
+    !frozen &&
+    !scene.ctx?.writes.frozen &&
+    !topstitchMode &&
+    !bindingMode &&
+    !busy &&
+    !posePending &&
+    !clearingSeams &&
+    (autosave.status === 'idle' || autosave.status === 'saved');
   const activeLine = topstitchMode
     ? topstitchLines.find((line) => line.lineKey === activeSeam)
     : undefined;
@@ -1470,6 +1504,37 @@ export function SeamPickerBody({
             </ChipRow>
           </div>
         )}
+
+        {!frozen &&
+          !surface &&
+          !topstitchMode &&
+          !bindingMode &&
+          scene.ctx &&
+          shownActive &&
+          savedDirectionCapture && (
+            <SavedSurfaceDirection
+              key={`${cardId}:${savedDirectionCard?.lockVersion}:${operationNumber}:${savedDirectionCapture.seam.seamKey}`}
+              capture={savedDirectionCapture}
+              disabled={!canEditSavedDirection || savedDirectionPending}
+              change={scene.ctx.writes.change}
+              canWrite={({ rows: [expected], operationNumber, seam }, pending) => {
+                const store = useSeamsStore.getState();
+                const currentOperation = form.getValues(`operations.${index}`);
+                const currentRow = store.server.find(({ seamKey }) => seamKey === seam.seamKey);
+                return (
+                  canEditSavedDirection &&
+                  activeSeam === seam.seamKey &&
+                  currentOperation?.operationNumber === operationNumber &&
+                  !!currentOperation.seamKeys?.includes(seam.seamKey) &&
+                  store.cardId === expected.techCardId &&
+                  store.serverVersion === expected.cardLockVersion &&
+                  autosave.getBaseLockVersion() === expected.cardLockVersion &&
+                  (pending || !store.pending[seam.seamKey]) &&
+                  samePlacedSurfaceSeam(seam, currentRow)
+                );
+              }}
+            />
+          )}
 
         <div
           className='sticky bottom-0 box-content flex h-21 flex-none flex-wrap content-center items-center gap-x-3 border-t border-hairline bg-bgColor px-3 pb-[env(safe-area-inset-bottom)] md:gap-4.5 md:px-5'
