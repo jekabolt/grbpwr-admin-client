@@ -290,7 +290,7 @@ export function useBringOwnModel(techCardId: number): BringOwnModel {
       const preview = staged.preview
         ? stripDataUrlPrefix(await getBase64File(staged.preview))
         : undefined;
-      const response = await adminService.UploadContentModel({ raw, preview });
+      const response = await adminService.UploadContentModel({ raw, preview, fileName: undefined });
       mediaId = response.media?.id ?? 0;
       if (!mediaId) throw new Error('the model went up but came back without an id');
     } catch (e) {

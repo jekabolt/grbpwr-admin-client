@@ -3,11 +3,13 @@
 import { SECTION } from 'constants/routes';
 import { FEATURE } from 'lib/workspace/features';
 
-export type HomeBlockKey = 'tasks' | 'fittings' | 'production' | 'files';
+export type HomeBlockKey = 'tasks' | 'recent' | 'fittings' | 'production' | 'files';
 
 /** The blocks in phone order; each lives behind its team feature and its section's read right. */
 export const HOME_BLOCKS: { key: HomeBlockKey; feature: string; section: string }[] = [
   { key: 'tasks', feature: FEATURE.tasks, section: SECTION.tasks },
+  // recent techcards: the server answers ListMyRecentTechCards under the tech-cards feature + read
+  { key: 'recent', feature: FEATURE.techCards, section: SECTION.techCards },
   { key: 'fittings', feature: FEATURE.fittings, section: SECTION.fittings },
   { key: 'production', feature: FEATURE.production, section: SECTION.production },
   { key: 'files', feature: FEATURE.files, section: SECTION.files },

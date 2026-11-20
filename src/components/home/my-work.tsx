@@ -1,7 +1,7 @@
-// «my work» — the home of a team host (mockup HOME, variant a, owner's pick 19.11). Four blocks, in
-// phone order: my tasks, fittings this week, production running, recent files. Each block shows
-// only when the team has its feature on AND the person may read its section; a block with nothing
-// in it is not drawn (my tasks keeps its door). Existing list RPCs only.
+// «my work» — the home of a team host (mockup HOME, variant a, owner's pick 19.11). Five blocks, in
+// phone order: my tasks, recent techcards, fittings this week, production running, recent files.
+// Each block shows only when the team has its feature on AND the person may read its section; a
+// block with nothing in it is not drawn (my tasks keeps its door).
 import { useQuery } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
@@ -17,6 +17,7 @@ import {
   runStatusToDbFilter,
 } from 'components/managers/production-runs/components/options';
 import { runQty } from 'components/managers/production-runs/components/run-rows';
+import { stageLabel } from 'components/managers/tech-cards/components/utils';
 import { tasksService } from 'components/managers/tasks/api/tasksService';
 import { emptyFormValues, type TaskFormValues } from 'components/managers/tasks/api/types';
 import { TaskFormModal } from 'components/managers/tasks/components/task-form-modal';
@@ -54,11 +55,13 @@ const TONE: Record<Tone, string> = {
   warn: 'text-error',
 };
 const TASKS_SHOWN = 8;
+const RECENT_SHOWN = 6;
 const RUNS_SHOWN = 6;
 const FILES_SHOWN = 4;
 
 // Column templates of the mockup; below `sm` a row folds to two lines (name over its quiet line).
 const TASK_COLS = 'sm:grid-cols-[minmax(0,1fr)_9.5rem_6rem_4rem]';
+const RECENT_COLS = 'sm:grid-cols-[minmax(0,1fr)_6rem_7rem_4.5rem]';
 const RUN_COLS = 'sm:grid-cols-[minmax(0,1fr)_6rem_2.75rem_4rem]';
 const FIT_COLS = 'grid-cols-[4.5rem_minmax(0,1fr)] sm:grid-cols-[6rem_minmax(0,1fr)_auto]';
 
@@ -228,6 +231,48 @@ function MyTasks({ me, canAdd, className }: { me: string; canAdd: boolean; class
           draftKey='home'
         />
       )}
+    </HomeList>
+  );
+}
+
+function RecentTechCards({ className }: { className: string }) {
+  const now = new Date();
+  // Every open or save of a card moves it here, so a return to home asks again (no 5-minute cache).
+  const q = useQuery({
+    queryKey: ['techCards', 'home', 'recent'],
+    queryFn: () => adminService.ListMyRecentTechCards({ limit: RECENT_SHOWN }),
+    staleTime: 0,
+  });
+  const items = (q.data?.items ?? []).filter((r) => r.card?.id);
+  if (q.isLoading || items.length === 0) return null;
+  return (
+    <HomeList title='recent techcards' className={className}>
+      <div>
+        <Head className={RECENT_COLS}>
+          <span>name</span>
+          <span>style</span>
+          <span>stage</span>
+          <span className='text-right'>when</span>
+        </Head>
+        {items.map(({ card, touchedAt }) => (
+          <Line
+            key={card?.id}
+            to={ROUTES.singleTechCard.replace(':id', String(card?.id))}
+            className={cn('grid-cols-[minmax(0,1fr)_auto]', RECENT_COLS)}
+          >
+            <span className={NAME}>{card?.name || card?.styleNumber || 'untitled'}</span>
+            <span className='col-start-1 row-start-2 min-w-0 truncate text-labelColor sm:col-start-auto sm:row-start-auto'>
+              {card?.styleNumber}
+            </span>
+            <span className='hidden min-w-0 truncate text-labelColor sm:block'>
+              {stageLabel(card?.stage)}
+            </span>
+            <span className='col-start-2 row-start-1 whitespace-nowrap text-right text-labelColor sm:col-start-auto sm:row-start-auto'>
+              {agoWord(touchedAt, now)}
+            </span>
+          </Line>
+        ))}
+      </div>
     </HomeList>
   );
 }
@@ -429,8 +474,8 @@ export default function MyWork() {
 
   if (blocks.size === 0) return <Navigate to={homeRoute ?? ROUTES.me} replace />;
 
-  // Desktop: tasks + files on the left, fittings + production on the right. Below `lg` the two
-  // columns dissolve and the blocks fall into phone order.
+  // Desktop: tasks + recent techcards + files on the left, fittings + production on the right.
+  // Below `lg` the two columns dissolve and the blocks fall into phone order.
   const col = 'flex min-w-0 flex-col gap-gutter max-lg:contents';
   return (
     <div className='grid grid-cols-1 items-start gap-gutter lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]'>
@@ -442,11 +487,12 @@ export default function MyWork() {
             className='max-lg:order-1'
           />
         )}
-        {blocks.has('files') && <RecentFiles me={me} className='max-lg:order-4' />}
+        {blocks.has('recent') && <RecentTechCards className='max-lg:order-2' />}
+        {blocks.has('files') && <RecentFiles me={me} className='max-lg:order-5' />}
       </div>
       <div className={col}>
-        {blocks.has('fittings') && <WeekFittings className='max-lg:order-2' />}
-        {blocks.has('production') && <RunningRuns className='max-lg:order-3' />}
+        {blocks.has('fittings') && <WeekFittings className='max-lg:order-3' />}
+        {blocks.has('production') && <RunningRuns className='max-lg:order-4' />}
       </div>
     </div>
   );

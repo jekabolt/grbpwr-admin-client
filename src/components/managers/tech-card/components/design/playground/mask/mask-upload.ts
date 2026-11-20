@@ -236,6 +236,7 @@ export const maskDataUrl: MaskPainter = async (strokes, width, height) => {
 export const uploadMask: MaskUploadFn = async (dataUrl, signal) => {
   const response = await (signal ? abortableAdminService(signal) : adminService).UploadContentImage(
     {
+      fileName: undefined,
       rawB64Image: dataUrl,
       preserveOriginal: true,
     },

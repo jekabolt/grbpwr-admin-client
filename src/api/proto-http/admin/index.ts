@@ -206,6 +206,31 @@ export type TranslateContext =
   | "TRANSLATE_CONTEXT_UNKNOWN"
   // TRANSLATE_CONTEXT_TECHPACK: a tech pack for a sewing factory (garment technologist).
   | "TRANSLATE_CONTEXT_TECHPACK";
+export type LibrarySource =
+  | "LIBRARY_SOURCE_UNSPECIFIED"
+  | "LIBRARY_SOURCE_MEDIA"
+  | "LIBRARY_SOURCE_FILE";
+export type LibraryKind =
+  | "LIBRARY_KIND_UNSPECIFIED"
+  | "LIBRARY_KIND_IMAGE"
+  | "LIBRARY_KIND_VIDEO"
+  | "LIBRARY_KIND_VECTOR"
+  | "LIBRARY_KIND_MODEL"
+  | "LIBRARY_KIND_DOCUMENT";
+export type LibraryAccept =
+  | "LIBRARY_ACCEPT_UNSPECIFIED"
+  | "LIBRARY_ACCEPT_ANY"
+  | "LIBRARY_ACCEPT_VISUAL";
+export type LibraryUsage =
+  | "LIBRARY_USAGE_UNSPECIFIED"
+  | "LIBRARY_USAGE_USED"
+  | "LIBRARY_USAGE_FREE";
+export type LibrarySort =
+  | "LIBRARY_SORT_UNSPECIFIED"
+  | "LIBRARY_SORT_NEW"
+  | "LIBRARY_SORT_OLD"
+  | "LIBRARY_SORT_NAME"
+  | "LIBRARY_SORT_SIZE";
 export type GetDictionaryRequest = {
 };
 
@@ -542,6 +567,8 @@ export type UploadContentImageRequest = {
   // everything» would be the dishonest wording.
   // Absent/false = the ordinary path (re-encode + derive thumbnail/compressed), unchanged.
   preserveOriginal: boolean | undefined;
+  // Optional original file name for the library list: trimmed, at most 255 runes, never a path.
+  fileName: string | undefined;
 };
 
 export type UploadContentImageResponse = {
@@ -599,6 +626,8 @@ export type common_MediaInfo = {
 export type UploadContentVideoRequest = {
   raw: string | undefined;
   contentType: string | undefined;
+  // Optional original file name (see UploadContentImageRequest.file_name). 2 and 3 are retired.
+  fileName: string | undefined;
 };
 
 export type UploadContentVideoResponse = {
@@ -622,6 +651,8 @@ export type UploadContentVectorRequest = {
   // trusted. A GLB has its own door (UploadContentModel), for the same reason: one verb, one
   // content type, so no client can choose which branch of the non-raster path its payload takes.
   raw: string | undefined;
+  // Optional original file name (see UploadContentImageRequest.file_name).
+  fileName: string | undefined;
 };
 
 export type UploadContentVectorResponse = {
@@ -642,6 +673,8 @@ export type UploadContentModelRequest = {
   // no preview: the media row keeps the old shape (every url slot is the .glb), which is what every
   // model uploaded before this field looks like. The same raster ceilings as UploadContentImage.
   preview: string | undefined;
+  // Optional original file name of the .glb (see UploadContentImageRequest.file_name).
+  fileName: string | undefined;
 };
 
 export type UploadContentModelResponse = {
@@ -12716,6 +12749,20 @@ export type common_TechCardListItem = {
   setup: boolean | undefined;
 };
 
+export type ListMyRecentTechCardsRequest = {
+  limit: number | undefined;
+};
+
+// RecentTechCard is one card the caller touched (opened or wrote) and when they last did.
+export type RecentTechCard = {
+  card: common_TechCardListItem | undefined;
+  touchedAt: wellKnownTimestamp | undefined;
+};
+
+export type ListMyRecentTechCardsResponse = {
+  items: RecentTechCard[] | undefined;
+};
+
 // TechCardReadinessRequirement is ONE condition on a style's progress, evaluated server-side against
 // the real data. `key` is the stable machine name (switch on it); `label` is the sentence to show.
 export type TechCardReadinessRequirement = {
@@ -20728,6 +20775,151 @@ export type TranslatedFields = {
   fields: { [key: string]: string } | undefined;
 };
 
+// LibraryItemRef is the row key of the unified list: media id 7 and file id 7 are different rows.
+export type LibraryItemRef = {
+  source: LibrarySource | undefined;
+  id: number | undefined;
+};
+
+export type LibraryItemFilter = {
+  kinds: LibraryKind[] | undefined;
+  accept: LibraryAccept | undefined;
+  sources: LibrarySource[] | undefined;
+  folderId: number | undefined;
+  noFolder: boolean | undefined;
+  includeSubfolders: boolean | undefined;
+  search: string | undefined;
+  projectTopicId: number | undefined;
+  topicIds: number[] | undefined;
+  uploadedById: number | undefined;
+  createdFrom: wellKnownTimestamp | undefined;
+  createdTo: wellKnownTimestamp | undefined;
+  usage: LibraryUsage | undefined;
+  ratios: string[] | undefined;
+};
+
+export type LibraryItem = {
+  ref: LibraryItemRef | undefined;
+  kind: LibraryKind | undefined;
+  name: string | undefined;
+  sizeBytes: number | undefined;
+  contentType: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  folderId: number | undefined;
+  uploadedById: number | undefined;
+  uploadedBy: string | undefined;
+  inUse: boolean | undefined;
+  media: common_MediaFull | undefined;
+  file: LibraryFile | undefined;
+  width: number | undefined;
+  height: number | undefined;
+};
+
+export type ListLibraryItemsRequest = {
+  filter: LibraryItemFilter | undefined;
+  sort: LibrarySort | undefined;
+  limit: number | undefined;
+  offset: number | undefined;
+};
+
+export type ListLibraryItemsResponse = {
+  items: LibraryItem[] | undefined;
+  total: number | undefined;
+  sourcesVisible: LibrarySource[] | undefined;
+};
+
+export type LibraryKindCount = {
+  kind: LibraryKind | undefined;
+  count: number | undefined;
+};
+
+export type LibraryRatioCount = {
+  ratio: string | undefined;
+  count: number | undefined;
+};
+
+export type GetLibraryFacetsRequest = {
+  filter: LibraryItemFilter | undefined;
+};
+
+export type GetLibraryFacetsResponse = {
+  months: MonthCount[] | undefined;
+  kinds: LibraryKindCount[] | undefined;
+  used: number | undefined;
+  free: number | undefined;
+  ratios: LibraryRatioCount[] | undefined;
+  total: number | undefined;
+};
+
+export type LibraryFolder = {
+  id: number | undefined;
+  parentId: number | undefined;
+  name: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  itemCount: number | undefined;
+  childCount: number | undefined;
+};
+
+export type ListLibraryFoldersRequest = {
+  filter: LibraryItemFilter | undefined;
+};
+
+export type ListLibraryFoldersResponse = {
+  folders: LibraryFolder[] | undefined;
+};
+
+export type CreateLibraryFolderRequest = {
+  parentId: number | undefined;
+  name: string | undefined;
+};
+
+export type CreateLibraryFolderResponse = {
+  folder: LibraryFolder | undefined;
+};
+
+export type RenameLibraryFolderRequest = {
+  id: number | undefined;
+  name: string | undefined;
+};
+
+export type RenameLibraryFolderResponse = {
+  folder: LibraryFolder | undefined;
+};
+
+export type MoveLibraryFolderRequest = {
+  id: number | undefined;
+  newParentId: number | undefined;
+};
+
+export type MoveLibraryFolderResponse = {
+  folder: LibraryFolder | undefined;
+};
+
+export type DeleteLibraryFolderRequest = {
+  id: number | undefined;
+};
+
+export type DeleteLibraryFolderResponse = {
+};
+
+export type MoveLibraryItemsRequest = {
+  refs: LibraryItemRef[] | undefined;
+  folderId: number | undefined;
+};
+
+export type MoveLibraryItemsResponse = {
+  moved: number | undefined;
+};
+
+export type CopyLibraryFileToMediaRequest = {
+  fileId: number | undefined;
+};
+
+export type CopyLibraryFileToMediaResponse = {
+  media: common_MediaFull | undefined;
+  existed: boolean | undefined;
+};
+
 export interface AdminService {
   // Retrieves a key-value dictionary.
   GetDictionary(request: GetDictionaryRequest): Promise<GetDictionaryResponse>;
@@ -21607,6 +21799,11 @@ export interface AdminService {
   // /tech-card/list before /tech-card/{id}. Guarded by
   // TestTechCardListRouteNotShadowed.
   ListTechCards(request: ListTechCardsRequest): Promise<ListTechCardsResponse>;
+  // ListMyRecentTechCards returns the cards the caller opened or changed most recently, latest
+  // first. The caller is always «me»: no account id travels in the request. Archived (obsolete)
+  // and system cards are skipped; limit defaults to 6, capped at 20. Guarded by the tech-card
+  // read right; the route lives outside /tech-card/ so the {id} pattern cannot shadow it.
+  ListMyRecentTechCards(request: ListMyRecentTechCardsRequest): Promise<ListMyRecentTechCardsResponse>;
   // GetStylePipeline returns the development board: per-stage counts + a few light cards per column
   // (gap-01), so the idea→prod pipeline loads in one call.
   // GetTechCardReadiness reports what is missing before a style can advance a stage or be released.
@@ -22876,6 +23073,26 @@ export interface AdminService {
   SetTeamBrand(request: SetTeamBrandRequest): Promise<SetTeamBrandResponse>;
   // SetTeamMemberAccess replaces a member's section rights with the full set sent; a section left out gets none.
   SetTeamMemberAccess(request: SetTeamMemberAccessRequest): Promise<SetTeamMemberAccessResponse>;
+  // ListLibraryItems is one page of the unified library: media rows and library files in one
+  // list, keyed by (source, id). Branches the caller may not read are dropped silently.
+  ListLibraryItems(request: ListLibraryItemsRequest): Promise<ListLibraryItemsResponse>;
+  // GetLibraryFacets answers the counts for the same filter: months, kinds, used/free, ratios.
+  GetLibraryFacets(request: GetLibraryFacetsRequest): Promise<GetLibraryFacetsResponse>;
+  // ListLibraryFolders answers every folder, flat, ordered by parent then name.
+  ListLibraryFolders(request: ListLibraryFoldersRequest): Promise<ListLibraryFoldersResponse>;
+  // CreateLibraryFolder makes a folder under parent_id (0 = root).
+  CreateLibraryFolder(request: CreateLibraryFolderRequest): Promise<CreateLibraryFolderResponse>;
+  // RenameLibraryFolder renames a folder; the name stays unique among its siblings.
+  RenameLibraryFolder(request: RenameLibraryFolderRequest): Promise<RenameLibraryFolderResponse>;
+  // MoveLibraryFolder moves a folder under a new parent (0 = root); no cycles, depth capped.
+  MoveLibraryFolder(request: MoveLibraryFolderRequest): Promise<MoveLibraryFolderResponse>;
+  // DeleteLibraryFolder deletes an empty folder; anything inside refuses with folder_not_empty.
+  DeleteLibraryFolder(request: DeleteLibraryFolderRequest): Promise<DeleteLibraryFolderResponse>;
+  // MoveLibraryItems puts items into a folder (0 = out of every folder), all or nothing.
+  MoveLibraryItems(request: MoveLibraryItemsRequest): Promise<MoveLibraryItemsResponse>;
+  // CopyLibraryFileToMedia turns a private library image/vector/video into a media row through
+  // the normal upload pipeline (three sizes for raster). The file stays; dedup by sha256.
+  CopyLibraryFileToMedia(request: CopyLibraryFileToMediaRequest): Promise<CopyLibraryFileToMediaResponse>;
 }
 
 type RequestType = {
@@ -27632,6 +27849,26 @@ export function createAdminServiceClient(
         method: "ListTechCards",
       }) as Promise<ListTechCardsResponse>;
     },
+    ListMyRecentTechCards(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/me/recent-tech-cards`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.limit) {
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListMyRecentTechCards",
+      }) as Promise<ListMyRecentTechCardsResponse>;
+    },
     GetTechCardReadiness(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
         throw new Error("missing required field request.tech_card_id");
@@ -32382,6 +32619,159 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "SetTeamMemberAccess",
       }) as Promise<SetTeamMemberAccessResponse>;
+    },
+    ListLibraryItems(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/library/items/list`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListLibraryItems",
+      }) as Promise<ListLibraryItemsResponse>;
+    },
+    GetLibraryFacets(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/library/facets`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetLibraryFacets",
+      }) as Promise<GetLibraryFacetsResponse>;
+    },
+    ListLibraryFolders(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/library/folders/list`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListLibraryFolders",
+      }) as Promise<ListLibraryFoldersResponse>;
+    },
+    CreateLibraryFolder(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/library/folders/create`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateLibraryFolder",
+      }) as Promise<CreateLibraryFolderResponse>;
+    },
+    RenameLibraryFolder(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/library/folders/rename`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "RenameLibraryFolder",
+      }) as Promise<RenameLibraryFolderResponse>;
+    },
+    MoveLibraryFolder(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/library/folders/move`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "MoveLibraryFolder",
+      }) as Promise<MoveLibraryFolderResponse>;
+    },
+    DeleteLibraryFolder(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/library/folders/delete`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteLibraryFolder",
+      }) as Promise<DeleteLibraryFolderResponse>;
+    },
+    MoveLibraryItems(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/library/items/move`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "MoveLibraryItems",
+      }) as Promise<MoveLibraryItemsResponse>;
+    },
+    CopyLibraryFileToMedia(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/library/files/copy-to-media`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CopyLibraryFileToMedia",
+      }) as Promise<CopyLibraryFileToMediaResponse>;
     },
   };
 }
