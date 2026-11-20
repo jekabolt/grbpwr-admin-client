@@ -89,6 +89,32 @@ function mediaProxyPlugin(allowedHosts?: string) {
   };
 }
 
+// Tab title and link-preview text are build-time values: the legacy admin keeps today's wording, a
+// lekalo build sets VITE_APP_TITLE / VITE_APP_DESCRIPTION to its own neutral text.
+const DEFAULT_APP_TITLE = 'GRBPWR';
+const DEFAULT_APP_DESCRIPTION = 'grbpwr admin panel';
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function appMetaPlugin(title?: string, description?: string): PluginOption {
+  const t = escapeHtml(title?.trim() || DEFAULT_APP_TITLE);
+  const d = escapeHtml(description?.trim() || DEFAULT_APP_DESCRIPTION);
+  return {
+    name: 'app-meta',
+    transformIndexHtml: {
+      order: 'pre',
+      handler: (html: string) =>
+        html.replaceAll('%APP_TITLE%', t).replaceAll('%APP_DESCRIPTION%', d),
+    },
+  };
+}
+
 /** Release = git sha. Vercel exposes it as VERCEL_GIT_COMMIT_SHA; a local build asks git. */
 function gitRelease(env: Record<string, string>) {
   const fromEnv = (env.SENTRY_RELEASE || env.VERCEL_GIT_COMMIT_SHA || '').trim();
@@ -146,6 +172,7 @@ export default defineConfig(({ command, mode }) => {
 
   return {
     plugins: [
+      appMetaPlugin(env.VITE_APP_TITLE, env.VITE_APP_DESCRIPTION),
       mediaProxyPlugin(env.MEDIA_PROXY_ALLOWED_HOSTS),
       translateApiPlugin(env.OPENROUTER_API_KEY, env.OPENROUTER_MODEL),
       react({

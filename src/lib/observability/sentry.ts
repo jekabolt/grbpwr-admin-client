@@ -2,6 +2,7 @@
 // Loaded only through ./index (dynamic import) when VITE_SENTRY_DSN is set.
 import * as Sentry from '@sentry/react';
 import { sentryEnvironment } from 'lib/deployment-env';
+import { currentHost } from 'lib/host';
 import type { ErrorInfo } from 'react';
 import type { ApiErrorContext, ImportRefusalContext } from './index';
 import { scrubEnvelope } from './scrub';
@@ -13,11 +14,28 @@ import { scrubEnvelope } from './scrub';
 // - BrowserSession: a session envelope on every page load and navigation, with no error in it.
 const OFF = new Set(['Breadcrumbs', 'BrowserSession']);
 
+/** "prod" / "beta" from the environment name ("lekalo-beta" → "beta"), like the backend's install tag. */
+export function installOf(env: string): string {
+  const e = env.trim().toLowerCase();
+  if (e.includes('prod')) return 'prod';
+  if (e.includes('beta')) return 'beta';
+  return e || 'beta';
+}
+
+/** Tags every report carries: the team's address word (never an id) and the install. */
+function scopeTags(env: string): Record<string, string> {
+  const tags: Record<string, string> = { install: installOf(env) };
+  const host = currentHost();
+  if (host.slug) tags.team = host.slug;
+  return tags;
+}
+
 export function init(dsn: string) {
   Sentry.init({
     dsn,
     release: __APP_RELEASE__ || undefined,
     environment: sentryEnvironment(),
+    initialScope: { tags: scopeTags(sentryEnvironment()) },
     sendDefaultPii: false,
     // No performance tracing, and no trace headers on API calls: the backend's CORS allowlist
     // does not know sentry-trace/baggage, and a rejected preflight would break every request.
