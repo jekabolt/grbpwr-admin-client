@@ -203,3 +203,56 @@ export function deleteRefusal(e: unknown): string {
   if (status === 429 || /resource.?exhausted|too many/i.test(msg)) return 'try later';
   return refusalWord(e, 'not deleted');
 }
+
+// STORAGE (lane X11): bytes arrive as numbers or, from the JSON gateway, as int64 strings.
+const GIB = 1024 ** 3;
+
+const bytesOf = (v: number | string | undefined): number => Number(v ?? 0) || 0;
+
+/** Gigabytes as the console writes them: 214 · 19.4 · 3.2 · 0.21. */
+export function gb(bytes: number | string | undefined): string {
+  const n = bytesOf(bytes) / GIB;
+  if (n >= 100) return n.toFixed(0);
+  if (n >= 1 || n === 0) return n.toFixed(1);
+  return n.toFixed(2);
+}
+
+export interface Storage {
+  used: number;
+  /** 0 = no cap */
+  cap: number;
+  full: boolean;
+}
+
+export function storageOf(t: {
+  storageUsedBytes?: number | string;
+  storageCapBytes?: number | string;
+}): Storage {
+  const used = bytesOf(t.storageUsedBytes);
+  const cap = bytesOf(t.storageCapBytes);
+  return { used, cap, full: cap > 0 && used >= cap };
+}
+
+/** «3.2 / 20.0 gb», «214 / ∞ gb» with no cap. */
+export function storageText(s: Storage): string {
+  return `${gb(s.used)} / ${s.cap ? gb(s.cap) : '∞'} gb`;
+}
+
+/** Share of the cap in use, 0–100; 0 with no cap. */
+export const storagePct = (s: Storage): number =>
+  s.cap ? Math.min(100, (s.used / s.cap) * 100) : 0;
+
+export type CapChange = { capBytes: number } | { noCap: true } | { defaultCap: true };
+
+/**
+ * The cap control's save: «no cap» ticked → no cap; the field emptied → back to the default; else
+ * the number of gb. null = not a cap (the save stays off).
+ */
+export function capChange(field: string, noCap: boolean): CapChange | null {
+  if (noCap) return { noCap: true };
+  const v = field.trim().replace(',', '.');
+  if (!v) return { defaultCap: true };
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0 || n >= 1e6) return null;
+  return { capBytes: Math.round(n * GIB) };
+}

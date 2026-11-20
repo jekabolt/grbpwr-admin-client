@@ -82,7 +82,7 @@ const send = async (
       const err = new Error(msg) as Error & { status?: number; details?: unknown[] };
       err.status = response.status;
       err.details = details;
-      const signal = signalOf(msg);
+      const signal = signalOf(msg, response.status);
       if (signal) emitWorkspaceSignal(signal);
       reportApiError(err, {
         route: meta ? `${meta.service}.${meta.method}` : path.split('?')[0],

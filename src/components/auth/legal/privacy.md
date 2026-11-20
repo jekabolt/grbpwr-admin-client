@@ -34,12 +34,10 @@ The lekalo operator (platform administrators) can open any workspace and see and
 Some functions (image and text generation, analysis of sketches and pattern files) send the content the user submits to third-party AI providers through the operator's own accounts. Only content submitted to an AI function is sent. AI usage is metered per team, and the operator may limit or switch off AI for a team.
 
 ## 8. sub-processors
-| who | role |
-|---|---|
-| DigitalOcean | hosting, databases, file storage |
-| Resend | service email |
-| Sentry | error reports |
-| AI providers reached through OpenRouter and fal | only content submitted to AI functions |
+- DigitalOcean: hosting, databases, file storage.
+- Resend: service email.
+- Sentry: error reports.
+- AI providers reached through OpenRouter and fal: only content submitted to AI functions.
 
 Data is stored in Frankfurt, Germany (DigitalOcean). Some of the providers above are based in the United States.
 

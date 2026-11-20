@@ -4,7 +4,15 @@ import type { ListTeamsResponse, PlatformTeam } from 'api/proto-http/admin';
 import { currentHost, goToUrl, teamUrl } from 'lib/host';
 import { useSnackBarStore } from 'lib/stores/store';
 import { consoleKeys, platformService } from './api';
-import { deleteRefusal, patchTeam, refusalWord, STATUS, withFeature, withReadOnly } from './model';
+import {
+  type CapChange,
+  deleteRefusal,
+  patchTeam,
+  refusalWord,
+  STATUS,
+  withFeature,
+  withReadOnly,
+} from './model';
 
 /** `ostra.lekalo.studio`: the team's address on this contour. */
 export const addressOf = (slug: string) => `${slug}.${currentHost().base}`;
@@ -140,6 +148,21 @@ export function useConsoleActions() {
     onError: stale,
   });
 
+  // The cap is saved on press (no optimistic flip): the row takes the server's answer.
+  const storageCap = useMutation({
+    mutationFn: (v: { slug: string; change: CapChange }) =>
+      platformService.SetTeamStorageCap({
+        teamSlug: v.slug,
+        capBytes: 'capBytes' in v.change ? v.change.capBytes : undefined,
+        noCap: 'noCap' in v.change ? true : undefined,
+        defaultCap: 'defaultCap' in v.change ? true : undefined,
+      }),
+    onSuccess: (r, v) => {
+      if (r.team) setRows((rows) => patchTeam(rows, v.slug, (t) => ({ ...t, ...r.team })));
+    },
+    onError: fail,
+  });
+
   const busy = (m: { isPending: boolean; variables?: unknown }, slug: string) =>
     m.isPending && m.variables === slug;
 
@@ -150,6 +173,12 @@ export function useConsoleActions() {
     decline: (slug: string) => decline.mutate(slug),
     enter: (slug: string) => enter.mutate(slug),
     restore: (slug: string) => restore.mutate(slug),
+    setStorageCap: (slug: string, change: CapChange) =>
+      storageCap.mutateAsync({ slug, change }).then(
+        () => true,
+        () => false,
+      ),
+    savingCap: (slug: string) => storageCap.isPending && storageCap.variables?.slug === slug,
     approving: (slug: string) => busy(approve, slug),
     declining: (slug: string) => busy(decline, slug),
     entering: (slug: string) => busy(enter, slug),

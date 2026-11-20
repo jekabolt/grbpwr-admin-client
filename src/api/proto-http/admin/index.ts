@@ -20785,6 +20785,18 @@ export type SetTeamMemberAccessResponse = {
   member: TeamMember | undefined;
 };
 
+export type GetTeamStorageRequest = {
+};
+
+export type GetTeamStorageResponse = {
+  // used_bytes is the team's storage in use (counted at upload / delete, recounted daily).
+  usedBytes: number | undefined;
+  // cap_bytes is the cap that applies to the team; 0 = no cap (teams mode off answers 0 / 0).
+  capBytes: number | undefined;
+  // full: uploads are refused until files are removed or the cap is raised.
+  full: boolean | undefined;
+};
+
 // TranslateFieldsRequest — the admin client's /api/translate body
 // ({source:{langName, fields}, targets:[{code, langName}], constraints}).
 export type TranslateFieldsRequest = {
@@ -23134,6 +23146,9 @@ export interface AdminService {
   SetTeamBrand(request: SetTeamBrandRequest): Promise<SetTeamBrandResponse>;
   // SetTeamMemberAccess replaces a member's section rights with the full set sent; a section left out gets none.
   SetTeamMemberAccess(request: SetTeamMemberAccessRequest): Promise<SetTeamMemberAccessResponse>;
+  // GetTeamStorage returns the calling team's file storage: bytes in use and its cap (lane X11). Any
+  // member may read it; only the operator changes the cap (PlatformService.SetTeamStorageCap).
+  GetTeamStorage(request: GetTeamStorageRequest): Promise<GetTeamStorageResponse>;
   // ListLibraryItems is one page of the unified library: media rows and library files in one
   // list, keyed by (source, id). Branches the caller may not read are dropped silently.
   ListLibraryItems(request: ListLibraryItemsRequest): Promise<ListLibraryItemsResponse>;
@@ -32755,6 +32770,23 @@ export function createAdminServiceClient(
         method: "SetTeamMemberAccess",
       }) as Promise<SetTeamMemberAccessResponse>;
     },
+    GetTeamStorage(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/team/storage`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetTeamStorage",
+      }) as Promise<GetTeamStorageResponse>;
+    },
     ListLibraryItems(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/library/items/list`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
@@ -32927,6 +32959,12 @@ export type PlatformTeam = {
   schemaOk: boolean | undefined;
   // purge_at is set only while status is deleted: the moment the team's data is wiped.
   purgeAt: wellKnownTimestamp | undefined;
+  // storage_used_bytes is the team's file storage in use (counted at upload / delete, recounted daily).
+  storageUsedBytes: number | undefined;
+  // storage_cap_bytes is the cap that applies to the team; 0 = no cap.
+  storageCapBytes: number | undefined;
+  // storage_cap_default is true when the team follows the installation's default cap (no own cap).
+  storageCapDefault: boolean | undefined;
 };
 
 // PlatformMember is one member of a team as the console sees it.
@@ -32990,6 +33028,20 @@ export type SetTeamStatusRequest = {
 };
 
 export type SetTeamStatusResponse = {
+  team: PlatformTeam | undefined;
+};
+
+export type SetTeamStorageCapRequest = {
+  teamSlug: string | undefined;
+  // Exactly one of: cap_bytes > 0, no_cap, default_cap; anything else is INVALID_ARGUMENT.
+  capBytes: number | undefined;
+  // no_cap: the team has no storage cap.
+  noCap: boolean | undefined;
+  // default_cap: the team goes back to the installation's default cap (its own cap is removed).
+  defaultCap: boolean | undefined;
+};
+
+export type SetTeamStorageCapResponse = {
   team: PlatformTeam | undefined;
 };
 
@@ -33101,6 +33153,11 @@ export interface PlatformService {
   // operator out of the console; their next sign-in sets an app up again behind a mailed code. Every operator
   // gets a letter. Needs the calling operator's own password.
   ResetOperatorApp(request: ResetOperatorAppRequest): Promise<ResetOperatorAppResponse>;
+  // SetTeamStorageCap sets how much file storage a team may use — exactly one of three states:
+  // cap_bytes > 0 (this team's own cap), no_cap (no cap at all), or default_cap (back to the
+  // installation's default, TEAM_STORAGE_CAP_GB). An upload that would take the team over its cap
+  // is refused; nothing stored is touched.
+  SetTeamStorageCap(request: SetTeamStorageCapRequest): Promise<SetTeamStorageCapResponse>;
 }
 
 export function createPlatformServiceClient(
@@ -33357,6 +33414,26 @@ export function createPlatformServiceClient(
         service: "PlatformService",
         method: "ResetOperatorApp",
       }) as Promise<ResetOperatorAppResponse>;
+    },
+    SetTeamStorageCap(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.teamSlug) {
+        throw new Error("missing required field request.team_slug");
+      }
+      const path = `api/platform/teams/${request.teamSlug}/storage-cap`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "PlatformService",
+        method: "SetTeamStorageCap",
+      }) as Promise<SetTeamStorageCapResponse>;
     },
   };
 }
