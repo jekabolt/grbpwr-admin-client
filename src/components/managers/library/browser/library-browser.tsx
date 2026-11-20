@@ -628,7 +628,13 @@ export function LibraryBrowser({
       onChange={(e: ChangeEvent<HTMLInputElement>) => setSearch(e.target.value)}
       placeholder='search'
       aria-label='search'
-      className={page ? 'min-w-0 flex-1 lg:max-w-60 lg:flex-none' : 'min-w-0 flex-1 sm:max-w-48'}
+      className={
+        page
+          ? 'min-w-0 flex-1 lg:max-w-60 lg:flex-none'
+          : visibleGroups(kinds).length > 1
+            ? 'w-full min-w-0 sm:w-48'
+            : 'min-w-0 flex-1 sm:max-w-48'
+      }
     />
   );
   const uploadButton = canUpload && (
