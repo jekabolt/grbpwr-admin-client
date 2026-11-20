@@ -3,15 +3,20 @@ import { Button, Input, Text } from 'ui';
 
 const LEN = 6;
 
-/** Six one-digit cells. A paste (or a phone's code autofill) fills all of them at once. */
+/**
+ * Six one-digit cells. A paste (or a phone's code autofill) fills all of them at once.
+ * `big` — the console's second step: the code is the whole form block.
+ */
 export function CodeCells({
   onChange,
   invalid,
   autoFocus = true,
+  big,
 }: {
   onChange: (code: string) => void;
   invalid?: boolean;
   autoFocus?: boolean;
+  big?: boolean;
 }) {
   const [cells, setCells] = useState<string[]>(() => Array(LEN).fill(''));
   const refs = useRef<(HTMLInputElement | null)[]>([]);
@@ -50,7 +55,11 @@ export function CodeCells({
           autoComplete={i === 0 ? 'one-time-code' : 'off'}
           aria-label={`digit ${i + 1}`}
           aria-invalid={invalid || undefined}
-          className='h-12 w-10 p-0 text-center text-lg'
+          className={
+            big
+              ? 'h-[3.375rem] w-[2.625rem] p-0 text-center text-statBig sm:h-[3.75rem] sm:w-12'
+              : 'h-12 w-10 p-0 text-center text-lg'
+          }
           onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
             const digits = e.target.value.replace(/\D/g, '');
             if (!digits) {

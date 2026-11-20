@@ -53,6 +53,7 @@ let signedUp: { email: string; team: Record<string, unknown> } | null = null;
  * localStorage knobs: stub.teams=empty (first time), stub.signin=google|none (default: both),
  * stub.rootToken=0 (the code answers as the old server: no token; 111111 → awaiting, else the
  * team host). Brand: a website starting with `refuse` → the server's `bad_website`.
+ * stub.secondStep=code|setup → the console log-in asks the app code / sets the app up.
  * stub.entry=1 → the first entry (`/welcome`); username `taken` → `username_taken`.
  */
 function knob(key: string): string {
@@ -135,6 +136,16 @@ export async function stubAnswer(method: string, body: string | null, path = '')
       return { teamSlug: 'ostra', handoffCode: 'stub-code' };
     case 'SignIn':
       if (req.password === 'linen2025') refuse(401, 'wrong password');
+      // stub.secondStep=code|setup → the console answers a ticket (switch on); unset = a token
+      if (req.target === 'SIGN_IN_TARGET_CONSOLE' && knob('stub.secondStep'))
+        return {
+          ticket: 'stub-ticket',
+          secondStep:
+            knob('stub.secondStep') === 'setup'
+              ? 'OPERATOR_SECOND_STEP_SETUP'
+              : 'OPERATOR_SECOND_STEP_CODE',
+          setupLetterSent: true,
+        };
       return {
         token: TOKEN,
         teams:
@@ -146,6 +157,25 @@ export async function stubAnswer(method: string, body: string | null, path = '')
                 : [...TEAMS, WAITING]
             : [],
       };
+    // second step: 000000 = wrong, 999999 = locked, 111111 = the sign-in is gone
+    case 'OperatorVerify':
+    case 'OperatorSetupMail':
+    case 'OperatorSetupConfirm':
+      if (req.code === '000000') refuse(400, 'invalid code');
+      if (req.code === '999999') refuse(429, 'locked');
+      if (req.code === '111111') refuse(400, 'sign_in_again');
+      if (method === 'OperatorSetupMail')
+        return {
+          secret: 'JBSWY3DPEHPK3PXPK4ZQ7MNA',
+          otpauthUrl:
+            'otpauth://totp/lekalo:operator?secret=JBSWY3DPEHPK3PXPK4ZQ7MNA&issuer=lekalo',
+        };
+      if (method === 'OperatorSetupConfirm')
+        return {
+          token: TOKEN,
+          recoveryCodes: Array.from({ length: 10 }, (_, i) => `stub-${String(i).padStart(4, '0')}`),
+        };
+      return { token: TOKEN, recoveryCodesLeft: 10 };
     case 'GetSignInOptions': {
       const s = knob('stub.signin');
       return { google: s !== 'none', apple: s === '' || s === 'all' };

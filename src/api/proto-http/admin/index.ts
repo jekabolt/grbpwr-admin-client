@@ -32909,6 +32909,30 @@ export type RestoreTeamResponse = {
   team: PlatformTeam | undefined;
 };
 
+// PlatformOperator is one console operator.
+export type PlatformOperator = {
+  email: string | undefined;
+  // app_set_up: an authenticator app is confirmed.
+  appSetUp: boolean | undefined;
+  recoveryCodesLeft: number | undefined;
+};
+
+export type ListOperatorsRequest = {
+};
+
+export type ListOperatorsResponse = {
+  operators: PlatformOperator[] | undefined;
+};
+
+export type ResetOperatorAppRequest = {
+  email: string | undefined;
+  // password is the calling operator's own console password.
+  password: string | undefined;
+};
+
+export type ResetOperatorAppResponse = {
+};
+
 // PlatformService is the operator console over the control plane. A team is
 // addressed by slug, never by id.
 export interface PlatformService {
@@ -32936,6 +32960,12 @@ export interface PlatformService {
   DeleteTeam(request: DeleteTeamRequest): Promise<DeleteTeamResponse>;
   // RestoreTeam brings back a deleted team whose data is not wiped yet.
   RestoreTeam(request: RestoreTeamRequest): Promise<RestoreTeamResponse>;
+  // ListOperators lists the console operators and whether each has an authenticator app.
+  ListOperators(request: ListOperatorsRequest): Promise<ListOperatorsResponse>;
+  // ResetOperatorApp removes an operator's authenticator app and recovery codes (lost phone) and signs that
+  // operator out of the console; their next sign-in sets an app up again behind a mailed code. Every operator
+  // gets a letter. Needs the calling operator's own password.
+  ResetOperatorApp(request: ResetOperatorAppRequest): Promise<ResetOperatorAppResponse>;
 }
 
 export function createPlatformServiceClient(
@@ -33158,6 +33188,40 @@ export function createPlatformServiceClient(
         service: "PlatformService",
         method: "RestoreTeam",
       }) as Promise<RestoreTeamResponse>;
+    },
+    ListOperators(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/platform/operators`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "PlatformService",
+        method: "ListOperators",
+      }) as Promise<ListOperatorsResponse>;
+    },
+    ResetOperatorApp(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/platform/operators/reset-app`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "PlatformService",
+        method: "ResetOperatorApp",
+      }) as Promise<ResetOperatorAppResponse>;
     },
   };
 }
