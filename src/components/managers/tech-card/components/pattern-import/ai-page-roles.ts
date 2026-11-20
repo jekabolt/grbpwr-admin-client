@@ -27,6 +27,7 @@ export const apiPageRoleDeps: PageRoleDeps = {
       fileName: undefined,
       rawB64Image: await asDataUrl(picture),
       preserveOriginal: undefined,
+      fileName: undefined,
     });
     const id = res.media?.id ?? 0;
     if (!id) throw new Error('the page went up but came back without an id');

@@ -150,6 +150,7 @@ export async function uploadMediaInput(input: UploadMediaInput): Promise<common_
       response = await adminService.UploadContentImage({
         fileName: undefined,
         rawB64Image: base64,
+        fileName: undefined,
         // Приехало с контрактом полосы DESIGN. `false` — это ПРЕЖНЕЕ поведение медиатеки:
         // сервер жмёт и приводит формат. Verbatim-путь (побайтовое сохранение оригинала) нужен
         // плитам полосы, а не общей загрузке, и включать его здесь означало бы молча поменять
@@ -174,6 +175,7 @@ export async function uploadMediaInput(input: UploadMediaInput): Promise<common_
       fileName: undefined,
       raw,
       contentType,
+      fileName: undefined,
     });
   } catch (e) {
     throw uploadError(e, true);
