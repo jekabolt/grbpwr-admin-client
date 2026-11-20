@@ -31,10 +31,12 @@ const send = async (
   { path, method, body }: RequestHandlerParams,
   signal?: AbortSignal,
   meta?: ProtoMetaParams,
+  extra?: Record<string, string>,
 ) => {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...authHeaders(),
+    ...extra,
   };
 
   if (import.meta.env.DEV && import.meta.env.VITE_AUTH_STUB && meta) {
@@ -113,3 +115,7 @@ export const abortableAdminService = (signal: AbortSignal) =>
 export const frontendService = createFrontendServiceClient(requestHandler);
 export const adminService = createAdminServiceClient(requestHandler);
 export const authService = createAuthServiceClient(requestHandler);
+
+/** The auth client with extra request headers (the sign-up «not a robot» answer). */
+export const authServiceWith = (headers: Record<string, string>) =>
+  createAuthServiceClient((params, meta) => send(params, undefined, meta, headers));
