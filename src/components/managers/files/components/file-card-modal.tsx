@@ -137,7 +137,7 @@ export function FileCardModal({
   const [closeIntent, setCloseIntent] = useState<'close' | 'note'>('close');
   const [failure, setFailure] = useState<{ e: unknown; fallback: string }>();
   const [reading, setReading] = useState(false);
-  const [published, setPublished] = useState(false);
+  const [madePublic, setMadePublic] = useState(false);
 
   const note = isMarkdownNote(file?.fileName ?? '', file?.contentType ?? undefined);
   const readable = isReadablePdf(file?.fileName ?? '', file?.contentType ?? undefined);
@@ -242,7 +242,7 @@ export function FileCardModal({
     setTopicsOpen(false);
     setAccessOpen(false);
     setAccessUrl(undefined);
-    setPublished(false);
+    setMadePublic(false);
     setPhoneSheet(null);
     // The form resets only when another file opens, not on background revalidation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -357,6 +357,7 @@ export function FileCardModal({
   // level reads `private`: a narrower level keeps its own word.
   const publishable =
     !!file && canWrite(SECTION.media) && isPublishableType(file.contentType ?? undefined);
+  const published = madePublic || (file?.publicMediaId ?? 0) > 0;
   const accessWord = published
     ? 'public'
     : publishable && accessLevel === 'team'
@@ -365,7 +366,7 @@ export function FileCardModal({
   const makePublic = async () => {
     try {
       await copyToMedia.mutateAsync({ fileId: id });
-      setPublished(true);
+      setMadePublic(true);
     } catch (publishError) {
       showMessage(copyFailureWord(publishError), 'error');
     }

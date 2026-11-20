@@ -33,7 +33,7 @@ export type FilterGroup = {
 
 /**
  * The filter chips' groups, in the mockup's order: kind, usage, uploaded by, period, project,
- * topic, then ratio (picture fields need it). Counts come from the facets, each
+ * topic, access, then ratio (picture fields need it). Counts come from the facets, each
  * computed by the server under the filter minus its own group.
  */
 export function useFilterGroups({
@@ -42,6 +42,7 @@ export function useFilterGroups({
   facets,
   allowedKinds,
   showFileGroups,
+  showAccess = showFileGroups,
 }: {
   filter: LibraryFilter;
   onChange: (next: LibraryFilter) => void;
@@ -49,6 +50,8 @@ export function useFilterGroups({
   allowedKinds?: LibraryKind[];
   /** Project and topic live on files only; a visual-only host does not show them. */
   showFileGroups: boolean;
+  /** Private vs public needs both files and media in the list. */
+  showAccess?: boolean;
 }): FilterGroup[] {
   const admins = useAdmins().data?.admins;
   const topicsData = useFileTopics(false, showFileGroups).data?.topics;
@@ -158,6 +161,20 @@ export function useFilterGroups({
         });
       }
     }
+    if (showAccess) {
+      groups.push({
+        key: 'access',
+        label: 'access',
+        clear: () => set({ access: undefined }),
+        options: (['private', 'public'] as const).map((a) => ({
+          key: a,
+          label: a,
+          count: facets ? facets[a] : undefined,
+          on: filter.access === a,
+          toggle: () => set({ access: filter.access === a ? undefined : a }),
+        })),
+      });
+    }
     const ratios = facets?.ratios ?? [];
     if (ratios.length) {
       groups.push({
@@ -175,7 +192,7 @@ export function useFilterGroups({
     }
 
     return groups;
-  }, [filter, onChange, facets, allowedKinds, showFileGroups, admins, topicsData]);
+  }, [filter, onChange, facets, allowedKinds, showFileGroups, showAccess, admins, topicsData]);
 }
 
 /** The chip's words: the group name, or the chosen value (`pictures`, `pictures +1`). */

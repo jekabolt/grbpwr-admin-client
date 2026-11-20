@@ -330,6 +330,9 @@ export function LibraryBrowser({
     facets,
     allowedKinds: kinds,
     showFileGroups: accept === 'any' && (!sources?.length || sources.includes('file')),
+    showAccess:
+      accept === 'any' &&
+      (!sources?.length || (sources.includes('file') && sources.includes('media'))),
   });
 
   // ---- selection ----
@@ -505,9 +508,14 @@ export function LibraryBrowser({
   /** Bulk `make public`: files done of the run's total; null when nothing runs. */
   const [publishing, setPublishing] = useState<{ done: number; total: number } | null>(null);
   const mayPublish = canWrite(SECTION.media);
-  // Media rows are public already; a file the server cannot copy is skipped silently.
+  // Media rows and published files are public already; a file the server cannot copy is
+  // skipped silently.
   const publishable = selectedItems.filter(
-    (i) => !i.media && !!i.ref?.id && isPublishableType(i.contentType ?? i.file?.contentType),
+    (i) =>
+      !i.media &&
+      !!i.ref?.id &&
+      !((i.file?.publicMediaId ?? 0) > 0) &&
+      isPublishableType(i.contentType ?? i.file?.contentType),
   );
 
   const moveTo = async (folderId: number) => {
