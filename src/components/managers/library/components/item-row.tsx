@@ -26,10 +26,14 @@ export function ItemRow({
   const size = Number(item.sizeBytes ?? 0);
   const sizeWord = size > 0 ? formatBytes(size) : '';
   const ratio = item.width && item.height ? `${item.width}×${item.height}` : '';
-  // A nameless old media row is named by its kind and size, so the meta line does not repeat them.
+  // A nameless old media row is named by its kind and size (its pixels when the server has no
+  // bytes for it), so the meta line does not repeat them.
   const named = !!item.name;
-  const name = item.name || [KIND_WORD[kind], sizeWord].filter(Boolean).join(' · ');
-  const meta = (named ? [KIND_WORD[kind], ratio, sizeWord, day(item)] : [ratio, day(item)])
+  const measure = sizeWord || ratio;
+  const name = item.name || [KIND_WORD[kind], measure].filter(Boolean).join(' · ');
+  const meta = (
+    named ? [KIND_WORD[kind], ratio, sizeWord, day(item)] : [sizeWord && ratio, day(item)]
+  )
     .filter(Boolean)
     .join(' · ');
 
