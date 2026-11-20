@@ -2,8 +2,16 @@ import type { FeatureInfo, PlatformTeam } from 'api/proto-http/admin';
 import { type ChangeEvent, type KeyboardEvent, useRef, useState } from 'react';
 import { Avatar, Button, ConfirmationModal, Input, Loader, Text } from 'ui';
 import { FeatureSquare } from './feature-square';
-import { canDelete, featureGroups, isReadOnly, keptTillIfDeleted, seenWord } from './model';
-import { useDeleteTeam, useTeamDetail } from './use-console';
+import {
+  canDelete,
+  capChange,
+  featureGroups,
+  gb,
+  isReadOnly,
+  keptTillIfDeleted,
+  seenWord,
+} from './model';
+import { useConsoleActions, useDeleteTeam, useTeamDetail } from './use-console';
 
 /**
  * The `delete team` sheet: the operator's own password confirms it. The password lives only in this
@@ -98,6 +106,69 @@ function DeleteTeamSheet({ team, onClose }: { team: PlatformTeam; onClose: () =>
   );
 }
 
+/**
+ * The operator's cap: gb, `no cap`, save. An emptied field saves the team back to the installation's
+ * default, which the empty field shows as its placeholder.
+ */
+function CapControl({ team }: { team: PlatformTeam }) {
+  const slug = team.slug ?? '';
+  const act = useConsoleActions();
+  const capBytes = Number(team.storageCapBytes ?? 0) || 0;
+  const followsDefault = !!team.storageCapDefault;
+  const initialNo = !followsDefault && capBytes === 0;
+  const initialField = followsDefault || initialNo ? '' : gb(capBytes);
+  const [field, setField] = useState(initialField);
+  const [noCap, setNoCap] = useState(initialNo);
+  const change = capChange(field, noCap);
+  const dirty = field !== initialField || noCap !== initialNo;
+  const busy = act.savingCap(slug);
+
+  const save = async () => {
+    if (!change || !dirty || busy) return;
+    await act.setStorageCap(slug, change); // the row's new cap remounts this control (key)
+  };
+
+  return (
+    <>
+      <span className='inline-flex items-center gap-1.5'>
+        <Text variant='label' size='micro' component='label' htmlFor={`cap-${slug}`}>
+          cap
+        </Text>
+        <Input
+          name={`cap-${slug}`}
+          inputMode='decimal'
+          className='w-16 text-right tabular-nums'
+          value={noCap ? '' : field}
+          placeholder={followsDefault && !noCap ? gb(capBytes) : undefined}
+          disabled={noCap}
+          aria-label='cap in gb'
+          onChange={(e: ChangeEvent<HTMLInputElement>) => setField(e.target.value)}
+          onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              save();
+            }
+          }}
+        />
+        <Text variant='label' size='micro' component='span'>
+          gb
+        </Text>
+      </span>
+      <FeatureSquare name={`nocap-${slug}`} checked={noCap} onChange={setNoCap}>
+        no cap
+      </FeatureSquare>
+      <Button
+        variant='main'
+        className='whitespace-nowrap px-3 py-0.5'
+        disabled={!change || !dirty || busy}
+        onClick={save}
+      >
+        save
+      </Button>
+    </>
+  );
+}
+
 /** The unfolded team row: on the phone the team's switches, then read only, delete and the people. */
 export function TeamDetail({
   team,
@@ -147,14 +218,10 @@ export function TeamDetail({
           </div>
         ))}
       </div>
-      <div className='flex min-h-8 items-center gap-4 border-b border-borderColor pb-1 md:gap-5'>
+      <div className='flex min-h-8 flex-wrap items-center gap-x-4 gap-y-2 border-b border-borderColor pb-1 md:gap-x-5'>
         <span className='mr-auto text-micro font-bold tracking-group text-labelColor'>people</span>
-        <FeatureSquare
-          name={`ro-${slug}`}
-          checked={ro}
-          locked={teamOne}
-          onChange={onReadOnly}
-        >
+        <CapControl key={`${team.storageCapBytes}-${team.storageCapDefault}`} team={team} />
+        <FeatureSquare name={`ro-${slug}`} checked={ro} locked={teamOne} onChange={onReadOnly}>
           read only
         </FeatureSquare>
         {canDelete(team, teamOne) && (

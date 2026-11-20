@@ -17,7 +17,7 @@ const LIVE = isLekaloHost();
 
 /**
  * Keeps the workspace fresh (load, window focus, every 60 s) and answers the backend's team
- * refusals: `team_read_only` → toast + refetch, `feature_off` → refetch + leave for the first
+ * refusals: `storage_full` → toast, `team_read_only` → toast + refetch, `feature_off` → refetch + leave for the first
  * allowed screen. Mounted once inside the protected layouts.
  */
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
@@ -41,6 +41,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     () =>
       onWorkspaceSignal((signal) => {
         const { refetch, homeRoute, showMessage, navigate } = latest.current;
+        if (signal === 'storage_full') {
+          showMessage('storage full', 'error');
+          return;
+        }
         refetch();
         if (signal === 'read_only') {
           showMessage('read only', 'error');

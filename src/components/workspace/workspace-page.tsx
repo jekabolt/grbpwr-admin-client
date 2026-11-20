@@ -3,6 +3,7 @@ import { useWorkspace } from 'lib/workspace/use-workspace';
 import { SectionStack, Text } from 'ui';
 import { WorkspaceBrand } from './brand-block';
 import { WorkspacePeople } from './people-block';
+import { WorkspaceStorage } from './storage-block';
 
 // `/workspace` on a team host (wave «teams», fix mockup `fix-workspace.html`): the team's brand,
 // which every factory paper prints, and its people. Writes are an owner's of a team that is not
@@ -39,6 +40,7 @@ export default function WorkspacePage() {
         editor={editor}
       />
       <WorkspacePeople editor={editor} paused={!!readOnly} teamName={name} />
+      <WorkspaceStorage />
     </SectionStack>
   );
 }
