@@ -225,6 +225,12 @@ export type LibraryUsage =
   | "LIBRARY_USAGE_UNSPECIFIED"
   | "LIBRARY_USAGE_USED"
   | "LIBRARY_USAGE_FREE";
+// LibraryAccess filters the unified list by who can see an item: PRIVATE = library files that
+// have no public media twin; PUBLIC = media rows.
+export type LibraryAccess =
+  | "LIBRARY_ACCESS_UNSPECIFIED"
+  | "LIBRARY_ACCESS_PRIVATE"
+  | "LIBRARY_ACCESS_PUBLIC";
 export type LibrarySort =
   | "LIBRARY_SORT_UNSPECIFIED"
   | "LIBRARY_SORT_NEW"
@@ -5861,6 +5867,12 @@ export type LibraryFile = {
   // whole feature: a file may be «исходники» in one shoot and «идея» in another,
   // and a flat set would make «съёмка × идея» find it in the shoot too.
   roles: LibraryFileRole[] | undefined;
+  // public_media_id is the public media made from this file (CopyLibraryFileToMedia), by the
+  // same twin rule the library list uses: a media row whose lib_source_sha256 or content_hash is
+  // this file's sha256, the lowest id if several. 0 = not published, a blank sha, or a caller
+  // without media read access. Filled by GetLibraryFile, ListLibraryFiles and the file rows of
+  // ListLibraryItems; 0 everywhere else.
+  publicMediaId: number | undefined;
 };
 
 // FileTopic is a topic LABEL, not a folder.
@@ -20796,6 +20808,7 @@ export type LibraryItemFilter = {
   createdTo: wellKnownTimestamp | undefined;
   usage: LibraryUsage | undefined;
   ratios: string[] | undefined;
+  access: LibraryAccess | undefined;
 };
 
 export type LibraryItem = {
@@ -20849,6 +20862,8 @@ export type GetLibraryFacetsResponse = {
   free: number | undefined;
   ratios: LibraryRatioCount[] | undefined;
   total: number | undefined;
+  accessPrivate: number | undefined;
+  accessPublic: number | undefined;
 };
 
 export type LibraryFolder = {
