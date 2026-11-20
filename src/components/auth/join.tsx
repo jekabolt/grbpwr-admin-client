@@ -1,9 +1,10 @@
 import { authService } from 'api/api';
 import { currentHost, goToUrl, teamUrl } from 'lib/host';
-import { useEffect, useState } from 'react';
+import { type ChangeEvent, useEffect, useState } from 'react';
 import { Loader, Section } from 'ui';
 
 import { clearHash, hashParam, isRefusal } from './api-error';
+import { JoinByLink } from './join-link';
 import { TeamMark, useTeamLogo } from './logo-step';
 import { ProviderButtons, signInOptions } from './providers';
 import {
@@ -36,8 +37,18 @@ function JoinSide({ name }: { name: string }) {
 
 type Invite = { teamName: string; email: string; accountExists: boolean };
 
-/** `/join#token=…`: the invite letter's link. */
+/** `/join`: public team link or invite letter. */
 export function Join() {
+  const [link] = useState(() => hashParam('link'));
+  return link ? (
+    <JoinByLink link={link} renderSide={(name) => <JoinSide name={name} />} />
+  ) : (
+    <JoinInvite />
+  );
+}
+
+/** `/join#token=…`: the invite letter's link. */
+function JoinInvite() {
   const [token] = useState(() => hashParam('token'));
   const [invite, setInvite] = useState<Invite | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'expired'>(
@@ -132,7 +143,7 @@ export function Join() {
                   placeholder='mira'
                   autoComplete='name'
                   autoFocus
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
+                  onChange={(e: ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
                 />
               </SheetRow>
             )}
