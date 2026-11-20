@@ -94,7 +94,7 @@ const myProfile = {
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 let slowOnce = true;
 
-export async function stubAnswer(method: string, body: string | null): Promise<unknown> {
+export async function stubAnswer(method: string, body: string | null, path = ''): Promise<unknown> {
   const req = (body ? JSON.parse(body) : {}) as Record<string, string>;
   await wait(250);
   switch (method) {
@@ -245,7 +245,11 @@ export async function stubAnswer(method: string, body: string | null): Promise<u
       entryDone = true;
       return {};
     default: {
-      // workspace calls (brand, people, access), then console calls (lane C2)
+      // team home lists (GETs: id and filters ride in the path), then workspace calls
+      // (brand, people, access), then console calls (lane C2)
+      const { homeStubAnswer } = await import('components/home/dev-stub');
+      const home = homeStubAnswer(method, body, path);
+      if (home !== undefined) return home;
       const { workspaceStubAnswer } = await import('components/workspace/dev-stub');
       const ws = workspaceStubAnswer(method, body);
       if (ws !== undefined) return ws;

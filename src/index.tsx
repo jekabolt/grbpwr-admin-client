@@ -324,6 +324,7 @@ const RootApp = lazyRoute(() => import('components/auth/root-app'));
 const ConsoleApp = lazyRoute(() => import('components/shell/console-layout'));
 const ConsoleHome = lazyRoute(() => import('components/console/console-page'));
 const WorkspacePage = lazyRoute(() => import('components/workspace/workspace-page'));
+const MyWork = lazyRoute(() => import('components/home/my-work'));
 const Handoff = lazyRoute(() =>
   import('components/auth/handoff').then((m) => ({ default: m.Handoff })),
 );
@@ -381,9 +382,12 @@ const LoadingFallback = () => (
 
 // The /main landing is analytics. Scoped accounts without analytics access are
 // redirected to the first section they can open, instead of a permission error.
+// A team host has no store analytics: its home is «my work» (the person's tasks, fittings, runs,
+// files). The legacy grbpwr host keeps the analytics landing as it was.
 const AnalyticsHome = () => {
   const { canRead, homeRoute, isLoading } = usePermissions();
   if (isLoading) return <LoadingFallback />;
+  if (HOST_KIND === 'team') return <MyWork />;
   if (canRead(SECTION.analytics)) return <Analitic />;
   if (homeRoute && homeRoute !== ROUTES.main) return <Navigate to={homeRoute} replace />;
   return (
@@ -476,6 +480,9 @@ const app = (
                 {HOST_KIND === 'team' && <Route path={ROUTES.handoff} element={<Handoff />} />}
                 {HOST_KIND === 'team' && <Route path={ROUTES.join} element={<Join />} />}
                 <Route path='/' element={<ProtectedLayout />}>
+                  {HOST_KIND === 'team' && (
+                    <Route index element={<Navigate to={ROUTES.main} replace />} />
+                  )}
                   <Route path={ROUTES.main} element={<AnalyticsHome />} />
                   {import.meta.env.DEV && AssemblyCarrierDevPage ? (
                     <Route path='/dev/assembly-carrier' element={<AssemblyCarrierDevPage />} />

@@ -81,7 +81,11 @@ function TeamTile({ team, busy, onOpen }: { team: TeamRef; busy: boolean; onOpen
       <Tile
         lowercase
         media={media}
-        name={<Text variant='label'>{name}</Text>}
+        name={
+          <Text variant='label' component='span' className='block truncate'>
+            {name}
+          </Text>
+        }
         sub='awaiting approval'
         title={name}
       />
