@@ -15,7 +15,7 @@ export function WorkspaceStorage() {
   const s = storageOf({ storageUsedBytes: q.data.usedBytes, storageCapBytes: q.data.capBytes });
   if (!s.used && !s.cap) return null; // nothing counted here (teams mode off)
   return (
-    <Section title='storage'>
+    <Section title='storage' headerClassName='[&_h3]:normal-case'>
       <Row
         label='used'
         tone={s.full ? 'error' : undefined}
