@@ -7,6 +7,7 @@ import {
   type QueryClient,
 } from '@tanstack/react-query';
 import type { LibraryFilePersonRole, LibraryFileSort } from 'api/proto-http/admin';
+import { libraryKeys } from 'components/managers/library/hooks/keys';
 import { tasksKeys } from 'components/managers/tasks/hooks/useTasks';
 import { fileTasksService } from '../api/fileTasksService';
 import { filesService } from '../api/filesService';
@@ -369,6 +370,9 @@ export function invalidateFileViews(qc: QueryClient) {
    * потеряла привязку, отсюда не видно и знать не нужно.
    */
   qc.invalidateQueries({ queryKey: ['fileStyleProjects'] });
+  // The library section lists the same files under its own root: without this line a file deleted
+  // or renamed from its card stays on the grid, with the old count, until a reload.
+  qc.invalidateQueries({ queryKey: libraryKeys.all });
 }
 
 const PAGE_SIZE = 60;
