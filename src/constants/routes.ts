@@ -253,7 +253,7 @@ export const NAV_GROUPS: NavGroup[] = [
       },
       { label: 'tasks', route: ROUTES.tasks, section: SECTION.tasks, feature: FEATURE.tasks },
       {
-        label: 'files',
+        label: 'library',
         route: ROUTES.files,
         section: [SECTION.files, SECTION.media],
         feature: [FEATURE.files, FEATURE.media],

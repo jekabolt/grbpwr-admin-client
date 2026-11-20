@@ -38,7 +38,7 @@ export function Headline({
   const path = typeof loc === 'number' ? folderPath(byId, loc) : [];
   const folder = path[path.length - 1];
   const empty = !!folder && deepCount(folder) === 0 && folder.children.length === 0;
-  const title = loc === 'unfiled' ? 'unfiled' : folder ? folder.name : 'files';
+  const title = loc === 'unfiled' ? 'unfiled' : folder ? folder.name : 'library';
 
   const current =
     folder && editable && editing ? (
