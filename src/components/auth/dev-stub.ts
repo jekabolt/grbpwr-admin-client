@@ -225,8 +225,11 @@ export async function stubAnswer(method: string, body: string | null, path = '')
         },
       };
     }
-    case 'GetMyProfile':
-      return { profile: { ...myProfile } };
+    case 'GetMyProfile': {
+      const { profileExtras } = await import('components/managers/accounts/profile/dev-stub');
+      const extra = profileExtras(myProfile);
+      return { profile: { ...myProfile, ...extra } };
+    }
     case 'UpdateMyProfile': {
       const u = req.publicUsername ?? '';
       if (u === 'taken') refuse(409, 'username_taken');
@@ -236,7 +239,9 @@ export async function stubAnswer(method: string, body: string | null, path = '')
         lastName: req.lastName ?? '',
         publicUsername: u,
       });
-      return { profile: { ...myProfile } };
+      const { profileExtras } = await import('components/managers/accounts/profile/dev-stub');
+      const extra = profileExtras(myProfile);
+      return { profile: { ...myProfile, ...extra } };
     }
     case 'SetMyAvatar':
       myProfile.avatarUrl = logoUrlOf(req.avatar);
@@ -247,6 +252,9 @@ export async function stubAnswer(method: string, body: string | null, path = '')
     default: {
       // team home lists (GETs: id and filters ride in the path), then workspace calls
       // (brand, people, access), then console calls (lane C2)
+      const { profileStubAnswer } = await import('components/managers/accounts/profile/dev-stub');
+      const profile = profileStubAnswer(method, body);
+      if (profile !== undefined) return profile;
       const { homeStubAnswer } = await import('components/home/dev-stub');
       const home = homeStubAnswer(method, body, path);
       if (home !== undefined) return home;

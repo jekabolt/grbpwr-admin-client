@@ -1,150 +1,107 @@
+import { useQueryClient } from '@tanstack/react-query';
+import { authService } from 'api/api';
+import { clearAuthToken } from 'api/auth-headers';
 import { useAdmins } from 'components/managers/tech-card/components/useRoles';
-import { useMemo } from 'react';
-import { Avatar, GroupLabel, Pill, Row, Section, SectionStack, Text } from 'ui';
+import { ROUTES } from 'constants/routes';
+import { useWorkspace } from 'lib/workspace/use-workspace';
+import { useNavigate } from 'react-router-dom';
+import { Avatar, GroupLabel, Loader, Section, SectionStack, Text } from 'ui';
 import { SpecialtiesField } from './components/specialties-field';
-import { ACCESS } from './utils/hooks';
+import { ProfileDelete } from './profile/delete-block';
+import { ProfileIdentity } from './profile/identity-block';
+import { useMyProfile } from './profile/parts';
+import { ProfilePassword } from './profile/password-block';
+import { ProfileSessions } from './profile/sessions-block';
+import { ProfileSignIn } from './profile/sign-in-block';
+import { accountsKeys } from './utils/hooks';
 import { usePermissions } from './utils/permissions';
 
 /**
- * «Мой профиль» — единственный экран раздела аккаунтов, открытый ЛЮБОМУ аутентифицированному.
+ * «My profile», profile `b` (P0 §3, mockup VN3b7RVQSbTqEaJNX6heBP): two columns from 1100px —
+ * profile and sign in on the left; password, sessions and delete on the right. Open to anyone
+ * signed in; it reads and writes only the person's own account (AuthService `*-my-*`, plus
+ * `SetAccountSpecialties` on one's own name). No other account can be reached from here.
  *
- * Он существует потому, что решение Р1 (04-decisions.md) отдало самоописание самому человеку:
- * `SetAccountSpecialties` не требует accounts:write для своего аккаунта. Пункт «accounts» в
- * меню закрыт `SECTION.accounts`, так что без accounts:read к своей карточке нельзя было
- * добраться иначе как набрав адрес руками — то есть Р1 на практике не работал, и словарь
- * специальностей оставался пустым, обесценивая и пикер владельцев файла, и поиск людей.
- *
- * ЧУЖИХ АККАУНТОВ ЗДЕСЬ НЕТ ПО СОСТАВУ ЭКРАНА, А НЕ ПО УСЛОВИЮ В РАЗМЕТКЕ. Файл не
- * импортирует ни `AccountsTable`, ни `AccountFormModal`, ни `ResetPasswordModal`, ни
- * `PermissionPicker`, и подключён в роутер прямым путём, минуя баррель `accounts/index.ts`,
- * чтобы список не приехал транзитом: здесь нет ни одного элемента, способного позвать
- * `ListAccounts` / `UpdateAccountPermissions` / `ResetAccountPassword` / `SetAccountDisabled` /
- * `DeleteAccount`. Условие в разметке можно инвертировать случайной правкой, отсутствующий
- * экран — нельзя. Читает страница ровно три метода, все из allowlist и все доступные вошедшему
- * без неё: `GetCurrentAccount` (своя личность), `ListAccountSections` (каталог НАЗВАНИЙ
- * разделов, без чьих-либо грантов) и `ListAdmins` (справочник людей панели — тот же, что кормит
- * пикер владельцев файла). Пишет — один `SetAccountSpecialties` и только на своё имя.
- *
- * `./utils/hooks` в чанк всё же приезжает: оттуда берутся `ACCESS` и мутация специальностей.
- * Лежащий в том же модуле `useAccounts` при этом НЕ ВЫЗЫВАЕТСЯ — react-query не ходит в сеть
- * за некликнутый хук, — и вызвать его отсюда нечему.
- *
- * Права отсюда не выдаются и не правятся: блок «мои доступы» — это read-only ответ на вопрос
- * «почему я не вижу раздел», а не редактор.
+ * With teams mode off (grbpwr today) GetMyProfile is Unimplemented: the screen keeps the old
+ * profile, specialties only. Notifications are not shown (owner, 19.11: «Пока не показывать»).
  */
 export function MyProfile() {
-  const { account, isSuper, isLoading, sections } = usePermissions();
-  const { data: adminsData, isLoading: adminsLoading } = useAdmins();
+  const { account, isLoading } = usePermissions();
+  const { data: adminsData } = useAdmins();
+  const { readOnly } = useWorkspace();
+  const profile = useMyProfile();
+  const qc = useQueryClient();
+  const navigate = useNavigate();
 
-  const username = account?.username;
-
-  /**
-   * СПЕЦИАЛЬНОСТИ БЕРУТСЯ ИЗ `ListAdmins`, А НЕ ИЗ `GetCurrentAccount`.
-   *
-   * `GetCurrentAccount` собирает ответ из клеймов токена и в базу за специальностями не ходит —
-   * поле там всегда пустое. Покажи мы его, экран после перезагрузки рисовал бы «ничего не
-   * указано» у человека, у которого всё указано, а следующая добавка ушла бы набором из одного
-   * элемента и СТЁРЛА бы остальные: запись — это replace всего набора.
-   */
-  const mySpecialties = username
-    ? adminsData?.admins?.find((a) => a.username === username)?.specialties
+  const handle = account?.username ?? '';
+  const mySpecialties = handle
+    ? adminsData?.admins?.find((a) => a.username === handle)?.specialties
     : undefined;
 
-  const supers = (adminsData?.admins ?? []).filter((a) => a.isSuper && a.username);
+  const leave = () => {
+    clearAuthToken();
+    qc.removeQueries({ queryKey: accountsKeys.all });
+    qc.removeQueries({ queryKey: ['myProfile'] });
+    qc.removeQueries({ queryKey: ['mySessions'] });
+    navigate(ROUTES.login, { replace: true });
+  };
 
-  // Свои выданные разделы, человеческими названиями из каталога. Ключ показываем только когда
-  // каталог названия не дал: «tech_cards» читаемее пустой строки.
-  const granted = useMemo(() => {
-    return (account?.permissions ?? [])
-      .filter((p) => p.section && p.access && p.access !== ACCESS.NONE)
-      .map((p) => ({
-        key: p.section as string,
-        title: sections.find((s) => s.key === p.section)?.title || (p.section as string),
-        write: p.access === ACCESS.WRITE,
-      }))
-      .sort((a, b) => a.title.localeCompare(b.title));
-  }, [account, sections]);
+  // `log out` here leaves this device: the token's whole chain ends (SignOut device).
+  const logOut = () => {
+    authService.SignOut({ device: true }).catch(() => undefined);
+    leave();
+  };
 
-  // Пока личность не приехала, рисовать «мой профиль · —» нечестно: через мгновение он
-  // подменится именем, а первое человек уже прочитал.
-  if (isLoading) return null;
+  if (isLoading || profile.isLoading) return <Loader />;
+
+  const p = profile.data?.profile;
+  if (!p) {
+    return (
+      <SectionStack className='pb-16'>
+        <Section title={`my profile · ${handle || '—'}`}>
+          <GroupLabel flush>specialties</GroupLabel>
+          <SpecialtiesField username={handle} specialties={mySpecialties} editable={!!handle} />
+        </Section>
+      </SectionStack>
+    );
+  }
+
+  const username = p.publicUsername || handle;
+  const name = [p.firstName, p.lastName]
+    .map((s) => s?.trim())
+    .filter(Boolean)
+    .join(' ');
 
   return (
     <SectionStack className='pb-16'>
-      <Section
-        title={`my profile · ${username ?? '—'}`}
-        question='— what you do; it neither grants nor takes away any rights'
-      >
-        {!username && (
-          <Text variant='label' size='micro'>
-            the account did not resolve — refresh the page. there is nothing to edit yet.
-          </Text>
-        )}
-        <GroupLabel flush>what they do</GroupLabel>
-        <SpecialtiesField
-          username={username}
-          specialties={mySpecialties}
-          // Своё — всегда: этого права как раз и не требует SetAccountSpecialties.
-          editable={!!username}
-        />
-      </Section>
-
-      <Section
-        title='my access'
-        question='— what is open to your account; a super admin hands it out'
-      >
-        {isSuper ? (
-          <div className='flex flex-wrap items-center gap-2'>
-            <Pill tone='ink'>super admin</Pill>
-            <Text variant='label' size='micro' component='span'>
-              every section is open, accounts and rights included.
-            </Text>
+      <div className='flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-borderColor pb-3'>
+        <Avatar name={name || username} src={p.avatarUrl || undefined} size={32} />
+        <Text component='h1' size='large' className='min-w-0 break-words'>
+          {name || 'my profile'}
+        </Text>
+        <Text component='span' variant='label'>
+          @{username}
+        </Text>
+      </div>
+      <div className='@container'>
+        <div className='flex flex-col gap-6 @[68.75rem]:grid @[68.75rem]:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] @[68.75rem]:items-start'>
+          <div className='flex min-w-0 flex-col gap-6'>
+            <ProfileIdentity
+              profile={p}
+              handle={handle}
+              specialties={mySpecialties}
+              specialtiesEditable={!!handle && !readOnly}
+              onLogOut={logOut}
+            />
+            <ProfileSignIn profile={p} />
           </div>
-        ) : granted.length ? (
-          <div>
-            {granted.map((g) => (
-              <Row
-                key={g.key}
-                label={
-                  <Text variant='uppercase' size='control' tracking='label' component='span'>
-                    {g.title}
-                  </Text>
-                }
-                value={<Pill tone={g.write ? 'ink' : 'mut'}>{g.write ? 'write' : 'read'}</Pill>}
-              />
-            ))}
+          <div className='flex min-w-0 flex-col gap-6'>
+            <ProfilePassword profile={p} />
+            <ProfileSessions />
+            <ProfileDelete profile={{ ...p, publicUsername: username }} onDeleted={leave} />
           </div>
-        ) : (
-          <Text variant='label' size='micro'>
-            no sections granted: for now only this screen is open.
-          </Text>
-        )}
-
-        {!isSuper &&
-          // Пока список в пути — молчим: иначе экран сначала говорит «попросите у того, кто
-          // ведёт аккаунты», а через мгновение подменяет это именами, и человек читает первое.
-          (supers.length ? (
-            <div className='flex flex-wrap items-center gap-2'>
-              <Text variant='label' size='micro' component='span'>
-                one of these people hands out access
-              </Text>
-              {supers.map((a) => (
-                <span key={a.id ?? a.username} className='flex items-center gap-1'>
-                  <Avatar name={a.username} size={20} />
-                  <Text size='micro' component='span' className='uppercase'>
-                    {a.username}
-                  </Text>
-                </span>
-              ))}
-            </div>
-          ) : (
-            !adminsLoading && (
-              <Text variant='label' size='micro'>
-                ask whoever manages the accounts for it.
-              </Text>
-            )
-          ))}
-      </Section>
+        </div>
+      </div>
     </SectionStack>
   );
 }
