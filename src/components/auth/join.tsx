@@ -1,9 +1,10 @@
 import { authService } from 'api/api';
 import { currentHost, goToUrl, teamUrl } from 'lib/host';
-import { useEffect, useState } from 'react';
+import { type ChangeEvent, useEffect, useState } from 'react';
 import { Loader, Section, Text } from 'ui';
 
 import { clearHash, errMessage, hashParam, isRefusal } from './api-error';
+import { JoinByLink } from './join-link';
 import { TeamMark, useTeamLogo } from './logo-step';
 import { ProviderButtons, signInOptions } from './providers';
 import {
@@ -36,7 +37,6 @@ function JoinSide({ name }: { name: string }) {
 
 type Invite = { teamName: string; email: string; accountExists: boolean };
 
-/** `/join#token=…`: the invite letter's link. */
 /** The word for a refused name: the server's own codes, never «link expired». */
 function refusalWord(msg: string): string {
   if (msg.includes('name_too_long')) return 'too long';
@@ -44,7 +44,18 @@ function refusalWord(msg: string): string {
   return '';
 }
 
+/** `/join`: public team link or invite letter. */
 export function Join() {
+  const [link] = useState(() => hashParam('link'));
+  return link ? (
+    <JoinByLink link={link} renderSide={(name) => <JoinSide name={name} />} />
+  ) : (
+    <JoinInvite />
+  );
+}
+
+/** `/join#token=…`: the invite letter's link. */
+function JoinInvite() {
   const [token] = useState(() => hashParam('token'));
   const [invite, setInvite] = useState<Invite | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'expired'>(
@@ -148,7 +159,7 @@ export function Join() {
                   autoComplete='name'
                   autoFocus
                   invalid={!!nameErr}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                  onChange={(e: ChangeEvent<HTMLInputElement>) => {
                     setName(e.target.value);
                     setNameErr('');
                   }}

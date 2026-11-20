@@ -29,8 +29,10 @@ import {
   sentWord,
   validEmail,
 } from './model';
+import { JoinRequests } from './join-requests';
 import { PersonLine } from './person-line';
 import { ROLE_ITEMS, ROLE_SELECT_CASE } from './person-parts';
+import { TeamJoinLinkTools } from './team-join-link-tools';
 import { usePeople, usePeopleActions } from './use-people';
 
 // The people block of `/workspace` (fix mockup v4 `inline`): members as lines with the role and
@@ -68,6 +70,7 @@ export function WorkspacePeople({
 
   const members = people.data?.members ?? [];
   const sections = people.data?.sections ?? [];
+  const joinRequests = people.data?.joinRequests ?? [];
   const invites = openInvites(people.data?.invites);
   const shownInvites = invites.filter((i) => !revoking.has(i.inviteRef ?? '')).length;
 
@@ -155,6 +158,8 @@ export function WorkspacePeople({
               );
             })}
           </div>
+
+          <JoinRequests requests={joinRequests} editor={editor} actions={act} />
 
           {invites.length > 0 && (
             <>
@@ -250,6 +255,7 @@ export function WorkspacePeople({
               >
                 invite
               </Button>
+              <TeamJoinLinkTools rotate={act.rotateJoinLink} />
               {err && (
                 <Text component='span' variant='errorLabel' size='micro' role='alert'>
                   {err}

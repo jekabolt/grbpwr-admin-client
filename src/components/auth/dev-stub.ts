@@ -48,12 +48,14 @@ const MY_TEAMS = [
 const created: Record<string, unknown>[] = [];
 // a sign-up of this page load: after the code its person sees only this team, awaiting approval
 let signedUp: { email: string; team: Record<string, unknown> } | null = null;
+let joinEmail = '';
 
 /**
  * localStorage knobs: stub.teams=empty (first time), stub.signin=google|none (default: both),
  * stub.rootToken=0 (the code answers as the old server: no token; 111111 → awaiting, else the
  * team host). Brand: a website starting with `refuse` → the server's `bad_website`.
  * stub.secondStep=code|setup → the console log-in asks the app code / sets the app up.
+ * stub.join=pending|joined|already_member → the public join link's result.
  * stub.entry=1 → the first entry (`/welcome`); username `taken` → `username_taken`.
  */
 function knob(key: string): string {
@@ -104,6 +106,11 @@ export async function stubAnswer(method: string, body: string | null, path = '')
     case 'SignUp':
       if (TAKEN.has(req.teamSlug)) refuse(409, 'slug taken');
       if (!terms(body)) refuse(400, 'terms not accepted');
+      if (req.joinLink) {
+        if (req.joinLink === 'expired') refuse(404, 'link_invalid');
+        joinEmail = req.email;
+        return {};
+      }
       refuseBrand(body);
       signedUp = {
         email: req.email,
@@ -229,6 +236,15 @@ export async function stubAnswer(method: string, body: string | null, path = '')
     case 'GetInvite':
       if (req.token === 'expired') refuse(404, 'invite not found');
       return { teamName: 'ostra', email: 'mira@ostra.studio', accountExists: false };
+    case 'JoinLinkInfo':
+      if (req.link === 'expired') refuse(404, 'link_invalid');
+      return { teamName: 'studio kova' };
+    case 'JoinTeam':
+      if (req.link === 'expired') refuse(404, 'link_invalid');
+      return { state: knob('stub.join') || 'pending' };
+    case 'ConfirmJoinCode':
+      if (req.code === '000000' || (joinEmail && req.email !== joinEmail)) refuse(400, 'bad_code');
+      return { state: knob('stub.join') || 'pending' };
     case 'AcceptInvite':
       if (!terms(body)) refuse(400, 'terms not accepted');
       return { teamSlug: currentHost().slug || 'ostra', handoffCode: 'stub-code' };

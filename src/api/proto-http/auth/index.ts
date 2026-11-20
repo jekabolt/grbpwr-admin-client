@@ -103,6 +103,9 @@ export type SignUpRequest = {
   // at the first space into first/last name (the rest goes to last; each at most 60 characters); empty = no
   // name; at most 80 characters after trimming; a bad value refuses the request with bad_name.
   name: string | undefined;
+  // join_link creates no team. The pending account receives a join code for the team named by the
+  // current host or X-Team header.
+  joinLink: string | undefined;
 };
 
 // TeamBrand is the calling team's brand data; only in teams mode.
@@ -120,6 +123,35 @@ export type admin_TeamBrand = {
 };
 
 export type SignUpResponse = {
+};
+
+export type JoinLinkInfoRequest = {
+  link: string | undefined;
+};
+
+export type JoinLinkInfoResponse = {
+  teamName: string | undefined;
+};
+
+export type JoinTeamRequest = {
+  link: string | undefined;
+};
+
+export type JoinTeamResponse = {
+  // state is already_member, joined or pending.
+  state: string | undefined;
+};
+
+export type ConfirmJoinCodeRequest = {
+  email: string | undefined;
+  code: string | undefined;
+  // password is the one set at the join sign-up: the code works only for whoever set it.
+  password: string | undefined;
+};
+
+export type ConfirmJoinCodeResponse = {
+  // state is already_member, joined or pending.
+  state: string | undefined;
 };
 
 export type CheckTeamSlugRequest = {
@@ -540,8 +572,14 @@ export interface AuthService {
   Delete(request: DeleteRequest): Promise<DeleteResponse>;
   // ChangePassword changes the password for the user. Can be updated by user or admin.
   ChangePassword(request: ChangePasswordRequest): Promise<ChangePasswordResponse>;
-  // SignUp creates a pending user and a pending team and sends a verify letter.
+  // SignUp creates a pending user and team, or a teamless join intent when join_link is set.
   SignUp(request: SignUpRequest): Promise<SignUpResponse>;
+  // JoinLinkInfo returns the team name for the current host's join link.
+  JoinLinkInfo(request: JoinLinkInfoRequest): Promise<JoinLinkInfoResponse>;
+  // JoinTeam explicitly joins or requests access using the current host's join link.
+  JoinTeam(request: JoinTeamRequest): Promise<JoinTeamResponse>;
+  // ConfirmJoinCode confirms a join sign-up's email and runs its join decision.
+  ConfirmJoinCode(request: ConfirmJoinCodeRequest): Promise<ConfirmJoinCodeResponse>;
   // CheckTeamSlug tells whether a team address is free and suggests one.
   CheckTeamSlug(request: CheckTeamSlugRequest): Promise<CheckTeamSlugResponse>;
   // VerifyEmail confirms an email by link token or by email + six-digit code.
@@ -722,6 +760,57 @@ export function createAuthServiceClient(
         service: "AuthService",
         method: "SignUp",
       }) as Promise<SignUpResponse>;
+    },
+    JoinLinkInfo(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/auth/join-link-info`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AuthService",
+        method: "JoinLinkInfo",
+      }) as Promise<JoinLinkInfoResponse>;
+    },
+    JoinTeam(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/auth/join-team`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AuthService",
+        method: "JoinTeam",
+      }) as Promise<JoinTeamResponse>;
+    },
+    ConfirmJoinCode(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/auth/confirm-join-code`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AuthService",
+        method: "ConfirmJoinCode",
+      }) as Promise<ConfirmJoinCodeResponse>;
     },
     CheckTeamSlug(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/auth/check-team-slug`; // eslint-disable-line quotes
