@@ -63,7 +63,7 @@ export function AttachmentTiles({
   onOpenMedia: (index: number) => void;
   /** «+ add file» — последняя плитка ряда; без пропа двери нет (нет права записи). */
   onAdd?: () => void;
-  /** «+ media» открывает медиатеку; «+ add file» берёт файл с устройства. */
+  /** «+ library» открывает окно библиотеки; «+ add file» берёт файл с устройства. */
   onAddMedia?: () => void;
   addDisabled?: boolean;
 }) {
@@ -229,7 +229,7 @@ export function AttachmentTiles({
             disabled={addDisabled}
             onClick={onAddMedia}
           >
-            media
+            library
           </AddDoor>
         )}
         {onAdd && (

@@ -2,7 +2,6 @@ import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { LibraryFile } from 'api/proto-http/admin';
 import { filesService } from 'components/managers/files/api/filesService';
 import { filesKeys } from 'components/managers/files/hooks/useFiles';
-import { MediaSelector } from 'components/managers/media/components/media-selector';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useAdmins } from 'components/managers/tech-card/components/useRoles';
 import { addDays, format, startOfDay } from 'date-fns';
@@ -414,7 +413,7 @@ function LinkRow({
   );
 }
 
-type AddKind = LinkType | 'file' | 'media' | 'upload';
+type AddKind = LinkType | 'file' | 'upload';
 
 export function AttachField({
   phone,
@@ -442,7 +441,6 @@ export function AttachField({
   const [addOpen, setAddOpen] = useState(false);
   const [step, setStep] = useState<LinkType | null>(null);
   const [filePicker, setFilePicker] = useState(false);
-  const mediaTrigger = useRef<HTMLButtonElement>(null);
   const uploadTrigger = useRef<HTMLInputElement>(null);
 
   const setLinks = LINK_TYPES.filter((t) => isSet(links[t.field], t.config.empty));
@@ -464,13 +462,12 @@ export function AttachField({
   };
 
   const choose = (kind: AddKind) => {
-    if (kind === 'file' || kind === 'media' || kind === 'upload') {
+    if (kind === 'file' || kind === 'upload') {
       openAdd(false);
       // Шторка сначала закрывается и возвращает фокус, потом открывается пикер — иначе возврат
       // фокуса шторки выдернул бы его из только что открытого окна.
       setTimeout(() => {
         if (kind === 'file') setFilePicker(true);
-        else if (kind === 'media') mediaTrigger.current?.click();
         else uploadTrigger.current?.click();
       }, 0);
       return;
@@ -569,28 +566,11 @@ export function AttachField({
                 {t.label}
               </OptionRow>
             ))}
-            <OptionRow onClick={() => choose('file')}>library file</OptionRow>
+            <OptionRow onClick={() => choose('file')}>library</OptionRow>
             <OptionRow onClick={() => choose('upload')}>upload file</OptionRow>
-            <OptionRow onClick={() => choose('media')}>site media · public</OptionRow>
           </>
         )}
       </PickerSheet>
-
-      {/* Медиатека держит своё окно сама и открывается только своим триггером; триггер спрятан,
-          а жмёт его пункт «site media» шторки. Так окно живёт вне шторки и не закрывается с ней. */}
-      <MediaSelector
-        label='site media'
-        purpose='attachment'
-        aspectRatio={['Custom']}
-        allowMultiple
-        showVideos
-        saveSelectedMedia={(picked) => setMediaIds(mergePickedMedia(mediaIds, picked))}
-        trigger={
-          <Button ref={mediaTrigger} type='button' tabIndex={-1} aria-hidden className='sr-only'>
-            site media
-          </Button>
-        }
-      />
 
       <input
         ref={uploadTrigger}

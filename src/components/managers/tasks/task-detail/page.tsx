@@ -43,7 +43,7 @@ import {
 } from '../hooks/useTasks';
 import { AttachmentTiles } from './attachment-tiles';
 import { SheetEmbedsProvider } from './file-view/sheet-embeds';
-import { MediaSelector } from 'components/managers/media/components/media-selector';
+import { FilePicker } from '../components/file-attachments';
 import { mergePickedMedia } from '../components/media-attachments';
 import { DueField, InlineDescription, InlineTitle } from './inline-fields';
 import { AssigneesPicker } from '../components/assignees-picker';
@@ -172,7 +172,9 @@ export function TaskDetail() {
   const [pickingParent, setPickingParent] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const phone = useMediaQuery(PHONE_QUERY);
-  const mediaTrigger = useRef<HTMLButtonElement>(null);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  // The window hands files and media back in two calls; both go out as one write.
+  const pickedFileIds = useRef<number[] | null>(null);
   const fileTrigger = useRef<HTMLInputElement>(null);
   const taskRef = useRef(task);
   const navigate = useNavigate();
@@ -351,8 +353,8 @@ export function TaskDetail() {
     (boardId !== task.boardId || status !== task.status) &&
     move.mutate({ id: task.id, boardId, status, position: 0 });
 
-  const openMediaPicker = () => {
-    if (!editLocked) mediaTrigger.current?.click();
+  const openLibrary = () => {
+    if (!editLocked) setLibraryOpen(true);
   };
 
   const openFilePicker = () => {
@@ -866,7 +868,7 @@ export function TaskDetail() {
               annotations={annotations}
               onOpenMedia={attachments.openIndex}
               onAdd={canWrite ? openFilePicker : undefined}
-              onAddMedia={canWrite ? openMediaPicker : undefined}
+              onAddMedia={canWrite ? openLibrary : undefined}
               addDisabled={editLocked}
             />
           </Section>
@@ -896,23 +898,35 @@ export function TaskDetail() {
 
       {attachments.node}
 
-      {canWrite && (
-        <MediaSelector
-          label='media'
-          purpose='attachment'
-          aspectRatio={['Custom']}
-          allowMultiple
-          showVideos
-          saveSelectedMedia={(picked) => {
-            const seen = t.mediaIds ?? [];
-            const next = mergePickedMedia(seen, picked);
-            if (next !== seen) patchInline({ mediaIds: next }, { mediaIds: seen });
+      {canWrite && libraryOpen && (
+        <FilePicker
+          selected={t.fileIds}
+          mediaIds={t.mediaIds ?? []}
+          onClose={() => setLibraryOpen(false)}
+          onDone={(ids) => {
+            pickedFileIds.current = ids;
           }}
-          trigger={
-            <Button ref={mediaTrigger} type='button' tabIndex={-1} aria-hidden className='sr-only'>
-              media
-            </Button>
-          }
+          onDoneMedia={(ids, picked) => {
+            const seenMedia = t.mediaIds ?? [];
+            const seenFiles = t.fileIds;
+            const nextFiles = pickedFileIds.current ?? seenFiles;
+            pickedFileIds.current = null;
+            const nextMedia = mergePickedMedia(
+              seenMedia.filter((id) => ids.includes(id)),
+              picked.filter((m) => m.id != null && ids.includes(m.id)),
+            );
+            const patch: InlinePatch = {};
+            const seen: InlinePatch = {};
+            if (nextFiles.join() !== seenFiles.join()) {
+              patch.fileIds = nextFiles;
+              seen.fileIds = seenFiles;
+            }
+            if (nextMedia.join() !== seenMedia.join()) {
+              patch.mediaIds = nextMedia;
+              seen.mediaIds = seenMedia;
+            }
+            if (Object.keys(patch).length) patchInline(patch, seen);
+          }}
         />
       )}
 
