@@ -1,20 +1,18 @@
-import type { LibraryFile } from 'api/proto-http/admin';
 import { failureText } from 'components/managers/files/api/rpc-error';
-import { useLibraryFiles } from 'components/managers/files/hooks/useFiles';
+import type { LibraryItem, LibraryRef } from 'components/managers/library/api/types';
+import { LibraryPicker } from 'components/managers/library/picker/library-picker';
 import { notify } from 'lib/stores/store';
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
-import { ConfirmationModal, Input, Media, Placeholder, Text, Tile, Tiles } from 'ui';
+import { useEffect, useState } from 'react';
 
 import { sharePublicFile, uploadPublicFile } from './label-artwork-upload';
 
 export type LabelFilePick = { libraryFileId: number; publicUrl: string; fileName?: string };
 
-function FileMedia({ file }: { file: LibraryFile }) {
-  if (!file.previewUrl) return <Placeholder label='file' className='aspect-square w-full' />;
-  return <Media src={file.previewUrl} alt='' aspectRatio='1/1' fit='contain' />;
-}
-
-/** One-file library picker. The final tile uploads through the ordinary public-file flow. */
+/**
+ * One-file library picker: the one library window, files only (the label FK points at
+ * `library_file`). A pick mints the public print link; «+ upload» goes through the ordinary
+ * public-file flow.
+ */
 export function LabelFilePicker({
   open,
   onOpenChange,
@@ -24,49 +22,38 @@ export function LabelFilePicker({
   onOpenChange: (open: boolean) => void;
   onPick: (file: LabelFilePick) => void;
 }) {
-  const [search, setSearch] = useState('');
-  const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(false);
-  const uploadInput = useRef<HTMLInputElement | null>(null);
+  const [selected, setSelected] = useState<LibraryRef[]>([]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setQuery(search.trim()), 250);
-    return () => window.clearTimeout(timer);
-  }, [search]);
-  useEffect(() => {
     if (!open) {
-      setSearch('');
-      setQuery('');
       setBusy(false);
+      setSelected([]);
     }
   }, [open]);
 
-  const filesQuery = useLibraryFiles(
-    { topicIds: [], untopiced: false, search: query, sort: 'new' },
-    open,
-  );
-  const files = useMemo(
-    () => (filesQuery.data?.pages ?? []).flatMap((page) => page.files ?? []),
-    [filesQuery.data],
-  );
-
-  const choose = async (file: LibraryFile) => {
-    const id = Number(file.id) || 0;
+  const choose = async (refs: LibraryRef[], items: LibraryItem[]) => {
+    const ref = refs[0];
+    const file = items[0]?.file;
+    const id = ref?.source === 'file' ? ref.id : 0;
     if (!id || busy) return;
+    setSelected([ref]);
     setBusy(true);
     try {
       const picked = await sharePublicFile(id);
-      onPick({ ...picked, fileName: file.fileName || '' });
+      onPick({ ...picked, fileName: file?.fileName || items[0]?.name || '' });
       onOpenChange(false);
     } catch (error) {
+      setSelected([]);
       notify({ sev: 'error', subject: '', text: '', bad: failureText(error, 'file link failed') });
     } finally {
       setBusy(false);
     }
   };
 
-  const upload = async (file: File) => {
-    if (busy) return;
+  const upload = async (files: File[]) => {
+    const file = files[0];
+    if (!file || busy) return;
     setBusy(true);
     try {
       const picked = await uploadPublicFile(file);
@@ -80,57 +67,18 @@ export function LabelFilePicker({
   };
 
   return (
-    <ConfirmationModal
+    <LibraryPicker
       open={open}
       onOpenChange={onOpenChange}
-      onConfirm={() => onOpenChange(false)}
       title='choose file'
-      width='lg'
-      hideActions
-    >
-      <div className='flex flex-col gap-3'>
-        <Input
-          value={search}
-          placeholder='search files'
-          aria-label='search files'
-          disabled={busy}
-          className='h-7'
-          onChange={(event: ChangeEvent<HTMLInputElement>) => setSearch(event.target.value)}
-        />
-        <Tiles min={132}>
-          {files.map((file) => (
-            <Tile
-              key={Number(file.id)}
-              media={<FileMedia file={file} />}
-              name={file.fileName || `file ${file.id}`}
-              sub={file.contentType || 'file'}
-              title={file.fileName || undefined}
-              onClick={busy ? undefined : () => void choose(file)}
-            />
-          ))}
-          <Tile
-            dashed
-            name={busy ? 'working…' : '+ upload'}
-            onClick={busy ? undefined : () => uploadInput.current?.click()}
-            className='min-h-24 items-center justify-center'
-          />
-        </Tiles>
-        {!filesQuery.isLoading && files.length === 0 && query ? (
-          <Text size='micro' variant='label'>
-            no files found
-          </Text>
-        ) : null}
-      </div>
-      <input
-        ref={uploadInput}
-        type='file'
-        hidden
-        onChange={(event) => {
-          const file = event.target.files?.[0];
-          event.target.value = '';
-          if (file) void upload(file);
-        }}
-      />
-    </ConfirmationModal>
+      accept='any'
+      sources={['file']}
+      multiple={false}
+      selected={selected}
+      onSelectionChange={(refs, items) => void choose(refs, items)}
+      onUpload={(files) => void upload(files)}
+      uploadLabel={busy ? 'working…' : '+ upload'}
+      busy={busy}
+    />
   );
 }

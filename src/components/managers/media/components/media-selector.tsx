@@ -4,14 +4,16 @@ import { isVideo } from 'lib/features/filterContentType';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Close, Pill, RatioGlyph, Text } from 'ui';
-import { MediaManager } from '..';
+import { LibraryBrowser } from 'components/managers/library/browser/library-browser';
+import type { LibraryItem, LibraryRef } from 'components/managers/library/api/types';
+import { visualKinds } from 'components/managers/library/picker/refs';
+import { useCopyToMedia } from 'components/managers/library/picker/use-copy-to-media';
 import { matchesSlotRatio, parseAspect, readSlotAspect } from '../utils/calculate-aspect';
 import { mergeQueue } from '../utils/intake-queue';
 import { acceptOf, filesOfKind, refusalOf, usePasteFiles } from '../utils/usePasteFiles';
 import { isSvgMedia, isSvgUrl, useUploadMedia } from '../utils/useUploadMedia';
 import { MediaCropper } from './cropper';
 import { MediaIntakeDialog } from './media-intake-dialog';
-import { useCoarsePointer } from './media-mobile';
 
 interface MediaSelectorProps {
   label: string;
@@ -59,8 +61,6 @@ export function MediaSelector({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [selectedMedia, setSelectedMedia] = useState<common_MediaFull[]>([]);
   const [dialogKey, setDialogKey] = useState(0);
-  // The sparse grid comes with the date pill, and the pill is touch only: one signal for both.
-  const coarse = useCoarsePointer();
   const [virtualScrollEl, setVirtualScrollEl] = useState<HTMLDivElement | null>(null);
 
   // Crop-on-select state (slots with a fixed ratio).
@@ -83,6 +83,13 @@ export function MediaSelector({
   pastedRef.current = pasted;
 
   const uploadMedia = useUploadMedia();
+  // A picture that lives in files becomes media on choose (D7), then goes the usual way.
+  const copyToMedia = useCopyToMedia();
+  // Same narrowing as the old MediaManager props, said in library kinds.
+  const kinds = useMemo(
+    () => visualKinds({ showVideos, allowSvg, vectorOnly }),
+    [showVideos, allowSvg, vectorOnly],
+  );
   const { showMessage } = useSnackBarStore();
 
   /** The ONE exit to the owner. A vector-only slot lets through vectors only, whatever the road. */
@@ -248,6 +255,21 @@ export function MediaSelector({
     ],
   );
 
+  const { resolve: resolveToMedia, refFor } = copyToMedia;
+  // The tray holds media rows; the grid is told their refs (a copied file keeps its own tile lit).
+  const selectedRefs = useMemo(
+    () => (trayMode ? selectedMedia.map(refFor) : []),
+    [trayMode, selectedMedia, refFor],
+  );
+  const handleLibrarySelection = useCallback(
+    (refs: LibraryRef[], items: LibraryItem[]) => {
+      void resolveToMedia(refs, items, selectedMedia).then((media) => {
+        if (media) handleSelectionChange(media);
+      });
+    },
+    [resolveToMedia, selectedMedia, handleSelectionChange],
+  );
+
   // ⌘V ПРЯМО В ДИАЛОГЕ. Скриншот уже в буфере: заставлять сохранять его файлом, чтобы потом
   // искать в библиотеке, — три шага ради картинки, которая в руках. Вставленное проходит ту же
   // приёмную модалку, что и вставка в слот: превью, кроп по соотношению этого слота,
@@ -403,6 +425,7 @@ export function MediaSelector({
                 </span>
               </Pill>
             )}
+            {copyToMedia.busy && <Pill>copying</Pill>}
             {!slot.constrained && slot.hasCustom && (
               <Pill>
                 {primaryLabel ? (
@@ -455,9 +478,11 @@ export function MediaSelector({
               </DialogPrimitive.Description>
 
               <div ref={setVirtualScrollEl} className='mt-2.5 flex-1 min-h-0 overflow-y-scroll'>
-                <MediaManager
+                <LibraryBrowser
                   key={dialogKey}
-                  aspectRatio={undefined}
+                  mode='pick'
+                  accept='visual'
+                  kinds={kinds}
                   targetRatios={targetRatios}
                   // Файл с диска и файл, брошенный в сетку, идут той же дорогой, что и ⌘V:
                   // превью, кроп по пропорции этого слота, подтверждение. В общую очередь
@@ -465,14 +490,10 @@ export function MediaSelector({
                   onFilesPicked={takeFiles}
                   // НАБОР ЖИВЁТ ЗДЕСЬ, У ЛОТКА. Пока сетка вела свой список, крестик лотка не
                   // говорил ей ничего: следующий выбор возвращал убранный кадр обратно.
-                  selected={trayMode ? selectedMedia : undefined}
-                  allowMultiple={oneAtATime ? false : allowMultiple}
-                  disabled={false}
-                  showVideos={showVideos}
-                  showFilters
-                  virtualScrollEl={coarse ? virtualScrollEl : undefined}
-                  onSelectionChange={handleSelectionChange}
-                  selectionMode={true}
+                  selected={selectedRefs}
+                  multiple={oneAtATime ? false : allowMultiple}
+                  scrollEl={virtualScrollEl}
+                  onSelectionChange={handleLibrarySelection}
                 />
               </div>
 

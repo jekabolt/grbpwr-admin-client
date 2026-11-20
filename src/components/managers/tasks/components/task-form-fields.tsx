@@ -605,7 +605,22 @@ export function AttachField({
       />
 
       {filePicker && (
-        <FilePicker selected={fileIds} onClose={() => setFilePicker(false)} onDone={setFileIds} />
+        // The one library window: files and media together. Media the window dropped leave the
+        // task, new ones join after the kept ones (mergePickedMedia), files keep their own list.
+        <FilePicker
+          selected={fileIds}
+          mediaIds={mediaIds}
+          onClose={() => setFilePicker(false)}
+          onDone={setFileIds}
+          onDoneMedia={(ids, picked) =>
+            setMediaIds(
+              mergePickedMedia(
+                mediaIds.filter((id) => ids.includes(id)),
+                picked.filter((m) => m.id != null && ids.includes(m.id)),
+              ),
+            )
+          }
+        />
       )}
     </div>
   );
