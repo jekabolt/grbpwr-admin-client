@@ -11,6 +11,10 @@ export type SignInTarget =
   | "SIGN_IN_TARGET_TEAM"
   // console: the operator console.
   | "SIGN_IN_TARGET_CONSOLE";
+export type OperatorSecondStep =
+  | "OPERATOR_SECOND_STEP_UNKNOWN"
+  | "OPERATOR_SECOND_STEP_CODE"
+  | "OPERATOR_SECOND_STEP_SETUP";
 // LoginRequest is the request message for the Login RPC.
 export type LoginRequest = {
   // username is the username of the user.
@@ -164,12 +168,56 @@ export type SignInResponse = {
   // account_deleted_until is set, with no token and no teams, when the password is right but the account is
   // deleted and can still be restored until this time (RequestAccountRestore).
   accountDeletedUntil: wellKnownTimestamp | undefined;
+  // second_step is set, with no token, on a console sign-in: the operator must pass a code from an
+  // authenticator app (CODE) or set one up first (SETUP: a code was mailed). ticket names this sign-in
+  // in OperatorVerify / OperatorSetupMail / OperatorSetupConfirm and lives 10 minutes.
+  secondStep: OperatorSecondStep | undefined;
+  ticket: string | undefined;
+  // setup_letter_sent is false on SETUP when this hour's mail limit is spent (no new code was mailed).
+  setupLetterSent: boolean | undefined;
 };
 
 // Encoded using RFC 3339, where generated output will always be Z-normalized
 // and uses 0, 3, 6 or 9 fractional digits.
 // Offsets other than "Z" are also accepted.
 type wellKnownTimestamp = string;
+
+export type OperatorSetupMailRequest = {
+  ticket: string | undefined;
+  // code is the six-digit code from the setup letter.
+  code: string | undefined;
+};
+
+export type OperatorSetupMailResponse = {
+  // secret is the app key in base32, to type by hand.
+  secret: string | undefined;
+  // otpauth_url is the otpauth://totp/... link the QR code carries.
+  otpauthUrl: string | undefined;
+};
+
+export type OperatorSetupConfirmRequest = {
+  ticket: string | undefined;
+  // code is a six-digit code from the new app.
+  code: string | undefined;
+};
+
+export type OperatorSetupConfirmResponse = {
+  token: string | undefined;
+  // recovery_codes are shown once; each signs in once instead of an app code.
+  recoveryCodes: string[] | undefined;
+};
+
+export type OperatorVerifyRequest = {
+  ticket: string | undefined;
+  // code is a six-digit app code or a recovery code (xxxx-xxxx).
+  code: string | undefined;
+};
+
+export type OperatorVerifyResponse = {
+  token: string | undefined;
+  // recovery_codes_left is set when a recovery code was used: how many are left.
+  recoveryCodesLeft: number | undefined;
+};
 
 export type IssueHandoffRequest = {
   teamSlug: string | undefined;
@@ -559,6 +607,17 @@ export interface AuthService {
   DeleteMyAccount(request: DeleteMyAccountRequest): Promise<DeleteMyAccountResponse>;
   // FinishTeamEntry ends the first-entry screen of the calling team (team token only).
   FinishTeamEntry(request: FinishTeamEntryRequest): Promise<FinishTeamEntryResponse>;
+  // OperatorSetupMail is the first of three steps of a console sign-in by an operator with no authenticator app
+  // yet (SignInResponse.second_step = SETUP): the code mailed to the operator's address. The answer is the new
+  // app's key and its otpauth:// link (the page draws the QR). Errors: invalid or expired code (also a used,
+  // expired or burned ticket), too many attempts.
+  OperatorSetupMail(request: OperatorSetupMailRequest): Promise<OperatorSetupMailResponse>;
+  // OperatorSetupConfirm confirms the new app with one of its codes and returns the console token and ten
+  // recovery codes, shown only this once.
+  OperatorSetupConfirm(request: OperatorSetupConfirmRequest): Promise<OperatorSetupConfirmResponse>;
+  // OperatorVerify is the second step of a console sign-in (second_step = CODE): a six-digit app code, or a
+  // recovery code (each works once). Errors: invalid or expired code, too many attempts (locked for a while).
+  OperatorVerify(request: OperatorVerifyRequest): Promise<OperatorVerifyResponse>;
 }
 
 type RequestType = {
@@ -1156,6 +1215,57 @@ export function createAuthServiceClient(
         service: "AuthService",
         method: "FinishTeamEntry",
       }) as Promise<FinishTeamEntryResponse>;
+    },
+    OperatorSetupMail(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/auth/operator/setup-mail`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AuthService",
+        method: "OperatorSetupMail",
+      }) as Promise<OperatorSetupMailResponse>;
+    },
+    OperatorSetupConfirm(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/auth/operator/setup-confirm`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AuthService",
+        method: "OperatorSetupConfirm",
+      }) as Promise<OperatorSetupConfirmResponse>;
+    },
+    OperatorVerify(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/auth/operator/verify`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AuthService",
+        method: "OperatorVerify",
+      }) as Promise<OperatorVerifyResponse>;
     },
   };
 }

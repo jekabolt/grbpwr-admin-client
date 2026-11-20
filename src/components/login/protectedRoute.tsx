@@ -1,4 +1,5 @@
 import { readAuthToken } from 'api/auth-headers';
+import { ConsoleLogin } from 'components/auth/console-login';
 import { TeamLogin } from 'components/auth/team-login';
 import { ROUTES } from 'constants/routes';
 import { currentHost } from 'lib/host';
@@ -38,8 +39,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
 
   if (!isTokenExpired(readAuthToken())) return <>{children}</>;
   if (kind === 'team') return <TeamLogin onSignedIn={() => signedIn((n) => n + 1)} />;
-  if (kind === 'console')
-    return <TeamLogin target='SIGN_IN_TARGET_CONSOLE' onSignedIn={() => signedIn((n) => n + 1)} />;
+  if (kind === 'console') return <ConsoleLogin onSignedIn={() => signedIn((n) => n + 1)} />;
   return <LoginBlock></LoginBlock>;
 };
 
