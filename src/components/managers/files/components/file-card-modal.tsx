@@ -3,6 +3,9 @@ import { Link, useNavigate } from 'react-router-dom';
 import type { FileTopic } from 'api/proto-http/admin';
 import { publicFilePageUrl } from 'components/file-share-viewer/link';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { isPublishableType } from 'components/managers/library/api/library';
+import { useLibraryMutations } from 'components/managers/library/hooks/useLibraryMutations';
+import { copyFailureWord } from 'components/managers/library/picker/use-copy-to-media';
 import { PHONE_QUERY, useMediaQuery } from 'components/managers/tasks/hooks/useMediaQuery';
 import { FilePdfPreview } from './file-pdf-preview';
 import { FileContentViewer } from 'components/managers/tasks/task-detail/file-view/file-content-viewer';
@@ -114,7 +117,8 @@ export function FileCardModal({
   const { data, isLoading, error, refetch } = useLibraryFile(id);
   const { updateFile, deleteFile, setRoles } = useFilesMutations();
   const { showMessage } = useSnackBarStore();
-  const { canRead } = usePermissions();
+  const { canRead, canWrite } = usePermissions();
+  const { copyToMedia } = useLibraryMutations();
   const file = data?.file;
   const navigate = useNavigate();
   const viewer = useMediaViewer();
@@ -133,6 +137,7 @@ export function FileCardModal({
   const [closeIntent, setCloseIntent] = useState<'close' | 'note'>('close');
   const [failure, setFailure] = useState<{ e: unknown; fallback: string }>();
   const [reading, setReading] = useState(false);
+  const [published, setPublished] = useState(false);
 
   const note = isMarkdownNote(file?.fileName ?? '', file?.contentType ?? undefined);
   const readable = isReadablePdf(file?.fileName ?? '', file?.contentType ?? undefined);
@@ -237,6 +242,7 @@ export function FileCardModal({
     setTopicsOpen(false);
     setAccessOpen(false);
     setAccessUrl(undefined);
+    setPublished(false);
     setPhoneSheet(null);
     // The form resets only when another file opens, not on background revalidation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -343,6 +349,25 @@ export function FileCardModal({
     } catch (deleteError) {
       setFailure({ e: deleteError, fallback: "couldn't delete" });
       setConfirmDelete(false);
+    }
+  };
+
+  const accessLevel = asAccessLevel(file?.accessLevel) ?? 'team';
+  // A private picture / video becomes a public media row; the file stays (D7). Only the default
+  // level reads `private`: a narrower level keeps its own word.
+  const publishable =
+    !!file && canWrite(SECTION.media) && isPublishableType(file.contentType ?? undefined);
+  const accessWord = published
+    ? 'public'
+    : publishable && accessLevel === 'team'
+      ? 'private'
+      : ACCESS_LEVEL_TITLE[accessLevel];
+  const makePublic = async () => {
+    try {
+      await copyToMedia.mutateAsync({ fileId: id });
+      setPublished(true);
+    } catch (publishError) {
+      showMessage(copyFailureWord(publishError), 'error');
     }
   };
 
@@ -775,16 +800,27 @@ export function FileCardModal({
                         />
                       ) : (
                         <Text size='micro' component='span'>
-                          {ACCESS_LEVEL_TITLE[asAccessLevel(file.accessLevel) ?? 'team']}
+                          {accessWord}
                         </Text>
                       )}
                     </div>
                   </div>
                 }
                 value={
-                  writable || asAccessLevel(file.accessLevel) === 'link' ? (
+                  writable || accessLevel === 'link' || (publishable && !published) ? (
                     <div className='flex items-center gap-2'>
-                      {asAccessLevel(file.accessLevel) === 'link' && (
+                      {publishable && !published && (
+                        <Button
+                          size='xs'
+                          variant='underline'
+                          className={actionClass}
+                          disabled={copyToMedia.isPending}
+                          onClick={() => void makePublic()}
+                        >
+                          {copyToMedia.isPending ? 'making public…' : 'make public'}
+                        </Button>
+                      )}
+                      {accessLevel === 'link' && (
                         <Button
                           size='xs'
                           variant='underline'

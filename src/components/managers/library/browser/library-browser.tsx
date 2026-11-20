@@ -58,6 +58,7 @@ import {
   withoutFolder,
 } from '../api/types';
 import { decodeUrlFilter, encodeUrlFilter } from '../api/url-filter';
+import { copyLibraryFileToMedia, isPublishableType } from '../api/library';
 import { ItemRow } from '../components/item-row';
 import { ItemThumb } from '../components/item-thumb';
 import { useLibraryFacets } from '../hooks/useLibraryFacets';
@@ -499,6 +500,13 @@ export function LibraryBrowser({
   const [moving, setMoving] = useState<{ folder?: FolderNode } | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [busy, setBusy] = useState(false);
+  /** Bulk `make public`: files done of the run's total; null when nothing runs. */
+  const [publishing, setPublishing] = useState<{ done: number; total: number } | null>(null);
+  const mayPublish = canWrite(SECTION.media);
+  // Media rows are public already; a file the server cannot copy is skipped silently.
+  const publishable = selectedItems.filter(
+    (i) => !i.media && !!i.ref?.id && isPublishableType(i.contentType ?? i.file?.contentType),
+  );
 
   const moveTo = async (folderId: number) => {
     if (!moving) return;
@@ -555,6 +563,31 @@ export function LibraryBrowser({
         failed ? 'error' : 'success',
       );
     }
+  };
+
+  const makePublic = async () => {
+    const going = publishable.flatMap((i) => (i.ref?.id ? [i.ref.id] : []));
+    if (!going.length) return;
+    let done = 0;
+    let failed = 0;
+    setPublishing({ done: 0, total: going.length });
+    for (const fileId of going) {
+      try {
+        const res = await copyLibraryFileToMedia(fileId);
+        if (!res.media?.id) throw new Error('not copied');
+        done += 1;
+      } catch {
+        failed += 1;
+      }
+      setPublishing({ done: done + failed, total: going.length });
+    }
+    await invalidateLibrary(qc);
+    setPublishing(null);
+    exitSelect();
+    showMessage(
+      failed ? `public ${done} · failed ${failed}` : `public ${done}`,
+      failed ? 'error' : 'success',
+    );
   };
 
   const download = async () => {
@@ -678,6 +711,18 @@ export function LibraryBrowser({
     </div>
   );
 
+  const publishButton = mayPublish && (
+    <Button
+      variant='secondary'
+      size='sm'
+      className={phone ? 'flex-1 tabular-nums' : 'tabular-nums'}
+      disabled={!!publishing || !publishable.length}
+      onClick={() => void makePublic()}
+    >
+      {publishing ? `${publishing.done} / ${publishing.total}` : 'make public'}
+    </Button>
+  );
+
   const toolbar = bulk ? (
     <Toolbar>
       <Text size='micro' component='span' className='uppercase tracking-label'>
@@ -697,7 +742,7 @@ export function LibraryBrowser({
       <Button
         variant='secondary'
         size='sm'
-        disabled={!selected.length}
+        disabled={!selected.length || !!publishing}
         onClick={() => setMoving({})}
       >
         move
@@ -705,21 +750,22 @@ export function LibraryBrowser({
       <Button
         variant='secondary'
         size='sm'
-        disabled={!selected.length}
+        disabled={!selected.length || !!publishing}
         onClick={() => void download()}
       >
         download
       </Button>
+      {publishButton}
       <Button
         variant='secondary'
         size='sm'
         className='border-error text-error'
-        disabled={!selected.length}
+        disabled={!selected.length || !!publishing}
         onClick={() => setDeleting(true)}
       >
         delete
       </Button>
-      <Button variant='main' size='sm' onClick={exitSelect}>
+      <Button variant='main' size='sm' disabled={!!publishing} onClick={exitSelect}>
         done
       </Button>
     </Toolbar>
@@ -988,7 +1034,7 @@ export function LibraryBrowser({
                 variant='secondary'
                 size='sm'
                 className='flex-1'
-                disabled={!selected.length}
+                disabled={!selected.length || !!publishing}
                 onClick={() => setMoving({})}
               >
                 move
@@ -997,16 +1043,17 @@ export function LibraryBrowser({
                 variant='secondary'
                 size='sm'
                 className='flex-1'
-                disabled={!selected.length}
+                disabled={!selected.length || !!publishing}
                 onClick={() => void download()}
               >
                 download
               </Button>
+              {publishButton}
               <Button
                 variant='secondary'
                 size='sm'
                 className='flex-1 border-error text-error'
-                disabled={!selected.length}
+                disabled={!selected.length || !!publishing}
                 onClick={() => setDeleting(true)}
               >
                 delete
