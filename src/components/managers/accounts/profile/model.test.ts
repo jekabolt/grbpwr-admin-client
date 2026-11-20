@@ -82,18 +82,34 @@ describe('refusals', () => {
     expect(passwordRefusal('too_many_attempts').word).toBe('try again');
   });
 
-  it('an unknown refusal is shown as the server put it, a long one is not', () => {
-    expect(serverWord('method ChangeMyPassword not implemented')).toBe(
-      'method changemypassword not implemented',
-    );
-    expect(serverWord('x'.repeat(60))).toBe('try again');
+  it('every server key is a word, never raw', () => {
+    const k: Record<string, string> = {
+      wrong_password: 'wrong password',
+      weak_password: '8+ characters',
+      too_many_attempts: 'try again',
+      already_linked: 'already linked',
+      only_sign_in: 'only way in',
+      google_off: 'google off',
+      bad_username: 'bad username',
+      username_taken: 'username taken',
+      bad_avatar: 'bad picture',
+      name_too_long: 'name too long',
+      bad_name: 'bad name',
+      this_device: 'this device',
+      not_found: 'not found',
+      sole_owner: 'sole owner',
+    };
+    for (const [key, word] of Object.entries(k)) expect(serverWord(key)).toBe(word);
+    expect(serverWord('method X not implemented')).toBe('try again');
+    expect(serverWord('something_else')).toBe('try again');
     expect(serverWord('')).toBe('try again');
   });
 
   it('google return', () => {
-    expect(googleReturnWord(null)).toBe('');
-    expect(googleReturnWord('linked')).toBe('');
-    expect(googleReturnWord('taken')).toBe('try again');
+    for (const v of [null, 'linked', 'cancelled', 'already_linked']) expect(googleReturnWord(v)).toBe('');
+    expect(googleReturnWord('taken')).toBe('gmail in use');
+    expect(googleReturnWord('unverified')).toBe('gmail unverified');
+    for (const v of ['expired', 'try_again', 'zzz']) expect(googleReturnWord(v)).toBe('try again');
   });
 
   it('password form is ready only with the current one and 8+', () => {

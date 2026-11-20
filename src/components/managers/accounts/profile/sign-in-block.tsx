@@ -32,6 +32,7 @@ function postLink(ticket: string) {
 
 /** `?google=…` from the round trip: read once, then dropped from the address. */
 function useGoogleReturn(): string {
+  const qc = useQueryClient();
   const [word] = useState(() =>
     typeof window === 'undefined'
       ? ''
@@ -40,9 +41,11 @@ function useGoogleReturn(): string {
   useEffect(() => {
     const url = new URL(window.location.href);
     if (!url.searchParams.has('google')) return;
+    if (url.searchParams.get('google') === 'already_linked')
+      void qc.invalidateQueries({ queryKey: myProfileKey });
     url.searchParams.delete('google');
     window.history.replaceState(null, '', url.pathname + url.search + url.hash);
-  }, []);
+  }, [qc]);
   return word;
 }
 

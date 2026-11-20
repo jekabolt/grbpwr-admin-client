@@ -89,14 +89,34 @@ export function passwordRefusal(message: string): { field: 'current' | 'new' | '
 export function serverWord(message: string): string {
   const m = message.toLowerCase().trim();
   if (!m) return 'try again';
-  if (m.includes('too_many_attempts') || m.includes('try_again')) return 'try again';
-  if (m.includes('sole_owner')) return 'sole owner';
-  return m.length > 48 ? 'try again' : m;
+  for (const [key, word] of SERVER_WORDS) if (m.includes(key)) return word;
+  return 'try again';
 }
 
-/** `?google=linked|taken|unverified` after the Google round trip (P0 §3.7). */
+const SERVER_WORDS: [string, string][] = [
+  ['wrong_password', 'wrong password'],
+  ['weak_password', '8+ characters'],
+  ['too_many_attempts', 'try again'],
+  ['try_again', 'try again'],
+  ['already_linked', 'already linked'],
+  ['only_sign_in', 'only way in'],
+  ['google_off', 'google off'],
+  ['bad_username', 'bad username'],
+  ['username_taken', 'username taken'],
+  ['bad_avatar', 'bad picture'],
+  ['name_too_long', 'name too long'],
+  ['bad_name', 'bad name'],
+  ['this_device', 'this device'],
+  ['not_found', 'not found'],
+  ['sole_owner', 'sole owner'],
+  ['not implemented', 'try again'],
+];
+
+/** `?google=<key>` after the Google round trip (oauthflow handler keys). */
 export function googleReturnWord(v: string | null): string {
-  if (!v || v === 'linked') return '';
+  if (!v || v === 'linked' || v === 'cancelled' || v === 'already_linked') return '';
+  if (v === 'taken') return 'gmail in use';
+  if (v === 'unverified') return 'gmail unverified';
   return 'try again';
 }
 
