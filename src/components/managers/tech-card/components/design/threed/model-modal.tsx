@@ -203,6 +203,7 @@ export function ThreedModelModal({
       const ghostView = mode === 'sides' ? '' : api.nearestSide();
       setBusy('sending');
       const response = await adminService.UploadContentImage({
+        fileName: undefined,
         /**
          * ═══ КОНВЕРТ ЕДЕТ ЦЕЛИКОМ: `data:image/png;base64,…`, А НЕ ГОЛЫЕ БАЙТЫ ══════════════════
          *

@@ -5,17 +5,29 @@ const all = () => true;
 
 describe('visibleBlocks', () => {
   it('shows every block when the team has the features and the person reads the sections', () => {
-    expect([...visibleBlocks(all, all)]).toEqual(['tasks', 'fittings', 'production', 'files']);
+    expect([...visibleBlocks(all, all)]).toEqual([
+      'tasks',
+      'recent',
+      'fittings',
+      'production',
+      'files',
+    ]);
   });
 
   it('hides a block whose team feature is off', () => {
     const on = (f: string) => f !== 'fittings' && f !== 'files';
-    expect([...visibleBlocks(on, all)]).toEqual(['tasks', 'production']);
+    expect([...visibleBlocks(on, all)]).toEqual(['tasks', 'recent', 'production']);
   });
 
   it('hides a block whose section the person cannot read', () => {
     const can = (s: string) => s !== 'production';
-    expect([...visibleBlocks(all, can)]).toEqual(['tasks', 'fittings', 'files']);
+    expect([...visibleBlocks(all, can)]).toEqual(['tasks', 'recent', 'fittings', 'files']);
+  });
+
+  it('recent techcards: behind the tech cards feature and the tech cards read right', () => {
+    expect([...visibleBlocks((f) => f !== 'tech_cards', all)]).not.toContain('recent');
+    expect([...visibleBlocks(all, (s) => s !== 'tech_cards')]).not.toContain('recent');
+    expect([...visibleBlocks((f) => f !== 'models', all)]).toContain('recent');
   });
 
   it('needs both: feature on and read right', () => {

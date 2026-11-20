@@ -24,6 +24,7 @@ export const apiPageRoleDeps: PageRoleDeps = {
   // Codex #5: the ordinary upload path (no preserveOriginal: nothing here is kept), deleted after
   upload: async (picture) => {
     const res = await adminService.UploadContentImage({
+      fileName: undefined,
       rawB64Image: await asDataUrl(picture),
       preserveOriginal: undefined,
     });

@@ -20,6 +20,7 @@ export const asDataUrl = (blob: Blob) =>
 export const apiNamerDeps: NamerDeps = {
   async upload(picture) {
     const res = await adminService.UploadContentImage({
+      fileName: undefined,
       rawB64Image: await asDataUrl(picture),
       // PNG/JPEG are stored byte-for-byte: the model sees exactly the marks we drew.
       preserveOriginal: true,

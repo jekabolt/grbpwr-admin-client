@@ -227,6 +227,7 @@ export function layerRasterUrl(layer: common_DesignEditLayer | undefined): strin
  */
 export async function uploadRaster(dataUrl: string): Promise<common_MediaFull> {
   const response = await adminService.UploadContentImage({
+    fileName: undefined,
     rawB64Image: dataUrl,
     preserveOriginal: true,
   });

@@ -148,6 +148,7 @@ export async function uploadMediaInput(input: UploadMediaInput): Promise<common_
     let response;
     try {
       response = await adminService.UploadContentImage({
+        fileName: undefined,
         rawB64Image: base64,
         // Приехало с контрактом полосы DESIGN. `false` — это ПРЕЖНЕЕ поведение медиатеки:
         // сервер жмёт и приводит формат. Verbatim-путь (побайтовое сохранение оригинала) нужен
@@ -170,6 +171,7 @@ export async function uploadMediaInput(input: UploadMediaInput): Promise<common_
   let response;
   try {
     response = await adminService.UploadContentVideo({
+      fileName: undefined,
       raw,
       contentType,
     });
@@ -197,7 +199,10 @@ async function uploadVector(input: UploadMediaInput): Promise<common_MediaFull> 
   let response;
   try {
     // `raw` is proto `bytes`: base64 on the JSON wire, the bytes themselves on the server.
-    response = await adminService.UploadContentVector({ raw: trimBeforeBase64(dataUrl) });
+    response = await adminService.UploadContentVector({
+      raw: trimBeforeBase64(dataUrl),
+      fileName: undefined,
+    });
   } catch (e) {
     throw uploadError(e, false, true);
   }

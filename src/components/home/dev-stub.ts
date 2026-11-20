@@ -39,6 +39,11 @@ const fitting = (id: number, date: string, techCardId: number, round: number, mo
   },
 });
 
+const recent = (id: number, stage: string, touchedAt: string) => ({
+  card: { id, styleNumber: CARDS[id][0], name: CARDS[id][1], stage },
+  touchedAt,
+});
+
 const run = (id: number, techCardId: number, status: string, qty: number, promised: string) => ({
   id,
   run: { techCardId, status, promisedAt: promised, lines: [] },
@@ -74,6 +79,17 @@ export function homeStubAnswer(method: string, body: string | null, path = ''): 
               task(6, 'old fix', 'TASK_STATUS_DONE', 2701, at(-5)),
             ],
         total: none ? 0 : 6,
+      };
+    case 'ListMyRecentTechCards':
+      return {
+        items: none
+          ? []
+          : [
+              recent(2701, 'TECH_CARD_STAGE_FIT', at(0, new Date().getHours() - 1)),
+              recent(2704, 'TECH_CARD_STAGE_PROTO', at(-1, 16)),
+              recent(2705, 'TECH_CARD_STAGE_SMS', at(-3, 10)),
+              recent(2611, 'TECH_CARD_STAGE_PP', at(-12, 10)),
+            ],
       };
     case 'ListTaskBoards':
       return { boards: [{ id: 1, name: 'development', position: 1 }] };
