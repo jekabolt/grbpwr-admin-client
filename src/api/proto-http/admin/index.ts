@@ -5871,6 +5871,14 @@ export type AdminRef = {
   // of super-admins is not a secret, and the difference between «доступа нет» and
   // «доступ выдаёт jekabolt» is the difference between a dead end and a minute.
   isSuper: boolean | undefined;
+  // name is the person's display name: trim(first_name + ' ' + last_name); empty when both are empty.
+  name: string | undefined;
+  // public_username is the person's effective @username (the username when none was chosen); empty outside teams mode
+  // (show username then).
+  // username stays the lookup key; public_username is only for display.
+  publicUsername: string | undefined;
+  // avatar_url is the absolute URL of the person's avatar; empty when there is none.
+  avatarUrl: string | undefined;
 };
 
 // LibraryFileRole is «what this file is in THIS project» — a pair, not a label.
@@ -16266,6 +16274,13 @@ export type AdminAccount = {
   // specialties is the «чем занимается» column of the accounts table and the
   // chips on the account card. It grants nothing — see AdminRef.specialties.
   specialties: string[] | undefined;
+  // name is the account's display name: trim(first_name + ' ' + last_name); empty when both are empty.
+  name: string | undefined;
+  // public_username is the account's effective @username (the username when none was chosen); empty outside teams mode
+  // (show username then).
+  publicUsername: string | undefined;
+  // avatar_url is the absolute URL of the account's avatar; empty when there is none.
+  avatarUrl: string | undefined;
 };
 
 // AdminSectionInfo describes a grantable section for the permission picker.
@@ -16298,6 +16313,9 @@ export type Workspace = {
   logoUrl: string | undefined;
   // brand is the team's brand data; set only in teams mode, null otherwise.
   brand: TeamBrand | undefined;
+  // entry_needed is true while the calling member has not finished the first-entry screen of this team
+  // (FinishTeamEntry clears it); false for legacy tokens, operators and outside teams mode.
+  entryNeeded: boolean | undefined;
 };
 
 // TeamBrand is the calling team's brand data; only in teams mode.
@@ -20571,6 +20589,12 @@ export type TeamMember = {
   you: boolean | undefined;
   // permissions are the member's grants inside the grantable set; empty for an owner (full access).
   permissions: AdminPermission[] | undefined;
+  // name is the member's display name: trim(first_name + ' ' + last_name); empty when both are empty.
+  name: string | undefined;
+  // public_username is the member's effective @username (the handle when none was chosen); never empty.
+  publicUsername: string | undefined;
+  // avatar_url is the absolute URL of the member's avatar; empty when there is none.
+  avatarUrl: string | undefined;
 };
 
 // TeamInvite is one invite of the calling team.
@@ -20583,6 +20607,8 @@ export type TeamInvite = {
   expiresAt: wellKnownTimestamp | undefined;
   // status is pending, accepted, revoked or expired.
   status: string | undefined;
+  // name is the name the inviter typed; it seeds first/last name of a new account on accept; empty when none.
+  name: string | undefined;
 };
 
 export type ListTeamMembersRequest = {
@@ -20600,6 +20626,10 @@ export type InviteTeamMemberRequest = {
   role: string | undefined;
   // permissions are the rights the invited person gets on joining; empty = the team's default.
   permissions: AdminPermission[] | undefined;
+  // name is the invited person's optional full name; it prefills their invite sheet and seeds first/last name
+  // of a new account on accept; at most 80 characters after trimming; a bad value refuses the request with
+  // bad_name.
+  name: string | undefined;
 };
 
 export type InviteTeamMemberResponse = {
@@ -32380,6 +32410,8 @@ export type PlatformMember = {
   email: string | undefined;
   role: string | undefined;
   lastSeenAt: wellKnownTimestamp | undefined;
+  // name is the member's display name: trim(first_name + ' ' + last_name); empty when both are empty.
+  name: string | undefined;
 };
 
 // FeatureInfo is one entry of the feature catalog.

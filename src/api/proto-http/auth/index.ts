@@ -95,6 +95,10 @@ export type SignUpRequest = {
   // brand is optional brand data of the new team; empty = nothing is stored; a bad value refuses the
   // whole request with the same keys as SetTeamBrand.
   brand: admin_TeamBrand | undefined;
+  // name is the optional full name of the person creating the account, typed in one box; the server splits it
+  // at the first space into first/last name (the rest goes to last; each at most 60 characters); empty = no
+  // name; at most 80 characters after trimming; a bad value refuses the request with bad_name.
+  name: string | undefined;
 };
 
 // TeamBrand is the calling team's brand data; only in teams mode.
@@ -157,7 +161,15 @@ export type SignInRequest = {
 export type SignInResponse = {
   token: string | undefined;
   teams: TeamRef[] | undefined;
+  // account_deleted_until is set, with no token and no teams, when the password is right but the account is
+  // deleted and can still be restored until this time (RequestAccountRestore).
+  accountDeletedUntil: wellKnownTimestamp | undefined;
 };
+
+// Encoded using RFC 3339, where generated output will always be Z-normalized
+// and uses 0, 3, 6 or 9 fractional digits.
+// Offsets other than "Z" are also accepted.
+type wellKnownTimestamp = string;
 
 export type IssueHandoffRequest = {
   teamSlug: string | undefined;
@@ -177,6 +189,9 @@ export type ExchangeHandoffResponse = {
 };
 
 export type SignOutRequest = {
+  // device is true for the profile's log out: with a team token the whole chain of the token ends (this
+  // device leaves every team). false keeps the old behaviour.
+  device: boolean | undefined;
 };
 
 export type SignOutResponse = {
@@ -207,6 +222,9 @@ export type GetInviteResponse = {
   teamName: string | undefined;
   email: string | undefined;
   accountExists: boolean | undefined;
+  // name is the name the inviter typed (it prefills the sheet and seeds first/last name of a new account);
+  // empty when none.
+  name: string | undefined;
 };
 
 export type AcceptInviteRequest = {
@@ -216,6 +234,10 @@ export type AcceptInviteRequest = {
   handle: string | undefined;
   // terms_accepted must be true for a new account; the server refuses otherwise.
   termsAccepted: boolean | undefined;
+  // name is the person's optional full name, typed in one box; for a new account the server splits it at the
+  // first space into first/last name (the rest goes to last; each at most 60 characters); at most 80
+  // characters after trimming; a bad value refuses the request with bad_name.
+  name: string | undefined;
 };
 
 export type AcceptInviteResponse = {
@@ -235,6 +257,8 @@ export type ListMyTeamsResponse = {
   canCreateTeam: boolean | undefined;
   // terms_needed is true when CreateTeam must carry terms_accepted (the current terms are not accepted yet).
   termsNeeded: boolean | undefined;
+  // name is the account's display name: trim(first_name + ' ' + last_name); empty when both are empty.
+  name: string | undefined;
 };
 
 export type CreateTeamRequest = {
@@ -288,13 +312,176 @@ export type SetTeamLogoResponse = {
   logoUrl: string | undefined;
 };
 
+// MyProfile is the calling person's own account.
+export type MyProfile = {
+  firstName: string | undefined;
+  lastName: string | undefined;
+  // public_username is the effective @username (the handle when none was chosen); never empty.
+  publicUsername: string | undefined;
+  email: string | undefined;
+  // avatar_url is the absolute URL of the avatar; empty when there is none.
+  avatarUrl: string | undefined;
+  // password_set is false for an account that signs in only with a provider.
+  passwordSet: boolean | undefined;
+  // password_changed_at is unset when the change time is unknown.
+  passwordChangedAt: wellKnownTimestamp | undefined;
+  // google_email is the connected Google account's email; empty = not connected.
+  googleEmail: string | undefined;
+  // sole_owner_teams are the teams where the person is the only active owner and others are members;
+  // DeleteMyAccount is refused while this is not empty.
+  soleOwnerTeams: TeamRef[] | undefined;
+  // closing_teams are the teams where the person is the only active member: they close with the account
+  // and come back with it while its 30 days run.
+  closingTeams: TeamRef[] | undefined;
+};
+
+// MySession is one signed-in device: a root session plus the team sessions opened from it.
+export type MySession = {
+  // key identifies the device for RevokeMySession; opaque, never shown.
+  key: string | undefined;
+  // browser is chrome, safari, firefox, edge, opera or browser.
+  browser: string | undefined;
+  // os is macos, windows, ios, android, linux or empty.
+  os: string | undefined;
+  ip: string | undefined;
+  lastSeenAt: wellKnownTimestamp | undefined;
+  // this_device is true for the calling token's device (listed first).
+  thisDevice: boolean | undefined;
+};
+
+export type GetMyProfileRequest = {
+};
+
+export type GetMyProfileResponse = {
+  profile: MyProfile | undefined;
+};
+
+export type UpdateMyProfileRequest = {
+  // first_name and last_name are at most 60 characters each after trimming (name_too_long).
+  firstName: string | undefined;
+  lastName: string | undefined;
+  // public_username matches ^[a-z0-9][a-z0-9._-]{1,29}$ after lowercasing and stripping a leading @
+  // (bad_username); taken by another person = username_taken; the own handle clears the choice.
+  publicUsername: string | undefined;
+};
+
+export type UpdateMyProfileResponse = {
+  profile: MyProfile | undefined;
+};
+
+export type SetMyAvatarRequest = {
+  // avatar is a PNG or JPEG, at most 1 MB (JSON: base64); empty removes the avatar.
+  avatar: string | undefined;
+};
+
+export type SetMyAvatarResponse = {
+  // avatar_url is the absolute URL of the new avatar; empty after a removal.
+  avatarUrl: string | undefined;
+};
+
+export type ChangeMyPasswordRequest = {
+  // current_password must be empty when the account has no password yet (password_set false).
+  currentPassword: string | undefined;
+  // new_password is at least 8 characters (weak_password).
+  newPassword: string | undefined;
+  // sign_out_others true also signs out every other device.
+  signOutOthers: boolean | undefined;
+};
+
+export type ChangeMyPasswordResponse = {
+  passwordChangedAt: wellKnownTimestamp | undefined;
+  // signed_out is the number of devices signed out.
+  signedOut: number | undefined;
+};
+
+export type ListMySessionsRequest = {
+};
+
+export type ListMySessionsResponse = {
+  sessions: MySession[] | undefined;
+};
+
+export type RevokeMySessionRequest = {
+  // key is MySession.key.
+  key: string | undefined;
+};
+
+export type RevokeMySessionResponse = {
+};
+
+export type RevokeMyOtherSessionsRequest = {
+};
+
+export type RevokeMyOtherSessionsResponse = {
+  // signed_out is the number of devices signed out.
+  signedOut: number | undefined;
+};
+
+export type StartGoogleLinkRequest = {
+};
+
+export type StartGoogleLinkResponse = {
+  // ticket is single use and lives 2 minutes; post it to /api/auth/oauth/google/start with target=link.
+  ticket: string | undefined;
+};
+
+export type UnlinkMyGoogleRequest = {
+};
+
+export type UnlinkMyGoogleResponse = {
+};
+
+export type DeleteMyAccountRequest = {
+  // confirm_username must equal the effective @username (bad_confirm).
+  confirmUsername: string | undefined;
+};
+
+export type DeleteMyAccountResponse = {
+  // purge_at is when the account is erased; until then RestoreAccount brings it back.
+  purgeAt: wellKnownTimestamp | undefined;
+};
+
+export type FinishTeamEntryRequest = {
+};
+
+export type FinishTeamEntryResponse = {
+};
+
+export type RequestAccountRestoreRequest = {
+  // login is an email, a handle or an @username.
+  login: string | undefined;
+};
+
+export type RequestAccountRestoreResponse = {
+};
+
+export type RestoreAccountRequest = {
+  // token is the restore letter's link token; without it, login + code from the same letter.
+  token: string | undefined;
+  // login is an email, a handle or an @username.
+  login: string | undefined;
+  code: string | undefined;
+};
+
+export type RestoreAccountResponse = {
+  // root_token is a root token, valid for 30 days.
+  rootToken: string | undefined;
+  // teams are the account's teams after the restore, the teams that closed with it included.
+  teams: TeamRef[] | undefined;
+};
+
 // AuthService. Plain HTTP routes of the same /api/auth mount that are not RPCs (no gateway, no session):
 // POST /api/auth/oauth/{google|apple}/start  (HTML form: target signin|invite; for an invite
 // invite_token and terms_accepted) starts a provider sign-in;
 // GET  /api/auth/oauth/google/callback and POST /api/auth/oauth/apple/callback end it with a 303 to
 // https://<base>/auth/oauth#code=<one-time code for ExchangeSignInCode> or #error=<fixed key>
-// (cancelled, expired, unverified, invite_mismatch, disabled, try_again);
-// GET  /api/auth/team-logo/{slug} serves a team's logo as PNG (public; 404 when there is none).
+// (cancelled, expired, unverified, invite_mismatch, disabled, try_again, account_deleted — the
+// account is deleted and can still be restored: RequestAccountRestore);
+// GET  /api/auth/team-logo/{slug} serves a team's logo as PNG (public; 404 when there is none);
+// GET|HEAD /api/auth/avatar/{sha256} serves an account avatar as PNG (public, immutable; 404 when gone).
+// Google connect: StartGoogleLink, then the HTML form POST /api/auth/oauth/google/start with
+// target=link&ticket=<ticket>; the callback redirects to https://<slug>.<base>/profile?google=linked|taken|unverified.
+// Restore letters link to https://<base>/restore#token=<token> (RestoreAccount).
 // "root session" below = a Bearer token from SignIn target root or ExchangeSignInCode.
 export interface AuthService {
   // Authenticate a user. Returns a JWT token if the user is authenticated.
@@ -320,7 +507,8 @@ export interface AuthService {
   // ExchangeHandoff swaps a hand-off code for a team token; the slug travels in Grpc-Metadata-X-Team.
   ExchangeHandoff(request: ExchangeHandoffRequest): Promise<ExchangeHandoffResponse>;
   // SignOut revokes the session of the calling token. A root token ends the root session and every
-  // team session opened from it; a team token ends only itself.
+  // team session opened from it; a team token ends only itself, unless device is true: then it ends the
+  // token's whole chain (the root session plus every team session opened from it).
   SignOut(request: SignOutRequest): Promise<SignOutResponse>;
   // RequestPasswordReset sends a reset letter (generic response).
   RequestPasswordReset(request: RequestPasswordResetRequest): Promise<RequestPasswordResetResponse>;
@@ -340,6 +528,37 @@ export interface AuthService {
   ExchangeSignInCode(request: ExchangeSignInCodeRequest): Promise<ExchangeSignInCodeResponse>;
   // SetTeamLogo sets or removes the logo of the calling team (team session, owner only).
   SetTeamLogo(request: SetTeamLogoRequest): Promise<SetTeamLogoResponse>;
+  // RequestAccountRestore emails a restore letter (code + link, 1 hour) when login names an account deleted
+  // less than 30 days ago (public; always {}, whatever the login is; on the per-email letter cap).
+  RequestAccountRestore(request: RequestAccountRestoreRequest): Promise<RequestAccountRestoreResponse>;
+  // RestoreAccount brings a deleted account back while its 30 days run, by the restore letter's link token
+  // or by (login, code), and signs the person in on the root site (public). Errors: invalid or expired code.
+  RestoreAccount(request: RestoreAccountRequest): Promise<RestoreAccountResponse>;
+  // GetMyProfile returns the calling person's own account profile.
+  GetMyProfile(request: GetMyProfileRequest): Promise<GetMyProfileResponse>;
+  // UpdateMyProfile sets first/last name and @username. Errors: bad_username, username_taken, name_too_long.
+  UpdateMyProfile(request: UpdateMyProfileRequest): Promise<UpdateMyProfileResponse>;
+  // SetMyAvatar sets or removes the calling person's avatar. Errors: bad_avatar.
+  SetMyAvatar(request: SetMyAvatarRequest): Promise<SetMyAvatarResponse>;
+  // ChangeMyPassword changes (or, for a Google-only account, sets) the password.
+  // Errors: wrong_password, weak_password, too_many_attempts.
+  ChangeMyPassword(request: ChangeMyPasswordRequest): Promise<ChangeMyPasswordResponse>;
+  // ListMySessions lists the calling person's live devices (a root session plus its team sessions).
+  ListMySessions(request: ListMySessionsRequest): Promise<ListMySessionsResponse>;
+  // RevokeMySession signs one device out. Errors: this_device, not_found.
+  RevokeMySession(request: RevokeMySessionRequest): Promise<RevokeMySessionResponse>;
+  // RevokeMyOtherSessions signs out every device except the calling one.
+  RevokeMyOtherSessions(request: RevokeMyOtherSessionsRequest): Promise<RevokeMyOtherSessionsResponse>;
+  // StartGoogleLink returns a single-use ticket for the Google connect form. Errors: already_linked.
+  StartGoogleLink(request: StartGoogleLinkRequest): Promise<StartGoogleLinkResponse>;
+  // UnlinkMyGoogle disconnects Google from the account. Errors: only_sign_in.
+  UnlinkMyGoogle(request: UnlinkMyGoogleRequest): Promise<UnlinkMyGoogleResponse>;
+  // DeleteMyAccount deletes the calling person's account: sign-in closes at once, the teams where the person
+  // is the only member close with it, and RestoreAccount brings everything back for 30 days.
+  // Errors: bad_confirm, sole_owner, try_again (a closing team is still provisioning), operator.
+  DeleteMyAccount(request: DeleteMyAccountRequest): Promise<DeleteMyAccountResponse>;
+  // FinishTeamEntry ends the first-entry screen of the calling team (team token only).
+  FinishTeamEntry(request: FinishTeamEntryRequest): Promise<FinishTeamEntryResponse>;
 }
 
 type RequestType = {
@@ -716,6 +935,227 @@ export function createAuthServiceClient(
         service: "AuthService",
         method: "SetTeamLogo",
       }) as Promise<SetTeamLogoResponse>;
+    },
+    RequestAccountRestore(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/auth/request-account-restore`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AuthService",
+        method: "RequestAccountRestore",
+      }) as Promise<RequestAccountRestoreResponse>;
+    },
+    RestoreAccount(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/auth/restore-account`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AuthService",
+        method: "RestoreAccount",
+      }) as Promise<RestoreAccountResponse>;
+    },
+    GetMyProfile(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/auth/get-my-profile`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AuthService",
+        method: "GetMyProfile",
+      }) as Promise<GetMyProfileResponse>;
+    },
+    UpdateMyProfile(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/auth/update-my-profile`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AuthService",
+        method: "UpdateMyProfile",
+      }) as Promise<UpdateMyProfileResponse>;
+    },
+    SetMyAvatar(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/auth/set-my-avatar`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AuthService",
+        method: "SetMyAvatar",
+      }) as Promise<SetMyAvatarResponse>;
+    },
+    ChangeMyPassword(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/auth/change-my-password`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AuthService",
+        method: "ChangeMyPassword",
+      }) as Promise<ChangeMyPasswordResponse>;
+    },
+    ListMySessions(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/auth/list-my-sessions`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AuthService",
+        method: "ListMySessions",
+      }) as Promise<ListMySessionsResponse>;
+    },
+    RevokeMySession(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/auth/revoke-my-session`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AuthService",
+        method: "RevokeMySession",
+      }) as Promise<RevokeMySessionResponse>;
+    },
+    RevokeMyOtherSessions(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/auth/revoke-my-other-sessions`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AuthService",
+        method: "RevokeMyOtherSessions",
+      }) as Promise<RevokeMyOtherSessionsResponse>;
+    },
+    StartGoogleLink(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/auth/start-google-link`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AuthService",
+        method: "StartGoogleLink",
+      }) as Promise<StartGoogleLinkResponse>;
+    },
+    UnlinkMyGoogle(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/auth/unlink-my-google`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AuthService",
+        method: "UnlinkMyGoogle",
+      }) as Promise<UnlinkMyGoogleResponse>;
+    },
+    DeleteMyAccount(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/auth/delete-my-account`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AuthService",
+        method: "DeleteMyAccount",
+      }) as Promise<DeleteMyAccountResponse>;
+    },
+    FinishTeamEntry(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/auth/finish-team-entry`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AuthService",
+        method: "FinishTeamEntry",
+      }) as Promise<FinishTeamEntryResponse>;
     },
   };
 }

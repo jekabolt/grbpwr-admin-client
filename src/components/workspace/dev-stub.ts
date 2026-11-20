@@ -74,7 +74,17 @@ const member = (
   role: string,
   permissions: TeamMember['permissions'] = [],
   you = false,
-): TeamMember => ({ username, email, role, lastSeenAt: ago(DAY), you, permissions });
+): TeamMember => ({
+  username,
+  email,
+  role,
+  lastSeenAt: ago(DAY),
+  you,
+  permissions,
+  name: undefined,
+  publicUsername: undefined,
+  avatarUrl: undefined,
+});
 
 function seed(s: Scenario) {
   if (s === 'new')
@@ -278,6 +288,7 @@ export function workspaceStubAnswer(method: string, body: string | null): unknow
         sentAt: new Date().toISOString(),
         expiresAt: new Date(Date.now() + 7 * DAY).toISOString(),
         status: 'pending',
+        name: undefined,
       };
       s.invites = [fresh, ...s.invites.filter((i) => i.email !== email)];
       return { invite: fresh };

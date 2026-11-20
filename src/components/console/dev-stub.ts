@@ -105,6 +105,7 @@ function team(
       email,
       role,
       lastSeenAt: ago(seenMin * 60_000),
+      name: undefined,
     })),
     ...extra,
   };
@@ -223,6 +224,9 @@ let members: TeamMember[] = [
     lastSeenAt: ago(0),
     you: true,
     permissions: [],
+    name: undefined,
+    publicUsername: undefined,
+    avatarUrl: undefined,
   },
   {
     username: 'tomas',
@@ -231,6 +235,9 @@ let members: TeamMember[] = [
     lastSeenAt: ago(2 * 3_600_000),
     you: false,
     permissions: [],
+    name: undefined,
+    publicUsername: undefined,
+    avatarUrl: undefined,
   },
   {
     username: 'ana',
@@ -239,6 +246,9 @@ let members: TeamMember[] = [
     lastSeenAt: ago(30 * 3_600_000),
     you: false,
     permissions: [],
+    name: undefined,
+    publicUsername: undefined,
+    avatarUrl: undefined,
   },
   {
     username: 'lena',
@@ -247,6 +257,9 @@ let members: TeamMember[] = [
     lastSeenAt: ago(5 * DAY),
     you: false,
     permissions: [],
+    name: undefined,
+    publicUsername: undefined,
+    avatarUrl: undefined,
   },
   {
     username: 'sami',
@@ -255,6 +268,9 @@ let members: TeamMember[] = [
     lastSeenAt: ago(9 * DAY),
     you: false,
     permissions: [],
+    name: undefined,
+    publicUsername: undefined,
+    avatarUrl: undefined,
   },
 ];
 let invites: TeamInvite[] = [
@@ -265,6 +281,7 @@ let invites: TeamInvite[] = [
     sentAt: ago(DAY),
     expiresAt: new Date(now + 6 * DAY).toISOString(),
     status: 'pending',
+    name: undefined,
   },
   {
     inviteRef: 'ref-felix',
@@ -273,6 +290,7 @@ let invites: TeamInvite[] = [
     sentAt: ago(15 * DAY),
     expiresAt: ago(8 * DAY),
     status: 'expired',
+    name: undefined,
   },
 ];
 
@@ -385,6 +403,7 @@ export function consoleStubAnswer(method: string, body: string | null, path = ''
         sentAt: new Date().toISOString(),
         expiresAt: new Date(Date.now() + 7 * DAY).toISOString(),
         status: 'pending',
+        name: undefined,
       };
       const open = invites.find((i) => i.email === email);
       invites = open

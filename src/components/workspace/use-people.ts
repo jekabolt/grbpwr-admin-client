@@ -62,6 +62,7 @@ export function usePeopleActions() {
         email: normalEmail(v.email),
         role: v.role,
         permissions: undefined,
+        name: undefined,
       }),
     onSuccess: (r) => {
       const fresh = r.invite;

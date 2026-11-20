@@ -108,6 +108,7 @@ export function SignUp({ onSignedIn }: { onSignedIn: () => void }) {
         termsAccepted: true,
         logo: logo?.base64,
         brand: brand.payload(),
+        name: undefined,
       });
       rememberEmail(draft.email.trim());
       setStep('code');

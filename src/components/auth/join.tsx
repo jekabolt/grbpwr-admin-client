@@ -83,6 +83,7 @@ export function Join() {
         password,
         handle,
         termsAccepted: true,
+        name: undefined,
       });
       goToUrl(teamUrl(r.teamSlug ?? '', `/auth#code=${encodeURIComponent(r.handoffCode ?? '')}`));
     } catch (e) {

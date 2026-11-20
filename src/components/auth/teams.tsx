@@ -66,7 +66,7 @@ function useMyTeams(session: RootSession) {
 function useLogOut(session: RootSession) {
   const queryClient = useQueryClient();
   return async () => {
-    await authService.SignOut({}).catch(() => undefined);
+    await authService.SignOut({ device: undefined }).catch(() => undefined);
     queryClient.removeQueries({ queryKey: MY_TEAMS_KEY });
     session.out('/');
   };
