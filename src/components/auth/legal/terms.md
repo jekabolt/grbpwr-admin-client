@@ -1,9 +1,9 @@
-version 2026-11 · draft, not reviewed by a lawyer
+version 2026-11
 
 # lekalo — terms of use
 
 ## 1. who we are and what this covers
-lekalo (`lekalo.studio`) is operated by [LEGAL ENTITY], [REGISTERED ADDRESS] ("lekalo", "the operator", "we"). These terms apply to anyone who creates an account or uses a lekalo workspace. Contact: im@lekalo.studio.
+lekalo (`lekalo.studio`) is called "lekalo", "the operator" or "we" in this text. These terms apply to anyone who creates an account or uses a lekalo workspace. Contact: im@lekalo.studio.
 
 ## 2. the service
 lekalo is a workspace tool for fashion brands and their production: garment models, tech cards, materials, fittings, production runs, tasks, files and media. Each team gets its own address `team-name.lekalo.studio` and its own separate database. One team's data is not visible to another team.
@@ -42,15 +42,15 @@ You must not:
 - resell or sublicense access to lekalo.
 
 ## 9. price
-lekalo is free for now. Paid plans may come later; we will give notice in advance. Nothing is charged without a new explicit agreement with you.
+lekalo is free for now. Paid plans may come later. Nothing is charged without a new explicit agreement with you.
 
 ## 10. pause (read-only mode)
-We may put a workspace into read-only mode for abuse, security reasons, long inactivity of [INACTIVITY PERIOD], or non-payment once paid plans exist. Where possible we tell the owner first and explain how to resolve it.
+We may put a workspace into read-only mode for abuse, security reasons, or non-payment once paid plans exist. The owner can write to im@lekalo.studio to resolve it.
 
 ## 11. leaving and deletion
-- Today a team can ask us at im@lekalo.studio to delete its workspace or to get an export. We handle such requests within [N] days.
-- Self-service deletion and export are planned but not available yet.
-- We may end the service for a team that breaks these terms, after notice where reasonable.
+- A person can delete their own account.
+- You can also ask us at im@lekalo.studio to delete a workspace or an account. We handle such requests within 30 days.
+- We may end the service for a team that breaks these terms.
 
 ## 12. service state
 - lekalo is an early product, provided "as is". We make no uptime promise.
@@ -58,20 +58,7 @@ We may put a workspace into read-only mode for abuse, security reasons, long ina
 - Features may change, be added or be removed.
 
 ## 13. liability
-To the extent the law allows, lekalo is not liable for indirect losses, lost profit, or production decisions made on the basis of data or AI output in the service. Total liability is limited to [LIABILITY CAP]. Nothing here limits liability that cannot be limited by law.
+To the extent the law allows, lekalo is not liable for indirect losses, lost profit, or production decisions made on the basis of data or AI output in the service. Nothing here limits liability that cannot be limited by law.
 
 ## 14. changes to these terms
-We may update these terms. Each version has a tag (this one: `2026-11`). For material changes we notify account holders by email at least [NOTICE PERIOD] in advance and may ask you to accept the new version.
-
-## 15. law and disputes
-These terms are governed by [GOVERNING LAW]. Disputes go to [COURTS / VENUE].
-
----
-
-open points for the owner
-- [LEGAL ENTITY], [REGISTERED ADDRESS], im@lekalo.studio
-- [N] days — handling window for deletion / export requests
-- [INACTIVITY PERIOD] — what counts as long inactivity
-- [LIABILITY CAP] — e.g. fees paid in the last 12 months, or a fixed amount while free
-- [NOTICE PERIOD] — advance notice for material changes and paid plans
-- [GOVERNING LAW], [COURTS / VENUE]
+We may update these terms. Each version has a tag (this one: `2026-11`). The current version is always on this page, and we may ask you to accept a new version.
