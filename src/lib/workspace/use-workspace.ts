@@ -3,7 +3,13 @@ import { adminService } from 'api/api';
 import type { GetCurrentAccountResponse } from 'api/proto-http/admin';
 import { accountsKeys } from 'components/managers/accounts/utils/hooks';
 import { currentHost } from 'lib/host';
-import { workspaceGate, type WorkspaceGate, type WorkspaceInfo } from './features';
+import {
+  FEATURE,
+  featureOn,
+  workspaceGate,
+  type WorkspaceGate,
+  type WorkspaceInfo,
+} from './features';
 
 export function toWorkspace(res: GetCurrentAccountResponse | undefined): WorkspaceInfo | null {
   const w = res?.workspace;
@@ -38,6 +44,12 @@ export interface UseWorkspace {
  * periodic and on-focus refresh belongs to the one observer in `WorkspaceProvider`; this hook adds
  * no timers.
  */
+/** Paid ai is on for this team (no workspace = a legacy host: on, as before). */
+export function useAiOn(): boolean {
+  const { workspace } = useWorkspace();
+  return featureOn(workspace, FEATURE.ai);
+}
+
 export function useWorkspace(): UseWorkspace {
   const q = useQuery({
     queryKey: accountsKeys.current(),

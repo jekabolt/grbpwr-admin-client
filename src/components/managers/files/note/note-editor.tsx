@@ -11,6 +11,7 @@ import {
 import { PHONE_QUERY, useMediaQuery } from 'components/managers/tasks/hooks/useMediaQuery';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
+import { useAiOn } from 'lib/workspace/use-workspace';
 import { Button, ConfirmationModal, Input, Pill, Text, Toolbar, ToolbarSpacer } from 'ui';
 import { AiPanel, useNoteAssistant, type AiRequest, type AiSuggestion } from './ai-panel';
 import { FormatBar, type FormatMenuItem } from './format-bar';
@@ -379,6 +380,7 @@ export function NoteEditor({
   );
 
   const working = assistant.state.kind === 'working';
+  const aiOn = useAiOn();
 
   // Показ отстаёт от набора НА ОДИН КАДР ЗАНЯТОСТИ, а не на таймер: `useDeferredValue` отдаёт
   // старое значение, пока идёт ввод, и пересобирает разметку в свободную минуту. Потолок заметки
@@ -668,7 +670,7 @@ export function NoteEditor({
     { label: 'preview', on: previewOpen, run: () => setPreviewOpen((v) => !v) },
   ];
   const menuTail: FormatMenuItem[] = [
-    { label: 'tidy with ai', run: tidy, disabled: working || !value.trim() },
+    ...(aiOn ? [{ label: 'tidy with ai', run: tidy, disabled: working || !value.trim() }] : []),
     {
       label: 'wrap lines',
       on: wrapLines,
@@ -720,9 +722,16 @@ export function NoteEditor({
             />
           </label>
 
-          <Button size='sm' variant='secondary' onClick={tidy} disabled={working || !value.trim()}>
-            {working ? 'the assistant is reading…' : 'tidy with ai'}
-          </Button>
+          {aiOn && (
+            <Button
+              size='sm'
+              variant='secondary'
+              onClick={tidy}
+              disabled={working || !value.trim()}
+            >
+              {working ? 'the assistant is reading…' : 'tidy with ai'}
+            </Button>
+          )}
 
           <ToolbarSpacer />
 

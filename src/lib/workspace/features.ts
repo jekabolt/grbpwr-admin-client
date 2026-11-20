@@ -24,6 +24,8 @@ export const FEATURE = {
   analytics: 'analytics',
   accounting: 'accounting',
   settings: 'settings',
+  // paid ai (EnhanceText, note tidy, fitting drafts): off for a new team until the operator turns it on
+  ai: 'ai',
   aiProviders: 'ai_providers',
   localAccounts: 'local_accounts',
 } as const;
