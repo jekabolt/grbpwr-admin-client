@@ -113,6 +113,8 @@ export type LibraryBrowserProps = {
 };
 
 const SEARCH_DEBOUNCE_MS = 300;
+/** Phone bulk bar: widths follow the words, so `make public` stays on one line beside `move`. */
+const PHONE_BULK = 'flex-auto whitespace-nowrap';
 /** The app shell's sticky top bar on the phone: the scrubber pill stays under it. */
 const SHELL_BAR = 56;
 const NO_MONTHS: ScrubMonth[] = [];
@@ -715,7 +717,7 @@ export function LibraryBrowser({
     <Button
       variant='secondary'
       size='sm'
-      className={phone ? 'flex-1 tabular-nums' : 'tabular-nums'}
+      className={phone ? `${PHONE_BULK} tabular-nums` : 'tabular-nums'}
       disabled={!!publishing || !publishable.length}
       onClick={() => void makePublic()}
     >
@@ -1033,7 +1035,7 @@ export function LibraryBrowser({
               <Button
                 variant='secondary'
                 size='sm'
-                className='flex-1'
+                className={PHONE_BULK}
                 disabled={!selected.length || !!publishing}
                 onClick={() => setMoving({})}
               >
@@ -1042,7 +1044,7 @@ export function LibraryBrowser({
               <Button
                 variant='secondary'
                 size='sm'
-                className='flex-1'
+                className={PHONE_BULK}
                 disabled={!selected.length || !!publishing}
                 onClick={() => void download()}
               >
@@ -1052,7 +1054,7 @@ export function LibraryBrowser({
               <Button
                 variant='secondary'
                 size='sm'
-                className='flex-1 border-error text-error'
+                className={`${PHONE_BULK} border-error text-error`}
                 disabled={!selected.length || !!publishing}
                 onClick={() => setDeleting(true)}
               >
