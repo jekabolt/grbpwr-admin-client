@@ -1,9 +1,11 @@
 import { useState, type ChangeEvent, type ReactNode } from 'react';
+import { toPerson } from 'components/people/directory';
+import { PersonAvatar } from 'components/people/person';
 import { Link } from 'react-router-dom';
 import type { FileTopic } from 'api/proto-http/admin';
 import { useAdmins } from 'components/managers/tech-card/components/useRoles';
 import { ROUTES } from 'constants/routes';
-import { Avatar, Button, Chip, GenericPopover, Input, Select, Text, ViewSwitch } from 'ui';
+import { Button, Chip, GenericPopover, Input, Select, Text, ViewSwitch } from 'ui';
 import {
   PERSON_ROLE_CHIP,
   PERSON_ROLE_HINT,
@@ -76,7 +78,7 @@ export function PersonFilter({
     { value: '0', label: 'all people' },
     ...admins.map((a) => ({
       value: String(a.id),
-      label: a.username ?? `#${a.id}`,
+      label: toPerson(a.username ?? '', a).label || `#${a.id}`,
     })),
     // ID ИЗ АДРЕСА, КОТОРОГО НЕТ В СПИСКЕ, всё равно получает строку. Ссылку кидают в чат, а
     // `ListAdmins` отдаёт только включённые аккаунты — за месяц человек мог уйти. Без этой
@@ -98,9 +100,9 @@ export function PersonFilter({
         renderValue={(value: string | number) =>
           Number(value) > 0 ? (
             <span className='flex min-w-0 items-center gap-1.5'>
-              <Avatar name={picked?.username ?? ''} size={16} />
+              <PersonAvatar handle={picked?.username} size={16} />
               <Text component='span' className='truncate'>
-                {picked?.username ?? `#${personId}`}
+                {picked ? toPerson(picked.username ?? '', picked).label : `#${personId}`}
               </Text>
             </span>
           ) : (

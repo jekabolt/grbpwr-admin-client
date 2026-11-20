@@ -1,4 +1,6 @@
 import { cn } from 'lib/utility';
+import { PersonAvatar } from 'components/people/person';
+import { usePeopleDirectory } from 'components/people/directory';
 import { Avatar } from 'ui';
 
 /**
@@ -25,8 +27,9 @@ export function AvatarStack({
   max?: number;
   className?: string;
 }) {
+  const { who } = usePeopleDirectory();
   const people = names.filter((n) => !!n.trim());
-  const title = people.length ? people.join(', ') : 'unassigned';
+  const title = people.length ? people.map((n) => who(n).label).join(', ') : 'unassigned';
 
   if (people.length === 0) return <Avatar name='' size={size} className={className} />;
 
@@ -36,9 +39,9 @@ export function AvatarStack({
   return (
     <span className={cn('inline-flex shrink-0 items-center', className)} title={title}>
       {shown.map((name, i) => (
-        <Avatar
+        <PersonAvatar
           key={`${name}-${i}`}
-          name={name}
+          handle={name}
           size={size}
           // Общая подпись висит на ряду; своя у каждого лица дала бы две разные подсказки
           // на одном месте, и какая из них покажется, решал бы курсор.

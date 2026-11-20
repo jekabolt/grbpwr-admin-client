@@ -1,7 +1,8 @@
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { formatDistanceToNow } from 'date-fns';
 import { useState } from 'react';
-import { Avatar, Button, ConfirmationModal, Section, Text, Textarea } from 'ui';
+import { PersonAvatar, PersonLabel } from 'components/people/person';
+import { Button, ConfirmationModal, Section, Text, Textarea } from 'ui';
 import type { TaskComment, TaskMedia } from '../api/types';
 import { useAddComment, useDeleteComment, useTaskComments } from '../hooks/useTasks';
 import { TaskText, type MediaRef } from './task-text';
@@ -121,15 +122,15 @@ export function TaskComments({
         ) : (
           comments.map((c) => (
             <div key={c.id} className='flex gap-2 border-b border-borderColor pb-2 last:border-b-0'>
-              <Avatar name={c.author} title={c.author} />
+              <PersonAvatar handle={c.author} />
               <div className='flex min-w-0 flex-1 flex-col gap-0.5'>
                 <div className='flex items-baseline justify-between gap-2'>
                   <Text
                     size='micro'
                     component='span'
-                    className='font-bold uppercase tracking-label'
+                    className='font-bold tracking-label'
                   >
-                    {c.author}
+                    <PersonLabel handle={c.author} />
                   </Text>
                   <span className='flex shrink-0 items-baseline gap-1.5'>
                     <Text size='nano' variant='label' component='span'>

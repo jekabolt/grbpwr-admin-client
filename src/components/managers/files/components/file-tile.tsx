@@ -1,7 +1,8 @@
 import type { LibraryFile } from 'api/proto-http/admin';
+import { PersonAvatar } from 'components/people/person';
 import type { ReactNode } from 'react';
 import { cn } from 'lib/utility';
-import { Avatar, Pill, Text } from 'ui';
+import { Pill, Text } from 'ui';
 import { ACCESS_LEVEL_BADGE, asAccessLevel } from '../api/accessService';
 import { extensionOf, formatBytes, kindWord, previewExpected, stemOf } from '../utils/format';
 import { isMarkdownNote } from '../utils/reader-find';
@@ -200,7 +201,7 @@ export function FileTile({
             selected && 'opacity-0',
           )}
         >
-          <Avatar name={uploader} size={16} />
+          <PersonAvatar handle={uploader} size={16} />
         </span>
       )}
 

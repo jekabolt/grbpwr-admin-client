@@ -1,7 +1,7 @@
 import type { TeamMember } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import type { ReactNode, SyntheticEvent } from 'react';
-import { Avatar, Close, Select, Text } from 'ui';
+import { Avatar, Close, PersonName, Select, Text } from 'ui';
 import { avatarName, ROLES, specialtiesWord } from './model';
 
 // The parts of a person line the owner re-drew in fix mockup v4 `inline`: the identity cell
@@ -19,7 +19,7 @@ export const ROLE_SELECT_CASE = {
 };
 
 /**
- * avatar · name (the email until the contract has a name) · `you` · specialties. At 1440 the
+ * photo · name and quiet @username (the email when the server sends neither) · `you` · specialties. At 1440 the
  * specialties give way first and truncate; on a phone they wrap under the name.
  */
 export function PersonIdentity({
@@ -32,12 +32,20 @@ export function PersonIdentity({
   const sp = specialtiesWord(specialties);
   return (
     <span className='flex min-w-0 items-center gap-2'>
-      <Avatar name={avatarName(member)} title={member.email} size={20} />
+      <Avatar
+        name={member.name?.trim() || avatarName(member)}
+        src={member.avatarUrl || undefined}
+        title={member.email}
+        size={20}
+      />
       <span className='flex min-w-0 flex-1 flex-col md:flex-row md:items-baseline md:gap-2'>
         <span className='flex min-w-0 items-baseline gap-2'>
-          <span className='min-w-0 break-words group-hover/line:underline group-hover/line:underline-offset-2 group-aria-expanded/line:underline group-aria-expanded/line:underline-offset-2 md:truncate'>
-            {member.email}
-          </span>
+          <PersonName
+            name={member.name}
+            username={member.publicUsername}
+            fallback={member.email}
+            className='break-words group-hover/line:underline group-hover/line:underline-offset-2 group-aria-expanded/line:underline group-aria-expanded/line:underline-offset-2 md:truncate'
+          />
           {member.you && (
             <Text component='span' variant='label' size='micro' className='flex-none'>
               you

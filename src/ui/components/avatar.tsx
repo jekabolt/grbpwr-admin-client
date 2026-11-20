@@ -1,4 +1,5 @@
 import { cn } from 'lib/utility';
+import { useState } from 'react';
 
 /**
  * The reference's `.pin` at person scale: a filled ink circle carrying two initials,
@@ -22,30 +23,73 @@ export function initials(name: string): string {
 
 export function Avatar({
   name,
+  src,
   size = 20,
   title,
   className,
 }: {
   /** Empty / undefined renders the unassigned state. */
   name?: string;
+  /** The person's photo; the initials stay underneath when it is missing or fails to load. */
+  src?: string;
   size?: number;
   title?: string;
   className?: string;
 }) {
   const assigned = !!name?.trim();
+  const [broken, setBroken] = useState('');
+  const photo = !!src && broken !== src;
   return (
     <span
       title={title ?? (assigned ? name : 'unassigned')}
       style={{ width: size, height: size, flex: `0 0 ${size}px` }}
       className={cn(
-        'inline-flex items-center justify-center rounded-full text-nano leading-none',
-        assigned
+        'relative inline-flex items-center justify-center overflow-hidden rounded-full text-nano leading-none',
+        assigned || photo
           ? 'bg-textColor text-bgColor'
           : 'border border-dashed border-borderColor text-labelColor',
         className,
       )}
     >
-      {assigned ? initials(name!) : '?'}
+      {assigned ? initials(name!) : photo ? '' : '?'}
+      {photo && (
+        <img
+          src={src}
+          alt=''
+          loading='lazy'
+          onError={() => setBroken(src!)}
+          className='absolute inset-0 block size-full object-cover'
+        />
+      )}
+    </span>
+  );
+}
+
+/**
+ * A person in words: the name in ink and the quiet `@username` beside it; no name → `@username`;
+ * neither (outside teams mode) → `fallback`, the account's handle as it always read.
+ * `short` drops the quiet `@username` where a list has no room for it.
+ */
+export function PersonName({
+  name,
+  username,
+  fallback,
+  short,
+  className,
+}: {
+  name?: string;
+  /** The effective @username without the `@`; empty outside teams mode. */
+  username?: string;
+  fallback?: string;
+  short?: boolean;
+  className?: string;
+}) {
+  const n = name?.trim() ?? '';
+  const u = username?.trim() ?? '';
+  return (
+    <span className={cn('inline-flex min-w-0 items-baseline gap-1.5', className)}>
+      <span className='min-w-0 truncate'>{n || (u ? `@${u}` : fallback || '')}</span>
+      {n && u && !short && <span className='min-w-0 truncate text-labelColor'>@{u}</span>}
     </span>
   );
 }

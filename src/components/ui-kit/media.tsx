@@ -7,6 +7,7 @@ import {
   DateScrubber,
   GrbpwrMark,
   Media,
+  PersonName,
   Pin,
   RatioGlyph,
   scrubLabel,
@@ -64,6 +65,11 @@ function CanvasDemo() {
   );
 }
 
+// a grey head-and-shoulders square, drawn inline (no network in the kit)
+const KIT_PHOTO = `data:image/svg+xml,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24" fill="gainsboro"/><path d="M12 5a4 4 0 1 1 0 8 4 4 0 0 1 0-8Zm-8 19c0-5 3.6-8 8-8s8 3 8 8Z" fill="gray"/></svg>',
+)}`;
+
 function AvatarDemo() {
   const [who, setWho] = useState<string | undefined>('anna kim');
   return (
@@ -77,6 +83,26 @@ function AvatarDemo() {
               <Avatar name='boris' size={28} />
               <Avatar name='li wei' size={40} />
               <Avatar />
+            </div>
+          ),
+        },
+        {
+          label: 'photo',
+          content: (
+            <div className='flex items-center gap-2'>
+              <Avatar name='mira lund' src={KIT_PHOTO} size={28} />
+              <Avatar name='mira lund' src='/missing.png' size={28} />
+            </div>
+          ),
+        },
+        {
+          label: 'person name',
+          content: (
+            <div className='flex flex-col gap-1'>
+              <PersonName name='mira lund' username='mira.k' />
+              <PersonName name='mira lund' username='mira.k' short />
+              <PersonName username='teo' />
+              <PersonName fallback='jekabolt' />
             </div>
           ),
         },

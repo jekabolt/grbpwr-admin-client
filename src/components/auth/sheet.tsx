@@ -58,10 +58,22 @@ export function SheetForm({
   );
 }
 
-export function SheetRow({ label, children }: { label: string; children: ReactNode }) {
+/** `top` — a value taller than one line (chips): the label stays on its first line. */
+export function SheetRow({
+  label,
+  top,
+  children,
+}: {
+  label: string;
+  top?: boolean;
+  children: ReactNode;
+}) {
   return (
     <Row
-      className='grid grid-cols-1 items-center gap-1 py-2 sm:grid-cols-[6rem_minmax(0,1fr)] sm:gap-3 [&>span:last-child]:min-w-0'
+      className={cn(
+        'grid grid-cols-1 gap-1 py-2 sm:grid-cols-[6rem_minmax(0,1fr)] sm:gap-3 [&>span:last-child]:min-w-0',
+        top ? 'items-start sm:[&>span:first-child]:pt-1' : 'items-center',
+      )}
       label={
         <Text size='micro' variant='label' tracking='label' component='span'>
           {label}

@@ -1,4 +1,5 @@
 import { AdminRef, common_TechCardRole, common_TechCardRoleAssignment } from 'api/proto-http/admin';
+import { toPerson, usePeopleDirectory } from 'components/people/directory';
 import { notify } from 'lib/stores/store';
 import { useState } from 'react';
 import { Chip, ChipRow, Input, Pill, GenericPopover, Text } from 'ui';
@@ -65,9 +66,14 @@ function RoleRow({
   const mine = assignments.filter((a) => a.role === role);
   const held = new Map<number, common_TechCardRoleAssignment>();
   for (const a of mine) if (a.adminId != null) held.set(a.adminId, a);
+  const { who: person } = usePeopleDirectory();
   const needle = q.trim().toLowerCase();
   const hits = needle
-    ? admins.filter((a) => (a.username ?? '').toLowerCase().includes(needle))
+    ? admins.filter((a) =>
+        [a.username ?? '', a.name ?? '', a.publicUsername ?? ''].some((s) =>
+          s.toLowerCase().includes(needle),
+        ),
+      )
     : admins;
   const busy = assign.isPending || remove.isPending;
 
@@ -133,7 +139,7 @@ function RoleRow({
                 canEdit ? `remove ${a.adminUsername || `#${a.adminId}`} from ${label}` : undefined
               }
             >
-              {a.adminUsername || `#${a.adminId}`}
+              {a.adminUsername ? person(a.adminUsername).label : `#${a.adminId}`}
             </Chip>
           ))}
           {/* A gap, not a fault: a dashed pill says «nobody yet» without painting the approver —
@@ -180,7 +186,7 @@ function RoleRow({
                 <ChipRow>
                   {hits.map((a) => {
                     const on = held.has(a.id ?? 0);
-                    const who = a.username || `#${a.id}`;
+                    const who = a.username ? toPerson(a.username, a).label : `#${a.id}`;
                     return (
                       <Chip
                         key={a.id}

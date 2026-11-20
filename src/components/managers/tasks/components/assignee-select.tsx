@@ -1,4 +1,5 @@
 import { useAdmins } from 'components/managers/tech-card/components/useRoles';
+import { toPerson } from 'components/people/directory';
 import { Input, Select } from 'ui';
 
 // Radix Select forbids an empty-string item value, so "unassigned" uses a sentinel.
@@ -57,7 +58,7 @@ export function AssigneeSelect({
   const known = new Set(admins.map((a) => a.username));
   const items = [
     { value: NONE, label: 'unassigned' },
-    ...admins.map((a) => ({ value: a.username, label: a.username })),
+    ...admins.map((a) => ({ value: a.username, label: toPerson(a.username, a).label })),
     ...(value && !known.has(value) ? [{ value, label: value }] : []),
   ];
 

@@ -214,6 +214,7 @@ export enum ROUTES {
   reset = '/reset',
   handoff = '/auth',
   join = '/join',
+  welcome = '/welcome',
 }
 
 // Primary navigation, grouped by domain. Desktop renders each group as a top-bar

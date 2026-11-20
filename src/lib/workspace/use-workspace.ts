@@ -16,6 +16,7 @@ export function toWorkspace(res: GetCurrentAccountResponse | undefined): Workspa
     readOnly: !!w.readOnly,
     brand: w.brand ?? null,
     logoUrl: w.logoUrl ?? '',
+    entryNeeded: !!w.entryNeeded,
   };
 }
 

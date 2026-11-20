@@ -1,4 +1,5 @@
 import { useCurrentAccount } from 'components/managers/accounts/utils/hooks';
+import { toPerson } from 'components/people/directory';
 import { useAdmins } from 'components/managers/tech-card/components/useRoles';
 import { useEffect } from 'react';
 import { Controller, useFormContext, useWatch } from 'react-hook-form';
@@ -43,7 +44,7 @@ export function RecordedByField({ isEditMode }: { isEditMode: boolean }) {
     { value: UNSET, label: '— unset —' },
     ...admins
       .filter((a): a is typeof a & { username: string } => !!a.username)
-      .map((a) => ({ value: a.username, label: a.username })),
+      .map((a) => ({ value: a.username, label: toPerson(a.username, a).label })),
     ...(value && !knownUsernames.has(value) ? [{ value, label: value }] : []),
   ];
 

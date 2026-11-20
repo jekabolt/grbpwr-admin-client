@@ -1,4 +1,6 @@
 import { useAdmins } from 'components/managers/tech-card/components/useRoles';
+import { usePeopleDirectory } from 'components/people/directory';
+import { PersonAvatar, PersonLabel } from 'components/people/person';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Arrow, Button, Input, Text } from 'ui';
@@ -116,6 +118,7 @@ export function AssigneesPicker({
     (a): a is typeof a & { username: string } => !!a.username,
   );
   const known = new Set(admins.map((a) => a.username));
+  const { who } = usePeopleDirectory();
   /**
    * УЖЕ НАЗНАЧЕННЫЙ, НО ОТСУТСТВУЮЩИЙ В СПИСКЕ, ОСТАЁТСЯ СВОЕЙ СТРОКОЙ. `ListAdmins` исключает
    * отключённые аккаунты — человек, на котором стоит задача, исчез бы из пикера в день, когда
@@ -123,7 +126,11 @@ export function AssigneesPicker({
    */
   const names = [...admins.map((a) => a.username), ...draft.filter((n) => !known.has(n))];
   const q = query.trim().toLowerCase();
-  const shown = q ? names.filter((n) => n.toLowerCase().includes(q)) : names;
+  const shown = q
+    ? names.filter((n) =>
+        [n, who(n).label, who(n).username].some((s) => s.toLowerCase().includes(q)),
+      )
+    : names;
 
   const toggle = (name: string) => {
     setDraft((cur) => (cur.includes(name) ? cur.filter((n) => n !== name) : [...cur, name]));
@@ -153,7 +160,7 @@ export function AssigneesPicker({
     }
   };
 
-  const summary = draft.join(', ');
+  const summary = draft.map((n) => who(n).label).join(', ');
 
   return (
     <div ref={rootRef} className='relative' data-assignees-picker>
@@ -248,8 +255,9 @@ export function AssigneesPicker({
                       on && 'bg-textColor',
                     )}
                   />
+                  <PersonAvatar handle={name} size={16} />
                   <Text component='span' className='min-w-0 truncate'>
-                    {name}
+                    <PersonLabel handle={name} />
                   </Text>
                 </Button>
               );
