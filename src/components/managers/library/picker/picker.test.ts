@@ -15,9 +15,10 @@ const fileItem = (id: number, name = `f${id}.jpg`): LibraryItem =>
   ({ ref: { source: 'LIBRARY_SOURCE_FILE', id }, name }) as unknown as LibraryItem;
 
 describe('visualKinds (MediaSelector props → kinds)', () => {
-  it('defaults: pictures without vectors, 3D and video', () => {
+  it('defaults: pictures, vectors (a photo slot took an svg on beta), 3D and video', () => {
     expect(visualKinds({})).toEqual([
       'LIBRARY_KIND_IMAGE',
+      'LIBRARY_KIND_VECTOR',
       'LIBRARY_KIND_MODEL',
       'LIBRARY_KIND_VIDEO',
     ]);
@@ -25,10 +26,11 @@ describe('visualKinds (MediaSelector props → kinds)', () => {
   it('showVideos=false drops video', () => {
     expect(visualKinds({ showVideos: false })).toEqual([
       'LIBRARY_KIND_IMAGE',
+      'LIBRARY_KIND_VECTOR',
       'LIBRARY_KIND_MODEL',
     ]);
   });
-  it('allowSvg adds vectors', () => {
+  it('allowSvg changes nothing in the list', () => {
     expect(visualKinds({ allowSvg: true, showVideos: false })).toEqual([
       'LIBRARY_KIND_IMAGE',
       'LIBRARY_KIND_VECTOR',

@@ -1,7 +1,7 @@
 import { PHONE_QUERY, useMediaQuery } from 'components/managers/tasks/hooks/useMediaQuery';
-import { type ChangeEvent, type ReactNode, useRef } from 'react';
-import { Button, ConfirmationModal } from 'ui';
-import type { LibraryItem, LibraryKind, LibraryRef, LibrarySourceKey } from '../api/types';
+import type { ReactNode } from 'react';
+import { ConfirmationModal } from 'ui';
+import type { LibraryItem, LibraryKind, LibraryRef, LibrarySourceKey, RefKey } from '../api/types';
 import { LibraryBrowser } from '../browser/library-browser';
 
 export type LibraryPickerProps = {
@@ -23,12 +23,19 @@ export type LibraryPickerProps = {
   hint?: ReactNode;
   /** Extra footer actions between cancel and done (notes: «as table», «as link»). */
   footerActions?: ReactNode;
-  /** An own upload door (labels): a footer «+ upload» and drops on the grid go here. */
+  /**
+   * An own upload door (labels): the browser's «+ upload», drops and paste go here instead of the
+   * library queue. The browser's upload is the one door; the window adds none of its own.
+   */
   onUpload?: (files: File[]) => void;
-  uploadAccept?: string;
-  uploadLabel?: string;
   /** Work in flight: the window does not close and the footer controls wait. */
   busy?: boolean;
+  /** Client-side narrowing of the listed rows (labels: printable only). */
+  itemFilter?: (item: LibraryItem) => boolean;
+  /** A 1–2 word problem on a tile, by ref key. */
+  errors?: Partial<Record<RefKey, string>>;
+  /** Tiles being worked on (dimmed, «copying»). */
+  busyKeys?: RefKey[];
 };
 
 /**
@@ -51,31 +58,12 @@ export function LibraryPicker({
   hint,
   footerActions,
   onUpload,
-  uploadAccept,
-  uploadLabel = '+ upload',
   busy = false,
+  itemFilter,
+  errors,
+  busyKeys,
 }: LibraryPickerProps) {
   const phone = useMediaQuery(PHONE_QUERY);
-  const uploadInput = useRef<HTMLInputElement | null>(null);
-
-  const actions =
-    onUpload || footerActions ? (
-      <>
-        {onUpload && (
-          <Button
-            type='button'
-            variant='secondary'
-            size='default'
-            className='mr-auto'
-            disabled={busy}
-            onClick={() => uploadInput.current?.click()}
-          >
-            {uploadLabel}
-          </Button>
-        )}
-        {footerActions}
-      </>
-    ) : undefined;
 
   return (
     <ConfirmationModal
@@ -94,7 +82,7 @@ export function LibraryPicker({
       confirmDisabled={doneDisabled || busy}
       cancelDisabled={busy}
       footerHint={hint}
-      footerActions={actions}
+      footerActions={footerActions}
     >
       <div className='min-h-[60vh]'>
         <LibraryBrowser
@@ -106,22 +94,11 @@ export function LibraryPicker({
           selected={selected}
           onSelectionChange={busy ? () => undefined : onSelectionChange}
           onFilesPicked={onUpload}
+          itemFilter={itemFilter}
+          errors={errors}
+          busyKeys={busyKeys}
         />
       </div>
-      {onUpload && (
-        <input
-          ref={uploadInput}
-          type='file'
-          hidden
-          multiple={multiple}
-          accept={uploadAccept}
-          onChange={(event: ChangeEvent<HTMLInputElement>) => {
-            const files = Array.from(event.target.files ?? []);
-            event.target.value = '';
-            if (files.length) onUpload(files);
-          }}
-        />
-      )}
     </ConfirmationModal>
   );
 }

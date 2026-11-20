@@ -99,6 +99,10 @@ export function useCopyToMedia(copy: CopyFn = copyLibraryFileToMedia) {
   const origin = useRef(new Map<number, LibraryRef>());
   const turn = useRef(0);
   const [busy, setBusy] = useState(false);
+  /** Tiles whose copy runs now; the grid dims them and says «copying». */
+  const [busyKeys, setBusyKeys] = useState<RefKey[]>([]);
+  /** The last word a tile's copy failed with; a later success clears it. */
+  const [errors, setErrors] = useState<Partial<Record<RefKey, string>>>({});
 
   const resolve = useCallback(
     async (
@@ -112,16 +116,27 @@ export function useCopyToMedia(copy: CopyFn = copyLibraryFileToMedia) {
         if (!m.id) continue;
         known.set(refKey(origin.current.get(m.id) ?? { source: 'media', id: m.id }), m);
       }
-      const needsCopy = refs.some(
-        (r) => r.source === 'file' && !cache.current.has(r.id) && !known.has(refKey(r)),
-      );
-      if (needsCopy) setBusy(true);
+      const copying = refs
+        .filter((r) => r.source === 'file' && !cache.current.has(r.id) && !known.has(refKey(r)))
+        .map(refKey);
+      if (copying.length) {
+        setBusy(true);
+        setBusyKeys(copying);
+      }
       try {
         const res = await resolveRefsToMedia(refs, items, { copy, cache: cache.current, known });
         res.media.forEach((m, i) => {
           const from = res.origins[i];
           if (m.id && from?.source === 'file') origin.current.set(m.id, from);
         });
+        if (copying.length) {
+          setErrors((prev) => {
+            const next = { ...prev };
+            for (const key of copying) delete next[key];
+            for (const f of res.failed) next[refKey(f.ref)] = f.word;
+            return next;
+          });
+        }
         for (const f of res.failed) {
           showMessage(f.name ? `${f.name} · ${f.word}` : f.word, 'error');
         }
@@ -129,7 +144,10 @@ export function useCopyToMedia(copy: CopyFn = copyLibraryFileToMedia) {
         if (res.copied > 0) void invalidateLibrary(qc);
         return mine === turn.current ? res.media : undefined;
       } finally {
-        if (mine === turn.current) setBusy(false);
+        if (mine === turn.current) {
+          setBusy(false);
+          setBusyKeys([]);
+        }
       }
     },
     [copy, qc, showMessage],
@@ -142,5 +160,5 @@ export function useCopyToMedia(copy: CopyFn = copyLibraryFileToMedia) {
     [],
   );
 
-  return { resolve, refFor, busy };
+  return { resolve, refFor, busy, busyKeys, errors };
 }

@@ -14,9 +14,13 @@ const printable = (contentType?: string): boolean => {
   return type === 'application/pdf' || type.startsWith('image/');
 };
 
+/** Only printable rows are listed; documents of another type never show up here. */
+const listable = (item: LibraryItem): boolean =>
+  printable(item.contentType ?? item.file?.contentType);
+
 /**
- * What `printable` lets through, said in library kinds. Documents also hold non-PDF files, so a
- * pick is checked against `printable` once more.
+ * What `printable` lets through, said in library kinds (the server narrowing). Documents also
+ * hold non-PDF files, so `listable` narrows the loaded rows and a pick is checked once more.
  */
 const PRINTABLE_KINDS: LibraryKind[] = [
   'LIBRARY_KIND_IMAGE',
@@ -86,8 +90,8 @@ export function ChooseFileModal({
         }
         void finish(() => uploadPublicFile(file, setProgress));
       }}
-      uploadAccept='application/pdf,image/*'
-      uploadLabel={progress === null ? '+ upload' : `${Math.round(progress * 100)}%`}
+      itemFilter={listable}
+      hint={progress === null ? undefined : `${Math.round(progress * 100)}%`}
       busy={busy}
     />
   );

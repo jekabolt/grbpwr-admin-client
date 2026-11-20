@@ -493,6 +493,8 @@ export function MediaSelector({
                   selected={selectedRefs}
                   multiple={oneAtATime ? false : allowMultiple}
                   scrollEl={virtualScrollEl}
+                  errors={copyToMedia.errors}
+                  busyKeys={copyToMedia.busyKeys}
                   onSelectionChange={handleLibrarySelection}
                 />
               </div>

@@ -77,7 +77,7 @@ export function LabelFilePicker({
       selected={selected}
       onSelectionChange={(refs, items) => void choose(refs, items)}
       onUpload={(files) => void upload(files)}
-      uploadLabel={busy ? 'working…' : '+ upload'}
+      hint={busy ? 'working…' : undefined}
       busy={busy}
     />
   );

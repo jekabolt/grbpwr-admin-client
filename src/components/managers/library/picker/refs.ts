@@ -6,22 +6,21 @@ import { refKey, refOf } from '../api/types';
  * The library kinds a MediaSelector field shows, from its old props (02-DESIGN §6, D6).
  *
  * MediaManager in selection mode listed every media row that is not a video when `showVideos`
- * was off, 3D models included, so MODEL stays in. `vectorOnly` narrows to vectors; a field
- * without `allowSvg` does not show vectors.
+ * was off, vectors and 3D models included, and a photo slot took an SVG as it is. So VECTOR and
+ * MODEL stay in every field; `vectorOnly` narrows to vectors. `allowSvg` is about intake (the
+ * vector door for a dropped .svg), not about what the grid lists.
  */
 export function visualKinds({
   showVideos = true,
-  allowSvg = false,
   vectorOnly = false,
 }: {
   showVideos?: boolean;
+  /** Accepted for the old prop's sake; the grid lists vectors in every field. */
   allowSvg?: boolean;
   vectorOnly?: boolean;
 }): LibraryKind[] {
   if (vectorOnly) return ['LIBRARY_KIND_VECTOR'];
-  const kinds: LibraryKind[] = ['LIBRARY_KIND_IMAGE'];
-  if (allowSvg) kinds.push('LIBRARY_KIND_VECTOR');
-  kinds.push('LIBRARY_KIND_MODEL');
+  const kinds: LibraryKind[] = ['LIBRARY_KIND_IMAGE', 'LIBRARY_KIND_VECTOR', 'LIBRARY_KIND_MODEL'];
   if (showVideos) kinds.push('LIBRARY_KIND_VIDEO');
   return kinds;
 }
