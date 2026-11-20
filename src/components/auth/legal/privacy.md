@@ -35,4 +35,30 @@ Some functions (image and text generation, analysis of sketches and pattern file
 
 ## 8. sub-processors
 | who | role |
-|
+|---|---|
+| DigitalOcean | hosting, databases, file storage |
+| Resend | service email |
+| Sentry | error reports |
+| AI providers reached through OpenRouter and fal | only content submitted to AI functions |
+
+Data is stored in Frankfurt, Germany (DigitalOcean). Some of the providers above are based in the United States.
+
+## 9. cookies and tracking
+No advertising and no analytics trackers in the workspace. Cookies and local storage are used only for sign-in.
+
+## 10. how long we keep data
+- Account data: while the account exists.
+- Team data: while the workspace exists. On a deletion request we delete it within 30 days; backups expire within 7 days after that.
+- Logs and error reports: up to 90 days.
+- A declined team request and its address are deleted.
+
+## 11. your rights
+Depending on the law that applies to you, you may ask to access, correct, delete or export your data, or object to or restrict its use. Write to im@lekalo.studio. For data a team entered about you, we pass the request to that team, as it is the controller. You may also complain to your local data protection authority.
+
+Requests are handled by email within 30 days.
+
+## 12. security
+Each workspace has a separate database, passwords are stored only as hashes, and operator access is limited to platform administrators. No system is perfectly secure; if a breach affects your data we will tell you as the law requires.
+
+## 13. changes
+Each version has a tag (this one: `2026-11`). The current version is always on this page.
