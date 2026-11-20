@@ -110,6 +110,7 @@ export function SignUp({ onSignedIn }: { onSignedIn: () => void }) {
       logo: logo?.base64,
       brand: brand.payload(),
       name: undefined,
+      joinLink: undefined,
     };
     try {
       try {

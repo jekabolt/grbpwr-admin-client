@@ -4,18 +4,31 @@ import type {
   AdminPermission,
   ListTeamMembersResponse,
   TeamInvite,
+  TeamJoinRequest,
   TeamMember,
 } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { isOwnerOnly, memberRefusal, normalEmail } from './model';
 
-export const peopleKeys = { list: () => ['people', 'list'] as const };
+export const peopleKeys = {
+  list: () => ['people', 'list'] as const,
+  joinLink: () => ['people', 'join-link'] as const,
+};
 
 export function usePeople() {
   return useQuery({
     queryKey: peopleKeys.list(),
     queryFn: () => adminService.ListTeamMembers({}),
     staleTime: 30_000,
+  });
+}
+
+export function useTeamJoinLink() {
+  return useQuery({
+    queryKey: peopleKeys.joinLink(),
+    queryFn: () => adminService.GetTeamJoinLink({}),
+    enabled: false,
+    staleTime: Infinity,
   });
 }
 
@@ -30,6 +43,8 @@ export function usePeopleActions() {
     patch((d) => ({ ...d, members: fn(d.members ?? []) }));
   const patchInvites = (fn: (i: TeamInvite[]) => TeamInvite[]) =>
     patch((d) => ({ ...d, invites: fn(d.invites ?? []) }));
+  const patchJoinRequests = (fn: (r: TeamJoinRequest[]) => TeamJoinRequest[]) =>
+    patch((d) => ({ ...d, joinRequests: fn(d.joinRequests ?? []) }));
   const reload = () => qc.invalidateQueries({ queryKey: key });
   const hold = () => qc.cancelQueries({ queryKey: key });
   // owner_only: the screen thought the caller was an owner; reload instead of a toast
@@ -109,5 +124,45 @@ export function usePeopleActions() {
     onError: (e) => refused(e, 'not revoked'),
   });
 
-  return { setRole, setAccess, remove, invite, revoke };
+  const rotateJoinLink = useMutation({
+    mutationFn: () => adminService.RotateTeamJoinLink({}),
+    onSuccess: (response) => qc.setQueryData(peopleKeys.joinLink(), response),
+    onError: (e) => isOwnerOnly(e) && void reload(),
+  });
+
+  const approveJoinRequest = useMutation({
+    mutationFn: (request: { requestRef: string; role: string }) =>
+      adminService.ApproveTeamJoinRequest(request),
+    onSuccess: (_response, request) => {
+      patchJoinRequests((requests) =>
+        requests.filter((item) => item.requestRef !== request.requestRef),
+      );
+      void reload();
+    },
+    // The inline word is the row's; owner_only only reloads.
+    onError: (e) => isOwnerOnly(e) && void reload(),
+  });
+
+  const declineJoinRequest = useMutation({
+    mutationFn: (requestRef: string) => adminService.DeclineTeamJoinRequest({ requestRef }),
+    onSuccess: (_response, requestRef) => {
+      patchJoinRequests((requests) => requests.filter((item) => item.requestRef !== requestRef));
+      void reload();
+    },
+    // The inline word is the row's; owner_only only reloads.
+    onError: (e) => isOwnerOnly(e) && void reload(),
+  });
+
+  return {
+    setRole,
+    setAccess,
+    remove,
+    invite,
+    revoke,
+    rotateJoinLink,
+    approveJoinRequest,
+    declineJoinRequest,
+  };
 }
+
+export type PeopleActions = ReturnType<typeof usePeopleActions>;

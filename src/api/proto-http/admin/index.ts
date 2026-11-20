@@ -20678,6 +20678,14 @@ export type ListTeamMembersResponse = {
   invites: TeamInvite[] | undefined;
   // sections are the sections a member can be given, in screen order (key, title = screen word).
   sections: AdminSectionInfo[] | undefined;
+  joinRequests: TeamJoinRequest[] | undefined;
+};
+
+// TeamJoinRequest is one pending join-link request. Its database id never leaves the server.
+export type TeamJoinRequest = {
+  requestRef: string | undefined;
+  email: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
 };
 
 export type InviteTeamMemberRequest = {
@@ -20707,6 +20715,36 @@ export type ResendTeamInviteRequest = {
 };
 
 export type ResendTeamInviteResponse = {
+};
+
+export type GetTeamJoinLinkRequest = {
+};
+
+export type GetTeamJoinLinkResponse = {
+  link: string | undefined;
+};
+
+export type RotateTeamJoinLinkRequest = {
+};
+
+export type RotateTeamJoinLinkResponse = {
+  link: string | undefined;
+};
+
+export type ApproveTeamJoinRequestRequest = {
+  requestRef: string | undefined;
+  // role is "member" (default) or "owner"; rights are the ordinary invite defaults.
+  role: string | undefined;
+};
+
+export type ApproveTeamJoinRequestResponse = {
+};
+
+export type DeclineTeamJoinRequestRequest = {
+  requestRef: string | undefined;
+};
+
+export type DeclineTeamJoinRequestResponse = {
 };
 
 export type RemoveTeamMemberRequest = {
@@ -23080,6 +23118,14 @@ export interface AdminService {
   RevokeTeamInvite(request: RevokeTeamInviteRequest): Promise<RevokeTeamInviteResponse>;
   // ResendTeamInvite sends the invite letter again.
   ResendTeamInvite(request: ResendTeamInviteRequest): Promise<ResendTeamInviteResponse>;
+  // GetTeamJoinLink returns the calling team's stable join link.
+  GetTeamJoinLink(request: GetTeamJoinLinkRequest): Promise<GetTeamJoinLinkResponse>;
+  // RotateTeamJoinLink invalidates the old link and pending requests made through older generations.
+  RotateTeamJoinLink(request: RotateTeamJoinLinkRequest): Promise<RotateTeamJoinLinkResponse>;
+  // ApproveTeamJoinRequest joins one pending requester with the ordinary invite defaults.
+  ApproveTeamJoinRequest(request: ApproveTeamJoinRequestRequest): Promise<ApproveTeamJoinRequestResponse>;
+  // DeclineTeamJoinRequest declines one pending requester.
+  DeclineTeamJoinRequest(request: DeclineTeamJoinRequestRequest): Promise<DeclineTeamJoinRequestResponse>;
   // RemoveTeamMember removes a member from the calling team.
   RemoveTeamMember(request: RemoveTeamMemberRequest): Promise<RemoveTeamMemberResponse>;
   // SetTeamMemberRole sets a member's role (owner or member).
@@ -32557,6 +32603,80 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "ResendTeamInvite",
       }) as Promise<ResendTeamInviteResponse>;
+    },
+    GetTeamJoinLink(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/team/join-link`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetTeamJoinLink",
+      }) as Promise<GetTeamJoinLinkResponse>;
+    },
+    RotateTeamJoinLink(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/team/join-link/rotate`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "RotateTeamJoinLink",
+      }) as Promise<RotateTeamJoinLinkResponse>;
+    },
+    ApproveTeamJoinRequest(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.requestRef) {
+        throw new Error("missing required field request.request_ref");
+      }
+      const path = `api/admin/team/join-requests/${request.requestRef}/approve`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ApproveTeamJoinRequest",
+      }) as Promise<ApproveTeamJoinRequestResponse>;
+    },
+    DeclineTeamJoinRequest(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.requestRef) {
+        throw new Error("missing required field request.request_ref");
+      }
+      const path = `api/admin/team/join-requests/${request.requestRef}/decline`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeclineTeamJoinRequest",
+      }) as Promise<DeclineTeamJoinRequestResponse>;
     },
     RemoveTeamMember(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.username) {

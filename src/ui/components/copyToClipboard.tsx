@@ -1,26 +1,63 @@
 import { CheckCircledIcon, ClipboardCopyIcon } from '../icons';
 import * as Tooltip from '@radix-ui/react-tooltip';
-import { FC, useEffect, useState } from 'react';
+import { type FC, type ReactNode, useEffect, useState } from 'react';
 
+import { cn } from 'lib/utility';
 import Text from './text';
 
-interface CopyToClipboardProps {
-  text: string;
-  cutText?: boolean;
-}
+type CopySource =
+  | { text: string; getText?: never }
+  | { text?: never; getText: () => string | Promise<string> };
 
-export const CopyToClipboard: FC<CopyToClipboardProps> = ({ text, cutText }) => {
+type CopyToClipboardProps = CopySource & {
+  cutText?: boolean;
+  iconOnly?: boolean;
+  icon?: ReactNode;
+  label?: string;
+  copiedLabel?: string;
+  className?: string;
+  onCopy?: (text: string) => void;
+  onError?: (error: unknown, phase: 'resolve' | 'copy') => void;
+};
+
+export const CopyToClipboard: FC<CopyToClipboardProps> = ({
+  text,
+  getText,
+  cutText,
+  iconOnly,
+  icon,
+  label,
+  copiedLabel = 'Copied!',
+  className,
+  onCopy,
+  onError,
+}) => {
   const [copied, setCopied] = useState(false);
+  const [copying, setCopying] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
 
-  const handleCopy = () => {
-    navigator.clipboard
-      .writeText(text)
-      .then(() => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
-      })
-      .catch((err) => console.error('Failed to copy: ', err));
+  const handleCopy = async () => {
+    setCopying(true);
+    let value: string;
+    try {
+      value = getText ? await getText() : text ?? '';
+    } catch (error) {
+      if (onError) onError(error, 'resolve');
+      else console.error('Failed to resolve copy text: ', error);
+      setCopying(false);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+      onCopy?.(value);
+    } catch (error) {
+      if (onError) onError(error, 'copy');
+      else console.error('Failed to copy: ', error);
+    } finally {
+      setCopying(false);
+    }
   };
 
   useEffect(() => {
@@ -36,23 +73,32 @@ export const CopyToClipboard: FC<CopyToClipboardProps> = ({ text, cutText }) => 
     };
   }, []);
 
+  const idleLabel = label ?? 'Copy to clipboard';
+  const shownText = text ?? '';
+
   return (
-    <div className='flex items-center'>
-      <Text>{cutText ? text.slice(0, 4) + '...' + text.slice(-4) : text}</Text>
+    <div className={cn('flex items-center', className)}>
+      {!iconOnly && (
+        <Text>{cutText ? shownText.slice(0, 4) + '...' + shownText.slice(-4) : shownText}</Text>
+      )}
       <Tooltip.Provider delayDuration={300}>
         <Tooltip.Root>
           <Tooltip.Trigger asChild>
             <button
               type='button'
               onClick={handleCopy}
-              className='inline-flex p-0 pl-1.5 text-textColor hover:opacity-70 focus:outline-none focus:ring-2 focus:ring-textColor/50'
+              disabled={copying}
+              className={cn(
+                'inline-flex p-0 text-textColor hover:opacity-70 focus:outline-none focus:ring-2 focus:ring-textColor/50 disabled:text-borderColor',
+                !iconOnly && 'pl-1.5',
+              )}
               style={{ visibility: isPrinting ? 'hidden' : 'visible' }}
-              aria-label={copied ? 'Copied!' : 'Copy to clipboard'}
+              aria-label={label ?? (copied ? copiedLabel : idleLabel)}
             >
               {copied ? (
                 <CheckCircledIcon className='h-4 w-4' />
               ) : (
-                <ClipboardCopyIcon className='h-4 w-4' />
+                icon ?? <ClipboardCopyIcon className='h-4 w-4' />
               )}
             </button>
           </Tooltip.Trigger>
@@ -62,7 +108,7 @@ export const CopyToClipboard: FC<CopyToClipboardProps> = ({ text, cutText }) => 
               sideOffset={4}
               className='rounded-none border border-borderColor bg-bgColor px-2 py-1 text-textBaseSize text-textColor shadow-[var(--shadow-popover)]'
             >
-              {copied ? 'Copied!' : 'Copy to clipboard'}
+              {copied ? copiedLabel : idleLabel}
             </Tooltip.Content>
           </Tooltip.Portal>
         </Tooltip.Root>
