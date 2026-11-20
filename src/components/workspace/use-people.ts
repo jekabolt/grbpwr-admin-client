@@ -27,7 +27,6 @@ export function useTeamJoinLink() {
   return useQuery({
     queryKey: peopleKeys.joinLink(),
     queryFn: () => adminService.GetTeamJoinLink({}),
-    enabled: false,
     staleTime: Infinity,
   });
 }

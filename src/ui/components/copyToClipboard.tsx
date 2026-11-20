@@ -36,6 +36,58 @@ export const CopyToClipboard: FC<CopyToClipboardProps> = ({
   const [copying, setCopying] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
 
+  const markCopied = (value: string) => {
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+    onCopy?.(value);
+  };
+
+  // Safari drops the user gesture after a network await, so the clipboard write must start
+  // inside the click: a ClipboardItem with a pending blob, writeText as the fallback.
+  const copyLater = async (resolve: () => string | Promise<string>) => {
+    setCopying(true);
+    let pending: Promise<string>;
+    try {
+      pending = Promise.resolve(resolve());
+    } catch (error) {
+      pending = Promise.reject(error);
+    }
+    let written: Promise<void> | null = null;
+    try {
+      if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
+        const blob = pending.then((t) => new Blob([t], { type: 'text/plain' }));
+        blob.catch(() => undefined);
+        written = navigator.clipboard.write([new ClipboardItem({ 'text/plain': blob })]);
+      }
+    } catch {
+      written = null;
+    }
+    let value: string;
+    try {
+      value = await pending;
+    } catch (error) {
+      written?.catch(() => undefined);
+      if (onError) onError(error, 'resolve');
+      else console.error('Failed to resolve copy text: ', error);
+      setCopying(false);
+      return;
+    }
+    try {
+      try {
+        if (!written) throw new Error('no clipboard item');
+        await written;
+      } catch {
+        await navigator.clipboard.writeText(value);
+      }
+      markCopied(value);
+    } catch (error) {
+      if (onError) onError(error, 'copy');
+      else console.error('Failed to copy: ', error);
+    } finally {
+      setCopying(false);
+    }
+  };
+
   const handleCopy = async () => {
     setCopying(true);
     let value: string;
@@ -86,7 +138,7 @@ export const CopyToClipboard: FC<CopyToClipboardProps> = ({
           <Tooltip.Trigger asChild>
             <button
               type='button'
-              onClick={handleCopy}
+              onClick={getText ? () => void copyLater(getText) : handleCopy}
               disabled={copying}
               className={cn(
                 'inline-flex p-0 text-textColor hover:opacity-70 focus:outline-none focus:ring-2 focus:ring-textColor/50 disabled:text-borderColor',
