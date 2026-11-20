@@ -138,10 +138,11 @@ describe('isPublishableType', () => {
     expect(isPublishableType('IMAGE/PNG; charset=binary')).toBe(true);
     expect(isPublishableType('image/svg+xml')).toBe(true);
     expect(isPublishableType('video/mp4')).toBe(true);
+    expect(isPublishableType('image/gif')).toBe(true);
   });
-  it('refuses documents, gifs, models and empty types', () => {
+  it('refuses documents, avif, models and empty types', () => {
     expect(isPublishableType('application/pdf')).toBe(false);
-    expect(isPublishableType('image/gif')).toBe(false);
+    expect(isPublishableType('image/avif')).toBe(false);
     expect(isPublishableType('model/gltf-binary')).toBe(false);
     expect(isPublishableType(undefined)).toBe(false);
   });

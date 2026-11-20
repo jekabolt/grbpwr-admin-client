@@ -94,6 +94,7 @@ export const PUBLISHABLE_CONTENT_TYPES = [
   'image/png',
   'image/webp',
   'image/heic',
+  'image/gif',
   'image/svg+xml',
   'video/mp4',
   'video/webm',
