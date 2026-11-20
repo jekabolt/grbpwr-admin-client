@@ -6,7 +6,7 @@ import { NAV_GROUPS, ADMIN_GROUP, ROUTES } from 'constants/routes';
 import { currentHost, isLekaloHost } from 'lib/host';
 import { useSnackBarStore } from 'lib/stores/store';
 import { type ReactNode, useEffect, useRef } from 'react';
-import { Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { onWorkspaceSignal } from './events';
 import { FEATURE, featureForPath, featureOn } from './features';
 import { PaperBrandProvider } from './paper-brand-context';
@@ -17,8 +17,10 @@ const LIVE = isLekaloHost();
 
 /**
  * Keeps the workspace fresh (load, window focus, every 60 s) and answers the backend's team
- * refusals: `storage_full` → toast, `team_read_only` → toast + refetch, `feature_off` → refetch + leave for the first
- * allowed screen. Mounted once inside the protected layouts.
+ * refusals: `storage_full` → toast, `team_read_only` → toast + refetch, `feature_off` → refetch only.
+ * Leaving the screen is FeatureGuard's call once the fresh workspace shows the screen's own feature
+ * off: a side query (a badge, a widget) refused by another section never moves the person off the
+ * screen. Mounted once inside the protected layouts.
  */
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   useQuery({
@@ -31,26 +33,20 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     refetchOnWindowFocus: LIVE,
   });
   const { refetch } = useWorkspace();
-  const { homeRoute } = usePermissions();
   const { showMessage } = useSnackBarStore();
-  const navigate = useNavigate();
-  const latest = useRef({ refetch, homeRoute, showMessage, navigate });
-  latest.current = { refetch, homeRoute, showMessage, navigate };
+  const latest = useRef({ refetch, showMessage });
+  latest.current = { refetch, showMessage };
 
   useEffect(
     () =>
       onWorkspaceSignal((signal) => {
-        const { refetch, homeRoute, showMessage, navigate } = latest.current;
+        const { refetch, showMessage } = latest.current;
         if (signal === 'storage_full') {
           showMessage('storage full', 'error');
           return;
         }
         refetch();
-        if (signal === 'read_only') {
-          showMessage('read only', 'error');
-          return;
-        }
-        navigate(homeRoute ?? ROUTES.me, { replace: true });
+        if (signal === 'read_only') showMessage('read only', 'error');
       }),
     [],
   );

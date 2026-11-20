@@ -1,9 +1,9 @@
 import { authService } from 'api/api';
 import { currentHost, goToUrl, teamUrl } from 'lib/host';
 import { useEffect, useState } from 'react';
-import { Loader, Section } from 'ui';
+import { Loader, Section, Text } from 'ui';
 
-import { clearHash, hashParam, isRefusal } from './api-error';
+import { clearHash, errMessage, hashParam, isRefusal } from './api-error';
 import { TeamMark, useTeamLogo } from './logo-step';
 import { ProviderButtons, signInOptions } from './providers';
 import {
@@ -37,6 +37,13 @@ function JoinSide({ name }: { name: string }) {
 type Invite = { teamName: string; email: string; accountExists: boolean };
 
 /** `/join#token=…`: the invite letter's link. */
+/** The word for a refused name: the server's own codes, never «link expired». */
+function refusalWord(msg: string): string {
+  if (msg.includes('name_too_long')) return 'too long';
+  if (msg.includes('bad_name')) return 'check name';
+  return '';
+}
+
 export function Join() {
   const [token] = useState(() => hashParam('token'));
   const [invite, setInvite] = useState<Invite | null>(null);
@@ -50,6 +57,8 @@ export function Join() {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState('');
+  // a field the server refused, as one word under the name
+  const [nameErr, setNameErr] = useState('');
 
   useEffect(() => {
     clearHash();
@@ -76,20 +85,26 @@ export function Join() {
     if (password.length < (invite?.accountExists ? 1 : 8) || !agreed || busy) return;
     setBusy(true);
     setNote('');
+    setNameErr('');
     try {
-      const handle = invite?.accountExists ? undefined : name.trim() || undefined;
+      // a person's name, the same rule as the profile (first + last); the handle stays the server's
       const r = await authService.AcceptInvite({
         token,
         password,
-        handle,
+        handle: undefined,
         termsAccepted: true,
-        name: undefined,
+        name: invite?.accountExists ? undefined : name.trim() || undefined,
       });
       goToUrl(teamUrl(r.teamSlug ?? '', `/auth#code=${encodeURIComponent(r.handoffCode ?? '')}`));
     } catch (e) {
-      setNote(
-        isRefusal(e) ? (invite?.accountExists ? 'wrong password' : 'link expired') : 'try again',
-      );
+      const msg = errMessage(e);
+      const bad = refusalWord(msg);
+      if (bad) setNameErr(bad);
+      else if (!invite?.accountExists && msg.includes('password')) setNote('weak password');
+      else
+        setNote(
+          isRefusal(e) ? (invite?.accountExists ? 'wrong password' : 'link expired') : 'try again',
+        );
       setBusy(false);
     }
   };
@@ -132,8 +147,17 @@ export function Join() {
                   placeholder='mira'
                   autoComplete='name'
                   autoFocus
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
+                  invalid={!!nameErr}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                    setName(e.target.value);
+                    setNameErr('');
+                  }}
                 />
+                {nameErr && (
+                  <Text variant='error' size='micro' component='span' className='block pt-1'>
+                    {nameErr}
+                  </Text>
+                )}
               </SheetRow>
             )}
             <SheetRow label='password'>
