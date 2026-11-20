@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
+import { useAiOn } from 'lib/workspace/use-workspace';
 import { Button, ConfirmationModal, GenericPopover, Input, Text } from 'ui';
 import { AiPanel, useNoteAssistant, type AiSuggestion } from './ai-panel';
 import { BlockSheet } from './block-sheet';
@@ -220,6 +221,7 @@ export function NoteBlocksView({
   /* ── помощник: в режиме блоков — только вся заметка ─────────────────────────────────────── */
 
   const working = assistant.state.kind === 'working';
+  const aiOn = useAiOn();
   const accept = (s: AiSuggestion) => {
     // Пока помощник работал, буфер могли поправить: предложение построено по прошлой версии.
     if (value !== s.before) {
@@ -241,11 +243,15 @@ export function NoteBlocksView({
   const menu: { label: string; run: () => void; disabled?: boolean; on?: boolean }[] = [
     { label: 'rename', run: () => setRenameDraft(name) },
     { label: 'edit as text', run: onEditAsText },
-    {
-      label: 'tidy with ai',
-      run: () => assistant.run({ text: value, range: null }),
-      disabled: working || !value.trim(),
-    },
+    ...(aiOn
+      ? [
+          {
+            label: 'tidy with ai',
+            run: () => assistant.run({ text: value, range: null }),
+            disabled: working || !value.trim(),
+          },
+        ]
+      : []),
     { label: 'wrap lines', on: wrapLines, run: () => onWrapLinesChange(!wrapLines) },
   ];
 
