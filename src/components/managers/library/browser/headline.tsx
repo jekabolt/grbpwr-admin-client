@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react';
+import { Fragment, type ReactNode, useState } from 'react';
 import { BackLink, Button, Close, Text } from 'ui';
 import { type FolderNode, folderPath } from '../hooks/useLibraryFolders';
 import { type FolderLoc, FolderNameInput, deepCount } from './folder-rail';
@@ -21,6 +21,7 @@ export function Headline({
   onRename,
   onDelete,
   onMove,
+  extra,
 }: {
   loc: FolderLoc;
   byId: Map<number, FolderNode>;
@@ -33,6 +34,8 @@ export function Headline({
   onRename: (id: number, name: string) => Promise<unknown>;
   onDelete: (id: number) => void;
   onMove: (node: FolderNode) => void;
+  /** Right end of the title row: the section's other doors. */
+  extra?: ReactNode;
 }) {
   const [editing, setEditing] = useState(false);
   const path = typeof loc === 'number' ? folderPath(byId, loc) : [];
@@ -86,11 +89,14 @@ export function Headline({
         <div className='flex min-w-0 items-center gap-2'>
           {current}
           {tools}
-          {onSelectMode && (
-            <Button variant='underline' size='xs' className='ml-auto' onClick={onSelectMode}>
-              {selecting ? 'done' : 'select'}
-            </Button>
-          )}
+          <span className='ml-auto flex shrink-0 items-center gap-2'>
+            {!selecting && !folder && extra}
+            {onSelectMode && (
+              <Button variant='underline' size='xs' onClick={onSelectMode}>
+                {selecting ? 'done' : 'select'}
+              </Button>
+            )}
+          </span>
         </div>
       </div>
     );
@@ -116,6 +122,7 @@ export function Headline({
       ))}
       {current}
       {tools}
+      {extra && <span className='ml-auto flex shrink-0 items-center gap-2.5'>{extra}</span>}
     </div>
   );
 }

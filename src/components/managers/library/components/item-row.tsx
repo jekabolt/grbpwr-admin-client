@@ -8,7 +8,10 @@ function day(item: LibraryItem): string {
   return raw ? String(raw).slice(0, 10) : '';
 }
 
-/** One line of the list view: thumbnail, name, kind · size · date, uploader, used / free. */
+/**
+ * One line of the list view: thumbnail, name, kind · size · date, uploader, used / free. A row
+ * without a name reads «image · 1.2 mb» in the name line.
+ */
 export function ItemRow({
   item,
   selected,
@@ -19,11 +22,14 @@ export function ItemRow({
   onClick?: () => void;
 }) {
   const kind = item.kind ?? 'LIBRARY_KIND_UNSPECIFIED';
-  const name = item.name || KIND_WORD[kind];
   const thumb = item.media?.media?.thumbnail?.mediaUrl || item.file?.previewUrl || '';
   const size = Number(item.sizeBytes ?? 0);
+  const sizeWord = size > 0 ? formatBytes(size) : '';
   const ratio = item.width && item.height ? `${item.width}×${item.height}` : '';
-  const meta = [KIND_WORD[kind], ratio, size > 0 ? formatBytes(size) : '', day(item)]
+  // A nameless old media row is named by its kind and size, so the meta line does not repeat them.
+  const named = !!item.name;
+  const name = item.name || [KIND_WORD[kind], sizeWord].filter(Boolean).join(' · ');
+  const meta = (named ? [KIND_WORD[kind], ratio, sizeWord, day(item)] : [ratio, day(item)])
     .filter(Boolean)
     .join(' · ');
 

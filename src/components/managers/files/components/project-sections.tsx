@@ -58,6 +58,13 @@ export function ProjectHeader({
           вещи — «назад» вернуло бы в задачу; «all projects» отвечает на другой вопрос и всегда
           на один и тот же. */}
       <div className='flex flex-wrap items-center gap-1.5'>
+        {/* The way back to the one library: the board is a project's view, not a second grid. */}
+        <Button asChild size='xs' variant='underline'>
+          <Link to={ROUTES.files}>files</Link>
+        </Button>
+        <Text size='micro' variant='label' component='span'>
+          /
+        </Text>
         <Button size='xs' variant='underline' onClick={onIndex}>
           all projects
         </Button>

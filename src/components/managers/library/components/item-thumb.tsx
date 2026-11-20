@@ -50,8 +50,9 @@ function ItemPicture({ item, load }: { item: LibraryItem; load: boolean }) {
 
 /**
  * One tile of the unified library. MEDIA shows its thumbnail (video by its url), FILE its
- * preview or the extension plate. Caption: the name, or the kind word for a nameless old media
- * row (ids are never shown). With `targetRatios`, a picture of another ratio carries «crop».
+ * preview or the extension plate. Caption: the name and size. A nameless old media row has no
+ * caption at all (the picture is the content; ids are never shown); `Tile` stretches to the row,
+ * so mixed rows stay aligned. With `targetRatios`, a picture of another ratio carries «crop».
  */
 export function ItemThumb({
   item,
@@ -74,7 +75,7 @@ export function ItemThumb({
   busy?: boolean;
 }) {
   const kind = item.kind ?? 'LIBRARY_KIND_UNSPECIFIED';
-  const name = item.name || KIND_WORD[kind];
+  const name = item.name || undefined;
   const size = Number(item.sizeBytes ?? 0);
   const croppable = kind === 'LIBRARY_KIND_IMAGE' && !!item.media;
   const needsCrop =
@@ -102,8 +103,8 @@ export function ItemThumb({
         </span>
       }
       name={name}
-      sub={busy ? 'copying' : size > 0 ? formatBytes(size) : undefined}
-      title={item.name || undefined}
+      sub={busy ? 'copying' : name && size > 0 ? formatBytes(size) : undefined}
+      title={name}
       selected={selected}
       pressed={onClick ? !!selected : undefined}
       onClick={onClick}

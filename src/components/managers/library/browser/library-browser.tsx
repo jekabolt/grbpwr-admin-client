@@ -17,6 +17,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import {
   type ChangeEvent,
   type DragEvent,
+  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
@@ -101,6 +102,8 @@ export type LibraryBrowserProps = {
   busyKeys?: RefKey[];
   /** C1 for C2: client-side narrowing of the loaded rows (e.g. printable only). */
   itemFilter?: (item: LibraryItem) => boolean;
+  /** Page: the section's other doors (note, topics, shared, projects) on the headline row. */
+  headlineTools?: ReactNode;
 };
 
 const SEARCH_DEBOUNCE_MS = 300;
@@ -196,6 +199,7 @@ export function LibraryBrowser({
   errors,
   busyKeys,
   itemFilter,
+  headlineTools,
 }: LibraryBrowserProps) {
   const page = mode === 'page';
   const phone = useIsMobile();
@@ -752,6 +756,7 @@ export function LibraryBrowser({
       onRename={renameFolder}
       onDelete={(id) => void deleteFolder(id)}
       onMove={(folder) => setMoving({ folder })}
+      extra={bulk ? undefined : headlineTools}
     />
   );
 
