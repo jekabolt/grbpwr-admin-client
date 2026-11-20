@@ -389,7 +389,12 @@ export function LibraryBrowser({
     .filter((i): i is LibraryItem => !!i);
 
   // ---- upload ----
-  const uploader = useLibraryUpload({ folderId: typeof loc === 'number' ? loc : 0 });
+  // A photo uploaded here stays private until someone makes it public; a picture slot needs the
+  // public media at once, so only a visual host keeps the media doors.
+  const uploader = useLibraryUpload({
+    folderId: typeof loc === 'number' ? loc : 0,
+    as: accept === 'visual' ? 'auto' : 'document',
+  });
   const canUpload = !!onFilesPicked || mayWrite;
   const pickerRef = useRef<HTMLInputElement>(null);
   const intake = useCallback(

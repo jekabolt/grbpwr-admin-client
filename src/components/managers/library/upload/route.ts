@@ -5,8 +5,9 @@ import { isMediaFile, isSvgFile } from 'components/managers/media/utils/usePaste
  * - `media`: pictures and video go through the media doors (three sizes; svg → the vector door).
  * - `file`: everything else goes to the files queue as a document.
  *
- * `as: 'document'` sends a picture to the files queue too (a private photo kept as a document).
- * It exists in code only; no control sets it yet (Q1 pending).
+ * `as: 'document'` sends a picture to the files queue too: a private photo. The library section
+ * and the attachments window upload this way; it becomes public media (three sizes) only by
+ * `CopyLibraryFileToMedia`. A picture slot keeps `auto`.
  */
 export type UploadAs = 'auto' | 'document';
 export type UploadEngine = 'media' | 'file';
