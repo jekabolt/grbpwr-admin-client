@@ -8,14 +8,15 @@ export const BASE_PATH = process.env.NODE_ENV === 'production' ? '/grbpwr-admin-
 export type NavItem = {
   label: string;
   route: string;
-  section?: string;
+  // A list is any-of: the library item shows for an account with files OR media.
+  section?: string | readonly string[];
   // Shown to super accounts only, whatever the section grants say. For screens the backend
   // gates on `is_super` itself (rbac SuperOnly) rather than on a section: a section key would
   // fail open for a scoped account and hand it a menu entry whose every read is refused.
   superOnly?: boolean;
   // The team switch the item lives under (design §8). Hidden when the team has it off; `core`
   // is never off. No workspace (a backend before teams) leaves every item on.
-  feature?: FeatureKey;
+  feature?: FeatureKey | readonly FeatureKey[];
   // Not on a team host: the team's people live on `/workspace` there (wave «teams»).
   legacyOnly?: boolean;
 };
@@ -251,7 +252,12 @@ export const NAV_GROUPS: NavGroup[] = [
         feature: FEATURE.fulfillment,
       },
       { label: 'tasks', route: ROUTES.tasks, section: SECTION.tasks, feature: FEATURE.tasks },
-      { label: 'files', route: ROUTES.files, section: SECTION.files, feature: FEATURE.files },
+      {
+        label: 'files',
+        route: ROUTES.files,
+        section: [SECTION.files, SECTION.media],
+        feature: [FEATURE.files, FEATURE.media],
+      },
     ],
   },
   {
@@ -269,7 +275,6 @@ export const NAV_GROUPS: NavGroup[] = [
         section: SECTION.products,
         feature: FEATURE.products,
       },
-      { label: 'media', route: ROUTES.media, section: SECTION.media, feature: FEATURE.media },
       { label: 'hero', route: ROUTES.hero, section: SECTION.hero, feature: FEATURE.hero },
       { label: 'promo', route: ROUTES.promo, section: SECTION.promo, feature: FEATURE.promo },
       {

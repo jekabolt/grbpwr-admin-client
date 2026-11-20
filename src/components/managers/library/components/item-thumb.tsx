@@ -59,6 +59,8 @@ export function ItemThumb({
   onClick,
   targetRatios,
   load = true,
+  mark,
+  busy,
 }: {
   item: LibraryItem;
   selected?: boolean;
@@ -66,6 +68,10 @@ export function ItemThumb({
   targetRatios?: number[];
   /** Fetch the picture now (default). A virtual grid passes false while scrolling fast. */
   load?: boolean;
+  /** A 1–2 word problem on the tile («not copied»). */
+  mark?: string;
+  /** The row is being worked on (a copy runs): dimmed, «copying» under the name. */
+  busy?: boolean;
 }) {
   const kind = item.kind ?? 'LIBRARY_KIND_UNSPECIFIED';
   const name = item.name || KIND_WORD[kind];
@@ -81,8 +87,13 @@ export function ItemThumb({
   return (
     <Tile
       media={
-        <span className='relative block w-full bg-pageBg'>
+        <span className={`relative block w-full bg-pageBg ${busy ? 'opacity-50' : ''}`}>
           <ItemPicture item={item} load={load} />
+          {mark && (
+            <Pill tone='warn' lowercase className='absolute left-1 top-1 bg-bgColor'>
+              {mark}
+            </Pill>
+          )}
           {needsCrop && (
             <Pill tone='mut' className='absolute bottom-1 left-1 bg-bgColor'>
               crop
@@ -91,7 +102,7 @@ export function ItemThumb({
         </span>
       }
       name={name}
-      sub={size > 0 ? formatBytes(size) : undefined}
+      sub={busy ? 'copying' : size > 0 ? formatBytes(size) : undefined}
       title={item.name || undefined}
       selected={selected}
       pressed={onClick ? !!selected : undefined}

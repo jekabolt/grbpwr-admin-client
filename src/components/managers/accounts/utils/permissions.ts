@@ -51,7 +51,11 @@ export function usePermissions() {
 
   const hasSection = useMemo(
     () =>
-      (section?: string, level: AccessLevel = ACCESS.READ): boolean => {
+      (section?: string | readonly string[], level: AccessLevel = ACCESS.READ): boolean => {
+        // A list (one menu item over two sections, e.g. files + media) is any-of.
+        if (typeof section !== 'string') {
+          return !section?.length || section.some((s) => hasSection(s, level));
+        }
         if (!section) return true;
         if (!resolved || isSuper) return true;
         const key = closed ? BACKEND_SECTION[section] ?? section : section;
@@ -89,9 +93,9 @@ export function usePermissions() {
     canRead: (section?: string) => hasSection(section, ACCESS.READ),
     /** Is a nav item drawn: super-only rule, team feature, and read access. */
     canSee: (item: {
-      section?: string;
+      section?: string | readonly string[];
       superOnly?: boolean;
-      feature?: string;
+      feature?: string | readonly string[];
       legacyOnly?: boolean;
     }) =>
       gate !== 'missing' &&

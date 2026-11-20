@@ -44,7 +44,11 @@ export interface WorkspaceInfo {
 }
 
 /** Is this feature on? No workspace (a backend before teams) means everything is on, as today. */
-export function featureOn(ws: WorkspaceInfo | null | undefined, key?: string): boolean {
+/** A key or a list of keys; a list is on when any of its keys is (an empty list is on). */
+export type FeatureGate = string | readonly string[];
+
+export function featureOn(ws: WorkspaceInfo | null | undefined, key?: FeatureGate): boolean {
+  if (typeof key !== 'string') return !key?.length || key.some((k) => featureOn(ws, k));
   if (!key || key === FEATURE.core) return true;
   if (!ws) return true;
   return ws.features.includes(key);
@@ -105,13 +109,13 @@ function under(pathname: string, route: string): boolean {
 /** The feature a path belongs to ('' when none: always reachable). */
 export function featureForPath(
   pathname: string,
-  items: { route: string; feature?: string }[],
-): string {
+  items: { route: string; feature?: FeatureGate }[],
+): FeatureGate {
   // the longest route wins: /tech-cards before /t…, /accounting/bank before /accounting
-  const all: [string, string][] = [
+  const all: [string, FeatureGate][] = [
     ...items
-      .filter((i) => i.feature)
-      .map((i) => [i.route, i.feature as string] as [string, string]),
+      .filter((i) => i.feature && i.feature.length)
+      .map((i) => [i.route, i.feature as FeatureGate] as [string, FeatureGate]),
     ...EXTRA_PATHS,
   ].sort((a, b) => b[0].length - a[0].length);
   const hit = all.find(([route]) => route !== '/' && under(pathname, route));

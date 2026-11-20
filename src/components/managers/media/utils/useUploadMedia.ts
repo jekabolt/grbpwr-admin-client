@@ -109,8 +109,12 @@ export const isSvgMedia = (m: common_MediaFull): boolean =>
  * caller never learns which one ran. Exported for the probe (scripts/labels-foundation-probe.mjs):
  * the hook below is this function plus the cache and the toast.
  */
-export async function uploadMediaInput(input: UploadMediaInput): Promise<common_MediaFull> {
-  if (isSvgInput(input)) return uploadVector(input);
+export async function uploadMediaInput(
+  input: UploadMediaInput,
+  /** The original name the row keeps (`uploadFileName`); omitted = the server names it. */
+  fileName?: string,
+): Promise<common_MediaFull> {
+  if (isSvgInput(input)) return uploadVector(input, fileName);
   let base64: string;
   let contentType: string;
   let isVideo: boolean;
@@ -150,7 +154,7 @@ export async function uploadMediaInput(input: UploadMediaInput): Promise<common_
       response = await adminService.UploadContentImage({
         fileName: undefined,
         rawB64Image: base64,
-        fileName: undefined,
+        fileName,
         // Приехало с контрактом полосы DESIGN. `false` — это ПРЕЖНЕЕ поведение медиатеки:
         // сервер жмёт и приводит формат. Verbatim-путь (побайтовое сохранение оригинала) нужен
         // плитам полосы, а не общей загрузке, и включать его здесь означало бы молча поменять
@@ -175,7 +179,7 @@ export async function uploadMediaInput(input: UploadMediaInput): Promise<common_
       fileName: undefined,
       raw,
       contentType,
-      fileName: undefined,
+      fileName,
     });
   } catch (e) {
     throw uploadError(e, true);
@@ -188,7 +192,7 @@ export async function uploadMediaInput(input: UploadMediaInput): Promise<common_
   return response.media;
 }
 
-async function uploadVector(input: UploadMediaInput): Promise<common_MediaFull> {
+async function uploadVector(input: UploadMediaInput, fileName?: string): Promise<common_MediaFull> {
   let dataUrl: string;
   if (input instanceof File) {
     if (input.size > MAX_VECTOR_BYTES) throw new Error('File too large. Maximum size: 8MB');
@@ -203,7 +207,7 @@ async function uploadVector(input: UploadMediaInput): Promise<common_MediaFull> 
     // `raw` is proto `bytes`: base64 on the JSON wire, the bytes themselves on the server.
     response = await adminService.UploadContentVector({
       raw: trimBeforeBase64(dataUrl),
-      fileName: undefined,
+      fileName,
     });
   } catch (e) {
     throw uploadError(e, false, true);
@@ -225,7 +229,7 @@ export function useUploadMedia(options?: {
   const silent = options?.silent ?? false;
 
   return useMutation<common_MediaFull, Error, UploadMediaInput>({
-    mutationFn: uploadMediaInput,
+    mutationFn: (input) => uploadMediaInput(input),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: mediaKeys.all });
     },

@@ -21,6 +21,16 @@ describe('featureOn', () => {
     expect(featureOn(ws(['tasks']), 'tasks')).toBe(true);
     expect(featureOn(ws(['tasks']), 'orders')).toBe(false);
   });
+  it('reads a list as any-of', () => {
+    expect(featureOn(ws(['media']), ['files', 'media'])).toBe(true);
+    expect(featureOn(ws(['files']), ['files', 'media'])).toBe(true);
+    expect(featureOn(ws(['tasks']), ['files', 'media'])).toBe(false);
+    expect(featureOn(ws([]), [])).toBe(true);
+  });
+  it('hands a list back for its path', () => {
+    const items = [{ route: '/files', feature: ['files', 'media'] }];
+    expect(featureForPath('/files/12', items)).toEqual(['files', 'media']);
+  });
 });
 
 describe('workspaceGate', () => {

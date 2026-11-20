@@ -74,9 +74,6 @@ const SegmentEditor = lazyRoute(() =>
     default: m.SegmentEditor,
   })),
 );
-const MediaManager = lazyRoute(() =>
-  import('components/managers/media').then((m) => ({ default: m.MediaManager })),
-);
 const OrderDetails = lazyRoute(() =>
   import('components/managers/order/page').then((m) => ({ default: m.OrderDetails })),
 );
@@ -236,7 +233,8 @@ const MyProfile = lazyRoute(() =>
 const AiProviders = lazyRoute(() =>
   import('components/managers/ai-providers/page').then((m) => ({ default: m.AiProviders })),
 );
-const FilesLibrary = lazyRoute(() => import('components/managers/files/page'));
+// The one library (photos, videos, documents); a project board still renders the files page.
+const FilesLibrary = lazyRoute(() => import('components/managers/library/page/library-page'));
 const FileTopics = lazyRoute(() => import('components/managers/files/topics/topics-page'));
 const FilesShared = lazyRoute(() => import('components/managers/files/shared/shared-page'));
 const FileProjects = lazyRoute(() => import('components/managers/files/projects/projects-index'));
@@ -487,10 +485,11 @@ const app = (
                   {import.meta.env.DEV && AssemblyCarrierDevPage ? (
                     <Route path='/dev/assembly-carrier' element={<AssemblyCarrierDevPage />} />
                   ) : null}
-                  {/* Без `disabled`: страница библиотеки — единственное место, где снимки можно
-                      выбрать пачкой и удалить одним действием. Флаг глушил `toggleMedia`, то есть
-                      выбор на ней был мёртв физически, и чистка после съёмки шла по одному кадру. */}
-                  <Route path={ROUTES.media} element={<MediaManager />} />
+                  {/* Media lives in the one library now: old links land on its pictures. */}
+                  <Route
+                    path={ROUTES.media}
+                    element={<Navigate to={`${ROUTES.files}?kind=pictures,video`} replace />}
+                  />
                   <Route path={ROUTES.singleProduct} element={<Product />} />
                   <Route path={ROUTES.product} element={<ProductsCatalog />} />
                   <Route path={ROUTES.waitlist} element={<Waitlist />} />
