@@ -140,7 +140,7 @@ export default function FileProjectsIndex() {
                 className='w-[190px]'
               />
               <Button asChild size='xs' variant='secondary'>
-                <Link to={ROUTES.files}>to the files</Link>
+                <Link to={ROUTES.files}>library</Link>
               </Button>
               {/* ЗАВЕДЕНИЕ ПРОЕКТА — ЗДЕСЬ И В ОДНО НАЖАТИЕ. Довод — ниже, у самой модалки. */}
               <Button

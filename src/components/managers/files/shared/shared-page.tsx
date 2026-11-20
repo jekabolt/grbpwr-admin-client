@@ -195,7 +195,7 @@ export default function FilesSharedPage() {
             question={headline}
             action={
               <Button asChild size='xs' variant='secondary'>
-                <Link to={ROUTES.files}>to the files</Link>
+                <Link to={ROUTES.files}>library</Link>
               </Button>
             }
           >

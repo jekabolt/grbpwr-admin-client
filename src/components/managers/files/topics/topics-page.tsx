@@ -353,7 +353,7 @@ export default function FileTopicsPage() {
                 + topic
               </Button>
               <Button asChild size='xs' variant='underline'>
-                <Link to={ROUTES.files}>to the files</Link>
+                <Link to={ROUTES.files}>library</Link>
               </Button>
             </>
           }
