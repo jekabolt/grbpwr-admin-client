@@ -88,6 +88,23 @@ export async function copyLibraryFileToMedia(
   return adminService.CopyLibraryFileToMedia({ fileId });
 }
 
+/** The content types `CopyLibraryFileToMedia` accepts (server `entity.CopyableToMediaContentTypes`). */
+export const PUBLISHABLE_CONTENT_TYPES = [
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/heic',
+  'image/svg+xml',
+  'video/mp4',
+  'video/webm',
+] as const;
+
+/** Whether a private library file of this content type can be made public (copied to media). */
+export function isPublishableType(contentType: string | undefined): boolean {
+  const ct = (contentType ?? '').split(';')[0].trim().toLowerCase();
+  return (PUBLISHABLE_CONTENT_TYPES as readonly string[]).includes(ct);
+}
+
 /** The server error words of the library RPCs (gRPC status message). */
 export const LIBRARY_ERRORS = [
   'library_filter_invalid',

@@ -1,5 +1,6 @@
 import type { common_MediaFull, LibraryItem } from 'api/proto-http/admin';
 import { describe, expect, it, vi } from 'vitest';
+import { isPublishableType } from '../api/library';
 import { fileRef, mediaRef, splitRefs, visualKinds } from './refs';
 import { resolveRefsToMedia } from './use-copy-to-media';
 
@@ -128,5 +129,20 @@ describe('resolveRefsToMedia', () => {
     });
     expect(out.media.map((m) => m.id)).toEqual([7]);
     expect(copy).not.toHaveBeenCalled();
+  });
+});
+
+describe('isPublishableType', () => {
+  it('takes the pictures and video the server copies', () => {
+    expect(isPublishableType('image/jpeg')).toBe(true);
+    expect(isPublishableType('IMAGE/PNG; charset=binary')).toBe(true);
+    expect(isPublishableType('image/svg+xml')).toBe(true);
+    expect(isPublishableType('video/mp4')).toBe(true);
+  });
+  it('refuses documents, gifs, models and empty types', () => {
+    expect(isPublishableType('application/pdf')).toBe(false);
+    expect(isPublishableType('image/gif')).toBe(false);
+    expect(isPublishableType('model/gltf-binary')).toBe(false);
+    expect(isPublishableType(undefined)).toBe(false);
   });
 });
