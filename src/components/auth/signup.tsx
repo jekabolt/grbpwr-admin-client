@@ -1,4 +1,4 @@
-import { authService } from 'api/api';
+import { authService, authServiceWith } from 'api/api';
 import { writeAuthToken } from 'api/auth-headers';
 import { goToUrl } from 'lib/host';
 import { useEffect, useState } from 'react';
@@ -31,6 +31,7 @@ import {
   SheetSubmit,
   SheetValue,
 } from './sheet';
+import { useSignupProof } from './signup-proof';
 import { slugify } from './slug';
 import { useBrandDraft } from './use-brand-draft';
 import { afterVerify } from './verify';
@@ -90,6 +91,7 @@ export function SignUp({ onSignedIn }: { onSignedIn: () => void }) {
   const brand = useBrandDraft();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const proof = useSignupProof();
 
   const send = async () => {
     if (busy) return;
@@ -99,20 +101,28 @@ export function SignUp({ onSignedIn }: { onSignedIn: () => void }) {
       return;
     }
     setBusy(true);
+    const req = {
+      email: draft.email.trim(),
+      password: draft.password,
+      teamName: draft.team.trim(),
+      teamSlug: slug,
+      termsAccepted: true,
+      logo: logo?.base64,
+      brand: brand.payload(),
+      name: undefined,
+    };
     try {
-      await authService.SignUp({
-        email: draft.email.trim(),
-        password: draft.password,
-        teamName: draft.team.trim(),
-        teamSlug: slug,
-        termsAccepted: true,
-        logo: logo?.base64,
-        brand: brand.payload(),
-        name: undefined,
-      });
+      try {
+        await authServiceWith(await proof.take()).SignUp(req);
+      } catch (e) {
+        // A stale or spent answer: one more try with a fresh one.
+        if (!errMessage(e).includes('bot_check')) throw e;
+        await authServiceWith(await proof.take(true)).SignUp(req);
+      }
       rememberEmail(draft.email.trim());
       setStep('code');
     } catch (e) {
+      proof.again();
       const msg = errMessage(e);
       if (isBadLogo(msg)) setBad(true);
       else setError(brand.refused(msg) ? 'check fields' : createError(e));
