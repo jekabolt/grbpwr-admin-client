@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { ConfirmationModal, FoldCaret, SideRailItem, Text } from 'ui';
 import { KIND_WORD, type LibraryItem } from '../api/types';
 import { type FolderNode, flattenTree, subtreeIds } from '../hooks/useLibraryFolders';
-import { deepCount } from './folder-rail';
+import { deepCount } from './folders';
 
 const INDENT = ['', 'pl-3', 'pl-6', 'pl-9', 'pl-12'];
 

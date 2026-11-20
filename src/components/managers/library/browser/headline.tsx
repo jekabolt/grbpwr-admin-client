@@ -1,22 +1,22 @@
 import { Fragment, type ReactNode, useState } from 'react';
-import { BackLink, Button, Close, Text } from 'ui';
+import { Button, Close, Text } from 'ui';
 import { type FolderNode, folderPath } from '../hooks/useLibraryFolders';
-import { type FolderLoc, FolderNameInput, deepCount } from './folder-rail';
+import { type FolderLoc, FolderNameInput, deepCount } from './folders';
 
-const WORD = 'text-micro uppercase tracking-label';
+/** An earlier part of the path: the title's type, grey, inks on hover. */
+const CRUMB =
+  'h-auto shrink-0 border-0 p-0 font-bold normal-case text-labelColor hover:text-textColor';
 
 /**
  * The page title as a path: `files / lookbook / ss27`. The last segment is the open folder:
  * click it to rename (Enter saves, Esc cancels); × deletes it while it is empty; «move» puts it
- * under another folder. Phone: a back word to the parent above the title.
+ * under another folder. Phone: the same path on one line that scrolls sideways.
  */
 export function Headline({
   loc,
   byId,
   phone,
   editable,
-  selecting,
-  onSelectMode,
   onGo,
   onRename,
   onDelete,
@@ -27,9 +27,6 @@ export function Headline({
   byId: Map<number, FolderNode>;
   phone: boolean;
   editable: boolean;
-  /** Phone: the select / done word sits on the title row. Absent: no word. */
-  selecting?: boolean;
-  onSelectMode?: () => void;
   onGo: (loc: FolderLoc) => void;
   onRename: (id: number, name: string) => Promise<unknown>;
   onDelete: (id: number) => void;
@@ -77,47 +74,26 @@ export function Headline({
     </>
   );
 
-  if (phone) {
-    const parent = path.length > 1 ? path[path.length - 2] : undefined;
-    return (
-      <div className='flex flex-col gap-1'>
-        {loc !== 'all' && (
-          <BackLink onClick={() => onGo(parent ? parent.id : 'all')}>
-            {parent ? parent.name : 'files'}
-          </BackLink>
-        )}
-        <div className='flex min-w-0 items-center gap-2'>
-          {current}
-          {tools}
-          <span className='ml-auto flex shrink-0 items-center gap-2'>
-            {!selecting && !folder && extra}
-            {onSelectMode && (
-              <Button variant='underline' size='xs' onClick={onSelectMode}>
-                {selecting ? 'done' : 'select'}
-              </Button>
-            )}
-          </span>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className='flex min-w-0 flex-wrap items-center gap-1.5'>
+    <div
+      className={`flex min-w-0 items-center gap-1.5 ${
+        phone ? 'flex-nowrap overflow-x-auto whitespace-nowrap [scrollbar-width:none]' : 'flex-wrap'
+      }`}
+    >
       {loc !== 'all' && (
         <>
-          <Button variant='underline' size='xs' onClick={() => onGo('all')}>
+          <Button variant='default' className={CRUMB} onClick={() => onGo('all')}>
             files
           </Button>
-          <span className={`${WORD} text-labelColor`}>/</span>
+          <span className='text-borderColor'>/</span>
         </>
       )}
       {path.slice(0, -1).map((n) => (
         <Fragment key={n.id}>
-          <Button variant='underline' size='xs' onClick={() => onGo(n.id)}>
+          <Button variant='default' className={CRUMB} onClick={() => onGo(n.id)}>
             {n.name}
           </Button>
-          <span className={`${WORD} text-labelColor`}>/</span>
+          <span className='text-borderColor'>/</span>
         </Fragment>
       ))}
       {current}

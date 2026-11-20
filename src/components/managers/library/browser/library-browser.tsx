@@ -27,17 +27,12 @@ import {
 import { useSearchParams } from 'react-router-dom';
 import {
   Button,
-  Chip,
-  ChipRow,
   DateScrubber,
-  Drawer,
+  GroupLabel,
   Input,
   Loader,
   Placeholder,
   Progress,
-  SideRail,
-  SideRailGroup,
-  SideRailLayout,
   Text,
   Tile,
   Tiles,
@@ -49,6 +44,8 @@ import {
 } from 'ui';
 import {
   DEFAULT_SORT,
+  KIND_GROUPS,
+  type KindGroup,
   type LibraryFilter,
   type LibraryItem,
   type LibraryKind,
@@ -71,9 +68,17 @@ import { invalidateLibrary, useLibraryMutations } from '../hooks/useLibraryMutat
 import { acceptsFile } from '../upload/route';
 import { useLibraryUpload } from '../upload/use-library-upload';
 import { DeleteDialog, MoveDialog } from './dialogs';
-import { ActiveFilterChips, FilterChipGroups, FilterRail, useFilterGroups } from './filter-rail';
-import { activeCount, clearFilters } from './filters';
-import { FolderChips, FolderRail, type FolderLoc, folderErrorWord, locOf } from './folder-rail';
+import { FilterChips, PhoneFilterChips, useFilterGroups } from './filter-chips';
+import { activeCount, clearFilters, groupOn, visibleGroups } from './filters';
+import {
+  DoorTile,
+  FolderTile,
+  type FolderLoc,
+  NewFolderTile,
+  deepCount,
+  folderErrorWord,
+  locOf,
+} from './folders';
 import { Headline } from './headline';
 
 /**
@@ -262,22 +267,36 @@ export function LibraryBrowser({
   const kindsKey = (kinds ?? []).join(',');
   const sourcesKey = (sources ?? []).join(',');
   const narrowed = activeCount(state.filter) > 0 || !!state.filter.search.trim();
-  const filter = useMemo(
+  const loc = locOf(state.filter);
+  // The rows a filter or a search can reach: everything at the top, the folder and its
+  // subfolders inside one. Facets count over this scope.
+  const deepFilter = useMemo(
     () =>
       makeFilter({
         ...state.filter,
         accept,
         kinds: narrowKinds(state.filter.kinds, kinds),
         sources: sources?.length ? sources : state.filter.sources,
-        // A filter or a search looks through the open folder's subfolders too.
-        includeSubfolders: state.filter.folderId > 0 && narrowed,
+        includeSubfolders: state.filter.folderId > 0,
       }),
     // `kinds` / `sources` arrive as fresh literals from hosts; their content is the dependency.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [state.filter, accept, kindsKey, sourcesKey, narrowed],
+    [state.filter, accept, kindsKey, sourcesKey],
+  );
+  // The listed rows. Unnarrowed, a place shows its own rows (the top: unfiled) under its folder
+  // tiles; a filter or a search lists every match in the scope, folders included.
+  const filter = useMemo(
+    () =>
+      narrowed
+        ? deepFilter
+        : makeFilter({
+            ...deepFilter,
+            noFolder: deepFilter.noFolder || loc === 'all',
+            includeSubfolders: false,
+          }),
+    [deepFilter, narrowed, loc],
   );
   const sort = state.sort;
-  const loc = locOf(state.filter);
 
   // ---- data ----
   const list = useLibraryItems(filter, sort);
@@ -287,7 +306,10 @@ export function LibraryBrowser({
     [list.items, itemFilter],
   );
   const busySet = useMemo(() => new Set(busyKeys ?? []), [busyKeys]);
-  const facets = useLibraryFacets(filter).data;
+  const facets = useLibraryFacets(deepFilter).data;
+  // The scrubber indexes the listed rows, so its months come from the list's own filter.
+  const listFacets = useLibraryFacets(filter).data;
+  const months = listFacets?.months ?? NO_MONTHS;
   const folderFilter = useMemo(() => withoutFolder(filter), [filter]);
   const folders = useLibraryFolders(folderFilter);
   const { tree, byId } = folders;
@@ -426,7 +448,7 @@ export function LibraryBrowser({
     ? ((typeof document !== 'undefined' ? document.scrollingElement : null) as HTMLElement | null)
     : scrollEl ?? null;
   const insetTop = page && phone ? SHELL_BAR : 0;
-  const monthIndex = useMonthIndex(facets?.months ?? NO_MONTHS);
+  const monthIndex = useMonthIndex(months);
   const viewTop = useCallback(
     () =>
       !scroller || scroller === document.scrollingElement
@@ -553,16 +575,51 @@ export function LibraryBrowser({
   };
 
   // ---- pieces ----
-  const filtersOn = activeCount(state.filter);
   const onClear = narrowed ? () => setFilter(clearFilters(state.filter)) : undefined;
   // With a client-side narrowing (labels: printable only) the server total counts rows that are
   // not listed. Count what is shown, and only once every page is in; until then, no count.
   const shown = itemFilter ? (hasNextPage ? undefined : items.length) : list.total;
   const countLabel = shown === undefined ? '' : `${shown} ${shown === 1 ? 'item' : 'items'}`;
   const pending = uploader.pending;
-  const emptyHere =
-    typeof loc === 'number' && !list.isLoading && list.total === 0 && !narrowed && !pending.length;
   const bulk = page && selecting;
+  const gridMin = page ? (phone ? 140 : 184) : phone ? 96 : 118;
+
+  // Folder tiles of the open place. Narrowed (or in a picker), a folder with nothing to show
+  // is left out; the counts are the server's, under the same filter.
+  const hereFolders =
+    loc === 'all' ? tree : typeof loc === 'number' ? byId.get(loc)?.children ?? [] : [];
+  const shownFolders =
+    narrowed || !page ? hereFolders.filter((n) => deepCount(n) > 0) : hereFolders;
+  const canNewFolder = page && mayWrite && !bulk && !narrowed && loc !== 'unfiled';
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const newFolderTile = creatingFolder && createFolder && (
+    <NewFolderTile
+      key='new-folder'
+      onCancel={() => setCreatingFolder(false)}
+      onSave={async (name) => {
+        await createFolder(name);
+        setCreatingFolder(false);
+      }}
+    />
+  );
+  const folderTiles = shownFolders.map((n) => (
+    <FolderTile
+      key={`folder-${n.id}`}
+      node={n}
+      filter={filter}
+      scrollRoot={page ? null : scrollEl}
+      onOpen={() => go(n.id)}
+    />
+  ));
+  const here = typeof loc === 'number' ? byId.get(loc) : undefined;
+  const emptyHere =
+    !!here &&
+    !list.isLoading &&
+    list.total === 0 &&
+    here.children.length === 0 &&
+    !narrowed &&
+    !pending.length &&
+    !creatingFolder;
 
   const searchInput = (
     <Input
@@ -571,13 +628,43 @@ export function LibraryBrowser({
       onChange={(e: ChangeEvent<HTMLInputElement>) => setSearch(e.target.value)}
       placeholder='search'
       aria-label='search'
-      className='min-w-0 flex-1 lg:max-w-60'
+      className={page ? 'min-w-0 flex-1 lg:max-w-60 lg:flex-none' : 'min-w-0 flex-1 sm:max-w-48'}
     />
   );
   const uploadButton = canUpload && (
     <Button variant='main' size='sm' onClick={openPicker}>
       + upload
     </Button>
+  );
+
+  // Picker: one line, search and the kind switch, the count at the right (the mockup's picker).
+  const kindGroups = visibleGroups(kinds);
+  const kindValue: KindGroup | 'all' =
+    kindGroups.find(
+      (g) =>
+        groupOn(state.filter.kinds, g) &&
+        state.filter.kinds.every((k) => KIND_GROUPS[g].includes(k)),
+    ) ?? 'all';
+  const pickBar = (
+    <div className='flex min-w-0 flex-wrap items-center gap-2'>
+      {searchInput}
+      {kindGroups.length > 1 && (
+        <ViewSwitch
+          label='kind'
+          value={kindValue}
+          options={[
+            { value: 'all' as const, label: 'all' },
+            ...kindGroups.map((g) => ({ value: g, label: g })),
+          ]}
+          onChange={(v) =>
+            setFilter({ ...state.filter, kinds: v === 'all' ? [] : [...KIND_GROUPS[v]] })
+          }
+        />
+      )}
+      <Text size='micro' variant='label' component='span' className='ml-auto tabular-nums'>
+        {countLabel}
+      </Text>
+    </div>
   );
 
   const toolbar = bulk ? (
@@ -628,13 +715,11 @@ export function LibraryBrowser({
   ) : (
     <Toolbar>
       {searchInput}
+      <FilterChips groups={groups} />
+      <ToolbarSpacer />
       <ViewSwitch quiet label='sort' value={sort} options={SORTS} onChange={setSort} />
       <ViewSwitch label='view' value={view} options={VIEWS} onChange={setView} />
-      <ToolbarSpacer />
-      <Text size='micro' variant='label' component='span' className='tabular-nums'>
-        {countLabel}
-      </Text>
-      {page && mayWrite && (
+      {mayWrite && (
         <Button variant='secondary' size='sm' onClick={() => setSelecting(true)}>
           select
         </Button>
@@ -658,30 +743,39 @@ export function LibraryBrowser({
       lowercase
     />
   ));
-
-  const body = list.isLoading ? (
-    <Loader />
-  ) : list.isError ? (
-    <Text variant='label'>not loaded</Text>
-  ) : emptyHere ? (
-    <div className='flex flex-col items-center gap-2.5'>
-      <Placeholder label='empty' className='h-48 w-full' />
-      {canUpload && (
-        <Button variant='secondary' size='sm' onClick={openPicker}>
-          + upload
-        </Button>
-      )}
-    </div>
-  ) : items.length === 0 && !pending.length ? (
-    <div className='flex items-center gap-2'>
-      <Text variant='label'>nothing found</Text>
-      {onClear && (
-        <Button variant='underline' size='xs' onClick={onClear}>
-          clear
-        </Button>
-      )}
-    </div>
-  ) : view === 'list' ? (
+  const uploadDoor = !page && canUpload && (
+    <DoorTile key='upload-door' onClick={openPicker}>
+      upload
+    </DoorTile>
+  );
+  const itemTiles = items.map((item, i) => {
+    const ref = refOf(item);
+    if (!ref) return null;
+    const key = refKey(ref);
+    return (
+      <div key={key} data-offset={i} className='relative min-w-0'>
+        <ItemThumb
+          item={item}
+          selected={selectedKeys.has(key)}
+          targetRatios={targetRatios}
+          mark={errors?.[key]}
+          busy={busySet.has(key)}
+          onClick={() => handleClick(item)}
+        />
+        {!page && (
+          <Button
+            variant='underline'
+            size='xs'
+            className='absolute right-1 top-1 bg-bgColor px-1'
+            onClick={() => preview(item)}
+          >
+            open
+          </Button>
+        )}
+      </div>
+    );
+  });
+  const itemRows = (
     <div ref={gridRef} className='flex flex-col bg-bgColor'>
       {pending.map((p) => (
         <Text key={p.key} size='small' variant='label' className='px-1 py-1'>
@@ -703,39 +797,119 @@ export function LibraryBrowser({
         );
       })}
     </div>
-  ) : (
-    <div ref={gridRef}>
-      <Tiles min={phone ? 110 : 150}>
-        {pendingTiles}
-        {items.map((item, i) => {
-          const ref = refOf(item);
-          if (!ref) return null;
-          const key = refKey(ref);
-          return (
-            <div key={key} data-offset={i} className='relative min-w-0'>
-              <ItemThumb
-                item={item}
-                selected={selectedKeys.has(key)}
-                targetRatios={targetRatios}
-                mark={errors?.[key]}
-                busy={busySet.has(key)}
-                onClick={() => handleClick(item)}
-              />
-              {!page && (
-                <Button
-                  variant='underline'
-                  size='xs'
-                  className='absolute right-1 top-1 bg-bgColor px-1'
-                  onClick={() => preview(item)}
-                >
-                  open
-                </Button>
-              )}
-            </div>
-          );
-        })}
-      </Tiles>
+  );
+  const nothing = (
+    <div className='flex items-center justify-center gap-2 py-10'>
+      <Text variant='label'>nothing found</Text>
+      {onClear && (
+        <Button variant='underline' size='xs' onClick={onClear}>
+          clear
+        </Button>
+      )}
     </div>
+  );
+  const noRows = items.length === 0 && !pending.length;
+  /** The items of the place after its folder tiles (`lead`), in one grid or as rows. */
+  const itemsBlock = (lead: ReactNode[]) => {
+    if (list.isLoading) return <Loader />;
+    if (list.isError) return <Text variant='label'>not loaded</Text>;
+    const leadGrid = lead.some(Boolean) ? <Tiles min={gridMin}>{lead}</Tiles> : null;
+    if (noRows && (narrowed || !uploadDoor)) {
+      return (
+        <>
+          {leadGrid}
+          {narrowed ? nothing : null}
+        </>
+      );
+    }
+    if (view === 'list') {
+      return (
+        <div className='flex flex-col gap-3'>
+          {leadGrid}
+          {uploadDoor && <Tiles min={gridMin}>{uploadDoor}</Tiles>}
+          {itemRows}
+        </div>
+      );
+    }
+    return (
+      <div ref={gridRef}>
+        <Tiles min={gridMin}>
+          {lead}
+          {uploadDoor}
+          {pendingTiles}
+          {itemTiles}
+        </Tiles>
+      </div>
+    );
+  };
+
+  const emptyBlock = (
+    <Placeholder className='h-72 w-full'>
+      <div className='flex flex-col items-center gap-2.5 border border-borderColor bg-bgColor px-4 py-3.5'>
+        <Text variant='label' className='normal-case'>
+          empty
+        </Text>
+        <div className='flex gap-2'>
+          {canUpload && (
+            <Button variant='secondary' size='sm' onClick={openPicker}>
+              + upload
+            </Button>
+          )}
+          {canNewFolder && (
+            <Button variant='secondary' size='sm' onClick={() => setCreatingFolder(true)}>
+              + folder
+            </Button>
+          )}
+        </div>
+      </div>
+    </Placeholder>
+  );
+
+  const groupCount = shown === undefined ? '' : String(shown);
+  const body = emptyHere ? (
+    emptyBlock
+  ) : loc === 'all' ? (
+    <div className='flex flex-col'>
+      {(shownFolders.length > 0 || canNewFolder) && (
+        <>
+          {page && (
+            <GroupLabel
+              flush
+              action={
+                canNewFolder && !creatingFolder ? (
+                  <Button variant='underline' size='xs' onClick={() => setCreatingFolder(true)}>
+                    + folder
+                  </Button>
+                ) : undefined
+              }
+            >
+              folders
+            </GroupLabel>
+          )}
+          {(shownFolders.length > 0 || newFolderTile) && (
+            <Tiles min={gridMin}>
+              {folderTiles}
+              {newFolderTile}
+            </Tiles>
+          )}
+        </>
+      )}
+      <GroupLabel flush={!page && !shownFolders.length}>
+        {narrowed ? `${groupCount} found` : `unfiled · ${groupCount}`}
+      </GroupLabel>
+      {itemsBlock([])}
+    </div>
+  ) : (
+    itemsBlock([
+      ...folderTiles,
+      canNewFolder
+        ? newFolderTile || (
+            <DoorTile key='folder-door' onClick={() => setCreatingFolder(true)}>
+              folder
+            </DoorTile>
+          )
+        : null,
+    ])
   );
 
   const tail = (
@@ -745,52 +919,50 @@ export function LibraryBrowser({
     </>
   );
 
-  const headline = page && (
+  const headline = (
     <Headline
       loc={loc}
       byId={byId}
       phone={phone}
-      editable={mayWrite && !bulk}
-      selecting={selecting}
-      onSelectMode={
-        phone && mayWrite ? () => (selecting ? exitSelect() : setSelecting(true)) : undefined
-      }
+      editable={page && mayWrite && !bulk}
       onGo={go}
       onRename={renameFolder}
       onDelete={(id) => void deleteFolder(id)}
       onMove={(folder) => setMoving({ folder })}
-      extra={bulk ? undefined : headlineTools}
+      extra={page && !bulk ? headlineTools : undefined}
     />
   );
-
-  const [sheetOpen, setSheetOpen] = useState(false);
 
   const phoneLayout = (
     <div className={`flex flex-col gap-2.5 ${page ? 'pb-16' : ''}`}>
       {headline}
-      <div className='flex items-center gap-2'>
-        {searchInput}
-        <Chip selected={filtersOn > 0} onClick={() => setSheetOpen(true)}>
-          {filtersOn ? `filters ${filtersOn}` : 'filters'}
-        </Chip>
-        {!page && uploadButton}
-      </div>
-      <FolderChips
-        tree={tree}
-        byId={byId}
-        loc={loc}
-        onGo={go}
-        onCreate={page ? createFolder : undefined}
-      />
-      <ActiveFilterChips groups={groups} />
-      <div className='flex items-center gap-2'>
-        <Text size='micro' variant='label' component='span' className='tabular-nums'>
-          {countLabel}
-        </Text>
-        <Text size='micro' variant='label' component='span' className='ml-auto'>
-          {sort}
-        </Text>
-      </div>
+      {page ? (
+        <>
+          <div className='flex min-w-0 items-center gap-2'>
+            {searchInput}
+            {mayWrite && (
+              <Button
+                variant='secondary'
+                size='sm'
+                onClick={() => (selecting ? exitSelect() : setSelecting(true))}
+              >
+                {selecting ? 'done' : 'select'}
+              </Button>
+            )}
+          </div>
+          <PhoneFilterChips
+            groups={groups}
+            sort={sort}
+            sorts={SORTS}
+            onSort={setSort}
+            view={view}
+            views={VIEWS}
+            onView={setView}
+          />
+        </>
+      ) : (
+        pickBar
+      )}
       {uploader.busy && <Progress value={uploader.progress * 100} />}
       {body}
       {tail}
@@ -838,85 +1010,16 @@ export function LibraryBrowser({
           )}
         </div>
       )}
-      <Drawer
-        open={sheetOpen}
-        onOpenChange={setSheetOpen}
-        title='filters'
-        side='bottom'
-        footer={
-          <div className='flex w-full items-center gap-2'>
-            {onClear && (
-              <Button variant='underline' size='xs' onClick={onClear}>
-                clear
-              </Button>
-            )}
-            <Button
-              variant='main'
-              size='sm'
-              className='ml-auto'
-              onClick={() => setSheetOpen(false)}
-            >
-              show {list.total}
-            </Button>
-          </div>
-        }
-      >
-        <FilterChipGroups groups={groups} />
-        <SideRailGroup>sort</SideRailGroup>
-        <ChipRow>
-          {SORTS.map((s) => (
-            <Chip
-              key={s.value}
-              selected={sort === s.value}
-              pressed={sort === s.value}
-              onClick={() => setSort(s.value)}
-            >
-              {s.label}
-            </Chip>
-          ))}
-        </ChipRow>
-        <SideRailGroup>view</SideRailGroup>
-        <ChipRow>
-          {VIEWS.map((v) => (
-            <Chip
-              key={v.value}
-              selected={view === v.value}
-              pressed={view === v.value}
-              onClick={() => setView(v.value)}
-            >
-              {v.label}
-            </Chip>
-          ))}
-        </ChipRow>
-      </Drawer>
     </div>
   );
 
   const desktopLayout = (
     <div className='flex flex-col gap-2.5'>
       {headline}
-      <SideRailLayout
-        rail={
-          <SideRail width={200} className='lg:sticky lg:top-2.5'>
-            <FolderRail
-              tree={tree}
-              byId={byId}
-              loc={loc}
-              total={shown}
-              onGo={go}
-              onCreate={page ? createFolder : undefined}
-            />
-            <FilterRail groups={groups} onClear={onClear} />
-          </SideRail>
-        }
-      >
-        <div className='flex flex-col gap-2.5'>
-          {toolbar}
-          {uploader.busy && <Progress value={uploader.progress * 100} />}
-          {body}
-          {tail}
-        </div>
-      </SideRailLayout>
+      {page ? toolbar : pickBar}
+      {uploader.busy && <Progress value={uploader.progress * 100} />}
+      {body}
+      {tail}
     </div>
   );
 
@@ -944,7 +1047,7 @@ export function LibraryBrowser({
       {scroller && sort === 'new' && (
         <DateScrubber
           scrollEl={scroller}
-          months={facets?.months ?? NO_MONTHS}
+          months={months}
           labelAt={labelAt}
           offsetToScrollTop={offsetToScrollTop}
           onJump={(year, month) => {

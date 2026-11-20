@@ -5,10 +5,19 @@ import { Media, Pill, Placeholder, Tile } from 'ui';
 import { KIND_WORD, type LibraryItem } from '../api/types';
 
 /** The tile frame: one 4:5 cell for the whole grid, the picture fitted inside it. */
-const FRAME_RATIO = '4/5';
+export const FRAME_RATIO = '4/5';
 
 /** The picture of a row: media thumbnail, file preview, or the extension plate. */
-function ItemPicture({ item, load }: { item: LibraryItem; load: boolean }) {
+export function ItemPicture({
+  item,
+  load,
+  fit = 'contain',
+}: {
+  item: LibraryItem;
+  load: boolean;
+  /** `cover` fills the frame (a folder's collage cell); `contain` shows the whole picture. */
+  fit?: 'contain' | 'cover';
+}) {
   if (item.media) {
     const src = item.media.media?.thumbnail?.mediaUrl ?? '';
     return (
@@ -22,7 +31,7 @@ function ItemPicture({ item, load }: { item: LibraryItem; load: boolean }) {
         load={load}
         muted
         aspectRatio={FRAME_RATIO}
-        fit='contain'
+        fit={fit}
       />
     );
   }
