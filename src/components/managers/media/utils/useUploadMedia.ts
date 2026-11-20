@@ -152,7 +152,6 @@ export async function uploadMediaInput(
     let response;
     try {
       response = await adminService.UploadContentImage({
-        fileName: undefined,
         rawB64Image: base64,
         fileName,
         // Приехало с контрактом полосы DESIGN. `false` — это ПРЕЖНЕЕ поведение медиатеки:
@@ -176,7 +175,6 @@ export async function uploadMediaInput(
   let response;
   try {
     response = await adminService.UploadContentVideo({
-      fileName: undefined,
       raw,
       contentType,
       fileName,

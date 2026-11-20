@@ -230,7 +230,6 @@ export async function uploadRaster(dataUrl: string): Promise<common_MediaFull> {
     fileName: undefined,
     rawB64Image: dataUrl,
     preserveOriginal: true,
-    fileName: undefined,
   });
   const media = response.media;
   if (!media?.id) throw new Error('the raster went up but came back without an id');

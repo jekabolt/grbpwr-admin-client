@@ -239,7 +239,6 @@ export const uploadMask: MaskUploadFn = async (dataUrl, signal) => {
       fileName: undefined,
       rawB64Image: dataUrl,
       preserveOriginal: true,
-      fileName: undefined,
     },
   );
   return response.media?.id ?? 0;

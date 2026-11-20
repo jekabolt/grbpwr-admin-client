@@ -226,7 +226,6 @@ export function ThreedModelModal({
          */
         rawB64Image: shot.dataUrl,
         preserveOriginal: true,
-        fileName: undefined,
       });
       mediaId = response.media?.id ?? 0;
       if (!mediaId) throw new Error('the snapshot went up but came back without an id');

@@ -24,7 +24,6 @@ export const apiNamerDeps: NamerDeps = {
       rawB64Image: await asDataUrl(picture),
       // PNG/JPEG are stored byte-for-byte: the model sees exactly the marks we drew.
       preserveOriginal: true,
-      fileName: undefined,
     });
     const id = res.media?.id ?? 0;
     if (!id) throw new Error('the render went up but came back without an id');
