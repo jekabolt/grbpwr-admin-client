@@ -9,8 +9,12 @@ import type { LibraryRef } from '../api/types';
 import { invalidateLibrary } from '../hooks/useLibraryMutations';
 import { engineOf, type UploadAs } from './route';
 
-/** A file on its way: the grid draws it as a hatched tile with its percent. */
-export type PendingUpload = { key: string; name: string; progress: number };
+/**
+ * A file on its way: the grid draws it as a hatched tile. `exact` is true only where a real byte
+ * count stands behind `progress` (the files queue); the media doors send one request with no
+ * progress events, so their tile shows no percent, only the bar.
+ */
+export type PendingUpload = { key: string; name: string; progress: number; exact: boolean };
 
 type Outcome = { ok: true; ref: LibraryRef } | { ok: false; reason: string };
 
@@ -94,7 +98,12 @@ export function useLibraryUpload({ folderId, as = 'auto' }: { folderId: number; 
       const { folderId: target, as: mode } = live.current;
       const batch = files.map((file) => ({ file, key: `u${++seq.current}` }));
       setPending((list) => [
-        ...batch.map(({ file, key }) => ({ key, name: file.name, progress: 0 })),
+        ...batch.map(({ file, key }) => ({
+          key,
+          name: file.name,
+          progress: 0,
+          exact: engineOf(file, mode) === 'file',
+        })),
         ...list,
       ]);
 

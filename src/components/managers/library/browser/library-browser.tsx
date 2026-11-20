@@ -555,7 +555,10 @@ export function LibraryBrowser({
   // ---- pieces ----
   const filtersOn = activeCount(state.filter);
   const onClear = narrowed ? () => setFilter(clearFilters(state.filter)) : undefined;
-  const countLabel = `${list.total} ${list.total === 1 ? 'item' : 'items'}`;
+  // With a client-side narrowing (labels: printable only) the server total counts rows that are
+  // not listed. Count what is shown, and only once every page is in; until then, no count.
+  const shown = itemFilter ? (hasNextPage ? undefined : items.length) : list.total;
+  const countLabel = shown === undefined ? '' : `${shown} ${shown === 1 ? 'item' : 'items'}`;
   const pending = uploader.pending;
   const emptyHere =
     typeof loc === 'number' && !list.isLoading && list.total === 0 && !narrowed && !pending.length;
@@ -645,7 +648,7 @@ export function LibraryBrowser({
       key={p.key}
       media={
         <Placeholder
-          label={`${Math.round(p.progress * 100)}%`}
+          label={p.exact ? `${Math.round(p.progress * 100)}%` : undefined}
           className='w-full'
           style={{ aspectRatio: '4/5' }}
         />
@@ -682,7 +685,7 @@ export function LibraryBrowser({
     <div ref={gridRef} className='flex flex-col bg-bgColor'>
       {pending.map((p) => (
         <Text key={p.key} size='small' variant='label' className='px-1 py-1'>
-          {p.name} · {Math.round(p.progress * 100)}%
+          {p.exact ? `${p.name} · ${Math.round(p.progress * 100)}%` : `${p.name} · uploading`}
         </Text>
       ))}
       {items.map((item, i) => {
@@ -899,7 +902,7 @@ export function LibraryBrowser({
               tree={tree}
               byId={byId}
               loc={loc}
-              total={list.total}
+              total={shown}
               onGo={go}
               onCreate={page ? createFolder : undefined}
             />

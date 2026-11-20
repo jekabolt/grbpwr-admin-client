@@ -144,14 +144,22 @@ await page.route('http://stub.invalid/**', (route) => {
   if (/content\/usage/.test(url)) {
     return route.fulfill({ status: 200, contentType: 'application/json', body: '{"usage":[]}' });
   }
-  // Список библиотеки: свежезагруженное встаёт первым, как на настоящем DESC-порядке.
-  const list = [];
-  for (let i = uploaded; i > 0; i -= 1) list.push(item(900 + i));
-  list.push(item(11), item(12));
-  return route.fulfill({
-    status: 200, contentType: 'application/json',
-    body: JSON.stringify({ list, total: list.length }),
-  });
+  const json = (body) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+  if (/library\/facets/.test(url)) return json({});
+  if (/library\/folders\/list/.test(url)) return json({ folders: [] });
+  // Список библиотеки (ListLibraryItems): свежезагруженное встаёт первым, как на настоящем
+  // DESC-порядке. Сетка C2 читает строки библиотеки, а не голые медиа.
+  const media = [];
+  for (let i = uploaded; i > 0; i -= 1) media.push(item(900 + i));
+  media.push(item(11), item(12));
+  const items = media.map((m) => ({
+    ref: { source: 'LIBRARY_SOURCE_MEDIA', id: m.id },
+    kind: 'LIBRARY_KIND_IMAGE',
+    name: '', sizeBytes: 0, width: 2, height: 2, inUse: false,
+    media: m,
+  }));
+  return json({ items, total: items.length, sourcesVisible: ['LIBRARY_SOURCE_MEDIA'] });
 });
 
 await page.goto('http://probe.local/');

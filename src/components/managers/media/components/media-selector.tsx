@@ -158,8 +158,7 @@ export function MediaSelector({
    * звала `saveSelectedMedia` сразу после загрузки, а потом свежий снимок появлялся в сетке,
    * человек нажимал его и «add all» — и вставка случалась второй раз.
    *
-   * Дверь в этом режиме ОДНА, и она названа на самом экране («a click fills the tray — an upload
-   * lands there too; “add all” places them in one go»). Загрузка — это способ ПОПОЛНИТЬ
+   * Дверь в этом режиме ОДНА — кнопка лотка «add all». Загрузка — это способ ПОПОЛНИТЬ
    * библиотеку, а не способ обойти кнопку: снимок кладётся в лоток уже выбранным и уходит
    * владельцу тем же нажатием, что и всё остальное.
    *
@@ -460,21 +459,11 @@ export function MediaSelector({
             </div>
           ) : (
             <>
-              {/* Это предложение, а не метка: капсом в системе набирают только метку, кнопку и
-                  заголовок до четырёх слов. */}
-              <DialogPrimitive.Description asChild>
-                <Text size='micro' variant='label' component='p' className='mt-1 flex-shrink-0'>
-                  {pasted.length > 0
-                    ? 'sort out what you pasted'
-                    : oneAtATime
-                      ? 'a click places the frame at once · a frame of the wrong ratio opens cropping'
-                      : allowMultiple
-                        ? // Загрузка теперь тоже кладёт в лоток, и сказать об этом обязано то
-                          // же предложение: иначе «я же только что загрузил» и «ничего не
-                          // прикрепилось» встречаются молча.
-                          'a click fills the tray — an upload lands there too; “add all” places them in one go'
-                        : 'a click places the frame and closes the dialog'}
-                </Text>
+              {/* Подсказка под заголовком снята: правило владельца — никакого поясняющего
+                  текста, метки в 1–3 слова. Состояние (`needs 4:5`) стоит в строке заголовка.
+                  Описание диалога остаётся только для экранного диктора. */}
+              <DialogPrimitive.Description className='sr-only'>
+                {pasted.length > 0 ? 'pasted files' : 'library'}
               </DialogPrimitive.Description>
 
               <div ref={setVirtualScrollEl} className='mt-2.5 flex-1 min-h-0 overflow-y-scroll'>
