@@ -1,5 +1,5 @@
 import { authService, authServiceWith } from 'api/api';
-import { writeAuthToken } from 'api/auth-headers';
+import { currentHost, goToUrl, teamUrl } from 'lib/host';
 import { type ChangeEvent, type ReactNode, useState } from 'react';
 import { ViewSwitch } from 'ui';
 
@@ -31,13 +31,11 @@ export function JoinLinkAccess({
   teamName,
   renderSide,
   onResult,
-  onSession,
 }: {
   link: string;
   teamName: string;
   renderSide: (name: string) => ReactNode;
   onResult: (state: string | undefined, email: string) => void;
-  onSession: (email: string, note: string) => void;
 }) {
   const proof = useSignupProof();
   const [mode, setMode] = useState<Mode>('signup');
@@ -54,15 +52,27 @@ export function JoinLinkAccess({
   const signUpReady = /.+@.+\..+/.test(login) && password.length >= 8 && agreed;
   const signInReady = !!login && !!password;
 
-  const openSession = async () => {
+  // JoinTeam and IssueHandoff take an account (root) session; a team session exists only after
+  // joining. The root token stays in memory and the team token comes from the hand-off.
+  const rootSession = async () => {
     const signed = await authService.SignIn({
       login,
       password,
-      target: 'SIGN_IN_TARGET_TEAM',
+      target: 'SIGN_IN_TARGET_ROOT',
     });
     if (!signed.token) throw Object.assign(new Error('no token'), { status: 401 });
-    writeAuthToken(signed.token);
     setPassword('');
+    return authServiceWith({ 'Grpc-Metadata-Authorization': `Bearer ${signed.token}` });
+  };
+
+  const land = async (root: ReturnType<typeof authServiceWith>, state: string | undefined) => {
+    const result = state?.toLowerCase();
+    if (result !== 'joined' && result !== 'already_member') return onResult(state, login);
+    const slug = currentHost().slug;
+    const h = await root.IssueHandoff({ teamSlug: slug });
+    goToUrl(
+      h.code ? teamUrl(slug, `/auth#code=${encodeURIComponent(h.code)}`) : h.url || teamUrl(slug),
+    );
   };
 
   const signUp = async () => {
@@ -100,16 +110,18 @@ export function JoinLinkAccess({
     if (!signInReady || busy) return;
     setBusy(true);
     setNote('');
+    let root: ReturnType<typeof authServiceWith>;
     try {
-      await openSession();
-      try {
-        const joined = await authService.JoinTeam({ link });
-        onResult(joined.state, login);
-      } catch (e) {
-        onSession(login, joinErrorWord(e, 'try again'));
-      }
+      root = await rootSession();
     } catch (e) {
       setNote(joinErrorWord(e, 'wrong password'));
+      setBusy(false);
+      return;
+    }
+    try {
+      await land(root, (await root.JoinTeam({ link })).state);
+    } catch (e) {
+      setNote(joinErrorWord(e, 'try again'));
       setBusy(false);
     }
   };
@@ -128,9 +140,9 @@ export function JoinLinkAccess({
       setBusy(false);
       return;
     }
+    if (state?.toLowerCase() === 'pending') return onResult(state, login);
     try {
-      await openSession();
-      onResult(state, login);
+      await land(await rootSession(), state);
     } catch (e) {
       setMode('signin');
       setStep('form');
