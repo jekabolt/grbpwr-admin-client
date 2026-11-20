@@ -56,6 +56,9 @@ function useMyTeams(session: RootSession) {
     queryFn: () => authService.ListMyTeams({}),
     retry: false,
     staleTime: 0,
+    // a team still being prepared turns openable on its own
+    refetchInterval: (query) =>
+      query.state.data?.teams?.some((t) => !t.awaitingApproval && !t.ready) ? 15_000 : false,
   });
   useEffect(() => {
     if (q.error) ended(q.error);
@@ -72,11 +75,14 @@ function useLogOut(session: RootSession) {
   };
 }
 
-/** One team: its square, name, and role — or `awaiting approval`, greyed and not openable. */
+/**
+ * One team: its square, name, and role — or `awaiting approval` / `preparing` (its database is not
+ * ready yet), greyed and not openable.
+ */
 function TeamTile({ team, busy, onOpen }: { team: TeamRef; busy: boolean; onOpen: () => void }) {
   const name = team.name || team.slug || '';
   const media = <TeamMark src={team.logoUrl || undefined} size='tile' />;
-  if (team.awaitingApproval)
+  if (team.awaitingApproval || !team.ready)
     return (
       <Tile
         lowercase
@@ -86,7 +92,7 @@ function TeamTile({ team, busy, onOpen }: { team: TeamRef; busy: boolean; onOpen
             {name}
           </Text>
         }
-        sub='awaiting approval'
+        sub={team.awaitingApproval ? 'awaiting approval' : 'preparing'}
         title={name}
       />
     );
