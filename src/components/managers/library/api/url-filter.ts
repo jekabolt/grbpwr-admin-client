@@ -8,7 +8,7 @@ import {
 
 /**
  * URL codec of the library filter. Keys:
- * kind, folder, nofolder, q, project, topic, by, from, to, use, ratio, sort.
+ * kind, folder, nofolder, q, project, topic, by, from, to, use, access, ratio, sort.
  *
  * - `kind`: comma list of `pictures`, `video`, `documents` (groups) or the refinements `image`,
  *   `vector`, `model`. `/files?kind=pictures,video` is the old media screen's redirect.
@@ -100,6 +100,8 @@ export function decodeUrlFilter(params: URLSearchParams): {
   if (DAY_RE.test(to)) filter.createdTo = to;
   const use = params.get('use');
   if (use === 'used' || use === 'free') filter.usage = use;
+  const access = params.get('access');
+  if (access === 'private' || access === 'public') filter.access = access;
   const ratios = list(params.get('ratio')).filter((r) => RATIO_RE.test(r));
   if (ratios.length) filter.ratios = ratios;
   const rawSort = params.get('sort') as LibrarySortKey | null;
@@ -118,6 +120,7 @@ const FILTER_KEYS = [
   'from',
   'to',
   'use',
+  'access',
   'ratio',
   'sort',
 ] as const;
@@ -144,6 +147,7 @@ export function encodeUrlFilter(
   if (DAY_RE.test(filter.createdFrom)) p.set('from', filter.createdFrom);
   if (DAY_RE.test(filter.createdTo)) p.set('to', filter.createdTo);
   if (filter.usage) p.set('use', filter.usage);
+  if (filter.access) p.set('access', filter.access);
   if (filter.ratios.length) p.set('ratio', filter.ratios.join(','));
   if (sort !== DEFAULT_SORT) p.set('sort', sort);
   return p;

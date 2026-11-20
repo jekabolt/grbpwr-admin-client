@@ -12,6 +12,9 @@ export type LibraryFacets = {
   /** Under the filter minus `usage`. */
   used: number;
   free: number;
+  /** Under the filter minus `access`: files without a public twin, and media rows. */
+  private: number;
+  public: number;
   /** Under the filter minus `ratios`, media only. `ratio` is a server key (`4:5`) or `other`. */
   ratios: { ratio: string; count: number }[];
   total: number;
@@ -33,6 +36,8 @@ export function useLibraryFacets(filter: LibraryFilter, opts?: { enabled?: boole
         kinds,
         used: res.used ?? 0,
         free: res.free ?? 0,
+        private: res.accessPrivate ?? 0,
+        public: res.accessPublic ?? 0,
         ratios: (res.ratios ?? [])
           .map((r) => ({ ratio: r.ratio ?? '', count: r.count ?? 0 }))
           .filter((r) => !!r.ratio),

@@ -54,6 +54,7 @@ export function activeCount(f: LibraryFilter): number {
   return [
     f.kinds.length > 0,
     !!f.usage,
+    !!f.access,
     f.uploadedById > 0,
     !!(f.createdFrom || f.createdTo),
     f.projectTopicId > 0,

@@ -90,6 +90,8 @@ export const KIND_WORD: Record<LibraryKind, string> = {
 
 export type LibraryAcceptKey = 'visual' | 'any';
 export type LibraryUsageKey = 'used' | 'free';
+/** `private` = files without a public twin; `public` = media rows. */
+export type LibraryAccessKey = 'private' | 'public';
 export type LibrarySortKey = 'new' | 'old' | 'name' | 'size';
 
 export const DEFAULT_SORT: LibrarySortKey = 'new';
@@ -117,6 +119,7 @@ export type LibraryFilter = {
   createdFrom: string;
   createdTo: string;
   usage: LibraryUsageKey | undefined;
+  access: LibraryAccessKey | undefined;
   ratios: string[];
 };
 
@@ -134,6 +137,7 @@ export const EMPTY_FILTER: LibraryFilter = {
   createdFrom: '',
   createdTo: '',
   usage: undefined,
+  access: undefined,
   ratios: [],
 };
 
@@ -190,6 +194,12 @@ export function toPbFilter(f: LibraryFilter): LibraryItemFilter {
         : f.usage === 'free'
           ? 'LIBRARY_USAGE_FREE'
           : undefined,
+    access:
+      f.access === 'private'
+        ? 'LIBRARY_ACCESS_PRIVATE'
+        : f.access === 'public'
+          ? 'LIBRARY_ACCESS_PUBLIC'
+          : undefined,
     ratios: f.ratios.length ? f.ratios : undefined,
   };
 }
@@ -215,6 +225,7 @@ export function canonicalFilter(f: LibraryFilter): LibraryFilter {
     createdFrom: f.createdFrom,
     createdTo: f.createdTo,
     usage: f.usage,
+    access: f.access,
     ratios: str(f.ratios),
   };
 }

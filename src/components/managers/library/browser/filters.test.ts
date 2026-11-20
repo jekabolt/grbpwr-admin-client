@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { KIND_GROUPS, makeFilter } from '../api/types';
+import { KIND_GROUPS, canonicalFilter, makeFilter, toPbFilter } from '../api/types';
 import { decodeUrlFilter, encodeUrlFilter } from '../api/url-filter';
 import { acceptsFile, engineOf } from '../upload/route';
 import {
@@ -65,6 +65,7 @@ describe('url codec', () => {
       uploadedById: 4,
       createdFrom: '2026-11-14',
       usage: 'used',
+      access: 'private',
       ratios: ['4:5'],
     });
     const p = encodeUrlFilter(f, 'name', new URLSearchParams('tab=x'));
@@ -95,5 +96,26 @@ describe('upload routing', () => {
   it('refuses documents in a visual host', () => {
     expect(acceptsFile(file('a.pdf', 'application/pdf'), 'visual')).toBe(false);
     expect(acceptsFile(file('a.pdf', 'application/pdf'), 'any')).toBe(true);
+  });
+});
+
+describe('access filter', () => {
+  it('reads and writes the url key, ignoring unknown values', () => {
+    const p = encodeUrlFilter(makeFilter({ access: 'public' }), 'new');
+    expect(p.get('access')).toBe('public');
+    expect(decodeUrlFilter(p).filter.access).toBe('public');
+    expect(decodeUrlFilter(new URLSearchParams('access=team')).filter.access).toBeUndefined();
+    expect(encodeUrlFilter(makeFilter(), 'new').has('access')).toBe(false);
+  });
+  it('sends the enum name and leaves it out when off', () => {
+    expect(toPbFilter(makeFilter({ access: 'private' })).access).toBe('LIBRARY_ACCESS_PRIVATE');
+    expect(toPbFilter(makeFilter({ access: 'public' })).access).toBe('LIBRARY_ACCESS_PUBLIC');
+    expect(toPbFilter(makeFilter()).access).toBeUndefined();
+  });
+  it('counts as a filter, is cleared, and keys the query', () => {
+    const f = makeFilter({ access: 'private' });
+    expect(activeCount(f)).toBe(1);
+    expect(clearFilters(f).access).toBeUndefined();
+    expect(canonicalFilter(f)).not.toEqual(canonicalFilter(makeFilter()));
   });
 });
