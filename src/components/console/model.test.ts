@@ -1,6 +1,11 @@
 import type { FeatureInfo, PlatformTeam } from 'api/proto-http/admin';
 import { describe, expect, it } from 'vitest';
 import {
+  capChange,
+  gb,
+  storageOf,
+  storagePct,
+  storageText,
   canDelete,
   deleteRefusal,
   featureGroups,
@@ -42,6 +47,9 @@ const t = (slug: string, extra: Partial<PlatformTeam> = {}): PlatformTeam => ({
   aiUnpricedCallsMonth: 0,
   schemaOk: true,
   purgeAt: undefined,
+  storageUsedBytes: 0,
+  storageCapBytes: 0,
+  storageCapDefault: true,
   ...extra,
 });
 
@@ -233,5 +241,29 @@ describe('features', () => {
     expect(back[0].features).toEqual(['orders']);
     expect(withReadOnly(t('a'), true).status).toBe('read_only');
     expect(withReadOnly(t('a', { status: 'read_only' }), false).status).toBe('active');
+  });
+});
+
+describe('storage', () => {
+  const G = 1024 ** 3;
+  it('reads used / cap, also as int64 strings', () => {
+    const s = storageOf({ storageUsedBytes: String(3.2 * G), storageCapBytes: 20 * G });
+    expect(storageText(s)).toBe('3.2 / 20.0 gb');
+    expect(s.full).toBe(false);
+    expect(storageText(storageOf({ storageUsedBytes: 214.6 * G, storageCapBytes: 0 }))).toBe(
+      '215 / ∞ gb',
+    );
+    expect(storageOf({ storageUsedBytes: 20 * G, storageCapBytes: 20 * G }).full).toBe(true);
+    expect(storageOf({ storageUsedBytes: 20 * G, storageCapBytes: 0 }).full).toBe(false);
+    expect(gb(0.21 * G)).toBe('0.21');
+    expect(storagePct({ used: 5, cap: 10, full: false })).toBe(50);
+  });
+  it('cap control: number, no cap, empty = default', () => {
+    expect(capChange('5', false)).toEqual({ capBytes: 5 * G });
+    expect(capChange('0,5', false)).toEqual({ capBytes: G / 2 });
+    expect(capChange('', false)).toEqual({ defaultCap: true });
+    expect(capChange('7', true)).toEqual({ noCap: true });
+    expect(capChange('0', false)).toBeNull();
+    expect(capChange('x', false)).toBeNull();
   });
 });
