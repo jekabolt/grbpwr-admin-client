@@ -79,6 +79,7 @@ interface StubTeam extends PlatformTeam {
 }
 
 const STUB_PASSWORD = 'stub-password';
+const STUB_DEFAULT_CAP = 20 * 1024 ** 3;
 const RETENTION = 30 * DAY;
 
 function team(
@@ -100,6 +101,9 @@ function team(
     aiUnpricedCallsMonth: 0,
     schemaOk: true,
     purgeAt: undefined,
+    storageUsedBytes: Math.round(members.length * 1.1 * 1024 ** 3),
+    storageCapBytes: STUB_DEFAULT_CAP,
+    storageCapDefault: true,
     members: members.map(([handle, email, role, seenMin]) => ({
       handle,
       email,
@@ -153,14 +157,10 @@ let teams: StubTeam[] = [
     ],
     { features: [...DEFAULTS, 'products', 'settings'] },
   ),
-  team(
-    'mono',
-    'mono',
-    13,
-    '0',
-    [['nika petrova', 'nika@mono.works', 'owner', 60 * 24 * 17]],
-    { status: 'read_only', features: [...DEFAULTS.filter((k) => k !== 'materials'), 'accounting'] },
-  ),
+  team('mono', 'mono', 13, '0', [['nika petrova', 'nika@mono.works', 'owner', 60 * 24 * 17]], {
+    status: 'read_only',
+    features: [...DEFAULTS.filter((k) => k !== 'materials'), 'accounting'],
+  }),
   team(
     'studio-hale-atelier-for-considered-garments',
     'studio hale atelier for considered garments and small runs',
@@ -185,12 +185,7 @@ let teams: StubTeam[] = [
   gone('linea', 'linea', 1, 13),
   gone('atelier-vey', 'atelier vey', 2, 8),
   gone('pale-hours', 'pale hours', 2, 6),
-  gone(
-    'halden-rook-tailoring-house',
-    'halden & rook tailoring house and pattern archive',
-    4,
-    4,
-  ),
+  gone('halden-rook-tailoring-house', 'halden & rook tailoring house and pattern archive', 4, 4),
   gone('kiln-and-cloth', 'kiln and cloth', 4, 3),
   gone('atelier-brisk', 'atelier brisk', 1, 2),
   gone('draft-studio', 'draft studio', 1, 1),
@@ -349,6 +344,17 @@ export function consoleStubAnswer(method: string, body: string | null, path = ''
       t.status = req.readOnly ? 'read_only' : 'active';
       return { team: pub(t) };
     }
+    case 'SetTeamStorageCap': {
+      failWrite();
+      const t = find(slug);
+      if (req.defaultCap)
+        Object.assign(t, { storageCapBytes: STUB_DEFAULT_CAP, storageCapDefault: true });
+      else if (req.noCap) Object.assign(t, { storageCapBytes: 0, storageCapDefault: false });
+      else if (Number(req.capBytes) > 0)
+        Object.assign(t, { storageCapBytes: Number(req.capBytes), storageCapDefault: false });
+      else refuse(400, 'storage_cap');
+      return { team: pub(t) };
+    }
     case 'ApproveTeam': {
       failWrite();
       const t = find(slug);
@@ -386,6 +392,11 @@ export function consoleStubAnswer(method: string, body: string | null, path = ''
       return { handoffCode: 'stub-code' };
 
     // ---- team members ----
+    case 'GetTeamStorage': {
+      // localStorage stub.storageFull=1: the team is at its cap
+      const used = flag('stub.storageFull') ? STUB_DEFAULT_CAP : Math.round(19.4 * 1024 ** 3);
+      return { usedBytes: used, capBytes: STUB_DEFAULT_CAP, full: used >= STUB_DEFAULT_CAP };
+    }
     case 'ListTeamMembers':
       return { members, invites };
     case 'InviteTeamMember': {
