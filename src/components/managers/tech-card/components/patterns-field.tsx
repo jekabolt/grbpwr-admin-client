@@ -30,6 +30,8 @@ import type { common_TechCard, common_TechCardPatternRevision } from 'api/proto-
 import { abortableAdminService, adminService } from 'api/api';
 import { NEST_DEFAULTS, type PieceDTO } from 'lib/nesting/types';
 import { fetchMediaBlob } from 'lib/features/media-blob';
+import { openMediaInNewTab, useMediaObjectUrl } from 'lib/features/media-open';
+import { notifyFailure } from 'components/shared/notify-failure';
 import {
   INSUNITS_CODE,
   asciiDxfProblem,
@@ -1041,6 +1043,8 @@ export function PatternsField({
   const pickerMode = useRef<'standard' | 'review'>('standard');
   // Legacy PDF sheet open in the in-app viewer (null = closed). DXF names open the pieces viewer.
   const [viewing, setViewing] = useState<PatternRow | null>(null);
+  // The legacy PDF viewer reads the bytes (direct → proxy): a private team file's bare url is 403.
+  const viewingPdf = useMediaObjectUrl(viewing && !isDxfUrl(viewing.url) ? viewing.url : null);
   // Units dialog: DXFs without $INSUNITS, and what confirm does with the picked units.
   const [unitsAsk, setUnitsAsk] = useState<{
     items: UnitsItem[];
@@ -3773,10 +3777,15 @@ export function PatternsField({
           }}
         />
       ) : url ? (
-        <Button asChild variant='underline' size='xs'>
-          <a href={url} target='_blank' rel='noopener noreferrer'>
-            open
-          </a>
+        <Button
+          type='button'
+          variant='underline'
+          size='xs'
+          onClick={() =>
+            openMediaInNewTab(url).catch((e) => notifyFailure('PATTERN', 'not opened', e))
+          }
+        >
+          open
         </Button>
       ) : null;
     return (
@@ -5722,16 +5731,22 @@ export function PatternsField({
               {viewing?.sizeBytes ? ` · ${formatBytes(viewing.sizeBytes)}` : ''}
             </Text>
             <Button asChild variant='secondary' size='xs'>
-              <a href={viewing?.url || '#'} target='_blank' rel='noopener noreferrer'>
+              <a href={viewingPdf.src || '#'} target='_blank' rel='noopener noreferrer'>
                 open in new tab
               </a>
             </Button>
           </div>
-          <iframe
-            src={viewing?.url}
-            title={viewing ? labelOf(viewing) : 'pattern'}
-            className='h-[75vh] w-full border border-borderColor bg-bgColor'
-          />
+          {viewingPdf.src ? (
+            <iframe
+              src={viewingPdf.src}
+              title={viewing ? labelOf(viewing) : 'pattern'}
+              className='h-[75vh] w-full border border-borderColor bg-bgColor'
+            />
+          ) : (
+            <Text size='micro' variant='label' component='p'>
+              {viewingPdf.failed ? 'not opened' : 'loading'}
+            </Text>
+          )}
         </div>
       </ConfirmationModal>
 
