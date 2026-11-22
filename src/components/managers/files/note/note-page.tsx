@@ -33,6 +33,7 @@ import { NoteBlocksView } from './note-blocks-view';
 import { NoteDiff } from './note-diff';
 import { NoteEditor, type NoteCaret, type NoteEditorHandle } from './note-editor';
 import { readNoteDraft, useNoteDraft } from './use-note-draft';
+import { usePeopleDirectory } from 'components/people/directory';
 
 /**
  * ЭКРАН ЗАМЕТКИ (вариант md=v3 макета).
@@ -102,6 +103,7 @@ function isTextField(node: EventTarget | null): boolean {
 }
 
 export function NotePage() {
+  const { who } = usePeopleDirectory();
   const { id: rawId } = useParams<{ id: string }>();
   const id = Number(rawId);
   const navigate = useNavigate();
@@ -682,19 +684,19 @@ export function NotePage() {
 
   /* ── шапка чтения ─────────────────────────────────────────────────────────────────────── */
 
-  const editedBy = file?.contentUpdatedBy ?? '';
+  const editedBy = file?.contentUpdatedBy ? who(file.contentUpdatedBy).label : '';
   const editedAt = formatWhenShort(file?.contentUpdatedAt ?? undefined);
   const meta = editedBy
     ? `edited by ${editedBy}${editedAt ? ` · ${editedAt}` : ''}`
     : // Заметка, ни разу не правленная редактором (её залили файлом), честно показывает того,
       // кто её принёс: пустое «edited by » выглядело бы как потерянные данные.
-      `uploaded by ${file?.uploadedBy ?? '—'}${
+      `uploaded by ${file?.uploadedBy ? who(file.uploadedBy).label : '—'}${
         formatWhenShort(file?.createdAt ?? undefined)
           ? ` · ${formatWhenShort(file?.createdAt ?? undefined)}`
           : ''
       }`;
   const mobileMetaWhen = editedBy ? editedAt : formatWhenShort(file?.createdAt ?? undefined);
-  const mobileMeta = `${editedBy || file?.uploadedBy || '—'}${
+  const mobileMeta = `${editedBy || (file?.uploadedBy ? who(file.uploadedBy).label : '') || '—'}${
     mobileMetaWhen ? ` · ${mobileMetaWhen}` : ''
   }`;
 

@@ -1,4 +1,5 @@
 import { cn } from 'lib/utility';
+import { usePeopleDirectory } from 'components/people/directory';
 import { PersonAvatar } from 'components/people/person';
 import { Button, CheckboxCommon, Text } from 'ui';
 import { isProjectTopic } from '../hooks/useFiles';
@@ -85,6 +86,8 @@ export function FileRow({
 }: FileRowProps) {
   const name = file.fileName ?? '';
   const uploader = file.uploadedBy ?? '';
+  const { who } = usePeopleDirectory();
+  const uploaderWord = uploader ? who(uploader).label : '';
   const typeWord = extensionOf(name);
   const topics = (file.topics ?? [])
     .filter((topic) => !isProjectTopic(topic))
@@ -96,7 +99,7 @@ export function FileRow({
     .join(' · ');
   const viewable = !!onView && hasViewPath(file);
   const detailsLabel = uploader
-    ? `details of ${name} · uploaded by ${uploader}`
+    ? `details of ${name} · uploaded by ${uploaderWord}`
     : `details of ${name}`;
   const previewLabel = viewable ? `view ${name}` : `details of ${name}`;
 

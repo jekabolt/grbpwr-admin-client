@@ -1,4 +1,5 @@
 import type { LibraryFile } from 'api/proto-http/admin';
+import { usePeopleDirectory } from 'components/people/directory';
 import { PersonAvatar } from 'components/people/person';
 import type { ReactNode } from 'react';
 import { cn } from 'lib/utility';
@@ -98,6 +99,8 @@ export function FileTile({
   // Строка-имя, а не id: она переживает аккаунт, и «чьи это файлы» на глаз отвечается и для
   // ушедшего из команды человека.
   const uploader = file.uploadedBy ?? '';
+  const { who } = usePeopleDirectory();
+  const uploaderWord = uploader ? who(uploader).label : '';
   const noTopics = !(file.topics ?? []).length;
   // «Не вышло» против «не бывает». У картинки и pdf превью строит браузер, значит пустое
   // превью у такого типа — сбой отрисовки; у .zip первой страницы не существует, и подпись
@@ -127,10 +130,10 @@ export function FileTile({
   // делают одно и то же, и разночтение в предлоге читалось бы как разные действия.
   const frameLabel = split
     ? `${viewable ? `view ${name}` : `details of ${name}`}${
-        uploader ? ` · uploaded by ${uploader}` : ''
+        uploader ? ` · uploaded by ${uploaderWord}` : ''
       }`
     : uploader
-      ? `${name} · uploaded by ${uploader}`
+      ? `${name} · uploaded by ${uploaderWord}`
       : name;
 
   // Тело подвала одно на обе раскладки: кнопкой он становится или остаётся `div`, но читается
@@ -235,7 +238,7 @@ export function FileTile({
         // инициалы: у инициалов `pointer-events-none` (иначе прозрачный кружок съедал бы клик
         // по углу превью), своей подсказки у них быть не может — а «кто такой AL» спрашивают
         // ровно на наведении.
-        title={uploader ? `${name}\nuploaded by ${uploader}` : name}
+        title={uploader ? `${name}\nuploaded by ${uploaderWord}` : name}
         aria-label={frameLabel}
         // `min-w-0 max-w-full` — ЛОВУШКА ПРИМИТИВА, а не украшение: `button` меряется по
         // содержимому, вылезает за колонку грида и ложится поверх соседней плитки, а `truncate`

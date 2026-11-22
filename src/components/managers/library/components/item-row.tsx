@@ -2,6 +2,7 @@ import { extensionOf, formatBytes } from 'components/managers/files/utils/format
 import { cn } from 'lib/utility';
 import { Button, Media, Placeholder, Text } from 'ui';
 import { KIND_WORD, type LibraryItem } from '../api/types';
+import { usePeopleDirectory } from 'components/people/directory';
 
 function day(item: LibraryItem): string {
   const raw = item.createdAt as unknown as string | undefined;
@@ -21,6 +22,7 @@ export function ItemRow({
   selected?: boolean;
   onClick?: () => void;
 }) {
+  const { who } = usePeopleDirectory();
   const kind = item.kind ?? 'LIBRARY_KIND_UNSPECIFIED';
   const thumb = item.media?.media?.thumbnail?.mediaUrl || item.file?.previewUrl || '';
   const size = Number(item.sizeBytes ?? 0);
@@ -64,7 +66,7 @@ export function ItemRow({
       </span>
       {item.uploadedBy && (
         <Text size='micro' variant='label' component='span' className='hidden shrink-0 lg:inline'>
-          {item.uploadedBy.toLowerCase()}
+          {who(item.uploadedBy).label}
         </Text>
       )}
       <Text size='micro' variant='label' component='span' className='w-8 shrink-0 text-right'>

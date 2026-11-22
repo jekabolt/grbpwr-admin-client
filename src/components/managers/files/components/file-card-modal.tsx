@@ -29,6 +29,7 @@ import { FailureText } from './failure-text';
 import { FileAccessSection } from './file-access-section';
 import { FileReaderModal } from './file-reader';
 import { ProjectArchiveMark } from './topic-chips';
+import { usePeopleDirectory } from 'components/people/directory';
 
 type PhoneSheet = 'projects' | 'topics' | null;
 type ProjectRole = { id: number; name: string; role?: { roleId: number; roleName: string } };
@@ -113,6 +114,7 @@ export function FileCardModal({
   writable: boolean;
   onClose: () => void;
 }) {
+  const { who } = usePeopleDirectory();
   const phone = useMediaQuery(PHONE_QUERY);
   const { data, isLoading, error, refetch } = useLibraryFile(id);
   const { updateFile, deleteFile, setRoles } = useFilesMutations();
@@ -525,7 +527,7 @@ export function FileCardModal({
     ? [
         extension,
         formatBytes(Number(file.sizeBytes ?? 0)),
-        file.uploadedBy || '',
+        file.uploadedBy ? who(file.uploadedBy).label : '',
         formatDay(file.createdAt ?? undefined),
       ]
         .filter(Boolean)
