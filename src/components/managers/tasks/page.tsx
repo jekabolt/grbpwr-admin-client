@@ -421,9 +421,7 @@ export function Tasks() {
   if (!canView) {
     return (
       <div className='mx-auto flex max-w-md flex-col items-center gap-2 border border-borderColor bg-bgColor p-10 text-center'>
-        <Text variant='uppercase' size='large'>
-          tasks
-        </Text>
+        <Text size='large'>tasks</Text>
         <Text size='micro' variant='label'>
           You don’t have access to this section. Ask a super admin to grant it.
         </Text>
@@ -434,9 +432,8 @@ export function Tasks() {
   return (
     <div className='flex w-full flex-col gap-4 pb-24 sm:pb-10'>
       <SectionHeader
-        className='max-sm:hidden'
+        className='max-sm:hidden [&_h3]:normal-case [&_h3]:tracking-normal'
         title='tasks'
-        question='what is each department working on — and what needs a hand?'
         action={
           writable && (
             <Button variant='main' size='sm' onClick={() => setCreating('TASK_STATUS_TODO')}>
@@ -449,7 +446,9 @@ export function Tasks() {
       <SideRailLayout
         rail={
           <SideRail className='hidden lg:block' width={170}>
-            <SideRailGroup flush>boards</SideRailGroup>
+            <SideRailGroup flush>
+              <span className='normal-case tracking-normal'>boards</span>
+            </SideRailGroup>
             <SortableBoards ids={boardIds} onReorder={reorderBoards.mutate}>
               {boards.map((board) =>
                 renamingBoard && railShown && board.id === activeBoard ? (
@@ -701,11 +700,11 @@ export function Tasks() {
                   className='w-60'
                 />
               ) : (
-                <Text variant='uppercase' component='h2' className='font-bold tracking-label'>
+                <Text component='h2' className='font-bold'>
                   {activeName}
                 </Text>
               )}
-              <Text size='micro' variant='label' component='span' className='uppercase'>
+              <Text size='micro' variant='label' component='span'>
                 {counts.get(activeBoard) ?? 0} tasks
               </Text>
               {writable && (

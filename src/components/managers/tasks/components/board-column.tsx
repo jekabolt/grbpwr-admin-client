@@ -63,7 +63,7 @@ export function BoardColumn({
 
   return (
     <BoardLane
-      title={STATUS_LABEL[status]}
+      title={<span className='normal-case tracking-normal'>{STATUS_LABEL[status]}</span>}
       count={tasks.length}
       isDropTarget={!!slot}
       className={cn(
