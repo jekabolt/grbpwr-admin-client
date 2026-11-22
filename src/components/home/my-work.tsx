@@ -42,6 +42,7 @@ import {
   visibleBlocks,
   type Tone,
 } from './model';
+import { usePeopleDirectory } from 'components/people/directory';
 
 const TASK_STATUS: Record<string, string> = {
   TASK_STATUS_BACKLOG: 'backlog',
@@ -422,6 +423,7 @@ function RunningRuns({ className }: { className: string }) {
 }
 
 function RecentFiles({ me, className }: { me: string; className: string }) {
+  const { who } = usePeopleDirectory();
   const now = new Date();
   const q = useQuery({
     queryKey: ['files', 'home', 'recent'],
@@ -455,7 +457,7 @@ function RecentFiles({ me, className }: { me: string; className: string }) {
           >
             <span className={NAME}>{f.fileName}</span>
             <span className='whitespace-nowrap text-right text-labelColor'>
-              {[f.uploadedBy === me ? 'you' : f.uploadedBy, agoWord(f.createdAt, now)]
+              {[f.uploadedBy === me ? 'you' : f.uploadedBy && who(f.uploadedBy).label, agoWord(f.createdAt, now)]
                 .filter(Boolean)
                 .join(' · ')}
             </span>
