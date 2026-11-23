@@ -314,6 +314,17 @@ const facesKey = (run: SizeRun, cellMm: number | undefined) =>
     ),
   ].join('|');
 
+/**
+ * PIECES BENCH (scripts/pattern-import/pieces-bench.ts): a Node harness may record the session as it
+ * enters the pieces stage — its fields after `invalidateAfter('pieces')` and the stage input — so the
+ * pieces step can be replayed on that state in seconds without re-reading the PDF. Null = off (the
+ * browser never sets it).
+ */
+let piecesSnapshotSink: ((session: Session, input: StageIO['pieces']['in']) => void) | null = null;
+export function setPiecesSnapshotSink(sink: typeof piecesSnapshotSink): void {
+  piecesSnapshotSink = sink;
+}
+
 export class Session {
   readonly id: number;
   files: SourceFileInfo[];
@@ -575,6 +586,8 @@ export class Session {
     ctx: StageCtx,
   ): Promise<StageIO[S]['out']> {
     this.invalidateAfter(stage);
+    if (stage === 'pieces' && piecesSnapshotSink)
+      piecesSnapshotSink(this, input as StageIO['pieces']['in']);
     const out = await (async (): Promise<StageIO[StageName]['out']> => {
       switch (stage) {
         case 'extract':

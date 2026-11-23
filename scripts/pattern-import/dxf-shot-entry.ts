@@ -11,6 +11,8 @@ import { liteProbe } from 'lib/pattern-import/sizes/corner-probe';
 import { setCornerProbeSink, type CornerProbe } from 'lib/pattern-import/sizes/corners';
 
 import { runCase } from './autopilot-entry';
+import { captureSession } from './pieces-bench-lib';
+import { setPiecesSnapshotSink } from 'lib/pattern-import/worker/session';
 
 type Rec = Record<string, unknown> & {
   verdict?: string;
@@ -63,7 +65,19 @@ export async function main(args: string[]): Promise<number> {
     setCornerProbeSink((p) =>
       cornerCalls.push(process.env.CORNER_PROBES === 'full' ? p : liteProbe(p)),
     );
+  // PIECES_SNAPSHOT=1: the session as it enters every pieces call of the final pass
+  // (pieces-<n>.snap.gz, read by pieces-bench.ts) — the pieces step replayed without the PDF
+  let piecesCalls = 0;
+  if (process.env.PIECES_SNAPSHOT && (saved || labels.length))
+    setPiecesSnapshotSink((session, input) => {
+      piecesCalls++;
+      writeFileSync(
+        resolve(out, `pieces-${piecesCalls}.snap.gz`),
+        captureSession(id, piecesCalls, session, input),
+      );
+    });
   const rec = saved || labels.length ? await run(labels, resolve(out, 'dxf')) : discovery;
+  setPiecesSnapshotSink(null);
   setRepairProbeSink(null);
   setCornerProbeSink(null);
   // full precision: rounded to 0.01 mm, 1 of 19 Leah tries replayed differently (F · 30, an
