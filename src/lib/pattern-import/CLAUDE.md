@@ -80,7 +80,9 @@ top). This section stays ≤ ~80 lines: replace, never append.
 
 - Off with `=1`: `DASH_TRAIN_OFF` `ALIKE_NESTS_OFF` `MOOD_MARKS_OFF` `MOOD_WIDE_OFF`
   `TICK_KNIFE_SPREAD_OFF` `GRADE_DRAW_OFF` `NEST_CROSS_OFF` `CONT_ORDER_OFF` `TICK_THROUGH_OFF`
-  `TICK_ORDER_OFF` `TICK_THROUGH_NEAREST_OFF` `BORROW_LANDED_OFF` `SPLIT_PEN_OFF`.
+  `TICK_ORDER_OFF` `TICK_THROUGH_NEAREST_OFF` `BORROW_LANDED_OFF` `SPLIT_PEN_OFF`
+  `TILE_TEXT_JOIN_OFF` (a label cut by a tile edge stays two texts) `ONE_BLOCK_OFF` (two labels of
+  one paragraph merge again).
 - `NEST_CORNER_MM` `GRADEP2_DEBUG` `MOOD_TICKS_DEBUG` `SHOT_STDOUT` `SHOT_ROWS`.
 - `GFIT_NEST_WALK` — nest walk after repairSize, **on by default**, only `=0` disables.
   `NEST_WALK_DEBUG=1` logs. `NEST_WALK_DUMP=<dir>` writes `seed<n>.json`.

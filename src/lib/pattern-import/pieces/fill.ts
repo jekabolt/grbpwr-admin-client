@@ -60,7 +60,7 @@ import { unsupportedLanding, type AmbiguousLanding } from './ambiguous-landing';
 import { gradeHook, SOLVER_MODEL, type GradeHook } from './grade/hook';
 import { gradeOrderRun } from './continuity-order';
 import { seedFaces, type SeedFaceDiag } from './seed-face';
-import { seedLabel } from './seeds';
+import { oneLabelBlock, seedLabel } from './seeds';
 import { snapOutline, type WallItem } from './snap';
 import { cutTails, LineIndex, type TailCut } from './tails';
 import { variantKnifeItems } from './variants';
@@ -657,6 +657,17 @@ function fillOneSheet(
   const use = seeds.filter(
     (s) => opts.variant == null || s.variant == null || s.variant === opts.variant,
   );
+  // two labels of one text block: one outline cut as two pieces — each seed fills it alone
+  const coLabelled = new Set<string>();
+  for (let i = 0; i < use.length; i++)
+    for (let j = i + 1; j < use.length; j++) {
+      const a = use[i].text;
+      const b = use[j].text;
+      if (!a || !b || use[i].origin !== 'text' || use[j].origin !== 'text') continue;
+      if (dist(use[i].at, use[j].at) > 8 * Math.max(a.fontSizeMm, b.fontSizeMm)) continue;
+      if (seedLabel(use[i]) === seedLabel(use[j])) continue;
+      if (oneLabelBlock(a, b, sheet.texts)) coLabelled.add(`${i}|${j}`).add(`${j}|${i}`);
+    }
   // H1: sizes drawn alike — the solver's per-rank walls, or refusals (null = F4 as before)
   // (the face pass's unconfirmed strays are lines to the size checks: chains/face-role gradeView)
   const graded =
@@ -1140,7 +1151,7 @@ function fillOneSheet(
         const others: number[] = [];
         const kOf = new Map<number, number>();
         for (let sj = 0; sj < use.length; sj++) {
-          if (sj === si || dropped.has(use[sj].id)) continue;
+          if (sj === si || dropped.has(use[sj].id) || coLabelled.has(`${si}|${sj}`)) continue;
           const kj = c === base ? px[sj].k : seedPixel(gg, c.wall, c.ext, pts[sj]).k;
           kOf.set(sj, kj);
           if (opened[kj]) others.push(sj);
