@@ -25,6 +25,16 @@
 // (≤ `touchMm`) or crosses the line of the end within `landedMm` ahead; a line running along the
 // end more than `lateralMm` across it is the nest and counts only by its own END (the Reims joint).
 // Geometry (on the line of the end, ≤ 0.4 mm off it, within 18°) is only the precondition.
+//
+// A train proves more than a dash. When at least `trainProofMin` dashes of one length follow at one
+// pitch, two refusals made for a lone dash no longer hold (Leah, sizes 18 and 24):
+//   - a rival with the same dash but a pen of SEVERAL draws (size 6: 3.75, 3, 1.75) cannot have
+//     drawn a row of identical dashes, and the gap need not be one of the key's gaps: where the pen
+//     has dots, the sheet often has none, so the gap between two dashes is any length up to the
+//     pen's span from one draw to the next (size 24: key 3.75 / 3.5·1·1·1.5, sheet 3.57 / 4.93);
+//   - a nest neighbour whose END sits beside a dash after the first two, with the train going on
+//     past it, is where that neighbour's line breaks too, not a joint (the Reims joint is the first
+//     dash after the host's end, or the last one of the train).
 import type { Chain, PtMm } from 'lib/pattern-import/types';
 
 import { dist, endTangent, PtGrid, SegGrid, segNearest } from '../chains/geom';
@@ -55,10 +65,17 @@ export const DASH_TRAIN = {
   touchMm: 1,
   /** A lone dash proves nothing when it is a bead of the pen (draws under this are ticks / dots). */
   loneMinMm: 3,
+  /** Dashes of one length at one pitch that prove the pen as a train (see the header). */
+  trainProofMin: 3,
+  /** A beside neighbour's end stops the train only while it holds fewer dashes than this. */
+  besideEndAfter: 2,
 };
 
-/** The draws (dashes, ≥ 1 mm) and the gaps of one pen's repeat, mm. */
-export type Rhythm = { draws: number[]; gaps: number[] };
+/**
+ * The draws (dashes, ≥ 1 mm) and the gaps of one pen's repeat, mm; `span` is the longest way from
+ * the end of one draw to the start of the next (the gaps and dots between them).
+ */
+export type Rhythm = { draws: number[]; gaps: number[]; span?: number };
 
 /** `[draw, gap, draw, gap, …]` as the signature carries it → what the rule compares with. */
 export function rhythmOfMotif(motif: readonly number[] | null | undefined): Rhythm | null {
@@ -69,7 +86,19 @@ export function rhythmOfMotif(motif: readonly number[] | null | undefined): Rhyt
     if (motif[i] >= DASH_TRAIN.minDashMm) draws.push(motif[i]);
     if (motif[i + 1] > 0.05) gaps.push(motif[i + 1]);
   }
-  return draws.length && gaps.length ? { draws, gaps } : null;
+  if (!draws.length || !gaps.length) return null;
+  // walk the repeat twice (it is cyclic): the span from each draw's end to the next draw
+  const n = motif.length - (motif.length % 2);
+  let span = 0;
+  let run = -1;
+  for (let k = 0; k < 2 * n; k++) {
+    const v = motif[k % n];
+    if (k % 2 === 0 && v >= DASH_TRAIN.minDashMm) {
+      if (run >= 0) span = Math.max(span, run);
+      run = 0;
+    } else if (run >= 0) run += v;
+  }
+  return { draws, gaps, span: span || Math.max(...gaps) };
 }
 
 /**
@@ -112,11 +141,13 @@ export type DashTrainInput = {
   rhythms: ReadonlyMap<number, Rhythm>;
   /** May this chain be taken in (not furniture, not a size line of its own)? */
   candidate: (chain: number) => boolean;
+  /** `DT_DEBUG`: why each free end of a ranked line stops where it does. */
+  debug?: (rank: number, line: string) => void;
 };
 
 /** Dashes taken into a size line: dash chain → host chain. The host's `pts` now run over them. */
 export function adoptDashTrains(inp: DashTrainInput): Map<number, number> {
-  const { chains, rankOf, rhythms, candidate } = inp;
+  const { chains, rankOf, rhythms, candidate, debug } = inp;
   const T = DASH_TRAIN;
   const adopted = new Map<number, number>();
   if (!rhythms.size) return adopted;
@@ -158,6 +189,17 @@ export function adoptDashTrains(inp: DashTrainInput): Map<number, number> {
   const gapIs = (r: number, g: number) =>
     rhythms.get(r)?.gaps.some((x) => Math.abs(g - x) <= T.gapTolMm + T.gapTolRel * x) ?? false;
   const gapMax = (r: number) => Math.max(...(rhythms.get(r)?.gaps ?? [0]));
+  /** A pen with draws of different lengths (one of them does not fit `len`) cannot draw a row of
+   *  identical `len` dashes. */
+  const severalDraws = (k: number, len: number) =>
+    rhythms.get(k)?.draws.some((d) => Math.abs(len - d) > T.lenTolRel * d + T.lenTolAbs) ?? false;
+  const spanOf = (r: number) => {
+    const rh = rhythms.get(r);
+    return rh ? rh.span ?? Math.max(...rh.gaps) : 0;
+  };
+  /** Could a dash `len` long, `gap` after the end, be r's when a train proves it (see the header)? */
+  const ownsAsTrain = (r: number, len: number, gap: number) =>
+    fits(r, len) && gap <= spanOf(r) + T.gapTolMm + T.gapTolRel * spanOf(r);
   /** Does a dash `len` long, `gap` after the end, belong to the pen of rank r and to no rival's? */
   const owns = (r: number, len: number, gap: number) => {
     if (!fits(r, len) || gap > gapMax(r) + T.gapTolMm + T.gapTolRel * gapMax(r)) return false;
@@ -223,22 +265,30 @@ export function adoptDashTrains(inp: DashTrainInput): Map<number, number> {
     return hit;
   };
 
-  /** Does a dash end p (on a line heading ±t) meet a line of another size? */
-  const nearOtherRank = (p: PtMm, r: number, t: PtMm) => {
+  /**
+   * Does a dash end p (on a line heading ±t) meet a line of another size? 'into' — it runs into
+   * that line or its end; 'beside-end' — only a nest neighbour's end sits beside it.
+   */
+  let intoBy = '';
+  const nearOtherRank = (p: PtMm, r: number, t: PtMm): 'into' | 'beside-end' | null => {
     const back = { x: -t.x, y: -t.y };
-    let hit = false;
+    let hit: 'into' | 'beside-end' | null = null;
     walls.near(p, T.landedMm, (o, si) => {
-      if (hit) return;
+      if (hit === 'into') return;
       const ro = rankOf.get(o);
       if (ro === undefined || ro === r) return;
       const a = wallPts[o][si];
       const b = wallPts[o][si + 1];
       if (segNearest(p, a, b).d > T.landedMm) return;
       if (besideAlong(p, a, b, t)) {
-        if (endNear(o, p)) hit = true;
+        if (endNear(o, p)) hit = 'beside-end';
         return;
       }
-      if (runsInto(p, t, a, b) || runsInto(p, back, a, b) || endNear(o, p)) hit = true;
+      const ends = endNear(o, p);
+      if (!ends && !runsInto(p, t, a, b) && !runsInto(p, back, a, b)) return;
+      const cos = Math.abs(((b.x - a.x) * t.x + (b.y - a.y) * t.y) / (dist(a, b) || 1));
+      hit = 'into';
+      intoBy = `${ro} (line ${o}, ${((Math.acos(Math.min(1, cos)) * 180) / Math.PI).toFixed(0)}°${ends ? ', its end' : ''})`;
     });
     return hit;
   };
@@ -263,6 +313,21 @@ export function adoptDashTrains(inp: DashTrainInput): Map<number, number> {
     return hit;
   };
 
+  /** ≥ `trainProofMin` dashes of one length (r's draw) at one pitch, and no rival with a pen of
+   *  one draw of that length whose gap is this pitch. */
+  const trainProves = (r: number, train: readonly { f: number; gap: number }[]) => {
+    if (train.length < T.trainProofMin) return false;
+    const lens = train.map((d) => chains[d.f].lengthMm);
+    const mean = lens.reduce((a, b) => a + b, 0) / lens.length;
+    const tol = T.lenTolRel * mean + T.lenTolAbs;
+    if (Math.max(...lens) - Math.min(...lens) > tol || !fits(r, mean)) return false;
+    const pitch = train.slice(1).reduce((a, d) => a + d.gap, 0) / (train.length - 1);
+    return ![...rhythms.keys()].some(
+      (k) =>
+        k !== r && fits(k, mean) && !severalDraws(k, mean) && gapIs(k, pitch) && !gapIs(r, pitch),
+    );
+  };
+
   for (const [host, r] of rankOf) {
     if (!rhythms.has(r) || adopted.has(host)) continue;
     for (const end of [0, 1] as const) {
@@ -271,8 +336,17 @@ export function adoptDashTrains(inp: DashTrainInput): Map<number, number> {
       let t = endTangent(hc.pts, end, 5);
       if (!t) continue;
       let p = end ? hc.pts[hc.pts.length - 1] : hc.pts[0];
+      const where = `host ${host} end ${p.x.toFixed(1)},${p.y.toFixed(1)}`;
       if (landed(p, host, t)) continue;
-      const train: { f: number; from: PtMm; to: PtMm; gap: number }[] = [];
+      let why = 'nothing ahead';
+      const train: {
+        f: number;
+        from: PtMm;
+        to: PtMm;
+        gap: number;
+        byTrain: boolean;
+        besideEnd: boolean;
+      }[] = [];
       while (train.length < T.maxTrain) {
         let best: { f: number; e: number; al: number } | null = null;
         endsOf.near(p, T.aheadMm, (id) => {
@@ -291,22 +365,60 @@ export function adoptDashTrains(inp: DashTrainInput): Map<number, number> {
         });
         if (!best) break;
         const { f, e, al } = best as { f: number; e: number; al: number };
-        if (!owns(r, chains[f].lengthMm, Math.max(0, al))) break;
+        why = `#${f} ${chains[f].lengthMm.toFixed(2)} mm, gap ${al.toFixed(2)}: `;
+        // a dash the rule for one dash refuses may still be r's as part of a proven train
+        let byTrain = false;
+        if (!owns(r, chains[f].lengthMm, Math.max(0, al))) {
+          if (!ownsAsTrain(r, chains[f].lengthMm, Math.max(0, al))) {
+            why += 'not the pen';
+            break;
+          }
+          byTrain = true;
+        }
         const startPt = chains[f].pts[e ? chains[f].pts.length - 1 : 0];
-        if (crosses(p, startPt, host)) break;
+        if (crosses(p, startPt, host)) {
+          why += 'crosses a line';
+          break;
+        }
         const farPt = chains[f].pts[e ? 0 : chains[f].pts.length - 1];
-        if (nearOtherRank(startPt, r, t) || nearOtherRank(farPt, r, t)) break;
+        const other = [nearOtherRank(startPt, r, t), nearOtherRank(farPt, r, t)];
+        if (other.includes('into')) {
+          why += `runs into rank ${intoBy}`;
+          break;
+        }
+        const besideEnd = other.includes('beside-end');
+        if (besideEnd) {
+          if (train.length < T.besideEndAfter) {
+            why += 'another size ends beside it';
+            break;
+          }
+          byTrain = true;
+        }
         const fp = chains[f].pts;
         const from = e ? fp[fp.length - 1] : fp[0];
         const to = e ? fp[0] : fp[fp.length - 1];
         // the dashes of one train keep one pitch: the gaps after the first differ by little
         const gap = Math.max(0, al);
-        if (train.length >= 2 && Math.abs(gap - train[1].gap) > T.pitchSpreadMm) break;
-        train.push({ f, from, to, gap });
+        if (train.length >= 2 && Math.abs(gap - train[1].gap) > T.pitchSpreadMm) {
+          why += 'off the pitch';
+          break;
+        }
+        train.push({ f, from, to, gap, byTrain, besideEnd });
         const L = dist(from, to) || 1;
         t = { x: (to.x - from.x) / L, y: (to.y - from.y) / L };
         p = to;
       }
+      // dashes taken on the train's evidence stay only when the train proves the pen: enough
+      // dashes of one length, and no rival that draws such a row at this pitch; else cut the
+      // train before the first of them
+      // a train that ENDS at a neighbour's end runs up to a joint (Reims): it ends before that dash
+      while (train.length && train[train.length - 1].besideEnd) train.pop();
+      const firstByTrain = train.findIndex((d) => d.byTrain);
+      if (firstByTrain >= 0 && !trainProves(r, train)) {
+        why = `train of ${train.length} does not prove the pen; ` + why;
+        train.length = firstByTrain;
+      }
+      debug?.(r, `${where}: ${train.length} taken, stop ${why}`);
       if (!train.length) continue;
       // one dash alone proves nothing, unless it closes a hole between two lines of the rank.
       // The hole must lie AHEAD of the dash: an end beside it is a line coming onto the host's
@@ -331,7 +443,10 @@ export function adoptDashTrains(inp: DashTrainInput): Map<number, number> {
         // its body, a T-join (Leah: the partner's pen ran to the dash and doubled back, so its END
         // sits beside, but the hole is gone).
         if (!closes) closes = touchesRank(train[0].f, host, r);
-        if (!closes) continue;
+        if (!closes) {
+          debug?.(r, `${where}: lone dash closes no hole`);
+          continue;
+        }
       }
       // the host runs over the dashes
       const add: PtMm[] = [];

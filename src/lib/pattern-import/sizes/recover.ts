@@ -35,6 +35,7 @@ import { ranksFromCoords, seriate } from './seriate';
 import { CORNER, closeCorners, type CornerMark, type CornerWall } from './corners';
 import { overlayShare, type OverlayLines } from './overlay';
 import { rankAlikeNests } from './alike-nests';
+import { sharedCutOutlines } from './shared-cut';
 import { adoptDashTrains, rankRhythms } from './dash-train';
 import { bridgeSameRank, landEnds, type Landing } from './land';
 import { legendIdentity, type LegendIdentity } from './legend-id';
@@ -88,7 +89,74 @@ export type RecoverOut = {
   diag: Record<string, unknown>;
   /** MOOD Ф2: corners closed by a size's own stub / ramps / extended edges, as derived walls. */
   cornerWalls: CornerWall[];
+  bracketedOutlines?: { chain: number; label: string }[];
 };
+
+/** Keyed fragments form a loop when their ends pair uniquely at the
+ * spacing of the printed motif. Every other fragment must retain its own key rank. */
+export function keyedFragmentLoop(chain: number, peers: readonly Chain[], gap: number): boolean {
+  const start = peers.find((c) => c.id === chain);
+  if (!start || start.closed || !(gap > 0)) return false;
+  const ends = peers.filter((c) => !c.closed).flatMap((c) => [
+    { id: c.id, side: 0, p: c.pts[0] }, { id: c.id, side: 1, p: c.pts[c.pts.length - 1] },
+  ]);
+  const mate = (a: (typeof ends)[number]) => {
+    const hits = ends.filter((b) => b.id !== a.id && Math.hypot(a.p.x-b.p.x, a.p.y-b.p.y) <= gap);
+    return hits.length === 1 ? hits[0] : undefined;
+  };
+  const first = ends.find((e) => e.id === chain)!;
+  const visited = new Set<number>();
+  let at = first;
+  while (!visited.has(at.id)) {
+    visited.add(at.id);
+    const next = mate(at);
+    if (!next || mate(next) !== at) return false;
+    at = ends.find((o) => o.id === next.id && o.side !== next.side)!;
+  }
+  return at === first && visited.size >= 3;
+}
+
+/** A PDF key may paint a long dash row as a patterned centre between equal solid caps.
+ * The cap under the label locates the row; the middle stroke declares its rhythm. */
+export function cappedLegendSample(
+  cap: Chain,
+  chains: Chain[],
+  styles: ReadonlyMap<number, Style>,
+): Chain | undefined {
+  const paint = styles.get(cap.style);
+  if (!paint || paint.dash?.some((x) => x > 0) || cap.pts.length !== 2 || cap.closed) return;
+  const [a, b] = cap.pts;
+  const length = dist(a, b);
+  if (!length) return;
+  const ux = (b.x - a.x) / length;
+  const uy = (b.y - a.y) / length;
+  const along = (p: PtMm) => (p.x - a.x) * ux + (p.y - a.y) * uy;
+  const across = (p: PtMm) => Math.abs((p.y - a.y) * ux - (p.x - a.x) * uy);
+  const row = chains.filter((c) => {
+    if (c === cap || c.closed || c.pts.length !== 2) return false;
+    const style = styles.get(c.style);
+    return (
+      style !== undefined &&
+      style.clip === paint.clip &&
+      style.widthMm === paint.widthMm &&
+      style.layer === paint.layer &&
+      String(style.strokeRgb) === String(paint.strokeRgb) &&
+      c.pts.every((p) => across(p) <= 0.02)
+    );
+  });
+  const matches = row.filter((c) => {
+    const dash = styles.get(c.style)?.dash;
+    if (!dash?.some((x) => x > 0) || c.lengthMm < 2 * length) return false;
+    const [start, end] = c.pts.map(along).sort((x, y) => x - y);
+    if (start < length - 0.02 || start - length > length / 2) return false;
+    return row.some((tail) => {
+      if (tail.style !== cap.style || Math.abs(tail.lengthMm - length) > 0.02) return false;
+      const gap = Math.min(...tail.pts.map(along)) - end;
+      return gap >= -0.02 && gap <= length / 2;
+    });
+  });
+  return matches.length === 1 ? matches[0] : undefined;
+}
 
 function lenOf(chains: Chain[], ids: Iterable<number>) {
   let L = 0;
@@ -204,7 +272,11 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
   const hits0 = tokenHits(allTexts, chains, cand, 6);
   // labels ALONG long lines (r4454) vs labels next to short sample strokes (a legend: viola p29)
   const onLine = hits0.filter((h) => chains[h.chain].lengthMm >= 150);
-  const legendHits0 = alignedLegend(legendEndHits(allTexts, chains, cand), chains);
+  const rawLegend = alignedLegend(legendEndHits(allTexts, chains, cand), chains);
+  const legendHits0 = rawLegend.map((hit) => {
+    const sample = cappedLegendSample(chains[hit.chain], chains, styles);
+    return sample ? { ...hit, chain: sample.id } : hit;
+  });
   const hitRun = labelRun(onLine, 2);
   let hits = onLine.filter((h) => hitRun.has(h.label));
   {
@@ -1637,6 +1709,19 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       const top = [...e.to].sort((x, y) => y[1] - x[1])[0];
       // a fragment (< 15 mm) is not worth a question on a whole row: it only loses its rank
       const to = top && top[1] >= 0.7 * e.against && chains[c].lengthMm >= 15 ? top[0] : -1;
+      // A cross-section at a crossing can put an outer size inside another
+      // one. A unique cycle traced with its keyed bead row supplies the missing
+      // local evidence when the sections propose no consistent alternative.
+      if (to < 0 && sigs[c]?.period === 'o' && legendId?.label[c] === unit[c]) {
+        const peers = chains.filter((ch, id) => {
+          if (rankOf.get(id) !== from || legendId?.label[id] !== unit[c] ||
+              sigs[id]?.period !== 'o' || ch.lengthMm < 15) return false;
+          const vote = per.get(id);
+          return id === c || !vote || vote.against < 3 || vote.against < 2 * vote.agree;
+        });
+        const pitch = chains[c].lengthMm / Math.max(1, chains[c].ranges.length - 1);
+        if (keyedFragmentLoop(c, peers, Math.min(4.5, 3.1 * pitch))) continue;
+      }
       if (to >= 0) {
         rankOf.set(c, to);
         into.add(to);
@@ -1714,6 +1799,7 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
 
   // ── sizes drawn in ONE pen (the key prints one sample for several): their closed outlines are
   // told apart by how they nest, between the outlines of the sizes whose ranks are known
+  const bracketedOutlines: { chain: number; label: string }[] = [];
   if (legendHits.length >= 3 && !debugFlag('ALIKE_NESTS_OFF')) {
     const keyRank = new Map<string, number>();
     labels.forEach((l, r) => l && keyRank.set(l, r));
@@ -1721,6 +1807,8 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       chains,
       rankOf,
       styles,
+      anchorRank: (i) => keyRank.get(legendKey[legendId?.label[i] ?? -1]),
+      onBracket: (chain, rank) => bracketedOutlines.push({ chain, label: labels[rank]! }),
       samples: legendHits.map((h) => ({ label: h.label, chain: h.chain })),
       keyRank,
       candidate: (i) => i < N0 && cand[i] && !furniture[i],
@@ -1759,6 +1847,9 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       rankOf,
       rhythms,
       candidate: (i) => i < N0 && !furniture[i],
+      debug: debugFlag('DT_DEBUG')
+        ? (r, l) => console.log(`DT size ${labels[r] ?? r} ${l}`)
+        : undefined,
     }))
       adopted.set(f, h);
     if (adopted.size) {
@@ -1790,6 +1881,7 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       extended: cc.extended,
       crossed: cc.crossed,
       marked: cc.marked,
+      arms: cc.walls.filter((w) => w.rule === 'arms').length,
       refused: cc.refused,
     };
   }
@@ -1960,6 +2052,19 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
   });
   if (overlaid.length)
     diag.overlayOrphans = `${overlaid.length}/${(lenOf(chains, overlaid) / 1000).toFixed(2)}m`;
+  if (legendId && legendHits0.some((hit, i) => rawLegend[i].chain !== hit.chain)) {
+    // The patterned centre identifies the legend size. A separate, fully drawn
+    // ungraded cut can use the solid pen of the caps without being an internal mark.
+    const shared = sharedCutOutlines(
+      sheet, chains, internal, new Set([...rankOf.keys(), ...orphans]), legendKey,
+    );
+    if (shared.size) {
+      common.push(...shared);
+      for (let i = internal.length - 1; i >= 0; i--) {
+        if (shared.has(internal[i])) internal.splice(i, 1);
+      }
+    }
+  }
 
   // ── classes ─────────────────────────────────────────────────────────────────────────────────
   const sizes: SizeClassOut[] = [];
@@ -2119,6 +2224,7 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
   diag.unitRank = unitRank;
   diag.unitPurity = unitPurity.map((p) => +p.toFixed(2));
   return {
+    bracketedOutlines,
     cornerWalls,
     encoding,
     n,

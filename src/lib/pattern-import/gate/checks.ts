@@ -63,6 +63,7 @@ import {
   parallelDeviation,
 } from '../semantics/offset';
 import { glyphCellKey, undashed } from '../semantics/glyphs';
+import { samePrintedCurve } from '../pieces/printed-cut-curves';
 import { CHROME_GATE, ChromeIndex, hairpins, onChrome } from './chrome';
 import type { RawDxf, RawEntity } from './reader';
 import { contourMm } from './roundtrip';
@@ -519,7 +520,7 @@ export const DERIVED_CARRIED_LEN_MAX_MM = 250 + 2 * DERIVED_LAND_REACH_MM;
  * of the line: 2×, ~7× and ~15× headroom, while a piece can never be 1/20 invented.
  */
 export const DERIVED_MAX_PER_BLOCK = 6;
-export const DERIVED_MAX_SHARE = 0.05;
+export const DERIVED_MAX_SHARE = PATIMPORT.derivedMaxShare;
 export const DERIVED_MAX_TOTAL_MM = 60;
 
 const r1 = (v: number) => Math.round(v * 10) / 10;
@@ -1752,6 +1753,7 @@ export function chromeProblems(
   chrome: readonly ChromeLine[] | undefined,
   /** A traced scan: its line wobbles in 2 mm steps (leonie), and a scan has no vector chrome. */
   raster = false,
+  visibleSourceCut?: PtMm[],
 ): { block: string[]; warn: string[] } {
   const out = { block: [] as string[], warn: [] as string[] };
   if (!chrome?.length) return out;
@@ -1769,7 +1771,18 @@ export function chromeProblems(
           out.block.push(
             `the ${word} line goes out and back round a ${h.capMm.toFixed(1)} mm bar ${h.legMm.toFixed(0)} mm long at (${h.at.x.toFixed(0)}, ${h.at.y.toFixed(0)})`,
           );
-      for (const run of onChrome(e.pts, e.closed, marks))
+      let runs = onChrome(e.pts, e.closed, marks);
+      if (
+        runs.length &&
+        word === 'cut' &&
+        e.closed &&
+        visibleSourceCut &&
+        samePrintedCurve(e.pts, visibleSourceCut)
+      ) {
+        const source = new ChromeIndex([[...visibleSourceCut, visibleSourceCut[0]]]);
+        runs = onChrome(e.pts, e.closed, marks, source);
+      }
+      for (const run of runs)
         out.block.push(
           `the ${word} line runs ${run.lengthMm.toFixed(0)} mm on a registration mark from (${run.from.x.toFixed(0)}, ${run.from.y.toFixed(0)})`,
         );
@@ -1807,6 +1820,7 @@ export function g19(ctx: GateCtx): GateCheck {
       rawOf(ctx, block),
       ctx.expect.chromeByBlock?.[block],
       ctx.expect.hausdorffP95Mm > PATIMPORT.hausdorffP95VectorMm,
+      ctx.expect.identityByBlock?.[block]?.visibleSourceCut,
     );
     const all = [...why.block, ...why.warn];
     if (!all.length) continue;

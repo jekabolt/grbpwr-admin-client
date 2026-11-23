@@ -106,14 +106,26 @@ const run = (bump: { x: number; half: number; height: number }) => {
   const r = repairSize(anchors, 2, wallsWithGap(40), opts);
   const lo = anchors.find((a) => a.rank === 1)!.outer;
   const fill = r.holes.flatMap((h) => h.pts);
-  return { r, lo, fills: r.holes.map((h) => h.pts), cross: r.holes.flatMap((h) => crossings(h.pts, lo)), fill };
+  return {
+    r,
+    lo,
+    fills: r.holes.map((h) => h.pts),
+    cross: r.holes.flatMap((h) => crossings(h.pts, lo)),
+    fill,
+  };
 };
 
 describe('draw mode · D-cross-nest (fill vs the oLo outline)', () => {
   it('PREMISE a: a bump of rank 1 pokes through the rank-2 line, flanks ~40 deg', () => {
     // rank 2 bottom edge is y = 306, rank 1 is y = 303: a 5 mm bump reaches y = 308
     const { r, cross } = run({ x: 50, half: 6, height: 5 });
-    console.log('a: ok', r.ok, r.refusals.join(','), 'crossings', JSON.stringify(cross.map((c) => [c.fromEnd.toFixed(1), c.ang.toFixed(0)])));
+    console.log(
+      'a: ok',
+      r.ok,
+      r.refusals.join(','),
+      'crossings',
+      JSON.stringify(cross.map((c) => [c.fromEnd.toFixed(1), c.ang.toFixed(0)])),
+    );
     expect(r.holes.length).toBeGreaterThan(0);
   });
 
@@ -128,7 +140,13 @@ describe('draw mode · D-cross-nest (fill vs the oLo outline)', () => {
   it('(b) a fill that meets the oLo outline at < 20 deg is accepted', () => {
     // 5 mm high over a 25 mm half-width: the flank is ~11 deg (crossings measured 10 and 6 deg)
     const { r, cross } = run({ x: 50, half: 25, height: 5 });
-    console.log('b: ok', r.ok, r.refusals.join(','), 'crossings', JSON.stringify(cross.map((c) => [c.fromEnd.toFixed(1), c.ang.toFixed(0)])));
+    console.log(
+      'b: ok',
+      r.ok,
+      r.refusals.join(','),
+      'crossings',
+      JSON.stringify(cross.map((c) => [c.fromEnd.toFixed(1), c.ang.toFixed(0)])),
+    );
     // the premise: the fill DOES cross the outline, but only at a shallow angle
     expect(cross.length).toBeGreaterThan(0);
     expect(cross.every((c) => c.ang < 20)).toBe(true);
@@ -139,7 +157,13 @@ describe('draw mode · D-cross-nest (fill vs the oLo outline)', () => {
   it('(c) a crossing within 2 mm of a fill end (the join point) is accepted', () => {
     // bump centred left of the hole so only its right flank crosses the fill, ~1 mm from its start (x = 30)
     const { r, cross } = run({ x: 28.6, half: 6, height: 5 });
-    console.log('c: ok', r.ok, r.refusals.join(','), 'crossings', JSON.stringify(cross.map((c) => [c.fromEnd.toFixed(1), c.ang.toFixed(0)])));
+    console.log(
+      'c: ok',
+      r.ok,
+      r.refusals.join(','),
+      'crossings',
+      JSON.stringify(cross.map((c) => [c.fromEnd.toFixed(1), c.ang.toFixed(0)])),
+    );
     // the premise: it crosses transversally, but only within 2 mm of the fill's end
     expect(cross.length).toBeGreaterThan(0);
     expect(cross.every((c) => c.fromEnd <= 2)).toBe(true);

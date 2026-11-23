@@ -11,7 +11,7 @@
 // (origin 'click' / 'ai'); fillPieces treats every origin alike.
 import type { ChainSet, IRText, PagePose, PtMm, Seed, Sheet } from 'lib/pattern-import/types';
 
-import { dist } from './geom';
+import { dist, pointInPoly } from './geom';
 
 /**
  * The piece-number grammar ("7", "21", "123", "2a"), shared with the cutting-list reader
@@ -151,6 +151,31 @@ function isSizeOrRange(s: string, sizes: ReadonlySet<string>): boolean {
   return !!r && sizes.has(r[1]) && sizes.has(r[2]);
 }
 
+/** A small facing title can sit with its two material instructions inside the same cut. */
+function isLabelledFacing(sheet: Sheet, title: IRText): boolean {
+  if (title.background || !/\bfacing\b/i.test(title.text)) return false;
+  const at = centre(title);
+  const nearby = sheet.texts.filter(
+    (t) =>
+      !t.background &&
+      t.src.file === title.src.file &&
+      t.src.page === title.src.page &&
+      t.rotationDeg === title.rotationDeg &&
+      dist(centre(t), at) <= 4 * title.fontSizeMm,
+  );
+  const fabric = nearby.find((t) => /^fabric\s*:\s*cut\s+[1-9]\d*$/i.test(t.text.trim()));
+  const fusing = nearby.find((t) => /^fusing\s*:\s*cut\s+[1-9]\d*$/i.test(t.text.trim()));
+  if (!fabric || !fusing) return false;
+  const points = [at, centre(fabric), centre(fusing)];
+  return sheet.paths.some(
+    (p) =>
+      p.src.file === title.src.file &&
+      !p.background &&
+      p.closed &&
+      points.every((q) => pointInPoly(q, p.pts)),
+  );
+}
+
 export function textSeeds(sheet: Sheet, sizeLabels: ReadonlySet<string> = new Set()): TextSeed[] {
   const texts = sheet.texts.filter((t) => t.text.trim());
   const explicit: TextSeed[] = [];
@@ -173,7 +198,7 @@ export function textSeeds(sheet: Sheet, sizeLabels: ReadonlySet<string> = new Se
         });
     }
     const m = s.match(LETTER_NAME);
-    if (m && t.fontSizeMm >= 4) {
+    if (m && (t.fontSizeMm >= 4 || isLabelledFacing(sheet, t))) {
       const name = s.slice(m[0].indexOf(m[1]) + m[1].length).replace(/^\s*[-–—:]\s*/, '');
       if (sizesUp.has(m[1].toUpperCase()) && isSizeOrRange(name, sizesUp)) continue;
       explicit.push({ label: m[1], name, at: centre(t), text: t, size: t.fontSizeMm });

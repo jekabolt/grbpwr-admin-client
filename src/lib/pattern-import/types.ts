@@ -93,6 +93,12 @@ export type Style = {
   fill: boolean;
   /** Clip path in force when the path was drawn, by id. Kept until classification — not dropped. */
   clip: string | null;
+  /** Small four-sided mask on a PDF fill, expressed in the frame of the path. */
+  clipQuad?: PtMm[];
+  /** Straight edges of a local PDF stroke mask, in the same frame as the path. */
+  clipPolygon?: PtMm[];
+  /** Visible stroke or fill under a single small mask, including curved turn sections. */
+  localClipPolygon?: PtMm[];
 };
 
 /**
@@ -106,6 +112,20 @@ export type IRPath = {
   closed: boolean;
   style: StyleId;
   src: PathSource;
+  /** Visible part of an individually filled PDF mark under supported masks; empty when hidden. */
+  visibleFill?: PtMm[];
+  /** Compound clips, uncertain opacity, or a partial tile prevent attribution of this fill. */
+  unknownFill?: true;
+  /** Single opaque stroke or fill entirely inside the page and its rectangular clips. */
+  visibleMotif?: true;
+  /** Visible fractions of numbered PDF outline edges after the page and rectangular clips. */
+  visibleEdges?: true | [number, number][];
+  /** Matching copies registered on other tiles before whole-path deduplication. */
+  /** Identical filled glyphs repeated on overlapping PDF tiles, in original operator order. */
+  /** Whole printed glyph before edge deduplication split it at a tile seam. */
+  printedGlyph?: PtMm[];
+  stampCopies?: PathSource[];
+  paintCopies?: { src: PathSource; edges: true | [number, number][] }[];
   /**
    * A8 (clean stage): the page furniture this path was masked as. Masked, never deleted: assembly
    * still sees it (tile frames and registration marks register tiles); chains, the legend, seeds,
@@ -364,6 +384,8 @@ export type PagePose = {
 };
 
 export type Sheet = {
+  /** Original visible stamps otherwise lost during cross-tile overlap removal. */
+  materialMarks?: IRPath[];
   /** Sheet index inside the session (one source may carry several sheets; one card run = one sheet). */
   id: number;
   poses: PagePose[];
@@ -507,6 +529,8 @@ export type PathRange = { path: PathId; from: number; to: number };
 
 /** A chain is an ordered polyline stitched from path ranges (dashes, beads, zigzag joined). */
 export type Chain = {
+  /** Straight side of a complete, legend-keyed panel proved by paired ring masks. */
+  ringBoundary?: { side: [PtMm, PtMm]; pts: PtMm[]; ranges: PathRange[] };
   id: ChainId;
   pts: PtMm[];
   closed: boolean;
@@ -514,6 +538,8 @@ export type Chain = {
   ranges: PathRange[];
   /** Recovered or declared dash motif, mm (dash, gap, …) quantised to 0.25 mm. null = solid. */
   motif: Mm[] | null;
+  /** Repeating printed shapes in source order (compound mark rows only). */
+  markPeriod?: string;
   style: StyleId;
   lengthMm: Mm;
 };
@@ -641,7 +667,7 @@ export type ChainAmbiguity = {
  * closes ("chain:end"); `chains` = the stub / ramp drawn there.
  */
 export type CornerWall = {
-  rule: 'stub' | 'ramp' | 'extend';
+  rule: 'stub' | 'ramp' | 'extend' | 'arms';
   pts: PtMm[];
   own: ChainId[];
   ends: string[];
@@ -652,6 +678,8 @@ export type ChainSet = {
   chains: Chain[];
   /** MOOD Ф2: derived corner walls (sizes/corners.ts); absent on sets joined from several sheets. */
   cornerWalls?: CornerWall[];
+  /** Shared-pen outlines distinguished by both neighbouring legend-identified sizes. */
+  bracketedOutlines?: { chain: ChainId; label: string }[];
   /**
    * LABELFRAME (sizes/label-frame.ts): the closed lines drawn round a size label, put in the
    * 'ignore' row. Out of every wall and feature; the H1 solver alone still reads them as drawn
@@ -1148,6 +1176,14 @@ export type CountEvidence = {
 
 /** One closed contour for one seed at one size rank, snapped to vector chains. */
 export type PieceCandidate = {
+  /** Separate, labelled material cut, with the shared printed marks and the straight original stroke. */
+  liningCut?: { cut: PtMm[]; path: PathId; label: TextId; segment: [PtMm, PtMm]; side: number };
+  materialMarkPaths?: PathId[];
+  /** Ordered pen operations and the two adjacent, fully printed size outlines. */
+  stampedBand?: { paths: PathId[]; brackets: [PathId, PathId] };
+  /** Printed paths supporting the fold-panel cycle or competing turn sections. */
+  foldPanelPaths?: PathId[];
+  foldPanelAlternatives?: PtMm[];
   seed: SeedId;
   /** Size rank in the SOURCE run (SizeRun.sizes[rank]); 0 for single-size files. */
   rank: number;
@@ -1180,6 +1216,10 @@ export type PieceCandidate = {
   };
   /** Fill gap when outcome = 'leak': where the outside got in. */
   leakAt?: PtMm;
+  /** Both source chains and the physical gap of a verified automatic bridge. */
+  gapRecovery?: { from: PtMm; to: PtMm; chains: ChainId[] };
+  /** Distinct full outlines reproduced by isolated, rank-specific wall edits. */
+  gapOptions?: { outer: PtMm[]; bridges: { from: PtMm; to: PtMm }[] }[];
   /** Features already known at segmentation (DXF fast path: notches, drills, grain). */
   features?: Feature[];
   /**
@@ -1190,7 +1230,15 @@ export type PieceCandidate = {
    * the source draws that join this rank's own dangling ends (see `continuity`). Absent on DXF
    * fast-path candidates.
    */
-  rankFrom?: 'class' | 'innerPlug' | 'bundleRank' | 'single' | 'grade' | 'continuity' | 'repair';
+  rankFrom?: 'class' | 'innerPlug' | 'bundleRank' | 'single' | 'grade' | 'continuity' | 'repair' | 'printed-range' | 'legend-polygon' | 'shared-polygon' | 'printed-motif';
+  /** Visible source marks used to recover a masked row. */
+  visibleMarks?: PathId[];
+  /** Printed legend glyphs and visible PDF marks supporting every side of the polygon. */
+  printedMotif?: { key: PathId[]; paths: PathId[] };
+  /** Complete visible PDF outline, its printed legend sample and optional flanking source paths. */
+  sourceOutline?: { path: PathId; key: ChainId; brackets?: [PathId, PathId] };
+  /** Two independently painted, legend-owned source figures confirming the shared cut. */
+  polygonSource?: { reference: string; confirmedBy: string; paths: PathId[]; confirmationPaths: PathId[] };
   /**
    * GRADE P2: this size was REPAIRED from the family's grade (rankFrom 'repair'): the outline runs
    * on the size's own and common lines where the grade model of its two neighbouring anchors puts
@@ -1655,6 +1703,9 @@ export type PairHand = 'L' | 'R';
 
 /** The final, per-identity description — what the writer turns into blocks. */
 export type PieceSpec = {
+  /** Semantics of the distinct, explicitly labelled lining size cuts, including their features. */
+  liningSizes?: PieceSizeSpec[];
+  liningProblem?: string;
   identity: PieceKey;
   /** Grammar: PREFIX[_mods]. `code` is PREFIX, mods in order (R/L, F/B, number, #). */
   code: string;
@@ -2695,6 +2746,8 @@ export type GradeEvidence = { hold?: string; warn?: string; drawsOwn?: boolean }
 export type IdentityGeometry = {
   pen: string | null;
   own: PtMm[][];
+  /** A single fully visible original cut, in a declared pen keyed to this size. */
+  visibleSourceCut?: PtMm[];
   excused: PtMm[][];
   /** Lines of another pen this rank's own lines land on (an edge drawn once): ≤ half excused. */
   shared?: PtMm[][];
@@ -3777,6 +3830,8 @@ export const PATIMPORT = {
   notchMaxMm: 8,
   notchMinAngleDeg: 45,
   defaultAllowanceMm: 10,
+  /** G15 bound on the share of a cut invented by straight bridges and other chords. */
+  derivedMaxShare: 0.05,
   coverageWarn: 0.98,
   coverageBlock: 0.95,
   hausdorffP95VectorMm: 0.3,

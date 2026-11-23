@@ -55,7 +55,7 @@ export function nonFiniteCount(p: CornerProbe): number {
 export type LinkView = {
   /** rule + the two ends, sorted: what identifies a link between two runs */
   key: string;
-  rule: 'stub' | 'ramp' | 'extend';
+  rule: 'stub' | 'ramp' | 'extend' | 'arms';
   rank: number | null;
   ends: string[];
   via: PtMm | null;

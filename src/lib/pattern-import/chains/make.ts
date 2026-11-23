@@ -85,6 +85,7 @@ export function makeChains(sheet: Sheet, opts: ChainOpts): ChainBuild {
       closed,
       ranges: rangesOf(ch),
       motif: sig.motif,
+      ...(sig.period && new Set(sig.period).size > 1 ? { markPeriod: sig.period } : {}),
       style: sig.backbone?.id ?? ch.items[0].it.style,
       lengthMm,
     });

@@ -32,7 +32,12 @@ import type {
 } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 
-import { bboxOf, dist, pointInPoly, resample, SegGrid, segNearest, signedArea } from './geom';
+import { triangleMarkLoop } from './triangle-mark-loop';
+import { clippedMarkLoop } from './clipped-mark-loop';
+import { ringStrokeLoop } from './ring-stroke-loop';
+import { selfIntersects } from '../semantics/geom';
+import { keyedDashLoop } from './keyed-dash-loop';
+import { bboxOf, dist, pointInPoly, quantile, resample, SegGrid, segNearest, signedArea } from './geom';
 import {
   components,
   drawPolyline,
@@ -51,6 +56,7 @@ import { gradeView } from 'lib/pattern-import/chains/face-role';
 
 import { type Bridge, facingBridges, wallBridges } from './bridges';
 import { landedBorrowWalls } from './landed-borrow';
+import { unsupportedLanding, type AmbiguousLanding } from './ambiguous-landing';
 import { gradeHook, SOLVER_MODEL, type GradeHook } from './grade/hook';
 import { gradeOrderRun } from './continuity-order';
 import { seedFaces, type SeedFaceDiag } from './seed-face';
@@ -78,6 +84,19 @@ import {
   type WallModel,
 } from './walls';
 import { rankLooks } from './identity';
+import { restoreBracketedStamps } from './bracketed-stamps';
+import { readLabelledSourceFamilies } from './labelled-source-family';
+import { restoreTriangleStripContours } from './triangle-strip-contour';
+import { readRepeatedMotifWalk, restorePrintedMotifPolygons } from './printed-motif-polygon';
+import { readPrintedMarkContours } from './printed-mark-contour';
+import { restoreMaskedMarkLoops } from './masked-mark-loop';
+import { restoreSourceOutlineFamilies } from './source-outline-family';
+import { restoreSourceLoops } from './source-loops';
+import { registeredMarkLoop } from './registered-marks';
+import { recoverMaterialPanels } from './material-panels';
+import { restoreFoldPanels } from './fold-panel';
+import { restoreRingPanels } from './ring-panel';
+import { applyPrintedCuts } from './apply-printed-cuts';
 import { looseWallsOn } from './gfit/repair';
 import { gradeP2Off, repairPass, type RepairDiag } from './gfit/repair-hook';
 import {
@@ -940,6 +959,35 @@ function fillOneSheet(
   if (faced?.diag.length) diag.faced = faced.diag;
   const carry = (s: Seed, r: number) => faced?.at.get(key(s.id, r)) ?? shift(s.at, r);
 
+  const measureSourceLoop = (c: PieceCandidate, ink: LineIndex) => {
+    const distances = resample(c.outer, 0.5, true).map((p) => ink.nearest(p, 3).d);
+    c.p95Mm = quantile(distances, 0.95);
+    c.sourceCoverage =
+      distances.filter((d) => d <= (opts.snapMm || PATIMPORT.snapMm)).length / distances.length;
+    c.textsInside = textCentres.filter((t) => pointInPoly(t.at, c.outer)).map((t) => t.id);
+    const walls = new Set(c.walls);
+    c.inside = set.chains
+      .filter(
+        (ch) =>
+          !walls.has(ch.id) &&
+          ch.pts.length > 1 &&
+          ch.pts.every(
+            (p) =>
+              p.x >= c.bbox.minX &&
+              p.x <= c.bbox.maxX &&
+              p.y >= c.bbox.minY &&
+              p.y <= c.bbox.maxY &&
+              pointInPoly(p, c.outer),
+          ),
+      )
+      .map((ch) => ch.id);
+  };
+  const measureSourceCut = (c: PieceCandidate, paths: ReadonlySet<number>) => {
+    const ink = new LineIndex(
+      [...sheet.paths, ...(sheet.materialMarks ?? [])].filter((p) => paths.has(p.id)).map((p) => ({ chain: p.id, pts: p.pts })),
+    );
+    measureSourceLoop(c, ink);
+  };
   /** One rank, every seed; returns the candidates and the frame chains found around merges. */
   const rankPass = (
     r: number,
@@ -965,6 +1013,7 @@ function fillOneSheet(
     const base = buildRank(box, cell, baseItems(r, excl));
     const pts = use.map((s) => override?.get(s.id) ?? carry(s, r));
     const px = pts.map((p) => seedPixel(base.g, base.wall, base.ext, p));
+    const refusedLandings: AmbiguousLanding[] = [];
     // passes after A, built lazily once per rank
     const later: { from: RankFrom; build: () => RankCtx }[] =
       model.mode === 'single'
@@ -973,7 +1022,9 @@ function fillOneSheet(
             {
               from: 'innerPlug',
               build: () => {
-                const plugs = landingPlugs(set, model, r, lone).filter(keep);
+                const plugs = landingPlugs(set, model, r, lone, {
+                  refused: refusedLandings,
+                }).filter(keep);
                 return plugs.length ? buildRank(box, cell, [...base.items, ...plugs]) : base;
               },
             },
@@ -1246,12 +1297,73 @@ function fillOneSheet(
           snapMm: opts.snapMm || PATIMPORT.snapMm,
         },
       );
+      // Where the legend and both neighbouring sizes distinguish a single complete
+      // vector loop, keep its corners if raster snapping picked a nearby wall instead.
+      if (!merged && !opts.variant && !userExcl.size && !edits.include?.length && !edits.bridges?.length) {
+        // Isolated portions of another size are useful walls in an open drawing.
+        // A closed region can nevertheless take a detour over those walls even
+        // when this rank's own two printed rows already enclose the seed.
+        const native =
+          model.mode === 'graded' &&
+          rankFrom === 'class' &&
+          !sheet.missing.length &&
+          !sheet.holes?.length &&
+          triangleMarkLoop(sheet, set, run, r, seed.at, sn.walls);
+        if (
+          native &&
+          !use.some((other) => other.id !== seed.id && pointInPoly(other.at, native.pts))
+        ) {
+          const ink = new LineIndex(itemsOf(set, native.walls));
+          if (sn.outer.some((p) => !Number.isFinite(ink.nearest(p, 3 * native.pitch).d))) {
+            cand.outer = signedArea(native.pts) < 0 ? native.pts.reverse() : native.pts;
+            cand.walls = native.walls;
+            cand.bbox = bboxOf(cand.outer);
+            cand.areaMm2 = Math.abs(signedArea(cand.outer));
+            cand.outcome = cand.areaMm2 < PATIMPORT.minPieceAreaMm2 ? 'tiny' : 'closed';
+            measureSourceLoop(cand, ink);
+            diag.cand.set(key(seed.id, r), {
+              gaps: [],
+              agreement: alongShare([...raster, raster[0]], cand.outer, 2.5),
+              seedMovedMm: movedMm,
+            });
+            out.set(seed.id, cand);
+            continue;
+          }
+        }
+        const loops = (set.bracketedOutlines ?? []).filter(({ label, chain }) => {
+          const c = set.chains[chain];
+          if (label !== run.sizes[r]?.label || !c?.closed || !sn.walls.includes(chain)) return false;
+          return hausdorffMm(c.pts, sn.outer) <= 2.5;
+        });
+        if (loops.length === 1) {
+          const c = set.chains[loops[0].chain];
+          if (hausdorffMm(c.pts, sn.outer) > 0.2) {
+            sn.outer = dist(c.pts[0], c.pts[c.pts.length - 1]) < 0.001 ? c.pts.slice(0, -1) : c.pts.slice();
+            sn.walls = [c.id];
+            sn.coverage = 1;
+            sn.p95Mm = 0;
+            sn.gaps = [];
+          }
+        }
+      }
       const outer = untail(
         signedArea(sn.outer) < 0 ? sn.outer.slice().reverse() : sn.outer,
         seed.id,
         r,
         rankFrom,
       );
+      if (rankFrom === 'innerPlug' && refusedLandings.length) {
+        const at = unsupportedLanding(outer, sn.walls, refusedLandings, r, overlayOf(), set, [
+          ...model.common,
+          ...model.byRank[r],
+        ]);
+        if (at) {
+          cand.outcome = 'leak';
+          cand.leakAt = at;
+          out.set(seed.id, cand);
+          continue;
+        }
+      }
       cand.outer = outer;
       cand.walls = sn.walls.filter((id) => id >= 0);
       // bridges the outline runs along are derived edges the operator must see
@@ -1468,6 +1580,53 @@ function fillOneSheet(
         const ex = expectedArea(sid, r);
         if (!c || c.outcome !== 'closed' || !c.derived?.length) continue;
         if (!ex || Math.abs(c.areaMm2 - ex.area) > ex.tol * ex.area) continue;
+        const cls = set.classes.find((k) => k.id === run.sizes[r]?.classId);
+        const key = cls?.evidence.find((e) => e.kind === 'declared-dash');
+        if (
+          key?.kind === 'declared-dash' &&
+          cls?.evidence.some((e) => e.kind === 'legend-sample') &&
+          !opts.variant &&
+          !userExcl.size &&
+          !edits.include?.length &&
+          !edits.bridges?.length
+        ) {
+          const pen = cls.chains
+            .map((id) => styleMap.get(set.chains[id]?.style))
+            .find((st) => st?.dash?.length === key.dash.length);
+          const seed = use.find((s) => s.id === sid)!;
+          const loop = pen && keyedDashLoop(sheet, key.dash, pen, seed.at);
+          const independent =
+            loop &&
+            !run.sizes.some(
+              (z, other) =>
+                other !== r &&
+                set.classes
+                  .find((k) => k.id === z.classId)
+                  ?.evidence.some(
+                    (e) =>
+                      e.kind === 'declared-dash' &&
+                      e.dash.length === key.dash.length &&
+                      e.dash.every((v, i) => Math.abs(v - key.dash[i]) <= 0.12 * key.dash[i]),
+                  ),
+            );
+          const witnesses =
+            loop &&
+            new Set(
+              cls.chains.flatMap((id) =>
+                set.chains[id].ranges.filter((p) => loop.paths.has(p.path)).map((p) => p.path),
+              ),
+            );
+          if (loop && independent && witnesses && witnesses.size >= 3) {
+            c.outer = signedArea(loop.pts) < 0 ? loop.pts.slice().reverse() : loop.pts;
+            c.bbox = bboxOf(c.outer);
+            c.areaMm2 = Math.abs(signedArea(c.outer));
+            c.walls = set.chains
+              .filter((ch) => ch.ranges.some((p) => loop.paths.has(p.path)))
+              .map((ch) => ch.id);
+            c.derived = [];
+            measureSourceCut(c, loop.paths);
+          }
+        }
         const list = cands.get(sid)!;
         const i = list.findIndex((x) => x.rank === r);
         if (i >= 0) list[i] = c;
@@ -1745,6 +1904,10 @@ function fillOneSheet(
       new Set([...dropped, ...(graded?.skip ?? [])]),
     );
   }
+  if (model.mode==='graded' && !solved && !graded?.walls && !opts.variant && !edits.include?.length && !edits.bridges?.length && !sheet.holes?.length && !set.assigned?.length) {
+    restoreSourceLoops(sheet,set,run,use,cands,excl,alongShare);
+    applyPrintedCuts(sheet,set,run,use,cands,excl,userExcl);
+  }
   // LADDER_RESCUE: a cell closed on a rescued ladder rung and off its family's trend is filled again
   // without the rung — after every closing pass (the state the dry run judged), before the leak
   // mouths (an opened cell gets one). Graded sheets on F4's own walls only.
@@ -1836,6 +1999,23 @@ function fillOneSheet(
     for (const f of sub.families) if (cands.has(f.seed)) cands.set(f.seed, f.candidates);
     (diag.subGrade ??= []).push(sub.diag);
   }
+  if (!solved && !opts.variant && !opts.only && !edits.include?.length && !edits.bridges?.length) {
+    restoreSourceOutlineFamilies(sheet, set, run, use, cands, excl);
+    if (!sheet.holes?.length && !set.assigned?.length && !graded?.walls) {
+      if (model.mode === 'graded') restoreTriangleStripContours(sheet, set, run, use, cands, userExcl, measureSourceCut);
+      if (model.mode === 'graded') restorePrintedMotifPolygons(sheet, set, run, use, cands, userExcl);
+      if (model.mode === 'graded') readPrintedMarkContours(sheet, set, run, use, cands, userExcl);
+      restoreMaskedMarkLoops(sheet, set, run, use, cands, excl);
+    }
+    if (!sheet.missing.length && !sheet.holes?.length && !userExcl.size && !set.assigned?.length) {
+      restoreBracketedStamps(sheet, set, run, use, cands, excl, measureSourceCut);
+      restoreRingPanels(sheet, set, run, use, cands, excl);
+      restoreFoldPanels(sheet, set, run, use, cands, excl, measureSourceCut);
+    }
+    if (model.mode === 'graded' && !graded?.walls && !sheet.holes?.length && !set.assigned?.length) {
+      readLabelledSourceFamilies(sheet, set, run, use, cands, excl);
+    }
+  }
   const families: PieceFamily[] = [];
   for (const s of use) {
     if (dropped.has(s.id)) continue;
@@ -1856,7 +2036,172 @@ function fillOneSheet(
         (diag.reversed ??= []).push(s.id);
       }
     }
+    // A recovered size can be the first measured neighbour of a closed raster detour.
+    if (
+      !solved &&
+      !opts.variant &&
+      !opts.only &&
+      !edits.include?.length &&
+      !edits.bridges?.length &&
+      !sheet.missing.length &&
+      !sheet.holes?.length &&
+      !userExcl.size &&
+      !set.assigned?.length
+    ) {
+      for (const candidate of c) {
+        if (
+          candidate.outcome !== 'leak' ||
+          !c.some((c) => c.rank < candidate.rank && c.outcome === 'closed')
+        )
+          continue;
+        const loop = registeredMarkLoop(sheet, set, run, candidate.rank, s.at, c);
+        if (
+          !loop ||
+          loop.walls.some((w) => excl.has(w)) ||
+          use.some((other) => other.id !== s.id && pointInPoly(other.at, loop.pts))
+        )
+          continue;
+        const area = signedArea(loop.pts);
+        candidate.outer = area < 0 ? loop.pts.reverse() : loop.pts;
+        candidate.areaMm2 = Math.abs(area);
+        candidate.bbox = bboxOf(candidate.outer);
+        candidate.walls = loop.walls;
+        candidate.outcome = 'closed';
+        candidate.rankFrom = 'class';
+        delete candidate.gradeRefusal;
+        delete candidate.leakAt;
+        measureSourceCut(candidate, loop.paths);
+      }
+    }
+    if (
+      model.mode === 'graded' &&
+      !sheet.missing.length &&
+      !sheet.holes?.length &&
+      !opts.variant &&
+      !userExcl.size &&
+      !edits.include?.length &&
+      !edits.bridges?.length
+    ) {
+      const anchors = c.filter((x) => x.outcome === 'closed' && !x.derived?.length);
+      for (const candidate of c) {
+        // A raster detour can leave a closed size longer than its next graded neighbour.
+        // Check it against a complete cycle of its own pen before replacing the cut.
+        const next = anchors.find((x) => x.rank === candidate.rank + 1);
+        const nextLength = next && perimeterOf(next.outer);
+        const closed =
+          nextLength !== undefined &&
+          perimeterOf(candidate.outer) > nextLength &&
+          candidate.outcome === 'closed' &&
+          candidate.rankFrom === 'class' &&
+          !candidate.derived?.length;
+        if (
+          !closed &&
+          (candidate.outcome !== 'leak' ||
+            !anchors.some((x) => x.rank < candidate.rank) ||
+            !anchors.some((x) => x.rank > candidate.rank))
+        )
+          continue;
+        const cls = set.classes.find((k) => k.id === run.sizes[candidate.rank]?.classId);
+        const key = cls?.evidence.find(
+          (e): e is Extract<typeof e, { kind: 'declared-dash' }> => e.kind === 'declared-dash',
+        );
+        const legend = cls?.evidence.find(
+          (e): e is Extract<typeof e, { kind: 'legend-sample' }> => e.kind === 'legend-sample',
+        );
+        const pen = legend && styleMap.get(set.chains[legend.chain]?.style);
+        let loop = closed
+          ? null
+          : clippedMarkLoop(sheet, set, run, candidate.rank, s.at) ??
+            ringStrokeLoop(sheet, set, run, candidate.rank, s.at);
+        if (
+          !loop &&
+          cls &&
+          key &&
+          pen &&
+          !run.sizes.some(
+            (size, index) =>
+              index !== candidate.rank &&
+              set.classes
+                .find((k) => k.id === size.classId)
+                ?.evidence.some(
+                  (e) =>
+                    e.kind === 'declared-dash' &&
+                    e.dash.length === key.dash.length &&
+                    e.dash.every((v, i) => Math.abs(v - key.dash[i]) <= 0.12 * key.dash[i]),
+                ),
+          )
+        ) {
+          const cycle = keyedDashLoop(sheet, key.dash, pen, s.at);
+          if (cycle) {
+            const walls = set.chains.filter((ch) => ch.ranges.some((p) => cycle.paths.has(p.path)));
+            const pitch = key.dash.reduce((sum, v) => sum + v, 0);
+            if (
+              walls.filter((ch) => cls.chains.includes(ch.id)).length >= 3 &&
+              (!closed ||
+                (perimeterOf(cycle.pts) < nextLength &&
+                  !selfIntersects(cycle.pts) &&
+                  hausdorffMm(candidate.outer, cycle.pts) > 3 * pitch))
+            )
+              loop = { pts: cycle.pts, walls: walls.map((ch) => ch.id) };
+          }
+        }
+        if (!loop || use.some((other) => other.id !== s.id && pointInPoly(other.at, loop.pts)))
+          continue;
+        const area = signedArea(loop.pts);
+        candidate.outer = area < 0 ? loop.pts.reverse() : loop.pts;
+        candidate.areaMm2 = Math.abs(area);
+        candidate.bbox = bboxOf(candidate.outer);
+        candidate.walls = loop.walls;
+        candidate.outcome = 'closed';
+        candidate.rankFrom = 'class';
+        candidate.derived = [];
+        delete candidate.leakAt;
+        measureSourceLoop(candidate, new LineIndex(itemsOf(set, loop.walls)));
+      }
+    }
     families.push({ seed: s.id, candidates: c, monotone: isMonotone(c) || ungraded(c) });
+  }
+  if (
+    !solved &&
+    model.mode === 'graded' &&
+    !opts.only &&
+    !opts.variant &&
+    !sheet.missing.length &&
+    !sheet.holes?.length &&
+    !userExcl.size &&
+    !set.assigned?.length &&
+    !edits.include?.length &&
+    !edits.bridges?.length
+  ) {
+    for (const seed of use) {
+      const family = families.find((f) => f.seed === seed.id);
+      if (!family) continue;
+      for (const c of family.candidates) {
+        const loop = readRepeatedMotifWalk(sheet, set, run, c, seed, use);
+        if (!loop || loop.walls.some((id) => excl.has(id))) continue;
+        const area = Math.abs(signedArea(loop.pts));
+        const smaller = family.candidates.find((x) => x.rank === c.rank - 1);
+        const larger = family.candidates.find((x) => x.rank === c.rank + 1);
+        if (
+          smaller?.outcome !== 'closed' ||
+          larger?.outcome !== 'closed' ||
+          area <= smaller.areaMm2 ||
+          area >= larger.areaMm2
+        )
+          continue;
+        c.outer = loop.pts;
+        c.bbox = bboxOf(loop.pts);
+        c.areaMm2 = area;
+        c.walls = loop.walls;
+        delete c.nest;
+        c.rankFrom = 'class';
+        measureSourceCut(c, loop.paths);
+        family.monotone = isMonotone(family.candidates);
+      }
+    }
+    recoverMaterialPanels(sheet, set, run, use, cands, measureSourceCut);
+    for (const f of families)
+      if (f.candidates.some((c) => c.materialMarkPaths)) f.monotone = isMonotone(f.candidates);
   }
   if (graded) diag.grade = graded;
   diag.ms = Date.now() - t0;

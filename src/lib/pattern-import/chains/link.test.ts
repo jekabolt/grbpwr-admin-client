@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import type { ChainOpts, IRPath, PtMm, Sheet, Style } from '../types';
 import { linkItems } from './link';
@@ -74,6 +74,62 @@ describe('pass 2b: trains of dashes', () => {
   it('leaves a pen that declares its dash to the tracker', () => {
     const declared: Style = { ...solid(1), dash: [6.1, 7.8] };
     expect(alive(row(every(8, 13.9), 0, 6.1, 1), true, [declared])).toHaveLength(8);
+  });
+});
+
+describe('pen split before a chain is mixed', () => {
+  /** Strokes of one operation, in order, `gap` mm between dashes. */
+  const operation = (lengths: number[], gap: number, op: number, x0 = 0) => {
+    let x = x0;
+    let sub = 0;
+    return lengths.map((len) => {
+      const p: IRPath = {
+        id: sub,
+        pts: [
+          { x, y: 0 },
+          { x: x + len, y: 0 },
+        ],
+        closed: false,
+        style: 0,
+        src: { file: '0', page: 0, op, sub: sub++ },
+      };
+      x += len + gap;
+      return p;
+    });
+  };
+  const linked = (paths: IRPath[]) =>
+    linkItems({ paths, styles: [solid()], poses: [], texts: [], rasters: [] } as unknown as Sheet, {
+      ...OPTS,
+    }).chains.filter((c) => !c.dead);
+
+  afterEach(() => {
+    delete process.env.SPLIT_PEN_OFF;
+  });
+
+  it('cuts one operation where a settled dash changes length', () => {
+    const chains = linked(operation([6, 6, 6, 6, 10, 10, 10, 10], 4, 1));
+    expect(chains).toHaveLength(2);
+    expect(chains.map((c) => c.items.length).sort()).toEqual([4, 4]);
+  });
+
+  it('keeps a dash-dot period as one chain', () => {
+    const period = [6, 1.8, 1.2, 6, 1.8, 1.2, 6, 1.8, 1.2];
+    expect(linked(operation(period, 2, 1))).toHaveLength(1);
+  });
+
+  it('joins the same pen across a 2 mm seam and refuses a different pen there', () => {
+    const same = linked([...operation([6, 6, 6, 6], 4, 1), ...operation([6, 6, 6, 6], 4, 2, 38)]);
+    expect(same).toHaveLength(1);
+    const other = linked([
+      ...operation([6, 6, 6, 6], 4, 3),
+      ...operation([10, 10, 10, 10], 4, 4, 38),
+    ]);
+    expect(other).toHaveLength(2);
+  });
+
+  it('joins the length change when SPLIT_PEN_OFF=1', () => {
+    process.env.SPLIT_PEN_OFF = '1';
+    expect(linked(operation([6, 6, 6, 6, 10, 10, 10, 10], 4, 1))).toHaveLength(1);
   });
 });
 

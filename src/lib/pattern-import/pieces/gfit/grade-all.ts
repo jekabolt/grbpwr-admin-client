@@ -169,8 +169,7 @@ function mapPair(A0: readonly PtMm[], PR: readonly PtMm[], Po: readonly PtMm[]):
     const dx = b.x - a.x;
     const dy = b.y - a.y;
     const l2 = dx * dx + dy * dy;
-    const u =
-      l2 > 1e-12 ? Math.max(0, Math.min(1, ((q.x - a.x) * dx + (q.y - a.y) * dy) / l2)) : 0;
+    const u = l2 > 1e-12 ? Math.max(0, Math.min(1, ((q.x - a.x) * dx + (q.y - a.y) * dy) / l2)) : 0;
     return { d: Math.hypot(q.x - a.x - u * dx, q.y - a.y - u * dy), u };
   };
   for (const q of A0) {

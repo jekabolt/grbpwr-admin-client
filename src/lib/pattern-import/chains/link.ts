@@ -7,12 +7,14 @@
 // Pass 2 (tracker): chain ENDS are joined along the line direction (viola: every dash its own path;
 //   tile seams everywhere). A join needs: gap ≤ joinGapMm, the two end tangents within joinAngleDeg,
 //   the lateral offset from the mean direction ≤ joinLateralMm (+ seam slack), the same backbone
-//   style, and no solid↔dashed mix. Candidates are taken cheapest first, one per end per round.
+//   style, and no solid↔dashed mix. A run whose dash and gap have settled does not take a stroke
+//   of another pen (SPLIT_PEN_OFF=1 joins as before). Candidates are taken cheapest first, one
+//   per end per round.
 // Pass 3 (decor): free beads (ticks, rings, dots) within decorMm of a chain become its decoration;
 //   they never extend the geometry but they are part of the line's look (motif).
 import type { ChainOpts, PathRange, PtMm, Sheet, Style } from 'lib/pattern-import/types';
 
-import { dist, PtGrid, SegGrid, segNearest } from './geom';
+import { dist, median, PtGrid, SegGrid, segNearest } from './geom';
 import { itemOf, type Item } from './primitives';
 
 export type Link = { it: Item; rev: boolean };
@@ -210,6 +212,74 @@ function cornerJump(ch: WChain, next: Link): boolean {
   return dq >= 0.6 && ((q.x - p.x) * ux + (q.y - p.y) * uy) / dq >= cosMax;
 }
 
+/** Off: a settled dash run may be linked to a stroke of another pen. */
+const splitPenOff = () => typeof process !== 'undefined' && !!process.env?.SPLIT_PEN_OFF;
+
+/** Same tolerance classify.ts uses to call two dashes one pen: 6 %, at least 0.3 mm. */
+const nearPen = (a: number, b: number) => Math.abs(a - b) <= Math.max(0.3, 0.06 * Math.max(a, b));
+
+/** Drawn strokes of a chain, in order, and the gap before each one after the first. */
+function penSeq(ch: WChain): { pieces: number[]; gaps: number[] } {
+  const pieces: number[] = [];
+  const gaps: number[] = [];
+  let prev: PtMm | null = null;
+  for (const l of ch.items) {
+    if (l.it.kind === 'bead') continue;
+    const pts = linkPts(l);
+    if (!pts.length) continue;
+    if (prev) gaps.push(dist(prev, pts[0]));
+    prev = pts[pts.length - 1];
+    pieces.push(l.it.len);
+  }
+  return { pieces, gaps };
+}
+
+/**
+ * A pen that has settled: three dashes and two gaps of one length. A dash-dot period does not
+ * settle here (its pieces differ), so this never cuts one pen into its elements.
+ */
+function settledPen(pieces: number[], gaps: number[]): [number, number] | null {
+  if (pieces.length < 3 || gaps.length < 2) return null;
+  const tail = pieces.slice(-3);
+  const gtail = gaps.slice(-2);
+  if (!tail.every((v) => nearPen(v, tail[0])) || !gtail.every((v) => nearPen(v, gtail[0])))
+    return null;
+  return [median(tail), median(gtail)];
+}
+
+const fitsPen = (pen: [number, number], len: number, gap: number) =>
+  nearPen(pen[0], len) && nearPen(pen[1], gap);
+
+/** True when `len` across `gap` is a different pen from the run `ch` already is. */
+function penBreak(ch: WChain, len: number, gap: number): boolean {
+  if (splitPenOff() || gap <= LINK.dashGapMm || len < 1) return false;
+  const { pieces, gaps } = penSeq(ch);
+  // one solid stroke does not grow a dash
+  if (pieces.length === 1 && pieces[0] >= 15 && len < pieces[0] * 0.5) return true;
+  const pen = settledPen(pieces, gaps);
+  return !!pen && !fitsPen(pen, len, gap);
+}
+
+/** True when two chains have each settled into a pen and the pens are not the same. */
+function pensDiffer(a: WChain, b: WChain, gap: number): boolean {
+  if (splitPenOff()) return false;
+  const pa = settledPen(penSeq(a).pieces, penSeq(a).gaps);
+  const pb = settledPen(penSeq(b).pieces, penSeq(b).gaps);
+  if (pa && pb) return !(nearPen(pa[0], pb[0]) && nearPen(pa[1], pb[1]));
+  if (pa) return !runFits(pa, b, gap);
+  if (pb) return !runFits(pb, a, gap);
+  return false;
+}
+
+/** Every stroke of `ch` is an element of `pen`. `gap` is the gap at the join, before its first. */
+function runFits(pen: [number, number], ch: WChain, gap: number): boolean {
+  const { pieces, gaps } = penSeq(ch);
+  if (!pieces.length) return true;
+  if (!fitsPen(pen, pieces[0], gap)) return false;
+  for (let i = 1; i < pieces.length; i++) if (!fitsPen(pen, pieces[i], gaps[i - 1])) return false;
+  return true;
+}
+
 /** Internal gap count above dashGapMm, and total length of drawn items. */
 function dashStats(ch: WChain) {
   let gaps = 0;
@@ -327,7 +397,8 @@ export function linkItems(sheet: Sheet, opts: ChainOpts): LinkResult {
             ].sort((x, y) => x.g - y.g)[0];
             if (
               opts4.g <= LINK.opGapMm &&
-              !markJump({ it: f.it, rev: opts4.frev }, { it, rev: opts4.rev })
+              !markJump({ it: f.it, rev: opts4.frev }, { it, rev: opts4.rev }) &&
+              !penBreak(cur, it.len, opts4.g)
             ) {
               f.rev = opts4.frev;
               cur.items.push({ it, rev: opts4.rev });
@@ -337,7 +408,11 @@ export function linkItems(sheet: Sheet, opts: ChainOpts): LinkResult {
             const e = chainEnd(cur, 1);
             const g0 = dist(e, a);
             const g1 = dist(e, b);
-            if (Math.min(g0, g1) <= LINK.opGapMm && !cornerJump(cur, { it, rev: g1 < g0 })) {
+            if (
+              Math.min(g0, g1) <= LINK.opGapMm &&
+              !cornerJump(cur, { it, rev: g1 < g0 }) &&
+              !penBreak(cur, it.len, Math.min(g0, g1))
+            ) {
               cur.items.push({ it, rev: g1 < g0 });
               continue;
             }
@@ -422,6 +497,7 @@ export function linkItems(sheet: Sheet, opts: ChainOpts): LinkResult {
         if ((A.solidLong && B.dashed) || (B.solidLong && A.dashed)) {
           if (g > 0.05) return;
         }
+        if (pensDiffer(chains[A.ch], chains[B.ch], g)) return;
         const align = -(A.t.x * B.t.x + A.t.y * B.t.y);
         if (align < cosMax) return;
         let mx = A.t.x - B.t.x;

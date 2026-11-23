@@ -131,7 +131,6 @@ import {
 } from '../sizes/map';
 import { fileSizeLabel } from '../sizes/recover';
 import {
-  applyPieceEdits,
   applyWallEdits,
   isWallEdit,
   pageLabels,
@@ -150,14 +149,14 @@ import { pointInPoly } from '../pieces/geom';
 import { asidesOf, blobOf, faceMap, faceSeedsOf, type FaceMap } from '../pieces/faces';
 import { dartLegsDrawn, provenDarts } from '../pieces/darts';
 import { codeTextSeeds } from '../pieces/seeds';
-import { exceptNested } from '../pieces/fill';
-import { cleanNotchMarks } from '../pieces/notch-marks';
+import { recoverAutomaticGaps } from '../pieces/automatic-gap';
+import { finalizePieces } from '../pieces/finalize';
 import { sheetModule, undrawnRanks } from '../pieces/walls';
 import { sheetCoverOf, sheetLegend, sheetPieces } from '../pieces/sheets';
 import { tileSheetIds } from '../assemble';
 import { chainView, joinSheetChains, partAt, sheetView } from '../assemble/composite';
 import { acceptMissing, missingEvidence } from '../assemble/holes';
-import { holeChainEnds, holeGuard } from '../pieces/holes';
+import { holeChainEnds } from '../pieces/holes';
 import { setAsideEvidenceOf } from '../pieces/aside-evidence';
 import {
   allowanceFromTexts,
@@ -166,7 +165,7 @@ import {
   detectAllowance,
   type SemanticsDetail,
 } from '../semantics';
-import { planScopes, proposeFabricsDetailed, purposeWord } from '../fabrics';
+import { isLiningScope, planScopes, proposeFabricsDetailed, purposeWord } from '../fabrics';
 import { cardRules } from './card-rules';
 import { ImportError, cancelled, stageUnavailable } from './errors';
 import { chainPreviewOf, previewOf } from './preview';
@@ -416,6 +415,7 @@ export class Session {
   private passport: GarmentPassport | null = null;
   private passportBound: GarmentPassport | null = null;
   /** Source walls per written identity × rank (F5) — what the gate measures the cut line against. */
+  private liningSemantics: SemanticsDetail | null = null;
   private wallsOf: SemanticsDetail['wallsOf'] | null = null;
   /** The outlines' derived edges per written identity × rank (F14b): gate G15, never walls. */
   private derivedOf: SemanticsDetail['derivedOf'] | null = null;
@@ -558,6 +558,7 @@ export class Session {
     }
     if (at < ORDER.indexOf('semantics')) {
       this.semantics = null;
+      this.liningSemantics = null;
       this.wallsOf = null;
       this.derivedOf = null;
       this.notchChordsOf = null;
@@ -1578,24 +1579,18 @@ export class Session {
     this.pieceWallEdits = wallEdits;
     this.pieceKey = key;
     const set = base;
-    let families = ps.families;
     const edits = input.edits.filter((e) => !isWallEdit(e));
-    if (edits.length)
-      families = applyPieceEdits(families, edits, {
-        sheet,
-        set,
-        run,
-        opts,
-        walls: ps.walls,
-      });
-    // A2: a face seed whose region the fill finds open in every size stays — an open outline is a
-    // question (close the gap, or not a piece), not a deletion. A piece drawn inside another is its
-    // own piece: its lines are not the host's internal lines.
-    families = exceptNested(families);
-    // UXHOOKS (D3): no piece closes across a missing page accepted as blank
-    families = holeGuard(families, set, sheet.holes);
-    // SHAPE: a notch mark on the line is a notch, never outline (pieces/notch-marks.ts)
-    families = cleanNotchMarks(families, set);
+    const finalize = edits.length
+      ? (state: PieceSession) => finalizePieces(state, edits)
+      : finalizePieces;
+    let families =
+      this.files.every((f) => f.kind === 'pdf') &&
+      !this.traced() &&
+      (typeof process !== 'undefined' && process.versions?.node
+        ? process.env?.AUTO_GAP_OFF !== '1'
+        : import.meta.env?.VITE_PATTERN_IMPORT_AUTO_GAP === '1')
+        ? recoverAutomaticGaps(ps, () => ctx.checkCancel(), finalize)
+        : finalize(ps);
     // VARIANTS: the pieces a model's own label block claims (D3: inside exactly one piece AND
     // beside its texts), read afresh on this run's fill — a claimed piece is left out of another
     // model's run. A seed with a model of its own (the operator's, or a label by its number) or a
@@ -1848,6 +1843,7 @@ export class Session {
         }
       : detail.output;
     this.semantics = output;
+    this.liningSemantics = detail.lining ?? null;
     this.wallsOf = detail.wallsOf;
     this.derivedOf = detail.derivedOf;
     this.notchChordsOf = detail.notchChordsOf;
@@ -2157,6 +2153,22 @@ export class Session {
     for (const sp of plan.scopes) {
       ctx.checkCancel();
       const scope = sp.target;
+      const lining = isLiningScope(scope) ? this.liningSemantics : null;
+      const sourceId = (id: string) => sp.sourceOf[id] ?? id;
+      const scopeWalls = lining?.wallsOf ?? rawWalls;
+      const scopeDerived = lining?.derivedOf ?? derived,
+        scopeChords = lining?.notchChordsOf ?? chords;
+      const scopeContinuity = lining?.continuityOf ?? continuity,
+        scopeIdentity = lining?.identityOf ?? identity;
+      const scopeOnePiece = this.fast ? null : lining?.onePieceOf ?? onePiece,
+        scopeGrade = this.fast ? null : lining?.gradeOf ?? grade;
+      const liningUsed = (id: string, rank: number) => {
+        const spec = sp.specs.find((p) => p.identity === id);
+        const size = spec?.sizes.find((z) => z.rank === rank);
+        const walls = scopeWalls?.(sourceId(id), rank);
+        if (!walls || !spec || !size) return walls;
+        return wallsUsedBy(walls, spec.allowance.meaning === 'seam' ? size.seam : size.cut);
+      };
       ctx.progress(k++, plan.scopes.length, scope.label);
       const res = await writeAndGate(
         {
@@ -2174,16 +2186,20 @@ export class Session {
         {
           rules: cardRules,
           sizeTokens,
-          wallsOf: rawWalls ? (id, rank) => rawWalls(sp.sourceOf[id] ?? id, rank) : undefined,
-          wallsUsedOf: wallsUsed ? (id, rank) => wallsUsed(sp.sourceOf[id] ?? id, rank) : undefined,
-          derivedOf: derived ? (id, rank) => derived(sp.sourceOf[id] ?? id, rank) : undefined,
-          notchChordsOf: chords ? (id, rank) => chords(sp.sourceOf[id] ?? id, rank) : undefined,
-          continuityOf: continuity
-            ? (id, rank) => continuity(sp.sourceOf[id] ?? id, rank)
+          wallsOf: scopeWalls ? (id, rank) => scopeWalls(sourceId(id), rank) : undefined,
+          wallsUsedOf: lining
+            ? liningUsed
+            : wallsUsed
+              ? (id, rank) => wallsUsed(sp.sourceOf[id] ?? id, rank)
+              : undefined,
+          derivedOf: scopeDerived ? (id, rank) => scopeDerived(sourceId(id), rank) : undefined,
+          notchChordsOf: scopeChords ? (id, rank) => scopeChords(sourceId(id), rank) : undefined,
+          continuityOf: scopeContinuity
+            ? (id, rank) => scopeContinuity(sourceId(id), rank)
             : undefined,
-          identityOf: identity ? (id, rank) => identity(sp.sourceOf[id] ?? id, rank) : undefined,
-          onePieceOf: onePiece ? (id, rank) => onePiece(sp.sourceOf[id] ?? id, rank) : undefined,
-          gradeOf: grade ? (id, rank) => grade(sp.sourceOf[id] ?? id, rank) : undefined,
+          identityOf: scopeIdentity ? (id, rank) => scopeIdentity(sourceId(id), rank) : undefined,
+          onePieceOf: scopeOnePiece ? (id, rank) => scopeOnePiece(sourceId(id), rank) : undefined,
+          gradeOf: scopeGrade ? (id, rank) => scopeGrade(sourceId(id), rank) : undefined,
           chrome,
           openFolds,
           ...(sheets ? { sheets } : {}),

@@ -527,6 +527,7 @@ export function assembleSheetDetailed(
       : {}),
     overview,
     paths: pl.paths,
+    ...(pl.materialMarks?.length ? { materialMarks: pl.materialMarks } : {}),
     texts: pl.texts,
     rasters: pl.rasters,
     styles: pl.styles,

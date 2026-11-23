@@ -9,6 +9,7 @@
 // unbacked length). Stretches with no wall in reach keep the raster samples (unbacked too).
 import type { ChainId, PtMm } from 'lib/pattern-import/types';
 
+import { collapsedCircuit } from './collapsed-circuit';
 import { dist, quantile, resample, SegGrid, segIntersect, segNearest } from './geom';
 
 /** A wall as the fill used it: a chain, or a stretch of one (a shared portion of a size line). */
@@ -227,8 +228,9 @@ export function snapOutline(raster: PtMm[], items: WallItem[], o: SnapOpts): Sna
     const hb = rn.hits[0];
     return crossNear(idx.pl[ri.item], idx.pl[rn.item], ha.q, hb.q, 4);
   });
-  const outer: PtMm[] = [];
-  const wallIds: ChainId[] = [];
+  let outer: PtMm[] = [];
+  const laps: { item: number; forward: boolean }[] = [];
+  let wallIds: ChainId[] = [];
   const push = (p: PtMm) => {
     const last = outer[outer.length - 1];
     if (last && dist(last, p) < 1e-6) return;
@@ -250,9 +252,26 @@ export function snapOutline(raster: PtMm[], items: WallItem[], o: SnapOpts): Sna
     const jn = joints[i];
     if (jp) a = idx.near(r.item, jp, a);
     if (jn) b = idx.near(r.item, jn, b);
+    const travel = hs[hs.length - 1] - hs[0];
+    if (
+      jp &&
+      jn &&
+      idx.items[r.item].closed &&
+      Math.abs(a - b) < 1e-6 &&
+      Math.abs(travel) > idx.per[r.item] / 2
+    )
+      laps.push({ item: r.item, forward: travel > 0 });
     for (const p of idx.stretch(r.item, a, b)) push(p);
     if (!wallIds.length || wallIds[wallIds.length - 1] !== idx.items[r.item].chain)
       wallIds.push(idx.items[r.item].chain);
+  }
+  if (outer.length === 1 && laps.length === 1) {
+    const { item, forward } = laps[0];
+    const ring = collapsedCircuit(raster, items, item, forward, o.stepMm, o.reachMm);
+    if (ring) {
+      outer = ring;
+      wallIds = [items[item].chain];
+    }
   }
   if (wallIds.length > 1 && wallIds[0] === wallIds[wallIds.length - 1]) wallIds.pop();
   // coverage: share of outline length within snapMm of a wall (sampled every 0.5 mm); p95 over the

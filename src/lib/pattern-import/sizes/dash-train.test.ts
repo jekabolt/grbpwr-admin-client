@@ -194,6 +194,57 @@ describe('adoptDashTrains', () => {
     expect(got.size).toBe(0);
   });
 
+  it('takes a proven train past a beside neighbour that ends at its third dash (Leah 18)', () => {
+    const chains = scene(6.2, 1.3, 3.6, 5);
+    // size 1 runs beside, 2.2 mm across, and ENDS at the third dash (its line breaks there too)
+    const third = 40 + 1.3 + 2 * (6.2 + 3.6);
+    chains.push(line(40, { x: 0, y: 2.2 }, { x: third + 1, y: 2.2 }));
+    const rh = new Map([
+      [0, LEAH18],
+      [1, { draws: [3], gaps: [2] }],
+    ]);
+    const got = adopt(chains, rh, [
+      [0, 0],
+      [6, 1],
+    ]);
+    expect([...got.keys()].sort()).toEqual([1, 2, 3, 4, 5]);
+    // a train that ENDS at the neighbour's end runs up to a joint: it stops before that dash
+    const short = scene(6.2, 1.3, 3.6, 3);
+    short.push(line(40, { x: 0, y: 2.2 }, { x: third + 1, y: 2.2 }));
+    expect(
+      [
+        ...adopt(short, rh, [
+          [0, 0],
+          [4, 1],
+        ]).keys(),
+      ].sort(),
+    ).toEqual([1, 2]);
+  });
+
+  it('takes a row of identical dashes past a rival whose pen has several draws (Leah 24 vs 6)', () => {
+    const twentyFour: Rhythm = { draws: [3.75], gaps: [3.5, 1, 1, 1.5], span: 7 };
+    const six: Rhythm = { draws: [3.75, 3, 1.75], gaps: [1.75, 1.5, 4], span: 4 };
+    const rh = new Map([
+      [0, twentyFour],
+      [1, six],
+    ]);
+    // the host ends on a dot: 1.4 mm to the first dash, then 3.57 mm dashes 4.93 apart
+    const row = scene(3.57, 1.4, 4.93, 5);
+    expect(adopt(row, rh).size).toBe(5);
+    // two dashes prove nothing: the rival stays a rival
+    expect(adopt(scene(3.57, 1.4, 4.93, 2), rh).size).toBe(0);
+    // a rival with ONE draw of that length and this gap still decides (Cassandra)
+    const same = new Map([
+      [0, twentyFour],
+      [1, { draws: [3.75], gaps: [4.9], span: 4.9 } as Rhythm],
+    ]);
+    expect(adopt(scene(3.57, 1.4, 4.93, 5), same).size).toBe(0);
+    // dashes of different lengths are no train of one pen
+    const mixed = scene(3.57, 1.4, 4.93, 5);
+    mixed[3] = line(3, mixed[3].pts[0], { x: mixed[3].pts[0].x + 3.1, y: 0 });
+    expect(adopt(mixed, rh).size).toBe(0);
+  });
+
   it('reads a line extended at its start by its own geometry, not shifted (wall index)', () => {
     // A runs +x from 40 and takes a train BEFORE its start (its pts grow at the front)
     const chains: Chain[] = [line(0, { x: 40, y: 0 }, { x: 100, y: 0 })];
@@ -227,7 +278,11 @@ describe('rhythms', () => {
     expect(rhythmOfMotif([6, 3.75, 0, 1.75, 0, 1.25])).toEqual({
       draws: [6],
       gaps: [3.75, 1.75, 1.25],
+      // from the end of the dash to the next dash, over both dots
+      span: 6.75,
     });
+    // several draws: the longest way between two of them
+    expect(rhythmOfMotif([3.75, 1.75, 3, 1.5, 1.75, 4])?.span).toBe(4);
     expect(rhythmOfMotif(null)).toBeNull();
     expect(rhythmOfMotif([0, 1.25])).toBeNull();
   });
@@ -252,6 +307,6 @@ describe('rhythms', () => {
       len,
     );
     // 0 and 1 are one pen at two tile scales (one 0.5 mm key): the longer one is the reference
-    expect(got.get(5)).toEqual({ draws: [6], gaps: [3.75] });
+    expect(got.get(5)).toEqual({ draws: [6], gaps: [3.75], span: 3.75 });
   });
 });

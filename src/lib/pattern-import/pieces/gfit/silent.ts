@@ -76,7 +76,8 @@ function samples(p: readonly PtMm[], step: number): PtMm[] {
     const b = p[(i + 1) % p.length];
     const L = Math.hypot(b.x - a.x, b.y - a.y);
     const k = Math.max(1, Math.ceil(L / step));
-    for (let j = 0; j < k; j++) out.push({ x: a.x + ((b.x - a.x) * j) / k, y: a.y + ((b.y - a.y) * j) / k });
+    for (let j = 0; j < k; j++)
+      out.push({ x: a.x + ((b.x - a.x) * j) / k, y: a.y + ((b.y - a.y) * j) / k });
   }
   return out;
 }
@@ -112,7 +113,11 @@ export function onShare(a: readonly PtMm[], b: readonly PtMm[], tol: number, ste
 }
 
 /** Two closed rings are one outline: symmetric Hausdorff ≤ tol (cheap box/area screen first). */
-export function oneOutline(a: readonly PtMm[], b: readonly PtMm[], tol = SIZE_RUN.collapseMm): boolean {
+export function oneOutline(
+  a: readonly PtMm[],
+  b: readonly PtMm[],
+  tol = SIZE_RUN.collapseMm,
+): boolean {
   if (a.length < 3 || b.length < 3) return false;
   const A = bboxOf(a);
   const B = bboxOf(b);
@@ -277,7 +282,11 @@ export type GradeResult = {
 };
 
 const residOf = (v: GfitFamily['sizes'][number]) =>
-  Math.max(0, ...v.points.filter((x) => x.strong).map((x) => x.resid), ...v.edges.map((e) => e.p95));
+  Math.max(
+    0,
+    ...v.points.filter((x) => x.strong).map((x) => x.resid),
+    ...v.edges.map((e) => e.p95),
+  );
 
 /** Weighted median of (value, weight). */
 function wmedian(xs: { v: number; w: number }[]): number {
@@ -298,10 +307,7 @@ function wmedian(xs: { v: number; w: number }[]): number {
  * break at a rank = the step-weighted median of b there (big pieces carry it; P0's plain median of
  * scores was dragged down by small pieces: Forrest 9 of 15 families < 0.35 at 12/14).
  */
-export function sheetBreaks(
-  fams: readonly GfitFamily[],
-  k = GRADE_HOLD,
-): Map<number, number> {
+export function sheetBreaks(fams: readonly GfitFamily[], k = GRADE_HOLD): Map<number, number> {
   const per = new Map<number, { v: number; w: number }[]>();
   for (const f of fams) {
     if (!f.model || !(f.stepMm >= k.breakMinStepMm)) continue;
@@ -317,8 +323,7 @@ export function sheetBreaks(
   const out = new Map<number, number>();
   if (!med.size) return out;
   const typical = median([...med.values()]);
-  for (const [r, m] of med)
-    if (m >= k.breakMin && m >= k.breakOverTypical * typical) out.set(r, m);
+  for (const [r, m] of med) if (m >= k.breakMin && m >= k.breakOverTypical * typical) out.set(r, m);
   return out.size > k.breakMax ? new Map() : out;
 }
 
@@ -445,15 +450,17 @@ export function gradeVerdicts(
         ? offStretch(fam, v, outer, f.lines.own(v.rank), f.lines.neighbour(v.rank), k)
         : undefined;
       const onNeighbour = !!off && off.lenMm >= k.farMinMm && off.neighbour >= k.offOnNeighbour;
-      const cause = onNeighbour ? 'neighbour' : v.cause === 'neighbour' ? 'other' : v.cause ?? 'other';
+      const cause = onNeighbour
+        ? 'neighbour'
+        : v.cause === 'neighbour'
+          ? 'other'
+          : v.cause ?? 'other';
       if (shortJog && cause !== 'neighbour') continue;
       let own: number | undefined;
       let hold = false;
       if (cause === 'neighbour') {
         own = outer ? ownAtPrediction(fam, v, outer, f.lines.own(v.rank), k) : undefined;
-        hold =
-          (shortJog || resid >= floorMm) &&
-          (!excused || (own ?? 0) >= k.ownAtPrediction);
+        hold = (shortJog || resid >= floorMm) && (!excused || (own ?? 0) >= k.ownAtPrediction);
       }
       verdicts.push({
         seed: f.seed,

@@ -26,6 +26,7 @@ import { rolesByFaces, type FaceRoleOpts, type FaceSizeCtx } from './face-role';
 import { rolesByLayer } from './layer-role';
 import { overlaidFiles } from './link';
 import { makeChains } from './make';
+import { recoverRingPanels } from './ring-boundary';
 import { seamPens, type SeamPen } from './seam';
 
 export const DEFAULT_CHAIN_OPTS: ChainOpts = {
@@ -104,6 +105,7 @@ function buildOnce(
     styles,
     { aama: extras.aamaLayers },
   );
+  recoverRingPanels(sheet, set);
   progress?.(3, 3);
   return { set, recover: rec };
 }
@@ -301,6 +303,7 @@ function toChainSet(
     orphans: rec.orphans,
     ambiguities: noSizes ? rec.ambiguities.filter((a) => !sizeQs.has(a.kind)) : rec.ambiguities,
     warnings,
+    ...(rec.bracketedOutlines?.length && !noSizes ? { bracketedOutlines: rec.bracketedOutlines } : {}),
     ...(rec.cornerWalls?.length && !noSizes ? { cornerWalls: rec.cornerWalls } : {}),
     ...(byWhy.get(LABEL_FRAME_WHY)?.length ? { labelFrames: byWhy.get(LABEL_FRAME_WHY) } : {}),
   };

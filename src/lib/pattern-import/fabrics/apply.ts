@@ -486,10 +486,8 @@ export async function applyDraft(
     // T3: the rows are the saved card's — the card saved; a later write is what is owed.
     const landed = fine
       ? null
-      : (deps.landed?.([
-          ...uploaded.map((u) => u.url),
-          ...plan.replaced.map((r) => r.newUrl),
-        ]) ?? null);
+      : deps.landed?.([...uploaded.map((u) => u.url), ...plan.replaced.map((r) => r.newUrl)]) ??
+        null;
     if (landed) {
       deps.unsaved?.set(false);
       return {

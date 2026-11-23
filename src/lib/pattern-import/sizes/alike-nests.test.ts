@@ -110,3 +110,37 @@ describe('rankAlikeNests', () => {
     expect([...rankOf]).toEqual(before);
   });
 });
+
+it('certifies a shared baseline from the two adjacent identified outlines', () => {
+  const { styles, samples, keyRank } = scene();
+  keyRank.set('10', 13);
+  const chains = [
+    square(0, 100, 0),
+    square(1, 105, 1),
+    square(2, 110, 2),
+    square(3, 150, 1),
+    square(4, 1, 1),
+    square(5, 1, 1),
+  ];
+  for (const c of chains) {
+    const base = c.pts[0];
+    c.pts = c.pts.map((p) => ({ x: p.x - base.x, y: p.y - base.y }));
+  }
+  const rankOf = new Map([
+    [0, 4],
+    [2, 6],
+  ]);
+  const certified: number[] = [];
+  rankAlikeNests({
+    chains,
+    styles,
+    samples,
+    keyRank,
+    rankOf,
+    candidate: (i) => i < 4,
+    anchorRank: (i) => rankOf.get(i),
+    onBracket: (i) => certified.push(i),
+  });
+  expect(certified).toEqual([1]);
+  expect(rankOf.get(1)).toBe(5);
+});

@@ -29,6 +29,7 @@ import {
   Text,
   EmptyCell,
 } from 'ui';
+import { bboxOf } from 'lib/pattern-import/pieces/geom';
 import { sheetAnswerEdits, sheetQuestion } from 'lib/pattern-import/pieces/sheets';
 import { cn } from 'lib/utility';
 import { SHEET_INK, SheetViewport, f32Attr, inside, ptsAttr, vy } from '../sheet-viewport';
@@ -57,9 +58,7 @@ import type { CardContext } from '../client';
 import { DroppedLabels } from './not-in-file';
 import {
   AsideSilhouette,
-  GapCrop,
   ModelThumb,
-  findGap,
   asideOutline,
   asideTouch,
   OutlineTile,
@@ -68,7 +67,7 @@ import {
   faceOutline,
   ownChains,
 } from './pieces-guide';
-import type { AsideTouch, GapGuess, TouchPart } from './pieces-guide';
+import type { AsideTouch, TouchPart } from './pieces-guide';
 
 type Tool = 'pan' | 'seed' | 'bridge' | 'wall' | 'ignore' | 'lasso' | 'reseed';
 
@@ -458,6 +457,19 @@ type AsideAnswer = 'yes' | 'no' | { join: number };
 /** A checklist row as it was last seen open: a fixed one keeps its words, greyed, with a ✓. */
 type SeenRow = { order: number; label: string; seed?: number };
 
+/** Explain the first documented reason that this size could not be reconstructed. */
+function leakReason(c: PieceCandidate): string {
+  if (c.gapOptions?.length) return 'The highlighted segments show where each outline closes.';
+  const why = c.gradeHint?.refusals[0] ?? c.gradeTryWhy?.[0];
+  if (why === 'not-bracketed')
+    return 'Reconstruction needs a confirmed smaller and larger outline for this piece.';
+  if (why?.startsWith('E1'))
+    return 'Too little of the outline could be traced to lines for this size.';
+  if (why?.startsWith('E2'))
+    return 'The lines for this size leave an unsupported stretch at the gap.';
+  return 'The lines on the sheet could not confirm a closed cut for this size.';
+}
+
 export function PiecesStep({
   api,
   card,
@@ -524,8 +536,6 @@ export function PiecesStep({
     answers: new Map<number, AsideAnswer>(),
     /** How many answers are being applied right now (0 = none). */
     committing: 0,
-    /** A bridge just sent: it must close that piece in that size (`at` = the edits after it). */
-    gapCheck: null as { seed: number; rank: number; at: number; auto: boolean } | null,
     /** The last send of the quiz failed: its answers are kept, «try again» sends them again. */
     applyFailed: false,
     /** A send that failed half way: the edit list before it, and the outlines it brought back. */
@@ -1252,55 +1262,6 @@ export function PiecesStep({
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoNext?.key, session.busy]);
-  // The fill already joined ends that continue one stroke. What is still open here is a gap the
-  // parser did not take: the card shows it, and one click closes that one.
-  const ignoredNow = new Set(
-    inputs.edits.flatMap((e) => (e.kind === 'ignore-line' ? [e.chain] : [])),
-  );
-  const gapOf = (seed: number, c: PieceCandidate) => {
-    if (!c.leakAt) return null;
-    const key = `g${seed}:${c.rank}:${inputs.edits.length}`;
-    const m = asideCache();
-    // only the ends of the leaking outline's own walls: a gap in THIS piece, not a line nearby
-    if (!m.has(key)) m.set(key, findGap(c.leakAt, pv, ignoredNow, 40, new Set(c.walls)));
-    return m.get(key) as GapGuess | null;
-  };
-  /**
-   * The size a bridge serves: the leaking size, unless every exported size leaks through that
-   * same gap (both ends within half a millimetre) — then every size.
-   */
-  const gapRank = (f: PieceFamily, c: PieceCandidate, g: GapGuess): number | null => {
-    const exp = f.candidates.filter((x) => isExp(x.rank));
-    const near = (p: PtMm, q: PtMm) => Math.hypot(p.x - q.x, p.y - q.y) <= 0.5;
-    const all =
-      exp.length > 0 &&
-      exp.every((x) => {
-        if (x.outcome !== 'leak') return false;
-        const h = gapOf(f.seed, x);
-        return (
-          !!h &&
-          ((near(h.from, g.from) && near(h.to, g.to)) || (near(h.from, g.to) && near(h.to, g.from)))
-        );
-      });
-    return all ? null : c.rank;
-  };
-  /**
-   * A bridge sent (by hand or by itself): it must close that piece in that size. One that did not
-   * is taken back when it was automatic, and said when it was the operator's.
-   */
-  useEffect(() => {
-    const k = seen.gapCheck;
-    if (!k || session.busy || inputs.edits.length !== k.at) return;
-    seen.gapCheck = null;
-    const f = families.find((x) => x.seed === k.seed);
-    const c = f?.candidates.find((x) => x.rank === k.rank);
-    if (!c || c.outcome === 'closed') return;
-    if (k.auto) {
-      seen.applied = null;
-      void autoAnswer({ type: 'piece-edits', edits: inputs.edits.slice(0, -1) });
-    } else setHint(`piece ${nameOf(k.seed)} is still open there — undo, or close it by hand`);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.busy, inputs.edits.length]);
   // the card follows the active question: a resolved region hands over to the next one by itself
   const guided = useRef(false);
   const activeRegion = active?.kind === 'region' ? active : null;
@@ -1476,7 +1437,7 @@ export function PiecesStep({
   const closedFams = families.filter((f) => !needsFix(f));
   const selClosed = !!selected && !needsFix(selected);
   /** What is wrong with a region: a short word on the row, the whole instruction as its title. */
-  const whyOf = (f: PieceFamily, c: PieceCandidate): { short: string; full: string } => {
+  const whyOf = (c: PieceCandidate): { short: string; full: string } => {
     switch (c.outcome) {
       case 'refused': {
         const r = c.gradeRefusal ?? 'sizes-not-distinguished';
@@ -1484,16 +1445,10 @@ export function PiecesStep({
         return { short: REFUSED_SHORT[r], full: `${REFUSED[r]}${extra ? ` (${extra})` : ''}` };
       }
       case 'leak':
-        return seedAt(f.seed)?.origin === 'face' &&
-          f.candidates.every((x) => x.outcome === 'leak' || x.outcome === 'tiny')
-          ? {
-              short: 'outline never closes',
-              full: 'an open outline: the drawing closes it nowhere in any size — the fill ran out through a gap (the red ring). close gap at the ring if it is a piece, or not a piece.',
-            }
-          : {
-              short: 'gap in the outline',
-              full: 'the outline has a gap and the fill ran outside (the red ring). close gap: click the two line ends at the ring. or drop it if it is not a piece.',
-            };
+        return {
+          short: c.gapOptions?.length ? 'choose an outline' : 'open outline',
+          full: leakReason(c),
+        };
       case 'merged':
         return {
           short: 'two pieces touch',
@@ -1608,7 +1563,7 @@ export function PiecesStep({
       seen.rows.set(p.key, {
         order: 1 + m,
         // the number is the region's current mark: a region gone from the sheet has none
-        label: whyOf(f, problemOf(f)).short,
+        label: whyOf(problemOf(f)).short,
         seed: p.seed,
       });
     } else if (p.kind === 'touch') {
@@ -1637,39 +1592,34 @@ export function PiecesStep({
     ? families.find((f) => f.seed === activeRegion.seed) ?? null
     : null;
   const activeCand = activeFam ? problemOf(activeFam) : null;
-  const activeWhy = activeFam && activeCand ? whyOf(activeFam, activeCand) : null;
+  const activeWhy = activeFam && activeCand ? whyOf(activeCand) : null;
   const expRanks = activeFam
     ? [...activeFam.candidates].filter((c) => isExp(c.rank)).sort((a, b) => a.rank - b.rank)
     : [];
   const badRanks = expRanks.filter((c) => c.outcome !== 'closed');
   /** The problem is in some sizes only: the card says which ('in 44 46'). */
   const partly = badRanks.length > 0 && badRanks.length < expRanks.length;
-  /** The piece does not close and the gap is found: the card shows it and closes it in one click. */
-  const leakGap =
-    activeRegion && !activeRegion.group && activeFam && activeCand?.outcome === 'leak'
-      ? gapOf(activeFam.seed, activeCand)
-      : null;
-  const closeGap = () => {
-    if (!leakGap || !activeFam || !activeCand) return;
+  const gapOptions =
+    activeRegion && !activeRegion.group && activeCand?.outcome === 'leak'
+      ? activeCand.gapOptions ?? []
+      : [];
+  const gapLabel =
+    activeFam && (seedAt(activeFam.seed)?.text?.text.trim() || `piece ${nameOf(activeFam.seed)}`);
+  const gapBox = gapOptions.length ? bboxOf(gapOptions.flatMap((option) => option.outer)) : null;
+  const chooseOutline = (option: (typeof gapOptions)[number]) => {
+    if (!activeFam || !activeCand) return;
     pickTool('pan');
-    seen.applied = {
-      text: `piece ${nameOf(activeFam.seed)} closed${partly ? ` in size ${labelOf(activeCand.rank)}` : ''}`,
-      n: 1,
-      at: inputs.edits.length + 1,
-    };
-    seen.gapCheck = {
-      seed: activeFam.seed,
-      rank: activeCand.rank,
-      at: inputs.edits.length + 1,
-      auto: false,
-    };
+    const before = inputs.edits;
     go(
-      api.editPieces({
-        kind: 'bridge',
-        seed: activeFam.seed,
-        rank: gapRank(activeFam, activeCand, leakGap),
-        from: leakGap.from,
-        to: leakGap.to,
+      api.chooseGapOutline(activeFam.seed, activeCand.rank, option).then((applied) => {
+        if (applied) {
+          seen.applied = {
+            text: `outline selected for piece ${nameOf(activeFam.seed)}, size ${labelOf(activeCand.rank)}`,
+            n: 0,
+            restore: before,
+            at: before.length + option.bridges.length,
+          };
+        }
       }),
     );
   };
@@ -2044,9 +1994,9 @@ export function PiecesStep({
       case 'leak':
         return [
           {
-            label: 'close the gap',
-            how: 'click both ends of the gap',
-            title: 'two clicks: the two line ends at the red ring',
+            label: 'edit manually',
+            how: 'edit this outline on the sheet',
+            title: 'place a bridge between two ends on the sheet',
             pressed: tool === 'bridge' && sel === activeFam.seed,
             onClick: () => arm('bridge'),
           },
@@ -2127,9 +2077,7 @@ export function PiecesStep({
             : active.kind === 'sheet'
               ? sheetQ?.text ?? 'how do these sheets relate?'
               : activeCand?.outcome === 'leak'
-                ? activeFam
-                  ? `piece ${nameOf(activeFam.seed)} isn't closed${partly ? ` in ${badRanks.length > 1 ? 'sizes' : 'size'} ${badRanks.map((c) => labelOf(c.rank)).join(', ')}` : ''}${leakGap ? '. close it?' : ': close the gap by hand?'}`
-                  : 'outline with a gap?'
+                ? `${gapLabel} · size ${labelOf(activeCand.rank)} · ${gapOptions.length ? 'which outline follows the cut?' : 'open outline'}`
                 : activeCand?.outcome === 'merged'
                   ? 'one piece or two parts?'
                   : activeCand?.outcome === 'tiny'
@@ -3205,6 +3153,8 @@ export function PiecesStep({
           {active && (
             <div
               data-ask-zone
+              {...ask(ASK_KEY.region, activeCand?.outcome === 'leak' && !activeTouch && !gapBox)}
+              tabIndex={activeCand?.outcome === 'leak' && !activeTouch && !gapBox ? -1 : undefined}
               data-ask-label={
                 active.kind === 'aside'
                   ? `${asideQ}${cardNow ? ` · ${quizCards.length - cardsLeft.length + 1} of ${quizCards.length}` : ''}`
@@ -3243,51 +3193,39 @@ export function PiecesStep({
               </Text>
               {activeTouch && activeCand && renderTouch(activeTouch)}
               {active.kind === 'touch' && renderTouchAll(active.groups)}
-              {leakGap && activeFam && (
-                <div
-                  className='flex flex-col gap-3'
-                  data-gap-card
-                  data-gap-mm={leakGap.mm.toFixed(1)}
-                >
-                  <GapCrop
-                    gap={leakGap}
-                    previews={previews}
-                    className='w-full border border-borderColor bg-bgColor'
-                    style={{ height: 220 }}
-                  />
-                  <div className='grid grid-cols-2 gap-2'>
-                    {(
-                      [
-                        ['close it', 'closed', closeGap],
-                        ['not a piece', 'drop', () => notAPiece(activeFam)],
-                      ] as const
-                    ).map(([label, mode, onClick], i) => (
-                      <button
-                        key={label}
-                        type='button'
-                        {...ask(ASK_KEY.region, i === 0)}
-                        data-ask-hint={i === 0 ? 'close the outline' : undefined}
-                        data-suggested={i === 0 || undefined}
-                        disabled={!!session.busy}
-                        onClick={onClick}
-                        className={`flex flex-col gap-2 bg-bgColor p-2 text-left hover:border-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor disabled:cursor-default ${i === 0 ? 'border-2 border-textColor' : 'border border-borderColor'}`}
-                      >
-                        <GapCrop
-                          gap={leakGap}
-                          previews={previews}
-                          mode={mode}
-                          className='w-full'
-                          style={{ height: 100 }}
-                        />
-                        <Text size='micro' component='span'>
-                          {label}
-                        </Text>
-                      </button>
-                    ))}
-                  </div>
+              {active.kind === 'region' && !activeTouch && activeCand?.outcome === 'leak' && (
+                <Text size='micro' variant='label' component='p'>
+                  {activeWhy?.full}
+                </Text>
+              )}
+              {gapBox && (
+                <div className='grid grid-cols-2 gap-2' data-gap-options>
+                  {gapOptions.map((option, i) => (
+                    <button
+                      key={i}
+                      type='button'
+                      {...ask(ASK_KEY.region, 'select the outline that follows the cut')}
+                      disabled={!!session.busy}
+                      onClick={() => chooseOutline(option)}
+                      className='flex flex-col gap-2 border border-borderColor bg-bgColor p-2 text-left hover:border-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor disabled:cursor-default'
+                    >
+                      <RegionCrop
+                        box={gapBox}
+                        outer={option.outer}
+                        previews={previews}
+                        stroke={SHEET_INK.blue}
+                        bridges={option.bridges}
+                        className='w-full'
+                        style={{ height: 160 }}
+                      />
+                      <Text size='micro' component='span'>
+                        outline {i + 1}
+                      </Text>
+                    </button>
+                  ))}
                 </div>
               )}
-              {active.kind === 'region' && !activeTouch && !leakGap && activeCand && cropBox && (
+              {active.kind === 'region' && !activeTouch && !gapBox && activeCand && cropBox && (
                 <RegionCrop
                   box={cropBox}
                   outer={activeCand.outer.length > 4 ? activeCand.outer : []}
@@ -3603,36 +3541,36 @@ export function PiecesStep({
                     })}
                 </div>
               )}
-              {active.kind === 'region' && partly && activeCand?.outcome !== 'leak' && (
-                <div className='flex flex-wrap items-center gap-1'>
-                  <Text size='micro' variant='label' component='span'>
-                    in size
-                  </Text>
-                  {badRanks.map((x) => (
-                    <button
-                      key={x.rank}
-                      type='button'
-                      title={`size ${labelOf(x.rank)}: ${OUTCOME[x.outcome].word}`}
-                      onClick={() => jump({ seed: active.seed, rank: x.rank })}
-                      className={cn(
-                        'text-micro tabular-nums text-labelColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor',
-                        x.rank === rank && 'text-textColor underline',
-                      )}
-                    >
-                      {labelOf(x.rank)}
-                    </button>
-                  ))}
-                </div>
-              )}
+              {active.kind === 'region' &&
+                (activeCand?.outcome === 'leak' ? badRanks.length > 1 : partly) && (
+                  <div className='flex flex-wrap items-center gap-1'>
+                    <Text size='micro' variant='label' component='span'>
+                      in size
+                    </Text>
+                    {badRanks.map((x) => (
+                      <button
+                        key={x.rank}
+                        type='button'
+                        title={`size ${labelOf(x.rank)}: ${OUTCOME[x.outcome].word}`}
+                        onClick={() => jump({ seed: active.seed, rank: x.rank })}
+                        className={cn(
+                          'text-micro tabular-nums text-labelColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor',
+                          x.rank === rank && 'text-textColor underline',
+                        )}
+                      >
+                        {labelOf(x.rank)}
+                      </button>
+                    ))}
+                  </div>
+                )}
               {active.kind !== 'model' &&
                 active.kind !== 'aside' &&
                 active.kind !== 'touch' &&
-                !activeTouch &&
-                !leakGap && (
+                !activeTouch && (
                   <div className='flex flex-wrap items-center gap-2'>
                     {answers.map((x, i) => (
                       <Button
-                        {...ask(ASK_KEY[active.kind], i === 0)}
+                        {...ask(ASK_KEY[active.kind], i === 0 && activeCand?.outcome !== 'leak')}
                         data-ask-hint={i === 0 ? x.how : undefined}
                         key={x.label}
                         variant='secondary'
@@ -3645,7 +3583,10 @@ export function PiecesStep({
                           setDoing(x.label);
                           x.onClick();
                         }}
-                        className={cn(i === 0 && 'border-textColor', x.pressed && 'bg-pageBg')}
+                        className={cn(
+                          i === 0 && activeCand?.outcome !== 'leak' && 'border-textColor',
+                          x.pressed && 'bg-pageBg',
+                        )}
                       >
                         {doing === x.label && session.busy ? `${x.label}…` : x.label}
                       </Button>

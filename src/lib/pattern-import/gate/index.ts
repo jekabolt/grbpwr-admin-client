@@ -329,6 +329,7 @@ export function identityByBlockFor(
     out[b.name] = {
       pen: g.pen,
       own: map(g.own),
+      ...(g.visibleSourceCut ? { visibleSourceCut: map([g.visibleSourceCut])[0] } : {}),
       excused: map(g.excused),
       ...(g.shared?.length ? { shared: map(g.shared) } : {}),
       ...(g.foreign?.length ? { foreign: map(g.foreign) } : {}),

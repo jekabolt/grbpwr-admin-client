@@ -452,6 +452,8 @@ function repairWith(
   const looseDist =
     looseOn && !looseBlocked && hasLoose ? [ringDistance(ring1), ringDistance(ring2)] : null;
   const looseDrop = new Set<number>();
+  /** Past this from the prediction a wall sample is off the corridor and deeper than a notch. */
+  const farMm = Math.max(...cor, C.corridorMm) + C.notchDepthMm + 4;
   const snapAt = (p: PtMm, r: number, i: number): Snap | null => {
     // per wall the TRUE nearest point (over all its segments); a nearest point at a wall's END is
     // no cover beyond the base corridor — past the end the line is not drawn (else the hole shrinks
@@ -487,19 +489,38 @@ function repairWith(
   // A sew line lies on pred only for a stretch; the size's own unranked line does not leave it.
   if (looseDist) {
     const predDist = ringDistance(pts);
-    const offLen = (k: number): number => {
-      const w = W[k];
-      const rs = ringOrLine(w.p, w.closed);
-      const off = rs.map((p) => {
-        let bi = 0;
-        let bd = Infinity;
-        for (let i = 0; i < n; i++) {
+    // A loose wall lies mostly far from the prediction: searching outward for its distance (cells
+    // grow as r²) took 80 % of a try and hung Clark and Paris (> 900 s / > 1500 s with
+    // GRADE_P2_LOOSE, 227 s without). Past `farMm` a sample is off the corridor and too deep for a
+    // notch whatever its distance, so it is not measured. Exact below that: a sample D away ends a
+    // segment ≤ D away, so once the best sample lies within the radius no closer one is missed.
+    const pgL = new SegGrid(3);
+    pgL.addPolyline(0, pts, true);
+    /** The nearest prediction sample within `farMm`, else -1. */
+    const nearSample = (p: PtMm): number => {
+      let bi = 0;
+      let bd = Infinity;
+      const visit = (_o: number, s: number) => {
+        for (const i of [s, (s + 1) % n]) {
           const d = hyp(pts[i], p);
-          if (d < bd) {
+          if (d < bd || (d === bd && i < bi)) {
             bd = d;
             bi = i;
           }
         }
+      };
+      for (const r of [4, farMm]) {
+        pgL.near(p, r, visit);
+        if (bd <= r) return bi;
+      }
+      return -1;
+    };
+    const offLen = (k: number): number => {
+      const w = W[k];
+      const rs = ringOrLine(w.p, w.closed);
+      const off = rs.map((p) => {
+        const bi = nearSample(p);
+        if (bi < 0) return { off: true, d: Infinity };
         const d = predDist(p, (cor[bi] ?? C.corridorMm) + 2);
         return { off: d > (cor[bi] ?? C.corridorMm), d };
       });
@@ -802,17 +823,22 @@ function repairWith(
   // E4: own walls that touch the corridor must not leave it for > 10 mm (notch excursions exempt)
   const pg = new SegGrid(3);
   pg.addPolyline(0, pts, true);
-  const distPred = (p: PtMm) => {
+  // (E4 passes `farMm`: past it a sample is off and no notch whatever its distance — the far
+  // samples of a wall were most of a try's time)
+  const distPred = (p: PtMm, maxR = 200) => {
     let best = Infinity;
     let bi = -1;
-    for (let r = 4; best === Infinity && r < 200; r *= 3)
-      pg.near(p, r, (_o, i) => {
+    // radii 4, 12, 36, 108 as before; with `maxR` the last search reaches exactly `maxR`
+    for (let r = 4; best === Infinity; r *= 3) {
+      pg.near(p, Math.min(r, maxR), (_o, i) => {
         const d = segNearest(p, pts[i], pts[(i + 1) % n]).d;
         if (d < best) {
           best = d;
           bi = i;
         }
       });
+      if (r >= maxR || r * 3 >= 200) break;
+    }
     return { d: best, c: bi >= 0 ? cor[bi] : C.corridorMm };
   };
   const used = new Set(snaps.filter((s): s is Snap => !!s).map((s) => s.w));
@@ -825,7 +851,7 @@ function repairWith(
     if (w.kind !== 'own') continue;
     const rs = ringOrLine(w.p, w.closed);
     const off = rs.map((p) => {
-      const x = distPred(p);
+      const x = distPred(p, farMm);
       return { off: x.d > x.c, d: x.d, near: x.d <= x.c + 0.25 };
     });
     if (!used.has(k) && !touched.has(k) && !off.some((o) => o.near)) continue;

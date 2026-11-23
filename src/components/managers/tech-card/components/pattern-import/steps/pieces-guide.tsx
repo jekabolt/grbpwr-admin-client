@@ -7,9 +7,7 @@ import { memo, useId } from 'react';
 import type { BoxMm, PtMm } from 'lib/pattern-import/types';
 import { cn } from 'lib/utility';
 import { SHEET_INK, f32Attr, ptsAttr, vy } from '../sheet-viewport';
-import { chainBoxes, type GapGuess } from './gap';
-
-export { findGap, type GapGuess } from './gap';
+import { chainBoxes } from './gap';
 
 const pad = (b: BoxMm, r: number) => {
   const w = Math.max(b.maxX - b.minX, 1);
@@ -40,6 +38,7 @@ export function RegionCrop({
   previews,
   stroke,
   leakAt,
+  bridges,
   marks,
   className,
   style,
@@ -49,6 +48,7 @@ export function RegionCrop({
   previews: readonly Float32Array[];
   stroke: string;
   leakAt?: PtMm | null;
+  bridges?: readonly { from: PtMm; to: PtMm }[];
   /** The numbers the question is about, drawn large (which part is which). */
   marks?: { at: PtMm; n: number | string }[];
   className?: string;
@@ -80,6 +80,18 @@ export function RegionCrop({
             strokeWidth={unit * 1.6}
           />
         )}
+        {bridges?.map(({ from, to }, i) => (
+          <line
+            key={i}
+            x1={from.x}
+            y1={vy(from.y)}
+            x2={to.x}
+            y2={vy(to.y)}
+            stroke={SHEET_INK.red}
+            strokeWidth={unit * 3}
+            strokeLinecap='round'
+          />
+        ))}
         {leakAt && (
           <circle
             cx={leakAt.x}
@@ -115,7 +127,6 @@ export function RegionCrop({
     </svg>
   );
 }
-
 
 /**
  * The drawn lines that lie wholly inside a box (its own lines, not the neighbours' running past),
@@ -892,114 +903,6 @@ export function TouchCrop({
             </g>
           );
         })}
-    </svg>
-  );
-}
-
-
-/**
- * A piece that does not close, alone: its open line(s) in blue, the sheet's other lines faint, the
- * two ends marked and the closing stroke across the gap — dashed (`ask`), solid (`closed`).
- */
-export function GapCrop({
-  gap,
-  previews,
-  mode = 'ask',
-  className,
-  style,
-}: {
-  gap: GapGuess;
-  previews: readonly Float32Array[];
-  mode?: 'ask' | 'closed' | 'drop';
-  className?: string;
-  style?: React.CSSProperties;
-}) {
-  const bx = chainBoxes(previews);
-  // cropped to the piece: the open line's box (never smaller than a hand's width round the gap)
-  const box = gap.chains.reduce(
-    (b, i) => ({
-      minX: Math.min(b.minX, bx[i * 4]),
-      minY: Math.min(b.minY, bx[i * 4 + 1]),
-      maxX: Math.max(b.maxX, bx[i * 4 + 2]),
-      maxY: Math.max(b.maxY, bx[i * 4 + 3]),
-    }),
-    {
-      minX: Math.min(gap.from.x, gap.to.x) - 30,
-      minY: Math.min(gap.from.y, gap.to.y) - 30,
-      maxX: Math.max(gap.from.x, gap.to.x) + 30,
-      maxY: Math.max(gap.from.y, gap.to.y) + 30,
-    },
-  );
-  const v = pad(box, 0.06);
-  const unit = Math.max(v.w, v.h) / 160;
-  const clip = `gap${useId().replace(/[^\w-]/g, '')}`;
-  const own = new Set(gap.chains);
-  const ink = mode === 'drop' ? SHEET_INK.mut : SHEET_INK.blue;
-  return (
-    <svg
-      viewBox={`${v.x} ${v.y} ${v.w} ${v.h}`}
-      preserveAspectRatio='xMidYMid meet'
-      role='img'
-      aria-label={mode === 'closed' ? 'the outline closed' : 'the open outline'}
-      className={className}
-      style={style}
-    >
-      <defs>
-        <clipPath id={clip}>
-          <rect x={v.x} y={v.y} width={v.w} height={v.h} />
-        </clipPath>
-      </defs>
-      <g clipPath={`url(#${clip})`}>
-        {boxLines(
-          { minX: v.x, maxX: v.x + v.w, minY: -(v.y + v.h), maxY: -v.y },
-          previews,
-          own,
-        ).map((r, k) => (
-          <polyline
-            key={k}
-            points={ptsAttr(r)}
-            fill='none'
-            stroke={SHEET_INK.pick}
-            strokeWidth={unit * 0.6}
-          />
-        ))}
-        {gap.chains.map((i) => (
-          <polyline
-            key={`c${i}`}
-            points={f32Attr(previews[i])}
-            fill='none'
-            stroke={ink}
-            strokeWidth={unit * 1.4}
-            strokeDasharray={mode === 'drop' ? `${unit * 3} ${unit * 2}` : undefined}
-            data-gap-chain={i}
-          />
-        ))}
-        {mode !== 'drop' && (
-          <line
-            x1={gap.from.x}
-            y1={vy(gap.from.y)}
-            x2={gap.to.x}
-            y2={vy(gap.to.y)}
-            stroke={SHEET_INK.blue}
-            strokeWidth={unit * (mode === 'closed' ? 1.4 : 1.8)}
-            strokeDasharray={mode === 'ask' ? `${unit * 2.5} ${unit * 2}` : undefined}
-            data-gap-bridge
-          />
-        )}
-        {mode === 'ask' &&
-          [gap.from, gap.to].map((p, k) => (
-            <circle
-              key={`e${k}`}
-              cx={p.x}
-              cy={vy(p.y)}
-              r={unit * 2.6}
-              fill='#ffffff'
-              stroke={SHEET_INK.blue}
-              strokeWidth={unit * 1.2}
-              data-gap-end
-            />
-          ))}
-      </g>
     </svg>
   );
 }

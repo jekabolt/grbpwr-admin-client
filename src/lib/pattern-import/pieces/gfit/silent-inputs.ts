@@ -137,7 +137,10 @@ export function silentRead(
         const L = Math.hypot(b.x - a.x, b.y - a.y);
         const k = Math.max(1, Math.ceil(L / DRAWS_OWN.sampleMm));
         for (let j = 0; j < k; j++) {
-          const p = { x: a.x + ((b.x - a.x) * (j + 0.5)) / k, y: a.y + ((b.y - a.y) * (j + 0.5)) / k };
+          const p = {
+            x: a.x + ((b.x - a.x) * (j + 0.5)) / k,
+            y: a.y + ((b.y - a.y) * (j + 0.5)) / k,
+          };
           if (p.x < box.minX - P || p.x > box.maxX + P || p.y < box.minY - P || p.y > box.maxY + P)
             continue;
           // beside the outline: inside it, or outside within ~a size step (a run collapsed onto its
@@ -147,7 +150,10 @@ export function silentRead(
           if (!pointInPoly(p, ring)) {
             let near = false;
             g.near(p, DRAWS_OWN.outsideMm, (_o, s) => {
-              if (!near && segNearest(p, ring[s], ring[(s + 1) % ring.length]).d <= DRAWS_OWN.outsideMm)
+              if (
+                !near &&
+                segNearest(p, ring[s], ring[(s + 1) % ring.length]).d <= DRAWS_OWN.outsideMm
+              )
                 near = true;
             });
             if (!near) continue;

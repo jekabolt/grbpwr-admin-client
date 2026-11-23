@@ -21,7 +21,16 @@
 // Pure, mm, y-up. On in the pipeline by default; `GFIT_NEST_WALK=0` turns it off (repair-hook.ts).
 import type { PtMm } from 'lib/pattern-import/types';
 
-import { bboxOf, dist, resample, segIntersect, signedArea, simplify } from '../geom';
+import {
+  bboxOf,
+  dist,
+  resample,
+  SegGrid,
+  segIntersect,
+  segNearest,
+  signedArea,
+  simplify,
+} from '../geom';
 import { bumpSpans } from './outline';
 
 export const NEST_WALK = {
@@ -56,6 +65,10 @@ export const NEST_WALK = {
   windowMm: 150,
   /** a run off the size's lines shorter than this is not a derived stretch */
   derivedMinMm: 1,
+  /** a ring point is drawn when it is within this of the size's own or common lines.
+   *  How the point was built does not count; a point on another size's line is derived
+   *  (owner, 18 Nov 2026, E1). */
+  derivedOffMm: 1,
   /** stepped grade: a range break is taken when it explains the chord within `breakFitMm` and
    *  beats the next explanation by `breakMarginMm`; otherwise the even split stands */
   breakFitMm: 0.5,
@@ -388,6 +401,42 @@ class LineIndex {
     else if (k < 0 || k >= L.n) return null;
     return L.start + k;
   }
+}
+
+/**
+ * A ring point is drawn when it lies within `tolMm` of this size's own lines or the common lines.
+ * A point on another size's line is derived. Length, not sample count: a segment counts as derived
+ * when its start point is off the line (the segment that leaves the last drawn point stays drawn).
+ */
+export function derivedByDistance(
+  ring: readonly PtMm[],
+  ownLines: readonly (readonly PtMm[])[],
+  commonLines: readonly (readonly PtMm[])[],
+  tolMm = 1,
+): { on: boolean[]; derivedMm: number; perimeter: number; share: number } {
+  const lines = [...ownLines, ...commonLines];
+  const grid = new SegGrid(4);
+  lines.forEach((l, i) => {
+    if (l.length >= 2) grid.addPolyline(i, l as PtMm[], false);
+  });
+  const on = ring.map((p) => {
+    let best = Infinity;
+    grid.near(p, tolMm + 4, (o, s) => {
+      const l = lines[o];
+      if (s + 1 < l.length) best = Math.min(best, segNearest(p, l[s], l[s + 1]).d);
+    });
+    return best <= tolMm;
+  });
+  let derivedMm = 0;
+  let perimeter = 0;
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i];
+    const b = ring[(i + 1) % ring.length];
+    const L = Math.hypot(b.x - a.x, b.y - a.y);
+    perimeter += L;
+    if (!on[i]) derivedMm += L;
+  }
+  return { on, derivedMm, perimeter, share: perimeter > 0 ? derivedMm / perimeter : 0 };
 }
 
 /** Share of a ring's samples within `tol` of a line set. */
@@ -2480,7 +2529,10 @@ export function nestWalk(inp: NestWalkIn): NestWalkOut {
         }
       }
     } // end !builtFromBlend spike/near-corner
-    // derived runs (≥ 1 mm off the size's lines)
+    // E1: drawn iff within derivedOffMm of this size's own or common lines
+    const drawn = derivedByDistance(out, ownLines(r), commonW, NEST_WALK.derivedOffMm);
+    for (let i = 0; i < out.length; i++) on[i] = drawn.on[i];
+    // derived runs (off the size's own and common lines)
     const derived: NestDerived[] = [];
     const m = out.length;
     let startAt = on.findIndex((x) => x);
@@ -2502,7 +2554,8 @@ export function nestWalk(inp: NestWalkIn): NestWalkOut {
         e++;
       }
       run.push(out[(startAt + e) % m]);
-      const mm = polyLen(run);
+      // length from the first off point: the segment that leaves the last drawn point is still on the line
+      const mm = polyLen(run.slice(1));
       if (mm >= NEST_WALK.derivedMinMm)
         derived.push({ from: run[0], to: run[run.length - 1], mm, kind, pts: run });
       s = e;
@@ -2513,7 +2566,7 @@ export function nestWalk(inp: NestWalkIn): NestWalkOut {
       outer: keep.map((i) => out[i]),
       src: keep.map((i) => srcAt[i]),
       derived,
-      derivedMm: derived.reduce((x, d) => x + d.mm, 0),
+      derivedMm: drawn.derivedMm,
       notches: lms
         .map((l, j) => (l.kind === 'notch' ? tracks[j].pos[r] : null))
         .filter((x): x is PtMm => !!x),
@@ -2579,7 +2632,10 @@ export function nestWalk(inp: NestWalkIn): NestWalkOut {
         srcAt.push({ j, path: false, line: h ? idx.pts[h.j].line : null });
       }
     }
-    // derived runs (≥ 1 mm off the size's lines)
+    // E1: drawn iff within derivedOffMm of this size's own or common lines
+    const drawn = derivedByDistance(out, ownLines(r), commonW, NEST_WALK.derivedOffMm);
+    for (let i = 0; i < out.length; i++) on[i] = drawn.on[i];
+    // derived runs (off the size's own and common lines)
     const derived: NestDerived[] = [];
     const m = out.length;
     let startAt = on.findIndex((x) => x);
@@ -2601,7 +2657,7 @@ export function nestWalk(inp: NestWalkIn): NestWalkOut {
         e++;
       }
       run.push(out[(startAt + e) % m]);
-      const mm = polyLen(run);
+      const mm = polyLen(run.slice(1));
       if (mm >= NEST_WALK.derivedMinMm)
         derived.push({ from: run[0], to: run[run.length - 1], mm, kind, pts: run });
       s = e;
@@ -2613,7 +2669,7 @@ export function nestWalk(inp: NestWalkIn): NestWalkOut {
       outer,
       src: keep.map((i) => srcAt[i]),
       derived,
-      derivedMm: derived.reduce((x, d) => x + d.mm, 0),
+      derivedMm: drawn.derivedMm,
       notches: lms
         .map((l, j) => (l.kind === 'notch' ? tracks[j].pos[r]! : null))
         .filter((x): x is PtMm => !!x),

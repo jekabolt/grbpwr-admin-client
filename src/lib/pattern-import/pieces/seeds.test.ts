@@ -59,3 +59,42 @@ describe('textSeeds: a size range is not a piece label', () => {
     expect(labels(['L - 2XL'], new Set())).toEqual(['L']);
   });
 });
+
+describe('small facing titles', () => {
+  const facingSheet = (label: string): Sheet => {
+    const s = sheet([label, 'FABRIC: CUT 1', 'FUSING: CUT 1']);
+    s.texts.forEach((t, i) => {
+      t.fontSizeMm = 3.72;
+      t.bbox = { minX: 10, maxX: 30, minY: 10 + 4 * i, maxY: 13 + 4 * i };
+    });
+    s.paths = [
+      {
+        id: 1,
+        src: s.texts[0].src,
+        style: 0,
+        closed: true,
+        pts: [
+          { x: 0, y: 0 },
+          { x: 40, y: 0 },
+          { x: 40, y: 40 },
+          { x: 0, y: 40 },
+        ],
+      },
+    ];
+    return s;
+  };
+
+  it('uses the facing title and both cutting instructions inside a closed outline', () => {
+    const s = facingSheet('F - BACK FACING');
+    expect(textSeeds(s).map((t) => t.label)).toEqual(['F']);
+    s.paths[0].closed = false;
+    expect(textSeeds(s)).toEqual([]);
+    s.paths[0].closed = true;
+    s.texts.pop();
+    expect(textSeeds(s)).toEqual([]);
+  });
+
+  it('ignores a small size label next to the same instructions', () => {
+    expect(textSeeds(facingSheet('L - 2XL'), SIZES)).toEqual([]);
+  });
+});

@@ -104,7 +104,8 @@ describe('nestWalk', () => {
     const out = w.sizes.get(6)!;
     // open size: blend fills the gap; resampling leaves ~0.4 mm on corners
     expect(maxErr(out.outer, n.truth[6])).toBeLessThan(0.5);
-    expect(out.derivedMm).toBeGreaterThan(11);
+    // the 12 mm hole, minus the 1 mm band at each end that still counts as on the line
+    expect(out.derivedMm).toBeGreaterThan(8);
     expect(out.refused).toBeUndefined();
   });
 
@@ -163,6 +164,35 @@ describe('nestWalk', () => {
     const c = w.candidates.find((x) => x.rank === E)!;
     expect(c.eligible).toBe(false);
     expect(c.fails.some((f) => f.startsWith('c:'))).toBe(true);
+  });
+
+  it('does not call a point on the size line derived', () => {
+    // size 6 is open but its line is drawn: the blend sits on that line, so almost none is derived
+    const n = nest(() => 0.03);
+    const w = nestWalk({ sizes: sizesOf(n, [6]), own: (r) => n.lines[r], common: [] });
+    const b = w.sizes.get(6)!;
+    let per = 0;
+    for (let i = 0; i < b.outer.length; i++) {
+      const p = b.outer[i];
+      const q = b.outer[(i + 1) % b.outer.length];
+      per += Math.hypot(q.x - p.x, q.y - p.y);
+    }
+    expect(b.derivedMm / per).toBeLessThan(0.05);
+  });
+
+  it('calls a point on another size line derived', () => {
+    // size 6 has no line of its own; the blend lies on the neighbours, which does not count
+    const n = nest(() => 0.03);
+    const lines = n.lines.map((l, r) => (r === 6 ? [] : l));
+    const w = nestWalk({ sizes: sizesOf(n, [6]), own: (r) => lines[r], common: [] });
+    const b = w.sizes.get(6)!;
+    let per = 0;
+    for (let i = 0; i < b.outer.length; i++) {
+      const p = b.outer[i];
+      const q = b.outer[(i + 1) % b.outer.length];
+      per += Math.hypot(q.x - p.x, q.y - p.y);
+    }
+    expect(b.derivedMm / per).toBeGreaterThan(0.9);
   });
 
   it('moves an etalon landmark by the measured grade shift', () => {

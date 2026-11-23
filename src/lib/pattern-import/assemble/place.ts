@@ -14,6 +14,8 @@
 // Clip provenance: `Style.clip` keeps F1's `<kind><op>:` prefix with the box moved into the sheet
 // frame; the page it came from is the path's `src.page`. Clips are still not applied.
 
+import { fullyVisibleSourcePath } from '../pieces/source-visibility';
+import {restoreCutLabels} from './cut-text';
 import type {
   Affine,
   BoxMm,
@@ -28,6 +30,7 @@ import type {
 export type Placed = { page: IRPage; pose: Affine };
 
 export type PlaceResult = {
+  materialMarks?: IRPath[];
   paths: IRPath[];
   texts: IRText[];
   rasters: IRRaster[];
@@ -92,6 +95,8 @@ type Cand = {
   style: Style;
   pose: Affine;
   inside: number;
+  stampCopies?: IRPath['stampCopies'];
+  paintCopies?: IRPath['paintCopies'];
 };
 
 function segDist(p: PtMm, a: PtMm, b: PtMm): number {
@@ -107,8 +112,26 @@ export function placePages(placed: Placed[], dedupeTolMm = 0.15): PlaceResult {
   const styles: Style[] = [];
   const styleIds = new Map<string, number>();
   const intern = (s: Style, pose: Affine): number => {
-    const t: Style = { ...s, clip: moveClip(s.clip, pose) };
-    const key = JSON.stringify([t.strokeRgb, t.widthMm, t.dash, t.layer, t.fill, t.clip]);
+    const t: Style = {
+      ...s,
+      clip: moveClip(s.clip, pose),
+      ...(s.clipQuad ? { clipQuad: s.clipQuad.map((p) => apply(pose, p)) } : {}),
+      ...(s.clipPolygon ? { clipPolygon: s.clipPolygon.map((p) => apply(pose, p)) } : {}),
+      ...(s.localClipPolygon
+        ? { localClipPolygon: s.localClipPolygon.map((p) => apply(pose, p)) }
+        : {}),
+    };
+    const key = JSON.stringify([
+      t.strokeRgb,
+      t.widthMm,
+      t.dash,
+      t.layer,
+      t.fill,
+      t.clip,
+      t.clipQuad,
+      t.clipPolygon,
+      t.localClipPolygon,
+    ]);
     const id = styleIds.get(key);
     if (id !== undefined) return id;
     const nid = styles.length;
@@ -195,7 +218,26 @@ export function placePages(placed: Placed[], dedupeTolMm = 0.15): PlaceResult {
             [bestPage, bestInside] = [pi, v];
         }
         for (const [pi, l] of byPage) {
-          if (pi === bestPage) survivors.push(...l);
+          if (pi === bestPage) {
+            for(const c of l){
+              if (c.path.closed && c.style.fill && !c.path.background && l.length === 1) {
+                const copies = cls.filter(
+                  (o) =>
+                    o.pageIdx !== pi &&
+                    byPage.get(o.pageIdx)?.length === 1 &&
+                    o.path.src.file === c.path.src.file &&
+                    o.pts.length === c.pts.length &&
+                    o.pts.every((v, i) => Math.hypot(v.x - c.pts[i].x, v.y - c.pts[i].y) < 0.006),
+                );
+                if (copies.length) c.stampCopies = copies.map((o) => o.path.src);
+              }
+              if ((c.path.closed || c.path.pts.length === 2) && c.path.visibleEdges !== true) {
+                const copies=cls.filter(other=>other.pageIdx!==pi && !other.path.background && other.path.src.file===c.path.src.file && other.path.visibleEdges);
+                if(copies.length)c.paintCopies=copies.map(other=>({src:other.path.src,edges:other.path.visibleEdges!}));
+              }
+            }
+            survivors.push(...l);
+          }
           else wholeDuplicates += l.length;
         }
       }
@@ -220,9 +262,9 @@ export function placePages(placed: Placed[], dedupeTolMm = 0.15): PlaceResult {
     }
   // 2. Overlap-strip edges. Segments of accepted paths indexed per look on a 2 mm grid.
   const CELL = 2;
-  const segs = new Map<string, Map<number, { a: PtMm; b: PtMm; page: number }[]>>();
+  const segs = new Map<string, Map<number, { a: PtMm; b: PtMm; page: number; closed: boolean }[]>>();
   const cellKey = (x: number, y: number) => Math.floor(x / CELL) * 1_000_003 + Math.floor(y / CELL);
-  const addSeg = (look: string, a: PtMm, b: PtMm, page: number) => {
+  const addSeg = (look: string, a: PtMm, b: PtMm, page: number, closed: boolean) => {
     let m = segs.get(look);
     if (!m) segs.set(look, (m = new Map()));
     const x0 = Math.floor((Math.min(a.x, b.x) - dedupeTolMm) / CELL);
@@ -234,36 +276,53 @@ export function placePages(placed: Placed[], dedupeTolMm = 0.15): PlaceResult {
       for (let y = y0; y <= y1; y++) {
         const k = x * 1_000_003 + y;
         const l = m.get(k);
-        const s = { a, b, page };
+        const s = { a, b, page, closed };
         if (l) l.push(s);
         else m.set(k, [s]);
       }
   };
-  const covered = (look: string, p: PtMm, page: number) => {
+  const covered = (look: string, p: PtMm, page: number, closedOnly = false) => {
     const m = segs.get(look);
     if (!m) return false;
     const l = m.get(cellKey(p.x, p.y));
     if (!l) return false;
-    for (const s of l) if (s.page !== page && segDist(p, s.a, s.b) <= dedupeTolMm) return true;
+    for (const s of l)
+      if (s.page !== page && (!closedOnly || s.closed) && segDist(p, s.a, s.b) <= dedupeTolMm)
+        return true;
     return false;
   };
   const paths: IRPath[] = [];
   let edgesIn = 0;
   let edgesDropped = 0;
+  const glyphRecorded = new Set<Cand>();
   const emit = (c: Cand, pts: PtMm[], closed: boolean) => {
+    const wholeGlyph =
+      !closed && c.path.closed && c.path.visibleMotif && c.style.fill && !glyphRecorded.has(c);
+    if (wholeGlyph) glyphRecorded.add(c);
     paths.push({
       id: paths.length,
       pts,
       closed,
       style: intern(c.style, c.pose),
+      ...(c.path.unknownFill ? { unknownFill: true as const } : {}),
+      ...(closed && c.path.visibleFill
+        ? { visibleFill: c.path.visibleFill.map((p) => apply(c.pose, p)) }
+        : {}),
+      ...(c.path.visibleMotif && closed === c.path.closed && pts.length === c.pts.length
+        ? { visibleMotif: true as const }
+        : {}),
       src: c.path.src,
+      ...(pts === c.pts && c.path.visibleEdges ? {visibleEdges:c.path.visibleEdges} : {}),
+      ...(wholeGlyph ? {printedGlyph:c.pts} : {}),
+      ...((closed || wholeGlyph) && c.stampCopies ? {stampCopies:c.stampCopies} : {}),
+      ...(pts === c.pts && c.paintCopies ? {paintCopies:c.paintCopies} : {}),
       // A8: the clean stage's mask rides with the path into the sheet
       ...(c.path.background ? { background: c.path.background } : {}),
     });
   };
   for (const page of placed.map((_, i) => i)) {
     const mine = survivors.filter((c) => c.pageIdx === page);
-    const toIndex: { look: string; a: PtMm; b: PtMm }[] = [];
+    const toIndex: { look: string; a: PtMm; b: PtMm; closed: boolean }[] = [];
     for (const c of mine) {
       const n = c.pts.length;
       const ne = c.path.closed ? n : n - 1;
@@ -281,9 +340,39 @@ export function placePages(placed: Placed[], dedupeTolMm = 0.15): PlaceResult {
           covered(c.look, a, page) && covered(c.look, b, page) && covered(c.look, mid, page);
         keep.push(!dup);
         if (dup) edgesDropped++;
-        else toIndex.push({ look: c.look, a, b });
+        else toIndex.push({ look: c.look, a, b, closed: c.path.closed });
       }
-      if (keep.every(Boolean)) {
+      // One coincident edge on two otherwise distinct closed outlines is a cut edge
+      // of both sizes. Whole-path copies have already been removed above.
+      const omitted = keep.flatMap((kept, i) => {
+        const a = c.pts[i];
+        const b = c.pts[(i + 1) % n];
+        return !kept && Math.hypot(a.x - b.x, a.y - b.y) > 0.01 ? [{ a, b }] : [];
+      });
+      const shared = omitted.length === 1 ? omitted[0] : undefined;
+      const sharedLoopEdge = c.path.closed && shared && keep.filter(Boolean).length >= 3 &&
+        segs.get(c.look)?.get(cellKey(shared.a.x, shared.a.y))?.some((s) =>
+          s.closed && s.page !== page &&
+          segDist(shared.a, s.a, s.b) <= dedupeTolMm &&
+          segDist(shared.b, s.a, s.b) <= dedupeTolMm);
+      // An independently visible, closed size line can briefly coincide with another
+      // closed size in the same pen. The cross-tile copy pass above has already merged
+      // copies of this whole outline. Retain all of a predominantly distinct source cut.
+      const visibleCut =
+        omitted.length > 1 &&
+        c.path.closed &&
+        !c.style.fill &&
+        c.style.dash?.length &&
+        c.paintCopies?.length &&
+        keep.filter(Boolean).length > ne / 2 &&
+        fullyVisibleSourcePath({ ...c.path, paintCopies: c.paintCopies }) &&
+        omitted.every(({ a, b }) =>
+          [a, b, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }].every((point) =>
+            covered(c.look, point, page, true),
+          ),
+        );
+      if (keep.every(Boolean) || sharedLoopEdge || visibleCut) {
+        if (sharedLoopEdge || visibleCut) edgesDropped -= keep.filter((kept) => !kept).length;
         emit(c, c.pts, c.path.closed);
         continue;
       }
@@ -304,7 +393,7 @@ export function placePages(placed: Placed[], dedupeTolMm = 0.15): PlaceResult {
       for (const r of runs) emit(c, r, false);
     }
     // Index after the page: a page never dedupes against itself.
-    for (const s of toIndex) addSeg(s.look, s.a, s.b, page);
+    for (const s of toIndex) addSeg(s.look, s.a, s.b, page, s.closed);
   }
   // Texts: a label printed on two overlapping tiles at the same sheet spot is one label.
   const texts: IRText[] = [];
@@ -358,9 +447,31 @@ export function placePages(placed: Placed[], dedupeTolMm = 0.15): PlaceResult {
         if (v.y > bbox.maxY) bbox.maxY = v.y;
       }
   }
+  // A partly coincident run may disappear from chain input at a page seam. Keep its
+  // original, fully visible paint as independent evidence for labelled material cuts.
+  let materialMarks: IRPath[] | undefined;
+  if (texts.some((t) => /^cut here for lining$/i.test(t.text.trim()))) {
+    const key = (p: IRPath) => [p.src.file, p.src.page, p.src.op, p.src.sub].join('/');
+    const emitted = new Map(paths.map((p) => [key(p), p]));
+    materialMarks = [];
+    for (const c of cands) {
+      if (c.path.background || !c.path.visibleMotif || c.pts.length > 16) continue;
+      const saved = emitted.get(key(c.path));
+      if (saved?.visibleMotif && saved.pts.length === c.pts.length) continue;
+      const a = c.pts[0];
+      if (!c.pts.every((p) => Math.hypot(p.x - a.x, p.y - a.y) < 12)) continue;
+      materialMarks.push({
+        ...c.path,
+        id: paths.length + materialMarks.length,
+        pts: c.pts,
+        style: intern(c.style, c.pose),
+      });
+    }
+  }
   return {
+    ...(materialMarks?.length ? { materialMarks } : {}),
     paths,
-    texts,
+    texts: restoreCutLabels(texts),
     rasters,
     styles,
     bbox,

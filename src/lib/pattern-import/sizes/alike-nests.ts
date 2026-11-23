@@ -25,6 +25,9 @@ export type AlikeNestsIn = {
   keyRank: ReadonlyMap<string, number>;
   /** Which chains may be size lines at all (not furniture). */
   candidate: (chain: number) => boolean;
+  /** Only legend-identified anchors can certify a shared-pen outline for export. */
+  anchorRank?: (chain: number) => number | undefined;
+  onBracket?: (chain: number, rank: number) => void;
 };
 
 type Pen = { dash: number[] | null; width: number; rgb: number[] | null };
@@ -109,6 +112,77 @@ export function rankAlikeNests(inp: AlikeNestsIn): Set<number> {
       const p = penOf(styles.get(c.style));
       if (p && samePen(p, g.pen)) unknown.add(i);
     });
+    // Some grading stacks share a baseline or cross at a seam. Test the extents of
+    // each outline against both adjacent, independently ranked sizes in sheet space.
+    // A cropped outline can still expose all four extrema.
+    const bounds = chains.map((c) => {
+      const b = [Infinity, Infinity, -Infinity, -Infinity];
+      for (const p of c.pts) {
+        b[0] = Math.min(b[0], p.x);
+        b[1] = Math.min(b[1], p.y);
+        b[2] = Math.max(b[2], p.x);
+        b[3] = Math.max(b[3], p.y);
+      }
+      return b;
+    });
+    const anchors = new Map<number, number[]>();
+    for (const [i, rank] of rankOf) {
+      const pen = penOf(styles.get(chains[i].style));
+      if (
+        inp.anchorRank?.(i) !== rank ||
+        !candidate(i) ||
+        !closed(chains[i]) ||
+        !pen ||
+        samePen(pen, g.pen)
+      )
+        continue;
+      const list = anchors.get(rank) ?? [];
+      list.push(i);
+      anchors.set(rank, list);
+    }
+    const proven = new Map<string, { chain: number; rank: number }[]>();
+    chains.forEach((c, i) => {
+      const pen = penOf(styles.get(c.style));
+      if (!candidate(i) || c.lengthMm < MIN_OUTLINE_MM || !pen || !samePen(pen, g.pen)) return;
+      const matches = [];
+      for (const rank of R) {
+        for (const lo of anchors.get(rank - 1) ?? []) {
+          for (const hi of anchors.get(rank + 1) ?? []) {
+            const spans = bounds[lo].map((x, k) => bounds[hi][k] - x);
+            const step = Math.max(...spans.map(Math.abs));
+            if (step < 1 || step > 0.12 * Math.min(chains[lo].lengthMm, chains[hi].lengthMm))
+              continue;
+            if (
+              c.lengthMm < 0.8 * Math.min(chains[lo].lengthMm, chains[hi].lengthMm) ||
+              c.lengthMm > 1.2 * Math.max(chains[lo].lengthMm, chains[hi].lengthMm)
+            )
+              continue;
+            if (
+              spans.every(
+                (span, k) =>
+                  Math.abs(bounds[i][k] - bounds[lo][k] - span / 2) <=
+                  Math.max(0.15, Math.abs(span) * 0.24),
+              )
+            ) {
+              matches.push({ key: `${lo}/${hi}`, rank });
+            }
+          }
+        }
+      }
+      if (matches.length !== 1) return;
+      const { key, rank } = matches[0];
+      const list = proven.get(key) ?? [];
+      list.push({ chain: i, rank });
+      proven.set(key, list);
+    });
+    for (const list of proven.values()) {
+      if (list.length !== 1) continue;
+      const { chain, rank } = list[0];
+      rankOf.set(chain, rank);
+      given.add(rank);
+      inp.onBracket?.(chain, rank);
+      unknown.delete(chain);
+    }
     if (unknown.size < 2) continue;
     // 2. the closed outlines that matter: the pen's own, and every other outline with a rank
     type O = { id: number; area: number; pts: readonly PtMm[]; rank: number | null };
