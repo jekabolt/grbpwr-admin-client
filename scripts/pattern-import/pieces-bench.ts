@@ -93,10 +93,13 @@ function diffPieces(before: BenchPiece[], after: BenchPiece[]): string[] {
       lines.push(`  + ${name}: ${a.cells.length} cells (${tally([a]).closed} closed)`);
       continue;
     }
-    const bySize = new Map(b.cells.map((c) => [c.size, c.outcome]));
-    const moved = a.cells
-      .filter((c) => bySize.get(c.size) !== c.outcome)
-      .map((c) => `${c.size} ${bySize.get(c.size) ?? '∅'}→${c.outcome}`);
+    const bySize = new Map(b.cells.map((c) => [c.size, c]));
+    const moved = a.cells.flatMap((c) => {
+      const o = bySize.get(c.size);
+      if (o?.outcome !== c.outcome) return [`${c.size} ${o?.outcome ?? '∅'}→${c.outcome}`];
+      // same outcome, other outline (only when both runs carry the fingerprint)
+      return o.geo && c.geo && o.geo !== c.geo ? [`${c.size} ${c.outcome} (outline moved)`] : [];
+    });
     if (moved.length) lines.push(`  ~ ${name}: ${moved.join(', ')}`);
   }
   for (const b of before)

@@ -8,6 +8,7 @@
 //   · chains/*, sizes/* (corners, dash trains, ranks) — NOT: their output is frozen in the
 //     snapshot. A change there needs a fresh capture (a dxf-shot with PIECES_SNAPSHOT=1).
 //   · steps after pieces (meaning, fabrics, check) — not run; the bench measures cells only.
+import { createHash } from 'node:crypto';
 import { deserialize, serialize } from 'node:v8';
 import { gunzipSync, gzipSync } from 'node:zlib';
 
@@ -100,6 +101,8 @@ export type BenchCell = {
   nest: unknown;
   derivedMm: number;
   gapRecovery: boolean;
+  /** Fingerprint of the outline, its walls and area: a speed-only change must keep it. */
+  geo?: string;
 };
 export type BenchPiece = {
   seed: number;
@@ -133,6 +136,17 @@ export function cellsOf(out: StageIO['pieces']['out'], ranks: RankInfo[] | null)
             (c.derived ?? []).reduce((a, d) => a + len(d.pts as { x: number; y: number }[]), 0),
           ),
           gapRecovery: !!c.gapRecovery,
+          geo: createHash('md5')
+            .update(
+              JSON.stringify([
+                c.outer.map((q) => [Math.round(q.x * 100), Math.round(q.y * 100)]),
+                c.walls,
+                Math.round(c.areaMm2),
+                (c.derived ?? []).map((d) => d.pts.length),
+              ]),
+            )
+            .digest('hex')
+            .slice(0, 12),
         })),
     };
   });

@@ -37,7 +37,16 @@ import { clippedMarkLoop } from './clipped-mark-loop';
 import { ringStrokeLoop } from './ring-stroke-loop';
 import { selfIntersects } from '../semantics/geom';
 import { keyedDashLoop } from './keyed-dash-loop';
-import { bboxOf, dist, pointInPoly, quantile, resample, SegGrid, segNearest, signedArea } from './geom';
+import {
+  bboxOf,
+  dist,
+  pointInPoly,
+  quantile,
+  resample,
+  SegGrid,
+  segNearest,
+  signedArea,
+} from './geom';
 import {
   components,
   drawPolyline,
@@ -45,6 +54,8 @@ import {
   flood,
   Grid,
   openMask,
+  dilateColumns,
+  dilateSquare,
   maskBox,
   regionOf,
   splitByCells,
@@ -315,7 +326,17 @@ function leakMouth(g: Grid, wall: Uint8Array, k: number, ref?: PtMm[]): PtMm | u
     // ref polygon rasterised and grown by 3 mm
     const inRef = new Uint8Array(wall.length);
     const grow = Math.ceil(15 / g.cell);
-    for (let j = 0; j < g.H; j++) {
+    // rows the polygon spans (others hold no crossing), and the box of the pixels it sets
+    let ry0 = Infinity;
+    let ry1 = -Infinity;
+    for (const q of ref) {
+      ry0 = Math.min(ry0, q.y);
+      ry1 = Math.max(ry1, q.y);
+    }
+    const box = { x0: W, y0: g.H, x1: -1, y1: -1 };
+    const j0 = Math.max(0, g.iy(ry1) - 1);
+    const j1 = Math.min(g.H - 1, g.iy(ry0) + 1);
+    for (let j = j0; j <= j1; j++) {
       const y = g.box.maxY - (j - 1 + 0.5) * g.cell;
       const xs: number[] = [];
       for (let i = 0, m = ref.length - 1; i < ref.length; m = i++) {
@@ -328,34 +349,21 @@ function leakMouth(g: Grid, wall: Uint8Array, k: number, ref?: PtMm[]): PtMm | u
         const i0 = Math.max(0, g.ix(xs[i]) - grow);
         const i1 = Math.min(W - 1, g.ix(xs[i + 1]) + grow);
         for (let x = i0; x <= i1; x++) inRef[j * W + x] = 1;
+        if (i0 <= i1) {
+          box.x0 = Math.min(box.x0, i0);
+          box.x1 = Math.max(box.x1, i1);
+          box.y0 = Math.min(box.y0, j);
+          box.y1 = Math.max(box.y1, j);
+        }
       }
     }
     // vertical growth
-    const grown = inRef.slice();
-    for (let j = 0; j < g.H; j++)
-      for (let x = 0; x < W; x++)
-        if (inRef[j * W + x])
-          for (let d = 1; d <= grow; d++) {
-            if (j - d >= 0) grown[(j - d) * W + x] = 1;
-            if (j + d < g.H) grown[(j + d) * W + x] = 1;
-          }
+    const grown = dilateColumns(g, inRef, grow, box);
     const p = bfsOut((c) => grown[c] === 1);
     if (p) return p;
   }
   for (const r of [2, 4, 8]) {
-    const thick = new Uint8Array(wall.length);
-    for (let y = 0; y < g.H; y++)
-      for (let x = 0; x < W; x++) {
-        if (!wall[y * W + x]) continue;
-        for (let dy = -r; dy <= r; dy++) {
-          const yy = y + dy;
-          if (yy < 0 || yy >= g.H) continue;
-          for (let dx = -r; dx <= r; dx++) {
-            const xx = x + dx;
-            if (xx >= 0 && xx < W) thick[yy * W + xx] = 1;
-          }
-        }
-      }
+    const thick = dilateSquare(g, wall, r);
     if (thick[k]) continue;
     const ext2 = exterior(g, thick);
     if (ext2[k]) continue;
@@ -995,7 +1003,9 @@ function fillOneSheet(
   };
   const measureSourceCut = (c: PieceCandidate, paths: ReadonlySet<number>) => {
     const ink = new LineIndex(
-      [...sheet.paths, ...(sheet.materialMarks ?? [])].filter((p) => paths.has(p.id)).map((p) => ({ chain: p.id, pts: p.pts })),
+      [...sheet.paths, ...(sheet.materialMarks ?? [])]
+        .filter((p) => paths.has(p.id))
+        .map((p) => ({ chain: p.id, pts: p.pts })),
     );
     measureSourceLoop(c, ink);
   };
@@ -1310,7 +1320,13 @@ function fillOneSheet(
       );
       // Where the legend and both neighbouring sizes distinguish a single complete
       // vector loop, keep its corners if raster snapping picked a nearby wall instead.
-      if (!merged && !opts.variant && !userExcl.size && !edits.include?.length && !edits.bridges?.length) {
+      if (
+        !merged &&
+        !opts.variant &&
+        !userExcl.size &&
+        !edits.include?.length &&
+        !edits.bridges?.length
+      ) {
         // Isolated portions of another size are useful walls in an open drawing.
         // A closed region can nevertheless take a detour over those walls even
         // when this rank's own two printed rows already enclose the seed.
@@ -1343,13 +1359,15 @@ function fillOneSheet(
         }
         const loops = (set.bracketedOutlines ?? []).filter(({ label, chain }) => {
           const c = set.chains[chain];
-          if (label !== run.sizes[r]?.label || !c?.closed || !sn.walls.includes(chain)) return false;
+          if (label !== run.sizes[r]?.label || !c?.closed || !sn.walls.includes(chain))
+            return false;
           return hausdorffMm(c.pts, sn.outer) <= 2.5;
         });
         if (loops.length === 1) {
           const c = set.chains[loops[0].chain];
           if (hausdorffMm(c.pts, sn.outer) > 0.2) {
-            sn.outer = dist(c.pts[0], c.pts[c.pts.length - 1]) < 0.001 ? c.pts.slice(0, -1) : c.pts.slice();
+            sn.outer =
+              dist(c.pts[0], c.pts[c.pts.length - 1]) < 0.001 ? c.pts.slice(0, -1) : c.pts.slice();
             sn.walls = [c.id];
             sn.coverage = 1;
             sn.p95Mm = 0;
@@ -1915,9 +1933,18 @@ function fillOneSheet(
       new Set([...dropped, ...(graded?.skip ?? [])]),
     );
   }
-  if (model.mode==='graded' && !solved && !graded?.walls && !opts.variant && !edits.include?.length && !edits.bridges?.length && !sheet.holes?.length && !set.assigned?.length) {
-    restoreSourceLoops(sheet,set,run,use,cands,excl,alongShare);
-    applyPrintedCuts(sheet,set,run,use,cands,excl,userExcl);
+  if (
+    model.mode === 'graded' &&
+    !solved &&
+    !graded?.walls &&
+    !opts.variant &&
+    !edits.include?.length &&
+    !edits.bridges?.length &&
+    !sheet.holes?.length &&
+    !set.assigned?.length
+  ) {
+    restoreSourceLoops(sheet, set, run, use, cands, excl, alongShare);
+    applyPrintedCuts(sheet, set, run, use, cands, excl, userExcl);
   }
   // LADDER_RESCUE: a cell closed on a rescued ladder rung and off its family's trend is filled again
   // without the rung — after every closing pass (the state the dry run judged), before the leak
@@ -2013,8 +2040,10 @@ function fillOneSheet(
   if (!solved && !opts.variant && !opts.only && !edits.include?.length && !edits.bridges?.length) {
     restoreSourceOutlineFamilies(sheet, set, run, use, cands, excl);
     if (!sheet.holes?.length && !set.assigned?.length && !graded?.walls) {
-      if (model.mode === 'graded') restoreTriangleStripContours(sheet, set, run, use, cands, userExcl, measureSourceCut);
-      if (model.mode === 'graded') restorePrintedMotifPolygons(sheet, set, run, use, cands, userExcl);
+      if (model.mode === 'graded')
+        restoreTriangleStripContours(sheet, set, run, use, cands, userExcl, measureSourceCut);
+      if (model.mode === 'graded')
+        restorePrintedMotifPolygons(sheet, set, run, use, cands, userExcl);
       if (model.mode === 'graded') readPrintedMarkContours(sheet, set, run, use, cands, userExcl);
       restoreMaskedMarkLoops(sheet, set, run, use, cands, excl);
     }
@@ -2023,7 +2052,12 @@ function fillOneSheet(
       restoreRingPanels(sheet, set, run, use, cands, excl);
       restoreFoldPanels(sheet, set, run, use, cands, excl, measureSourceCut);
     }
-    if (model.mode === 'graded' && !graded?.walls && !sheet.holes?.length && !set.assigned?.length) {
+    if (
+      model.mode === 'graded' &&
+      !graded?.walls &&
+      !sheet.holes?.length &&
+      !set.assigned?.length
+    ) {
       readLabelledSourceFamilies(sheet, set, run, use, cands, excl);
     }
   }
