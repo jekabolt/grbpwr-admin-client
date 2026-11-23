@@ -24,7 +24,12 @@ export function MobileNavMenu() {
       ...group,
       items: [
         ...group.items.filter((item) => canSee(item)),
-        ...(team && group === ADMIN_GROUP ? [{ label: 'workspace', route: ROUTES.workspace }] : []),
+        ...(team && group === ADMIN_GROUP
+          ? [
+              { label: 'shop', route: ROUTES.shop },
+              { label: 'workspace', route: ROUTES.workspace },
+            ]
+          : []),
       ],
     }))
     .filter((group) => group.items.length > 0);

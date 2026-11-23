@@ -20797,6 +20797,180 @@ export type GetTeamStorageResponse = {
   full: boolean | undefined;
 };
 
+// Shop is the calling team's shop (lane X18).
+export type Shop = {
+  // enabled: the team turned its shop on.
+  enabled: boolean | undefined;
+  // status: "off" (turned off), "open" (taking orders), "closed" (the operator closed it, or the
+  // team's products / orders features are off), "checkout_off" (open, no payments set up).
+  status: string | undefined;
+  // address is the shop's own address on the platform: "{slug}.shop.lekalo.studio"; empty while off.
+  address: string | undefined;
+  // primary_host is the main address (no scheme): a live custom domain or the address above.
+  primaryHost: string | undefined;
+  // domains are every host of the shop, the platform address first.
+  domains: ShopDomain[] | undefined;
+  payments: ShopPayments | undefined;
+  mail: ShopMail | undefined;
+  // closed_by_operator: the platform operator closed the shop; the team cannot reopen it.
+  closedByOperator: boolean | undefined;
+  // missing_features are feature keys the shop needs and the team does not have ("products", "orders").
+  missingFeatures: string[] | undefined;
+};
+
+// ShopDomain is one host the shop answers on.
+export type ShopDomain = {
+  // host is the bare host name, lowercase, no scheme or port.
+  host: string | undefined;
+  // kind: "subdomain" ({slug}.shop.lekalo.studio, managed by the platform), "custom" (the team's own),
+  // "legacy" (grbpwr's existing domains).
+  kind: string | undefined;
+  // status: "records_needed" (add the records), "verifying", "live", "failed".
+  status: string | undefined;
+  // primary: this host is the main address.
+  primary: boolean | undefined;
+  // managed: the platform owns the DNS (the shop.lekalo.studio address); it cannot be removed.
+  managed: boolean | undefined;
+  // redirect_to is set when this host only redirects (e.g. "www." to the bare domain).
+  redirectTo: string | undefined;
+  // records are the DNS records to add at the team's DNS provider; empty for managed hosts.
+  records: ShopDnsRecord[] | undefined;
+  verifiedAt: wellKnownTimestamp | undefined;
+  checkedAt: wellKnownTimestamp | undefined;
+};
+
+// ShopDnsRecord is one DNS record the team adds.
+export type ShopDnsRecord = {
+  // type: "A", "CNAME" or "TXT".
+  type: string | undefined;
+  // name is the record name as DNS providers take it ("@", "www", "_vercel").
+  name: string | undefined;
+  value: string | undefined;
+  // found: the last check saw this record in DNS.
+  found: boolean | undefined;
+};
+
+// ShopPayments is how the shop takes payments. No Stripe account id or key reaches the admin.
+export type ShopPayments = {
+  // method: "none", "connect" (Stripe Connect), "keys" (the team's own keys), "platform" (grbpwr's keys).
+  method: string | undefined;
+  // status: "none", "onboarding" (Connect started, not finished), "active", "restricted", "disconnected".
+  status: string | undefined;
+  // account_name is the Stripe account's display name.
+  accountName: string | undefined;
+  chargesEnabled: boolean | undefined;
+  payoutsEnabled: boolean | undefined;
+  detailsSubmitted: boolean | undefined;
+  // mode: "live" or "test".
+  mode: string | undefined;
+  // key_last4 is the last four characters of the team's secret key (method keys only).
+  keyLast4: string | undefined;
+  // webhook_url is where the team points its Stripe webhook (method keys only).
+  webhookUrl: string | undefined;
+};
+
+// ShopMail is the sender of the shop's letters.
+export type ShopMail = {
+  // from_name is the sender's name; empty = the team's brand name.
+  fromName: string | undefined;
+  // from_address is the sending address (set by the platform, read-only).
+  fromAddress: string | undefined;
+  // reply_to is where customers' replies go; empty = no reply-to.
+  replyTo: string | undefined;
+};
+
+export type GetShopRequest = {
+};
+
+export type GetShopResponse = {
+  shop: Shop | undefined;
+};
+
+export type SetShopEnabledRequest = {
+  enabled: boolean | undefined;
+};
+
+export type SetShopEnabledResponse = {
+  shop: Shop | undefined;
+};
+
+export type AttachShopDomainRequest = {
+  // host is the team's domain ("brand.com" or "shop.brand.com"); a scheme, path or port is refused.
+  host: string | undefined;
+};
+
+export type AttachShopDomainResponse = {
+  shop: Shop | undefined;
+  // domain is the attached host with the records to add.
+  domain: ShopDomain | undefined;
+};
+
+export type CheckShopDomainRequest = {
+  host: string | undefined;
+};
+
+export type CheckShopDomainResponse = {
+  shop: Shop | undefined;
+  domain: ShopDomain | undefined;
+};
+
+export type RemoveShopDomainRequest = {
+  host: string | undefined;
+};
+
+export type RemoveShopDomainResponse = {
+  shop: Shop | undefined;
+};
+
+export type SetShopPrimaryHostRequest = {
+  // host must be one of the shop's live hosts.
+  host: string | undefined;
+};
+
+export type SetShopPrimaryHostResponse = {
+  shop: Shop | undefined;
+};
+
+export type SetShopMailRequest = {
+  fromName: string | undefined;
+  replyTo: string | undefined;
+};
+
+export type SetShopMailResponse = {
+  shop: Shop | undefined;
+};
+
+export type StartStripeConnectRequest = {
+  // return_path is the admin page Stripe sends the owner back to; empty = the shop screen.
+  returnPath: string | undefined;
+};
+
+export type StartStripeConnectResponse = {
+  // url is the Stripe onboarding (or dashboard) link; open it in the same tab.
+  url: string | undefined;
+  shop: Shop | undefined;
+};
+
+export type SetStripeKeysRequest = {
+  // publishable_key: pk_live_… or pk_test_….
+  publishableKey: string | undefined;
+  // secret_key: sk_… or rk_…; never answered back.
+  secretKey: string | undefined;
+  // webhook_secret: whsec_… of the endpoint the team made at ShopPayments.webhook_url.
+  webhookSecret: string | undefined;
+};
+
+export type SetStripeKeysResponse = {
+  shop: Shop | undefined;
+};
+
+export type DisconnectStripeRequest = {
+};
+
+export type DisconnectStripeResponse = {
+  shop: Shop | undefined;
+};
+
 // TranslateFieldsRequest — the admin client's /api/translate body
 // ({source:{langName, fields}, targets:[{code, langName}], constraints}).
 export type TranslateFieldsRequest = {
@@ -23149,6 +23323,27 @@ export interface AdminService {
   // GetTeamStorage returns the calling team's file storage: bytes in use and its cap (lane X11). Any
   // member may read it; only the operator changes the cap (PlatformService.SetTeamStorageCap).
   GetTeamStorage(request: GetTeamStorageRequest): Promise<GetTeamStorageResponse>;
+  // GetShop answers the calling team's shop as the admin «shop» screen shows it.
+  GetShop(request: GetShopRequest): Promise<GetShopResponse>;
+  // SetShopEnabled turns the shop on or off. Turning it on gives it the address
+  // {slug}.shop.lekalo.studio (and makes it the main address when the team has none).
+  SetShopEnabled(request: SetShopEnabledRequest): Promise<SetShopEnabledResponse>;
+  // AttachShopDomain stores a domain of the team's own and answers the DNS records to add.
+  AttachShopDomain(request: AttachShopDomainRequest): Promise<AttachShopDomainResponse>;
+  // CheckShopDomain asks the domain provider again and answers the domain's fresh status.
+  CheckShopDomain(request: CheckShopDomainRequest): Promise<CheckShopDomainResponse>;
+  // RemoveShopDomain removes a domain of the team's own (the shop.lekalo.studio address stays).
+  RemoveShopDomain(request: RemoveShopDomainRequest): Promise<RemoveShopDomainResponse>;
+  // SetShopPrimaryHost picks the main address: mail links, revalidation and redirects use it.
+  SetShopPrimaryHost(request: SetShopPrimaryHostRequest): Promise<SetShopPrimaryHostResponse>;
+  // SetShopMail sets the sender name and reply-to address of the shop's letters.
+  SetShopMail(request: SetShopMailRequest): Promise<SetShopMailResponse>;
+  // StartStripeConnect answers the Stripe onboarding link for Stripe Connect (lane X18-L3).
+  StartStripeConnect(request: StartStripeConnectRequest): Promise<StartStripeConnectResponse>;
+  // SetStripeKeys stores the team's own Stripe keys, sealed at rest (lane X18-L3).
+  SetStripeKeys(request: SetStripeKeysRequest): Promise<SetStripeKeysResponse>;
+  // DisconnectStripe stops payments through the team's Stripe account or keys (lane X18-L3).
+  DisconnectStripe(request: DisconnectStripeRequest): Promise<DisconnectStripeResponse>;
   // ListLibraryItems is one page of the unified library: media rows and library files in one
   // list, keyed by (source, id). Branches the caller may not read are dropped silently.
   ListLibraryItems(request: ListLibraryItemsRequest): Promise<ListLibraryItemsResponse>;
@@ -32787,6 +32982,182 @@ export function createAdminServiceClient(
         method: "GetTeamStorage",
       }) as Promise<GetTeamStorageResponse>;
     },
+    GetShop(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/team/shop`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetShop",
+      }) as Promise<GetShopResponse>;
+    },
+    SetShopEnabled(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/team/shop/enabled`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetShopEnabled",
+      }) as Promise<SetShopEnabledResponse>;
+    },
+    AttachShopDomain(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/team/shop/domains`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AttachShopDomain",
+      }) as Promise<AttachShopDomainResponse>;
+    },
+    CheckShopDomain(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.host) {
+        throw new Error("missing required field request.host");
+      }
+      const path = `api/admin/team/shop/domains/${request.host}/check`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CheckShopDomain",
+      }) as Promise<CheckShopDomainResponse>;
+    },
+    RemoveShopDomain(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.host) {
+        throw new Error("missing required field request.host");
+      }
+      const path = `api/admin/team/shop/domains/${request.host}/remove`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "RemoveShopDomain",
+      }) as Promise<RemoveShopDomainResponse>;
+    },
+    SetShopPrimaryHost(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/team/shop/primary`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetShopPrimaryHost",
+      }) as Promise<SetShopPrimaryHostResponse>;
+    },
+    SetShopMail(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/team/shop/mail`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetShopMail",
+      }) as Promise<SetShopMailResponse>;
+    },
+    StartStripeConnect(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/team/shop/stripe/connect`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "StartStripeConnect",
+      }) as Promise<StartStripeConnectResponse>;
+    },
+    SetStripeKeys(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/team/shop/stripe/keys`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetStripeKeys",
+      }) as Promise<SetStripeKeysResponse>;
+    },
+    DisconnectStripe(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/team/shop/stripe/disconnect`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DisconnectStripe",
+      }) as Promise<DisconnectStripeResponse>;
+    },
     ListLibraryItems(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/library/items/list`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
@@ -32965,6 +33336,10 @@ export type PlatformTeam = {
   storageCapBytes: number | undefined;
   // storage_cap_default is true when the team follows the installation's default cap (no own cap).
   storageCapDefault: boolean | undefined;
+  // shop is the team's shop: "off", "open", "closed" (by the operator) or "checkout_off".
+  shop: string | undefined;
+  // shop_host is the shop's main address (no scheme); empty while off.
+  shopHost: string | undefined;
 };
 
 // PlatformMember is one member of a team as the console sees it.
@@ -33042,6 +33417,16 @@ export type SetTeamStorageCapRequest = {
 };
 
 export type SetTeamStorageCapResponse = {
+  team: PlatformTeam | undefined;
+};
+
+export type SetTeamShopRequest = {
+  teamSlug: string | undefined;
+  // closed: true closes the shop, false lifts the operator's close (the team's own on/off stays).
+  closed: boolean | undefined;
+};
+
+export type SetTeamShopResponse = {
   team: PlatformTeam | undefined;
 };
 
@@ -33158,6 +33543,9 @@ export interface PlatformService {
   // installation's default, TEAM_STORAGE_CAP_GB). An upload that would take the team over its cap
   // is refused; nothing stored is touched.
   SetTeamStorageCap(request: SetTeamStorageCapRequest): Promise<SetTeamStorageCapResponse>;
+  // SetTeamShop closes or reopens a team's shop (lane X18). A closed shop answers "shop closed" to
+  // every storefront call; the team cannot reopen it itself.
+  SetTeamShop(request: SetTeamShopRequest): Promise<SetTeamShopResponse>;
 }
 
 export function createPlatformServiceClient(
@@ -33434,6 +33822,26 @@ export function createPlatformServiceClient(
         service: "PlatformService",
         method: "SetTeamStorageCap",
       }) as Promise<SetTeamStorageCapResponse>;
+    },
+    SetTeamShop(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.teamSlug) {
+        throw new Error("missing required field request.team_slug");
+      }
+      const path = `api/platform/teams/${request.teamSlug}/shop`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "PlatformService",
+        method: "SetTeamShop",
+      }) as Promise<SetTeamShopResponse>;
     },
   };
 }

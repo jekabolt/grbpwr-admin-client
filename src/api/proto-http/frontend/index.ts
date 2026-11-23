@@ -905,6 +905,69 @@ export type common_CareSymbolTranslation = {
   shortProse: string | undefined;
 };
 
+export type GetShopProfileRequest = {
+};
+
+export type GetShopProfileResponse = {
+  profile: ShopProfile | undefined;
+};
+
+// ShopProfile is what a storefront needs to draw the shop (lane X18; shape agreed with the
+// storefront lane X18-L2). Empty strings / lists = not set; the storefront draws its default.
+export type ShopProfile = {
+  // shop_key is the shop's stable key ("t{n}"); a revalidation post to the shop is signed with
+  // hex(HKDF-SHA256(SHOP_REVALIDATE_MASTER, salt empty, info "revalidate:" + shop_key, 32 bytes)).
+  shopKey: string | undefined;
+  // name is the brand name.
+  name: string | undefined;
+  // legal_name is the legal entity that sells.
+  legalName: string | undefined;
+  description: string | undefined;
+  // logo_url is the brand logo (absolute https URL); empty = none.
+  logoUrl: string | undefined;
+  // email is the shop's contact address.
+  email: string | undefined;
+  // address is the legal address on one line.
+  address: string | undefined;
+  // colors is always present; empty fields = the storefront's default.
+  colors: ShopColors | undefined;
+  socials: ShopSocial[] | undefined;
+  // primary_host is the shop's main address (no scheme).
+  primaryHost: string | undefined;
+  // hosts are every address the shop answers on (live), primary first.
+  hosts: string[] | undefined;
+  // currencies the shop sells in (ISO 4217); empty = the storefront's dictionary decides.
+  currencies: string[] | undefined;
+  // base_currency is the shop's base currency (ISO 4217).
+  baseCurrency: string | undefined;
+  // stripe_account_id is the connected account Stripe.js loads with (Connect only).
+  stripeAccountId: string | undefined;
+  // stripe_publishable_key is the shop's own key (own keys); empty with Connect = the platform key.
+  stripePublishableKey: string | undefined;
+  // open: the shop takes orders; false = draw a closed page.
+  open: boolean | undefined;
+  // legal: page slug ("privacy-policy", "terms-conditions", "terms-of-sale", "legal-notice",
+  // "return-exchange", "membership", "faq", "tier-<slug>", optionally ".<locale>") -> markdown.
+  legal: { [key: string]: string } | undefined;
+  website: string | undefined;
+  // stripe_mode: "live" or "test"; empty = checkout off.
+  stripeMode: string | undefined;
+};
+
+// ShopColors are the brand colours ("#rrggbb").
+export type ShopColors = {
+  accent: string | undefined;
+  accentSecondary: string | undefined;
+  background: string | undefined;
+  text: string | undefined;
+};
+
+// ShopSocial is one social link of the shop.
+export type ShopSocial = {
+  text: string | undefined;
+  href: string | undefined;
+};
+
 export type GetColorwayRequest = {
   baseSku: string | undefined;
 };
@@ -1703,6 +1766,10 @@ export type ListMyOrdersResponse = {
 export interface FrontendService {
   // Get hero information
   GetHero(request: GetHeroRequest): Promise<GetHeroResponse>;
+  // GetShopProfile answers the shop the request is for (header x-shop-host, else Origin): brand,
+  // addresses, legal, Stripe (lane X18). A closed shop answers open=false; any other storefront call
+  // of a closed shop is NotFound "shop_closed", an unknown x-shop-host NotFound "shop_not_found".
+  GetShopProfile(request: GetShopProfileRequest): Promise<GetShopProfileResponse>;
   // Get a colourway by its public base SKU.
   GetColorway(request: GetColorwayRequest): Promise<GetColorwayResponse>;
   // Get paged colourways.
@@ -1780,6 +1847,23 @@ export function createFrontendServiceClient(
         service: "FrontendService",
         method: "GetHero",
       }) as Promise<GetHeroResponse>;
+    },
+    GetShopProfile(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/frontend/shop/profile`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "FrontendService",
+        method: "GetShopProfile",
+      }) as Promise<GetShopProfileResponse>;
     },
     GetColorway(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.baseSku) {

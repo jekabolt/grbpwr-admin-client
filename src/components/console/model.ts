@@ -256,3 +256,21 @@ export function capChange(field: string, noCap: boolean): CapChange | null {
   if (!Number.isFinite(n) || n <= 0 || n >= 1e6) return null;
   return { capBytes: Math.round(n * GIB) };
 }
+
+// SHOP (lane X18): PlatformTeam.shop is "off", "open", "closed" (by the operator) or "checkout_off".
+/** The console's shop cell: a word, red when the operator closed it. */
+export function shopCell(t: { shop?: string; shopHost?: string }): {
+  word: string;
+  closed: boolean;
+} {
+  switch (t.shop) {
+    case 'open':
+      return { word: t.shopHost || 'open', closed: false };
+    case 'checkout_off':
+      return { word: 'checkout off', closed: false };
+    case 'closed':
+      return { word: 'closed', closed: true };
+    default:
+      return { word: '', closed: false };
+  }
+}

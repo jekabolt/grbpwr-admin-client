@@ -104,6 +104,8 @@ function team(
     storageUsedBytes: Math.round(members.length * 1.1 * 1024 ** 3),
     storageCapBytes: STUB_DEFAULT_CAP,
     storageCapDefault: true,
+    shop: 'off',
+    shopHost: undefined,
     members: members.map(([handle, email, role, seenMin]) => ({
       handle,
       email,
@@ -155,7 +157,11 @@ let teams: StubTeam[] = [
       ['teo marin', 'teo@ostra.studio', 'member', 120],
       ['lena fischer', 'lena@ostra.studio', 'member', 60 * 24 * 7],
     ],
-    { features: [...DEFAULTS, 'products', 'settings'] },
+    {
+      features: [...DEFAULTS, 'products', 'settings'],
+      shop: 'open',
+      shopHost: 'ostra.studio',
+    },
   ),
   team('mono', 'mono', 13, '0', [['nika petrova', 'nika@mono.works', 'owner', 60 * 24 * 17]], {
     status: 'read_only',
@@ -353,6 +359,12 @@ export function consoleStubAnswer(method: string, body: string | null, path = ''
       else if (Number(req.capBytes) > 0)
         Object.assign(t, { storageCapBytes: Number(req.capBytes), storageCapDefault: false });
       else refuse(400, 'storage_cap');
+      return { team: pub(t) };
+    }
+    case 'SetTeamShop': {
+      failWrite();
+      const t = find(slug);
+      t.shop = req.closed ? 'closed' : 'open';
       return { team: pub(t) };
     }
     case 'ApproveTeam': {

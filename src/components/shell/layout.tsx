@@ -112,6 +112,19 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
                 asChild
                 className={cn(
                   'px-2 underline-offset-2 transition-colors hover:underline hover:opacity-70',
+                  pathname === ROUTES.shop && 'underline',
+                )}
+              >
+                <Link to={ROUTES.shop}>shop</Link>
+              </Button>
+            </div>
+          )}
+          {team && (
+            <div className='hidden lg:block'>
+              <Button
+                asChild
+                className={cn(
+                  'px-2 underline-offset-2 transition-colors hover:underline hover:opacity-70',
                   pathname === ROUTES.workspace && 'underline',
                 )}
               >

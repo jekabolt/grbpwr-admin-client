@@ -3,7 +3,16 @@ import { cn } from 'lib/utility';
 import { Fragment, useState } from 'react';
 import { Button, ConfirmationModal, EmptyCell, FoldCaret } from 'ui';
 import { FeatureSquare } from './feature-square';
-import { featureGroups, isReadOnly, shortDate, STATUS, storageOf, storageText, usd } from './model';
+import {
+  featureGroups,
+  isReadOnly,
+  shopCell,
+  shortDate,
+  STATUS,
+  storageOf,
+  storageText,
+  usd,
+} from './model';
 import { TeamDetail } from './team-detail';
 import { addressOf, useConsoleActions, useRequestEmails } from './use-console';
 
@@ -54,7 +63,7 @@ export function Matrix({
   const emails = useRequestEmails(requests.map((r) => r.slug ?? ''));
   const [declining, setDeclining] = useState<PlatformTeam | null>(null);
   const groups = featureGroups(catalog);
-  const span = 5 + catalog.length;
+  const span = 6 + catalog.length;
   const first = new Set(groups.map((g) => g.items[0]?.key));
 
   return (
@@ -65,7 +74,7 @@ export function Matrix({
             <th rowSpan={2} className={cn(HEAD, TEAM, 'z-30 align-bottom font-normal')}>
               team
             </th>
-            {['people', 'since', 'ai spend', 'storage'].map((h) => (
+            {['people', 'since', 'ai spend', 'storage', 'shop'].map((h) => (
               <th
                 key={h}
                 rowSpan={2}
@@ -140,7 +149,7 @@ export function Matrix({
               <Fragment key={slug}>
                 <tr className='max-md:hidden'>
                   <td className={cn(CELL, TEAM)}>{who}</td>
-                  <td colSpan={4} className={CELL} />
+                  <td colSpan={5} className={CELL} />
                   <td colSpan={catalog.length} className={cn(CELL, 'px-3 align-middle')}>
                     <div className='flex items-center gap-3'>
                       {approve}
@@ -248,6 +257,17 @@ export function Matrix({
                     <td className={cn(CELL, NUM)}>{usd(t.aiSpendMonthUsd)}</td>
                     <td className={cn(CELL, NUM, storage.full && 'text-error')}>
                       {storageText(storage)}
+                    </td>
+                    <td
+                      className={cn(
+                        CELL,
+                        NUM,
+                        'max-w-48 truncate',
+                        shopCell(t).closed && 'text-error',
+                      )}
+                      title={t.shopHost || undefined}
+                    >
+                      {shopCell(t).word || <EmptyCell />}
                     </td>
                     {catalog.map((f) => {
                       const key = f.key ?? '';
