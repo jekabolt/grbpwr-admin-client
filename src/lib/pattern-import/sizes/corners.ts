@@ -17,6 +17,14 @@
 //            small to be a chain (≤ 3 mm) — and its vertex ≤ 0.5 mm from the crossing of those two
 //            edges' tangents (b). Touching ends of several ranks (a dense corner bundle): only the
 //            rank with (a)+(b), and only when exactly one rank has them — never by proximity.
+//   ARMS     two straight solid strokes (1.5–8 mm), each continuing one own end of the SAME rank.
+//            The stroke may start up to 8 mm ahead of the end, on its outward tangent (cosine
+//            > 0.85, every point ≤ 0.4 mm off the line), in the rank's ink and in a width that
+//            rank's own lines use. The wall keeps those printed points. A vertex the strokes do
+//            not reach is the crossing of the two confirmed sides, and only when that crossing
+//            lies ahead of both within 8 mm. One stroke, two strokes on the same end, or one
+//            stroke continuing two ranks leaves the corner open. Another size's coordinates are
+//            never copied.
 //   EXTEND   no stub (a phase shift), on a sheet that shows the convention (≥ 10 stubs + ramps):
 //            two own ends of one rank, 0.5–8 mm apart, ≥ 20° apart, whose tangents cross ahead of
 //            both within 8 mm, are carried to the crossing (evidence 1) when that vertex lies where
@@ -87,10 +95,12 @@ export type CornerLink = {
   b: { c: number; end: 0 | 1 };
   /** Points between the two ends (stub points, or the vertex). */
   via: PtMm[];
-  rule: 'stub' | 'ramp' | 'extend';
+  rule: 'stub' | 'ramp' | 'extend' | 'arms';
   rank: number;
   /** The stub chain absorbed by a 'stub' link. */
   stub?: number;
+  /** The two printed strokes an 'arms' link keeps. */
+  arms?: number[];
 };
 
 export type CornerOut = {
@@ -595,6 +605,144 @@ export function closeCornersRun(
     });
     return hit;
   };
+  // ── ARMS: the printed stroke is already there. Keep it. A missing vertex is the crossing of
+  // the two confirmed sides. A second continuation, or a stroke that continues two ranks, stops.
+  // A sheet that already cuts corners into stubs and ramps keeps EXTEND for this; arms is the
+  // sheet that has no such convention, where those strokes were being thrown out.
+  if (stubs + ramps < CORNER.conventionMin) {
+    const cosMin = 0.85;
+    const rankWidths = new Map<number, number[]>();
+    for (let c = 0; c < chains.length; c++) {
+      const r = rankOf.get(c);
+      const w = styleOf(c)?.widthMm;
+      if (r === undefined || !own(c) || !(w && w > 0)) continue;
+      const ws = rankWidths.get(r) ?? [];
+      if (!ws.some((v) => Math.abs(v - w) < 1e-3)) ws.push(w);
+      rankWidths.set(r, ws);
+    }
+    type ArmHit = { k: number; c: number; near: 0 | 1 };
+    const hits: ArmHit[] = [];
+    for (let c = 0; c < chains.length; c++) {
+      if (rampOf.has(c) || !cand(c)) continue;
+      const ch = chains[c];
+      const st = styleOf(c);
+      if (ch.closed || ch.pts.length < 2 || ch.lengthMm < 1.5 || ch.lengthMm > 8) continue;
+      if (!st || st.fill || (st.dash && st.dash.some((v) => v > 0.01)) || !(st.widthMm > 0))
+        continue;
+      const a = ch.pts[0];
+      const b = ch.pts[ch.pts.length - 1];
+      const L = dist(a, b);
+      if (L < 0.9 * ch.lengthMm || L < 1e-6) continue;
+      for (const near of [0, 1] as const) {
+        const p = near ? b : a;
+        const q = near ? a : b;
+        const dir = { x: (q.x - p.x) / L, y: (q.y - p.y) / L };
+        endsNear(p, CORNER.extendMaxMm, (k) => {
+          const E = ends[k];
+          if (usedEnd.has(ek(E.c, E.end))) return;
+          const dx = p.x - E.p.x;
+          const dy = p.y - E.p.y;
+          const along = dx * E.t.x + dy * E.t.y;
+          const lat = Math.abs(dx * E.t.y - dy * E.t.x);
+          // ahead of the end, on its line: a dash break, not a stroke beside it
+          if (along < -0.5 || along > CORNER.extendMaxMm || lat > CORNER.armMm) return;
+          if (dir.x * E.t.x + dir.y * E.t.y <= cosMin) return;
+          if (!sameInk(c, E.c)) return;
+          const wr = rankWidths.get(E.rank) ?? [];
+          if (!wr.some((v) => Math.abs(v - st.widthMm) <= 0.03)) return;
+          const off = (pt: PtMm) => Math.abs((pt.x - E.p.x) * E.t.y - (pt.y - E.p.y) * E.t.x);
+          if (ch.pts.some((pt) => off(pt) > CORNER.armMm)) return;
+          hits.push({ k, c, near });
+        });
+      }
+    }
+    const byEnd = new Map<number, ArmHit[]>();
+    const ranksOf = new Map<number, Set<number>>();
+    for (const h of hits) {
+      const list = byEnd.get(h.k) ?? [];
+      if (!list.some((o) => o.c === h.c)) list.push(h);
+      byEnd.set(h.k, list);
+      const rs = ranksOf.get(h.c) ?? new Set<number>();
+      rs.add(ends[h.k].rank);
+      ranksOf.set(h.c, rs);
+    }
+    const shared = new Set<number>();
+    for (const [c, rs] of ranksOf) if (rs.size > 1) shared.add(c);
+    if (shared.size) refuse('arms: two ranks');
+    const armOf = new Map<number, ArmHit>();
+    for (const [k, list] of byEnd) {
+      const uniq = list.filter((h) => !shared.has(h.c));
+      if (uniq.length === 1) armOf.set(k, uniq[0]);
+      else if (uniq.length > 1) refuse('arms: two continuations');
+    }
+    /** Printed points of a stroke that lie strictly between the own end and `vertex`. */
+    const along = (c: number, near: 0 | 1, vertex: PtMm, t: PtMm, tip: PtMm) => {
+      const q = chains[c].pts;
+      const pts = near ? q.slice().reverse() : q.slice();
+      const reach = (vertex.x - tip.x) * t.x + (vertex.y - tip.y) * t.y;
+      const out: PtMm[] = [];
+      for (const p of pts) {
+        const s = (p.x - tip.x) * t.x + (p.y - tip.y) * t.y;
+        if (s <= 0.05 || s > reach + 0.05) continue;
+        out.push(p);
+      }
+      return out;
+    };
+    type ArmPair = { k0: number; k1: number; x: PtMm; cost: number };
+    const armPairs: ArmPair[] = [];
+    for (const [k0, h0] of armOf) {
+      const A = ends[k0];
+      endsNear(A.p, 2 * CORNER.extendMaxMm, (k1) => {
+        if (k1 <= k0) return;
+        const h1 = armOf.get(k1);
+        if (!h1 || h1.c === h0.c) return;
+        const B = ends[k1];
+        if (B.rank !== A.rank || (B.c === A.c && B.end === A.end)) return;
+        if (-(A.t.x * B.t.x + A.t.y * B.t.y) > cosTurn) return;
+        const x = rayCross(A.p, A.t, B.p, B.t);
+        if (!x || x.a < -0.3 || x.b < -0.3) return;
+        if (x.a > CORNER.extendMaxMm || x.b > CORNER.extendMaxMm) return;
+        if (dist(A.p, B.p) <= 0.5) return;
+        armPairs.push({ k0, k1, x: x.x, cost: Math.max(0, x.a) + Math.max(0, x.b) });
+      });
+    }
+    armPairs.sort((p, q) => p.cost - q.cost);
+    const taken = new Set<number>();
+    for (const pr of armPairs) {
+      const h0 = armOf.get(pr.k0);
+      const h1 = armOf.get(pr.k1);
+      if (!h0 || !h1 || taken.has(h0.c) || taken.has(h1.c)) continue;
+      if (!free(pr.k0) || !free(pr.k1)) continue;
+      const A = ends[pr.k0];
+      const B = ends[pr.k1];
+      if (crossesRank(A.p, pr.x, A.rank, new Set([A.c, B.c]))) {
+        refuse('arms: crosses its rank');
+        continue;
+      }
+      if (crossesRank(pr.x, B.p, A.rank, new Set([A.c, B.c]))) {
+        refuse('arms: crosses its rank');
+        continue;
+      }
+      const forward = along(h0.c, h0.near, pr.x, A.t, A.p);
+      const back = along(h1.c, h1.near, pr.x, B.t, B.p).reverse();
+      const via = [...forward];
+      const last = via[via.length - 1];
+      if (!last || dist(last, pr.x) > 0.05) via.push(pr.x);
+      via.push(...back);
+      usedEnd.add(ek(A.c, A.end));
+      usedEnd.add(ek(B.c, B.end));
+      taken.add(h0.c);
+      taken.add(h1.c);
+      links.push({
+        a: { c: A.c, end: A.end },
+        b: { c: B.c, end: B.end },
+        via,
+        rule: 'arms',
+        rank: A.rank,
+        arms: [h0.c, h1.c],
+      });
+    }
+  }
   let extended = 0;
   let crossed = 0;
   pairs.sort((p, q) => p.cost - q.cost);
@@ -856,7 +1004,7 @@ function wallsOf(
       pts: [pa, ...via, tip(l.b)],
       own: [A.c, B.c],
       ends: [`${A.c}:${A.end}`, `${B.c}:${B.end}`],
-      chains: l.stub !== undefined ? [l.stub] : [],
+      chains: l.arms ?? (l.stub !== undefined ? [l.stub] : []),
     });
   }
   return out;

@@ -3,43 +3,44 @@ import { describe, expect, it } from 'vitest';
 import type { Chain, PtMm, Style } from '../types';
 import { closeCorners } from './corners';
 
-// MDF340 Opal, F — FRONT SKIRT, size 10. Page 53.
-// Operation 3012 continues one side; operation 3046 continues the other.
-// Both strokes are on the sheet. The corner used to stay open: the sheet has no
-// stub/ramp convention, so the printed strokes were left for isNotch / fragment < 8 mm.
+// MDF340 Opal, F — FRONT SKIRT, size 10. Page 53, operations 3012 and 3046.
+// The size chains stop 1.77 mm and 5.48 mm short of those strokes. Both strokes
+// lie on the outward tangents. The sheet has no stub/ramp convention, so the
+// strokes used to be left for isNotch / fragment < 8 mm. The second side's chain
+// is 0.35 mm wide; the stroke is 0.49 mm, a width the same rank also draws.
 
-const END_A: PtMm = { x: 888.72, y: 232.99 };
-const END_B: PtMm = { x: 889.42, y: 230.94 };
+const END_A: PtMm = { x: 888.141, y: 234.678 };
+const END_B: PtMm = { x: 883.339, y: 228.947 };
 const OP_3012: PtMm[] = [
-  { x: 888.72, y: 233.01 },
-  { x: 889.22, y: 231.54 },
-  { x: 889.71, y: 230.09 },
+  { x: 888.715, y: 233.006 },
+  { x: 889.705, y: 230.09 },
 ];
 const OP_3046: PtMm[] = [
-  { x: 891.45, y: 231.65 },
-  { x: 890.0, y: 231.16 },
-  { x: 888.54, y: 230.67 },
+  { x: 891.446, y: 231.651 },
+  { x: 888.544, y: 230.666 },
 ];
+const VERTEX: PtMm = { x: 889.42, y: 230.94 };
 
 const unit = (x: number, y: number): PtMm => {
   const l = Math.hypot(x, y);
   return { x: x / l, y: y / l };
 };
 const tA = unit(0.325, -0.946);
-const tB = unit(0.946, 0.325);
+const tB = unit(0.95, 0.311);
 
-const style = (id: number, dash: number[] | null): Style => ({
+const style = (id: number, widthMm: number, dash: number[] | null): Style => ({
   id,
   strokeRgb: [32, 29, 30],
-  widthMm: 0.49,
+  widthMm,
   dash,
   layer: null,
   fill: false,
   clip: null,
 });
 const STYLES = new Map<number, Style>([
-  [0, style(0, [3, 1.5])],
-  [1, style(1, null)],
+  [0, style(0, 0.49, [3, 1.5])],
+  [1, style(1, 0.49, null)],
+  [2, style(2, 0.353, null)],
 ]);
 
 function poly(pts: PtMm[], styleId: number): Chain {
@@ -49,12 +50,17 @@ function poly(pts: PtMm[], styleId: number): Chain {
   return { id: 0, pts, closed: false, ranges: [], motif: null, style: styleId, lengthMm: len };
 }
 
-function side(end: PtMm, t: PtMm): Chain {
-  return poly([{ x: end.x - t.x * 40, y: end.y - t.y * 40 }, end], 0);
+function side(end: PtMm, t: PtMm, styleId = 0): Chain {
+  return poly([{ x: end.x - t.x * 40, y: end.y - t.y * 40 }, end], styleId);
 }
 
 function run(strokes: PtMm[][], extra: Chain[] = [], extraRank = false) {
-  const chains = [side(END_A, tA), side(END_B, tB), ...strokes.map((p) => poly(p, 1)), ...extra];
+  const chains = [
+    side(END_A, tA, 0),
+    side(END_B, tB, 2),
+    ...strokes.map((p) => poly(p, 1)),
+    ...extra,
+  ];
   chains.forEach((c, id) => (c.id = id));
   const rankOf = new Map<number, number>([
     [0, 0],
@@ -80,9 +86,9 @@ describe('closeCorners · printed corner arms', () => {
     expect(out.walls).toHaveLength(1);
     expect(out.walls[0].rule).toBe('arms');
     expect(out.walls[0].chains).toEqual([2, 3]);
-    expect(has(out.walls[0].pts, OP_3012[1])).toBe(true);
-    expect(has(out.walls[0].pts, END_B, 0.05)).toBe(true);
-    expect(has(out.walls[0].pts, OP_3012[2])).toBe(false);
+    expect(has(out.walls[0].pts, OP_3012[0])).toBe(true);
+    expect(has(out.walls[0].pts, OP_3046[1])).toBe(true);
+    expect(has(out.walls[0].pts, VERTEX, 0.15)).toBe(true);
     expect(out.extended).toBe(0);
   });
 
