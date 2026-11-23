@@ -107,15 +107,36 @@ describe('automatic gap replay', () => {
     session.set.classes[1].sizeLabel = '2';
     expect(recoverAutomaticGaps(session)[0].candidates[1].outcome).toBe('leak');
   });
-  it('does not confirm a local bridge while a second opening still leaks', () => {
+  it('closes two supported gaps in one contour without keeping either edit in the session', () => {
     const session = example();
     const chain = session.set.chains[1];
     // The second opening is halfway along the opposite side of this size.
-    const tail = { ...chain, id: 3, pts: [{ x: 56, y: 95 }, ...chain.pts.slice(3)] };
-    chain.pts = [...chain.pts.slice(0, 3), { x: 44, y: 95 }];
+    const tail = { ...chain, id: 3, pts: [{ x: 55, y: 95 }, ...chain.pts.slice(3)] };
+    chain.pts = [...chain.pts.slice(0, 3), { x: 45, y: 95 }];
     session.set.chains.push(tail);
     session.set.classes[1].chains.push(3);
+    const candidate = recoverAutomaticGaps(session)[0].candidates[1];
+    expect(candidate.outcome).toBe('closed');
+    expect(candidate.gapRecovery?.bridges).toHaveLength(2);
+    expect(candidate.derived?.map((d) => d.kind)).toEqual(['bridge', 'bridge']);
+    expect(session.walls.bridges).toHaveLength(0);
+    // The second gap now exceeds the bridge budget. The first may not be accepted alone.
+    tail.pts[0] = { x: 57, y: 95 };
+    chain.pts[3] = { x: 43, y: 95 };
+    expect(recoverAutomaticGaps({ ...session })[0].candidates[1].outcome).toBe('leak');
+  });
+  it('uses a source-confirmed neighbour when the earlier grade pass had no prediction', () => {
+    const session = example();
+    const [lo, target] = session.families[0].candidates;
+    delete target.gradeHint;
     expect(recoverAutomaticGaps(session)[0].candidates[1].outcome).toBe('leak');
+    lo.sourceOutline = { path: 0, key: 0 };
+    // A source reader may snap the cut differently from the isolated wall refill.
+    lo.outer = lo.outer.map((p) => ({ x: p.x + 0.25, y: p.y }));
+    const result = recoverAutomaticGaps({ ...session })[0].candidates;
+    expect(result[1].outcome).toBe('closed');
+    expect(result[1].gapRecovery?.sourceAnchors).toEqual([0, 2]);
+    expect(result[0]).toBe(lo);
   });
   it('leaves two rival size assignments unresolved', () => {
     const session = example();

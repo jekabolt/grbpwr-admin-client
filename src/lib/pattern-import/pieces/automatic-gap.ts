@@ -7,13 +7,15 @@ import { FACING_BRIDGE_MM } from './bridges';
 import { isMonotone } from './fill';
 import { gapPairs, type GapGuess } from './gap';
 import { bboxOf, dist, pointInPoly, resample, SegGrid, segNearest } from './geom';
-import { insideWithin, selfIntersects } from './gfit/checks';
+import { insideWithin, outlineOf, predictPair, selfIntersects } from './gfit/checks';
 import { applyWallEdits, type PieceSession } from './operator';
 import { drawPolyline, exterior, Grid } from './raster';
 
 type Finalize = (session: PieceSession) => PieceFamily[];
 const rawFamilies: Finalize = (session) => session.families;
 const cache = new WeakMap<PieceSession, WeakMap<Finalize, PieceFamily[]>>();
+const SEARCH_MM = 40;
+const MAX_BRIDGES = 6;
 
 function distanceToRing(p: PtMm, ring: PtMm[]) {
   let d = Infinity;
@@ -36,13 +38,13 @@ function equivalentCut(a: PtMm[], b: PtMm[]): boolean {
   return covered(a, b) && covered(b, a);
 }
 
-function preservesClosed(before: PieceFamily[], after: PieceFamily[]) {
+function preservesClosed(before: PieceFamily[], after: PieceFamily[], rank?: number) {
   return before.every((family) => {
     const other = after.find((f) => f.seed === family.seed);
     return (
       other === family ||
       family.candidates.every((c) => {
-        if (c.outcome !== 'closed') return true;
+        if (c.outcome !== 'closed' || (rank !== undefined && c.rank !== rank)) return true;
         const next = other?.candidates.find((x) => x.rank === c.rank);
         return next?.outcome === 'closed' && sameRing(c.outer, next.outer);
       })
@@ -102,15 +104,44 @@ function sourceClosure(
   }
   const k = y * grid.W + x;
   if (walls[k]) return;
-  return (pair: GapGuess) => {
+  return (pairs: readonly GapGuess[]) => {
     const trial = walls.slice();
-    drawPolyline(grid, trial, [pair.from, pair.to]);
+    for (const pair of pairs) drawPolyline(grid, trial, [pair.from, pair.to]);
     return !trial[k] && !exterior(grid, trial)[k];
   };
 }
 
+/** Search the rest of the predicted perimeter only after a local bridge could not close it. */
+function perimeterBridges(
+  pred: PtMm[],
+  local: GapGuess[],
+  find: (p: PtMm) => GapGuess[],
+  checkCancel?: () => void,
+) {
+  const pairs: GapGuess[] = [];
+  for (const point of resample(pred, SEARCH_MM, true)) {
+    checkCancel?.();
+    for (const pair of find(point)) {
+      if (pairs.some((p) => dist(p.from, pair.from) < 1e-6 && dist(p.to, pair.to) < 1e-6)) continue;
+      // Competing claims on one end need a choice, not a larger set of bridges.
+      if (
+        pairs.length === MAX_BRIDGES ||
+        pairs.some((p) =>
+          [p.from, p.to].some((end) => [pair.from, pair.to].some((q) => dist(end, q) < 1e-6)),
+        )
+      )
+        return;
+      pairs.push(pair);
+    }
+  }
+  return pairs.length > 1 &&
+    local.some((p) => pairs.some((q) => dist(p.from, q.from) < 1e-6 && dist(p.to, q.to) < 1e-6))
+    ? pairs
+    : undefined;
+}
+
 /** Coverage against assigned input chains alone, excluding the trial's synthetic wall. */
-function followsSource(session: PieceSession, cut: PieceCandidate, pair: GapGuess) {
+function followsSource(session: PieceSession, cut: PieceCandidate, pairs: readonly GapGuess[]) {
   const index = new SegGrid(4);
   for (const id of cut.walls) {
     const chain = session.set.chains[id];
@@ -126,7 +157,8 @@ function followsSource(session: PieceSession, cut: PieceCandidate, pair: GapGues
       onSource = segNearest(p, pts[i], pts[(i + 1) % pts.length]).d <= PATIMPORT.snapMm;
     });
     if (onSource) supported++;
-    else if (segNearest(p, pair.from, pair.to).d > PATIMPORT.snapMm) return false;
+    else if (!pairs.some((pair) => segNearest(p, pair.from, pair.to).d <= PATIMPORT.snapMm))
+      return false;
   }
   return supported >= samples.length * PATIMPORT.coverageBlock;
 }
@@ -135,22 +167,24 @@ function verifiedTrial(
   session: PieceSession,
   family: PieceFamily,
   c: PieceCandidate,
-  pair: GapGuess,
+  pairs: readonly GapGuess[],
   allowed: Set<number>,
   lo: PieceCandidate,
   hi: PieceCandidate,
+  sourceAnchors: [number, number] | undefined,
   finalize: Finalize,
   baseline: () => PieceFamily[],
 ) {
-  const trial = applyWallEdits(session, [
-    {
-      kind: 'bridge',
+  const bridges = pairs.map(({ from, to }) => ({ from, to }));
+  const trial = applyWallEdits(
+    session,
+    bridges.map((bridge) => ({
+      kind: 'bridge' as const,
       seed: family.seed,
       rank: c.rank,
-      from: pair.from,
-      to: pair.to,
-    },
-  ]);
+      ...bridge,
+    })),
+  );
   const next = trial.families
     .find((f) => f.seed === family.seed)
     ?.candidates.find((x) => x.rank === c.rank);
@@ -163,36 +197,54 @@ function verifiedTrial(
     next.p95Mm > PATIMPORT.hausdorffP95VectorMm ||
     !next.walls.length ||
     !next.walls.every((id) => allowed.has(id)) ||
-    !pair.chains.every((id) => next.walls.includes(id)) ||
-    !preservesClosed(session.families, trial.families)
+    !pairs.every((pair) => pair.chains.every((id) => next.walls.includes(id))) ||
+    !preservesClosed(session.families, trial.families, c.rank)
   )
     return;
-  const edge = next.derived?.[0];
+  const edges = next.derived;
   if (
-    next.derived?.length !== 1 ||
-    edge?.kind !== 'operator-bridge' ||
-    edge.pts.length !== 2 ||
-    dist(edge.pts[0], edge.pts[1]) > perimeter(next.outer) * PATIMPORT.derivedMaxShare ||
-    dist(edge.pts[0], pair.from) > 1 ||
-    dist(edge.pts[1], pair.to) > 1
+    edges?.length !== pairs.length ||
+    edges.reduce((mm, e) => mm + perimeter(e.pts, false), 0) >
+      Math.min(60, perimeter(next.outer) * PATIMPORT.derivedMaxShare)
   )
     return;
+  const remaining = new Set(pairs);
+  const derived = [];
+  for (const edge of edges) {
+    if (edge.kind !== 'operator-bridge' || edge.pts.length !== 2) return;
+    const pair = [...remaining].find(
+      (p) => dist(edge.pts[0], p.from) <= 1 && dist(edge.pts[1], p.to) <= 1,
+    );
+    if (!pair) return;
+    remaining.delete(pair);
+    derived.push({ ...edge, kind: 'bridge' as const, chains: pair.chains });
+  }
   const seed = session.seeds.find((s) => s.id === family.seed);
   if (
     !seed ||
     !pointInPoly(seed.at, next.outer) ||
     selfIntersects(next.outer) ||
-    !followsSource(session, next, pair) ||
+    !followsSource(session, next, pairs) ||
     next.areaMm2 <= lo.areaMm2 ||
     next.areaMm2 >= hi.areaMm2 ||
     !insideWithin(resample(lo.outer, 0.5, true), next.outer) ||
     !insideWithin(resample(next.outer, 0.5, true), hi.outer) ||
-    !resample([pair.from, pair.to], 0.5).every(
-      (p) => distanceToRing(p, next.outer) <= PATIMPORT.snapMm,
+    !pairs.every((pair) =>
+      resample([pair.from, pair.to], 0.5).every(
+        (p) => distanceToRing(p, next.outer) <= PATIMPORT.snapMm,
+      ),
     )
   )
     return;
-  const normalized = finalize(trial);
+  // A rank-specific refill can skip source readers that require the full sheet. Use
+  // its proposed cut in the original family so those original cuts still take part
+  // in final cleanup.
+  const normalized = finalize({
+    ...session,
+    families: session.families.map((f) =>
+      f !== family ? f : { ...f, candidates: f.candidates.map((x) => (x === c ? next : x)) },
+    ),
+  });
   const preview = normalized
     .find((f) => f.seed === family.seed)
     ?.candidates.find((v) => v.rank === c.rank);
@@ -201,13 +253,37 @@ function verifiedTrial(
     preview,
     candidate: {
       ...next,
-      derived: [{ ...edge, kind: 'bridge' as const, chains: pair.chains }],
-      gapRecovery: { from: pair.from, to: pair.to, chains: pair.chains },
+      derived,
+      gapRecovery: {
+        ...bridges[0],
+        chains: [...new Set(pairs.flatMap((p) => p.chains))],
+        ...(bridges.length > 1 ? { bridges } : {}),
+        ...(sourceAnchors ? { sourceAnchors } : {}),
+      },
     },
   };
 }
 
-/** The first release addresses bracketed, graded PDF sizes with an independently predicted gap. */
+function sourceAnchor(c: PieceCandidate) {
+  return !!(c.sourceOutline || c.printedMotif || c.rankFrom === 'legend-polygon');
+}
+
+/** Use source-proven cuts found after the grade pass to bracket the missing cut. */
+function predictedCut(c: PieceCandidate, lo: PieceCandidate, hi: PieceCandidate) {
+  if (!c.gradeHint?.extrapolated && c.gradeHint?.pred.length) return { pred: c.gradeHint.pred };
+  if (!sourceAnchor(lo) && !sourceAnchor(hi)) return;
+  if (lo.areaMm2 >= hi.areaMm2 || !insideWithin(lo.outer, hi.outer)) return;
+  const a = outlineOf(lo.outer);
+  const b = outlineOf(hi.outer);
+  const span = hi.rank - lo.rank;
+  const prediction = a && b ? predictPair(a, b, (c.rank - lo.rank) / span, span) : null;
+  if (prediction) {
+    const sourceAnchors: [number, number] = [lo.rank, hi.rank];
+    return { pred: prediction.pts, sourceAnchors };
+  }
+}
+
+/** Runs after the source and shared-cut passes. Only publish whole, verified contours. */
 export function recoverAutomaticGaps(
   session: PieceSession,
   checkCancel?: () => void,
@@ -220,9 +296,7 @@ export function recoverAutomaticGaps(
   if (saved) return saved;
   if (
     session.sheet.holes?.length ||
-    session.families.every((f) =>
-      f.candidates.every((c) => c.outcome !== 'leak' || !c.leakAt || !c.gradeHint?.pred.length),
-    )
+    session.families.every((f) => f.candidates.every((c) => c.outcome !== 'leak' || !c.leakAt))
   )
     return baseline();
   const boxes = session.set.chains.map((c) => bboxOf(c.pts));
@@ -234,21 +308,22 @@ export function recoverAutomaticGaps(
   });
   const families = session.families.map((family) => {
     const closed = family.candidates
-      .filter((c) => c.outcome === 'closed' && !c.derived?.length && c.rankFrom === 'class')
+      .filter(
+        (c) =>
+          c.outcome === 'closed' &&
+          !c.derived?.length &&
+          (c.rankFrom === 'class' || sourceAnchor(c)),
+      )
       .sort((a, b) => a.rank - b.rank);
     const candidates = family.candidates.map((c) => {
       checkCancel?.();
-      if (
-        c.outcome !== 'leak' ||
-        !c.leakAt ||
-        c.hole ||
-        !c.gradeHint?.pred.length ||
-        c.gradeHint.extrapolated
-      )
-        return c;
+      if (c.outcome !== 'leak' || !c.leakAt || c.hole) return c;
       const lo = closed.filter((x) => x.rank < c.rank).pop();
       const hi = closed.find((x) => x.rank > c.rank);
       if (!lo || !hi) return c;
+      const prediction = predictedCut(c, lo, hi);
+      if (!prediction?.pred.length) return c;
+      const { pred, sourceAnchors } = prediction;
       const label = session.run.sizes[c.rank]?.label;
       const own = new Set<number>();
       const allowed = new Set<number>();
@@ -262,23 +337,41 @@ export function recoverAutomaticGaps(
         }
       }
       for (const id of forbidden) allowed.delete(id);
-      const pred = c.gradeHint.pred;
-      const pairs = gapPairs(c.leakAt, lines, forbidden, 40, allowed, (p) =>
-        eligiblePair(p, own, pred),
-      );
+      const find = (at: PtMm) =>
+        gapPairs(at, lines, forbidden, SEARCH_MM, allowed, (p) => eligiblePair(p, own, pred));
+      const pairs = find(c.leakAt);
       if (!pairs.length) return c;
       const seed = session.seeds.find((s) => s.id === family.seed);
       const closes = seed && sourceClosure(session, allowed, seed.at, hi, boxes);
       if (!closes) return c;
       const options: NonNullable<PieceCandidate['gapOptions']> = [];
       let unique: PieceCandidate | undefined;
-      for (const pair of pairs) {
+      const verify = (group: GapGuess[]) => {
         checkCancel?.();
-        if (!closes(pair)) continue;
-        const result = verifiedTrial(session, family, c, pair, allowed, lo, hi, finalize, baseline);
-        if (!result || options.some((o) => equivalentCut(o.outer, result.preview.outer))) continue;
+        if (!closes(group)) return;
+        const result = verifiedTrial(
+          session,
+          family,
+          c,
+          group,
+          allowed,
+          lo,
+          hi,
+          sourceAnchors,
+          finalize,
+          baseline,
+        );
+        if (!result || options.some((o) => equivalentCut(o.outer, result.preview.outer))) return;
         unique = result.candidate;
-        options.push({ outer: result.preview.outer, bridges: [{ from: pair.from, to: pair.to }] });
+        options.push({
+          outer: result.preview.outer,
+          bridges: group.map(({ from, to }) => ({ from, to })),
+        });
+      };
+      for (const pair of pairs) verify([pair]);
+      if (!options.length) {
+        const group = perimeterBridges(pred, pairs, find, checkCancel);
+        if (group?.every((_, i) => !closes(group.filter((_, j) => j !== i)))) verify(group);
       }
       if (options.length === 1 && unique) return unique;
       return options.length ? { ...c, gapOptions: options } : c;

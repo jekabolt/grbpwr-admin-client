@@ -1216,8 +1216,14 @@ export type PieceCandidate = {
   };
   /** Fill gap when outcome = 'leak': where the outside got in. */
   leakAt?: PtMm;
-  /** Both source chains and the physical gap of a verified automatic bridge. */
-  gapRecovery?: { from: PtMm; to: PtMm; chains: ChainId[] };
+  /** Source chains and physical gaps of the verified automatic bridges. */
+  gapRecovery?: {
+    from: PtMm;
+    to: PtMm;
+    chains: ChainId[];
+    bridges?: { from: PtMm; to: PtMm }[];
+    sourceAnchors?: [number, number];
+  };
   /** Distinct full outlines reproduced by isolated, rank-specific wall edits. */
   gapOptions?: { outer: PtMm[]; bridges: { from: PtMm; to: PtMm }[] }[];
   /** Features already known at segmentation (DXF fast path: notches, drills, grain). */
