@@ -1501,6 +1501,275 @@ Verdict: PARKED at the stop after point 4. Anchors fix E 4/16; E 14/20 and self-
     those thresholds is outside the allowed set.
   - Missing etalon corner (not hidden): B, ~(740, 1298), sizes 26/30/32.
 
+
+### derived-by-distance — ACCEPTED (18 Nov 2026)
+Hypothesis: `derivedMm` counted how a point was built, so a blend sitting on the size's own line was "derived" and `walk:derived-share` refused A18 / C18 / B24.
+Change: `nest-walk.ts` relabels every ring point before the derived runs. Drawn = within `NEST_WALK.derivedOffMm` (1 mm) of this size's own or common lines. A point on another size's line stays derived. Run length starts at the first off point (the segment that leaves the last drawn point is still on the line). Tests in `nest-walk.test.ts`.
+Run: Leah `.runs/base-leah` (before) and `.runs/e1-leah` (after), `NEST_WALK_DUMP`. Cover compared by length, not by the cover script's old sample-count of `derivedMm`.
+Numbers: walk share vs other+none, every open Leah cell, |Δ| ≤ 0.3 pp (was 8–32 pp when `derivedMm` was divided by vertex count). A18 2.2 %, C18 3.5 %, B24 9.6 % — under 15 %, then refused `walk:blind` (p95 0.53 / 0.47 / 1.19). E26 15.8 % still derived-share. Closed cells 110 → 110, contour regressions 0. K1 ring geometry unchanged (the relabel does not move points). The check script's absolute 0.5 mm leave-one-out still fails on card ends; that bar is not the floor formula and was already failing.
+Verdict: metric fixed. It does not close a cell. Lesson: the 15 % gate was measuring the builder, not the ink.
+
+### re-rank onto the grade ring — DROPPED (18 Nov 2026)
+Hypothesis: `nest-walk-cover` column `other` is a chain ranked to the wrong size (G10/G12 → 14, G18 → 16, G24 → 22, F22/F24 onto neighbours).
+Change: none. Measured on `.runs/e1-leah` dumps.
+Numbers: the millimetres are on that size's closed outline (G10 on size 14: 174 mm on the outline, 0 off it; G18 on 16: 194/0; F26 on 28 and 32: all on the outline). Per rank, length ≥ 20 mm on the open size's anchor blend AND median distance to the owning size's prediction greater than half the local step: 0 chains on F and G. Per line, the hits that remain have a collapsed step (G10 vs size 8: half-step 0.04 mm) — the two blends share anchors and the test cannot tell them apart.
+Verdict: DROPPED. Moving the chain would take the neighbour's own line. `other` stays above 5 % (F24 ~48 %, G10 ~42 %). Same fact as the parked companion-proximity rule.
+
+### joint alignment — NO-GO (18 Nov 2026)
+Hypothesis: one dynamic program on the etalon's outward rays can give each chain a size (or call it common, or ask) and close the open cells the walk leaves.
+Change: `pieces/gfit/nest-align.ts`, `nest-align.test.ts`, `scripts/pattern-import/nest-align-check.ts`. Parameters (one set, from the synthetic nest whose right edge steps 10 mm and top edge 8 mm): `rayStepMm` 2, `gapCost` 6, `noiseCost` 3, `angleMinDeg` 25, `askMinMm` 10, `askMargin` 1.5, `commonStepMm` 1.5, `styleWeight` 2 capped at 4 mm, 3 passes. A chain is common only when ≥ 3 sizes sit within `askMargin` and their predictions span ≤ `commonStepMm`; two sizes that close is a question.
+Run: synthetic tests (a)–(e) pass. Offline on the base shots (cells.json + rows.json, no new pipeline): Leah, Cassandra, Dyanna.
+Numbers:
+- Tests: hole 30 mm drawn, share < 15 %; swapped ranks reported; fold stays common; an interior line is given to nobody; two sizes on one line of a new style become an ask.
+- Leah piece E leave-one-out: 6/16. Failures include 00 p95 28.0 (bar 0.50), 0 p95 20.8 (bar 9.25), 2 p95 19.6, 4 p95 8.8, 6 p95 3.0, 10 p95 8.9.
+- Agreement with `byRank` on closed sizes: Leah E 26 %, A 18 %, C 37 %, D 19 %, B 28 %, F 3 %, G 9 %. Cassandra A 2 %. Dyanna 2–13 % per piece.
+- Open cells the prototype marks closed: Leah 2/16 (G22, G24), Cassandra 3/7, Dyanna 3/41. On G the agreement is 9 %, so those two are not a result to trust. Named Leah cells stay open except G24, which the flag marks closed on one chain while the piece's ranks do not match.
+Verdict: NO-GO. Not tuned further. The ray on a shared edge measures every size at t = 0, and a graded line a few millimetres away is then within `gapCost` of several of those flattened predictions, so the chain is called common. What would have to be true instead: the step is taken from a ray whose closed sizes are not all on the same line, and "common" is only a line the closed outlines actually share.
+
+### fold rays out of the slope — NO MOVE (18 Nov 2026)
+Hypothesis: the grade slope was the median of fold rays (every size at t = 0), and a line was called common because those flat predictions sat within `gapCost`. Take the slope only from rays whose measured t spreads by more than `commonStepMm`. Call a chain common only when at least three closed outlines actually cross that ray within `commonStepMm` of the hit.
+Change: `nest-align.ts` only. New test: a line 4 mm off the fold is neither common nor any size's.
+Run: synthetic tests 6/6. Leah `.runs/base-leah` again, including leave-one-out on E.
+Numbers: E leave-one-out still 6/16, the same p95 (00: 27.98, 0: 20.84, 2: 19.57, 4: 8.84, 6: 3.01, 10: 8.86). Agreement on E still 26.1 % of 30723 mm. A 17.7 → 20.8, B 27.8 → 30.6, D 19.2 → 18.5, G 8.9 → 7.5. Open cells the flag marks closed: still 2/16.
+Verdict: the stage metric did not move. The flattened fold was not what kept the ranks. Stop.
+
+### dash loops — not solved (18 Nov 2026)
+Hypothesis: periodic 3–4 mm loops are pass 2b joining dashes in the wrong order.
+Change: none (cutting the loop after the join, or hiding it in `ringCheck`, is forbidden; a bad join already made Dyanna worse).
+Run: self-cross scan of `.runs/e1-leah` `rows.json`, segments i×i+2..i+14, loop length 1–12 mm.
+Numbers: 3 chains. 3090 size 26, 8.7 mm at (729, 1284). 2884 size 10, 11.7 mm at (670, 854). 2915 common, 11.7 mm at (362, 799). Each is a ~2 mm step back after a longer forward step — the dash is entered at the far end. Not removed.
+Verdict: PARKED. Needs a join-direction fix that does not reorder a dash whose stroke itself runs out and back, proved on Dyanna as well as Leah.
+
+### Leah leftovers after the metric — owner decision (18 Nov 2026)
+Hypothesis: with the derived label honest, A18 / C18 / B24 close, and the other open cells have a cause upstream of the 15 % gate.
+Change: none. `drawMaxShare` stays 15 %. `walk:blind` (p95 0.5 / max 1.5) stays. Loops are not cut in `ringCheck`.
+Run: `.runs/e1-leah` vs `.runs/base-leah`. 110 closed both, 0 contour moves, 0 new closes.
+Numbers, walk refusal (cover share is length of the ring farther than 1 mm from this size's own and common lines):
+- E26 derived-share 15.8 %. One point over the gate.
+- A18 blind p95 0.53 (share 2.2 %). C18 blind p95 0.47 (share 3.5 %). B24 blind p95 1.19 (share 9.6 %).
+- A24 62 %, A26 64 % derived-share. Almost all of that is `none` (on no line), `other` is 1–3 %.
+- F22 49 %, F26 17 %, G18 35 %, G22 48 %, G24 63 %, G26 26 % derived-share.
+- F24 crosses-own-line. G10 crosses-own-line. B18 self-crossing. G12 self-crossing.
+Verdict: not solved. Closing any of these means raising the draw cap, weakening the blind gate, or cutting a loop. Those are owner decisions. Leah open stays 16.
+
+### Cassandra and Dyanna, one shot each (18 Nov 2026)
+Hypothesis: the derived-label change does not move a contour that was already closed, and does not open a new cell.
+Change: the E1 relabel only.
+Run: `.runs/e5-cassandra` vs `.runs/base-cassandra` (29 s, same stop: A SHOULDER leak). `.runs/e5-dyanna` vs `.runs/base-dyanna` (210 s, same stop: 9 regions).
+Numbers: Cassandra 11 / 7 both, Dyanna 139 / 41 both. Regressions 0. Closed contours identical (rounded to 0.01 mm). No new close.
+Still open, walk refusal (the pieces-step reason is the first repair refusal; the walk ran and refused too):
+- Cassandra A, all piece A: 0, 2, 6, 18, 24, 26 derived-share; 10 crosses-own-line.
+- Dyanna: derived-share on A14 A18, B18, C18, F6 F10 F12 F14 F18 F24, H18 H24 H32, I10 I18 I24, J18 J24 J26 J32, D2.
+  crosses-own-line on B10, C6 C12 C14 C24 C26, G0 G2 G4, F26, H10, J10.
+  blind on B24 (p95 1.05), C30 (0.59), F00 (2.26), I32 (2.75), D10 (2.27), D16 (1.45), D30 (0.57).
+  J14 is `tiny` with no walk (one point). It was tiny in the baseline.
+Verdict: ACCEPTED as "no regression". Open count did not fall.
+
+### Э4.5 confusion matrix — DIAGNOSIS (18 Nov 2026)
+Hypothesis: agreement of 3–37 % with `byRank` on sizes the pipeline already closed is a broken prototype, not a limit of the method. The matrix (alignment size × byRank size, plus общая / шум / вопрос) says which bug.
+Change: none yet. `nest-align-check.ts --matrix` on `.runs/base-leah` after the ray reach was lengthened (a 40 mm backward pad missed a hem several sizes inside the etalon).
+Run: `npx vite-node scripts/pattern-import/nest-align-check.ts .runs/base-leah/2-A4-MDF-349-The-Leah-Shift-Dress-00-32- --matrix`
+Numbers, length of `byRank` chains in the piece window. Wrong-size is the off-diagonal. It is not a diagonal shifted by ±k.
+- E: agree 39.6 % of 30723 mm. common 46 %, ask 0 %, none 14 %, wrong 0 %.
+- A: 51.9 % of 30795. common 26 %, ask 1 %, none 21 %, wrong 0 %.
+- C: 45.5 % of 37053. common 23 %, ask 1 %, none 31 %, wrong 0 %.
+- D: 25.6 % of 35156. common 22 %, none 52 %, wrong 0 %.
+- B: 48.1 % of 36692. common 18 %, ask 1 %, none 31 %, wrong 3 %.
+- F: 15.2 % of 25683. common 14 %, ask 2 %, none 68 %, wrong 0 %.
+- G: 17.2 % of 6935. common 63 %, ask 14 %, none 1 %, wrong 4 %.
+Verdict: the error type in Э4.5 is «всё ушло в общая / шум», i.e. the costs, not a rank-index shift and not scattered crossings. Two different facts sit in those columns. общая is one stroke that lies on several closed outlines (E c933, the side at x=1027.9, median distance 0.00 mm to every size, `byRank` size 00). шум on F (68 %) and D (52 %) is another piece's line of the same size clipped by the 80 mm window: F c1904 is at y=71 while the piece bbox starts at y=497. Lesson: a graded edge the rays assign is the right size; the miss is the shared stroke and the foreign chain.
+
+### ask band wider than the grade — ACCEPTED (18 Nov 2026)
+Hypothesis: on Leah the closed outlines step about 1 mm along some rays. `askMargin` and `commonStepMm` are 1.5 mm, so every adjacent pair is an ask and three sizes within 1.5 mm of a hit are common even when their measured t's are a step apart. Chain 2897 (E, size 6, the right edge, on that outline and not on the others) was asked across every size. Four rays had a unique nearest size; 98 had two sizes inside the band.
+Change: `nest-align.ts`. A rival stays in the band only when the cost gap is also within half the local step. Common only when the coinciding measurements themselves span ≤ `commonStepMm`. A minority of corner rays cannot relabel a chain the other rays agreed on. The constants are unchanged. Tests: a 2 mm grade keeps each right edge on its size; an etalon at rank 5 with a 15 mm step still assigns size 0's edge (the old 40 mm pad did not reach it).
+Run: `npx vitest run src/lib/pattern-import/pieces/gfit/nest-align.test.ts` — 9/9. Then the check script with `--loo` on the Leah base shot.
+Numbers: agreement before this fix was the 18 Nov NO-GO (E 26 %). After it, the matrix above (E 39.6 %, wrong still 0 %). Leave-one-out got worse, not better: E 6/16 → 5/16, size 00 p95 28 → 52 mm (bar 0.50, floor 0 because there is no inner neighbour). The longer reach is what the hem test needs and what pulls a left-out ring. Thresholds not moved.
+Verdict: ACCEPTED as the cost bug the matrix named. It does not get agreement to 98 % and it does not pass leave-one-out.
+
+### ring oracle — DIAGNOSIS (18 Nov 2026)
+Hypothesis: if the prediction is the closed ring and there is no fit, no pen and no chain vote, agreement is ≥ 98 % on every Leah piece. Below that, the bug is in the rays, the crossings or the DP.
+Change: `nestAlignOracle` in `nest-align.ts`. A chain goes to the smallest closed size that contains as much of it as any size does (coverage within 1 mm). Best coverage under half: the chain is not this piece. `nest-align-check.ts --oracle`.
+Run: `npx vite-node scripts/pattern-import/nest-align-check.ts .runs/base-leah/2-A4-MDF-349-The-Leah-Shift-Dress-00-32- --oracle`
+Numbers, same denominator as the matrix (byRank length in the window):
+
+| part | E | A | C | D | B | F | G | leave-one-out |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| oracle: rings, no fit, no pen, no vote | 57.3 | 74.1 | 60.1 | 36.4 | 65.5 | 26.9 | 67.4 | not run — the input is the ring leave-one-out would rebuild |
+| rays, pen 0 (base `rows.json` has no style), chain vote, after the step fix | 39.6 | 51.9 | 45.5 | 25.6 | 48.1 | 15.2 | 17.2 | E 5/16, A 1/14, C 4/16, D 4/17, B 1/15, F 2/14, G 1/11 |
+
+The drop from the oracle to the rays is the vote calling the shared edge common. Assigning that edge to the smallest outline that contains it was tried and reverted: E agreement 43.9 % with wrong 27 %. It manufactures a wrong size. Not kept.
+Oracle misses that are not "none": the stroke lies on a smaller outline just as completely. E c2002 is the hem at y=497.3, mean distance 0.00 mm to every closed outline, `byRank` size 4. c2005 is the same hem, `byRank` size 8, mean distance ≤ 0.02 mm. No ring, ray or DP tells those two strokes apart. The "none" column is the foreign chain (F 66 %, D 47 %, E 8 %).
+Verdict: the oracle is not ≥ 98 % on any Leah piece. That is not a ray bug — the oracle does not use rays. It is also not the section-10 NO-GO, which needs the oracle at ≥ 98 % and the full method failing. Stop on this prototype. Do not tune `gapCost` / `askMargin` / `commonStepMm`.
+
+### Э5 again, same thresholds — not GO (18 Nov 2026)
+Hypothesis: the step fix is enough for the three gates on the three base shots.
+Change: none beyond the step fix and the reach. Not wired into `repair-hook.ts`.
+Run: the check script, no `--loo`, on `.runs/base-cassandra` and `.runs/base-dyanna`. Leah leave-one-out is the row above.
+Numbers:
+- (1) Leave-one-out fails on every Leah piece (table above). Size 00's floor stays 0 when there is no inner neighbour; the interior failures are real (E size 2 p95 26.9 vs bar 0.74).
+- (2) Agreement: Leah 15–52 % (table). Cassandra A 3.4 % of 58028 mm (common 30 %, none 66 %, wrong 0 %). Dyanna 1.9–31 % per piece (B not-nested). Wrong-size stays about 0 except godets (H/I/J 5–7 %).
+- (3) Cells the prototype flags closed: Leah 3/16, Cassandra 3/7, Dyanna 0. Not a close to trust while (1) and (2) fail.
+- (4) Named Leah cells stay open except G12 and G24, which the flag marks closed. G agreement is 17 %, so those two are not a result.
+Verdict: not GO. No Э6. The oracle is below 98 %, so this is not the "oracle passes, method fails" report. The prototype stays offline.
+
+### New agreement measure — DIAGNOSIS (18 Nov 2026)
+Hypothesis: length the rings cannot tell apart, and chains that only clip the +80 mm window, were the whole of the oracle's miss. Take them out and the oracle is ≥ 98 % on every Leah piece, with wrong-size ≤ 2 %.
+Change: `nest-align-check.ts` `agree()`. A sample counts only when it is within 1 mm of some closed ring of this piece (the same "on the line" tolerance as `derivedOffMm`; the +80 mm window is gone). Local step is the median gap between the nearest and the second-nearest closed ring along the chain. The sample's chain leaves the dispute when its median distance to at least two closed rings is ≤ min(0.5 mm, 0.25 × that step). On that length «общая» is right and a named size is not an error and not agreement. A named size that is not `byRank`, on the length that remains, is wrong and has its own 2 % limit. `nest-align.ts` default is unchanged by this: ray 40 mm back and 200 mm forward, costs the plain 1.5 mm band. The two cost changes are switches (`tune.ray`, `tune.costs`), off unless named.
+Run: `npx vite-node scripts/pattern-import/nest-align-check.ts .runs/base-leah/2-A4-MDF-349-The-Leah-Shift-Dress-00-32- --oracle --miss .runs/oracle-miss`
+Numbers, oracle, new denominator. Agree is the share of the distinguishable on-piece length whose owner is that `byRank` row. Wrong is a different size on that same length.
+
+| piece | agree | of mm | wrong | indistinct, excluded |
+| --- | --- | --- | --- | --- |
+| E | 80.4 % | 16570 | 19.6 % | 11529 |
+| A | 99.9 % | 18778 | 0.1 % | 7446 |
+| C | 85.4 % | 22031 | 14.6 % | 5203 |
+| D | 83.5 % | 11773 | 16.5 % | 7024 |
+| B | 84.7 % | 23357 | 13.0 % | 5339 |
+| F | 79.2 % | 8706 | 20.7 % | 0 |
+| G | 68.2 % | 6831 | 31.8 % | 0 |
+
+A is the only piece at ≥ 98 % with wrong ≤ 2 %. Not tuned. Э5 not rerun. No new shot. The pen is not in this measurement: base `rows.json` still has no style.
+What the miss actually is. Medians below are in card order (00 0 2 4 … 32); `-` is an open cell. One chain listed on many sizes is one stroke, counted once per `byRank` row, which is why 25 strokes become 3252 mm. Pictures: `.runs/oracle-miss/<letter>.svg` (red = uncovered, grey = closed rings) and `zoom/<letter>-c<id>.svg` for every chain of 40 mm or more. The per-row dump is `<letter>.txt`.
+- E, 24 strokes, each 8–13 mm, owner the smallest closed size, step 0.00, median 0.05–0.10 mm to every closed ring: 2031, 954, 1346, 1351, 959, 1361, 1353, 946, 949, 1341, 1364, 1338, 958, 1350, 1354, 1360, 950, 1337, 1342, 945, 957, 1349, 1365, 2028. The band is min(0.5, 0) = 0, so 0.05 mm does not qualify and each extra `byRank` row is wrong. c969, 9 mm, byRank 14/16/18/20/22/24/28/30, owner 6, step 0.00, med 71.35 58.85 46.65 33.35 20.35 7.85 then 0.05 from size 10 on.
+- C, the same kind, 23 strokes of 8–13 mm at 0.05–0.10 mm: 1588, 1675, 1686, 1490, 1669, 1574, 1582, 1572, 1584, 1671, 1488, 1682, 1491, 1575, 1668, 1679, 1581, 1487, 1571, 1585, 1672, 1683, 1678. c1480, 9 mm, byRank 10 through 30, owner 5, step 0.00, med 23.65 17.35 12.65 7.65 1.15 then 0.05.
+- D, 13 strokes of 8–13 mm at 0.05–0.10 mm: 2547, 2527, 2533, 2541, 2543, 2531, 1914, 2540, 2534, 2544, 2530, 2524, 1913. c1921, 10 mm, byRank 14 through 30, owner 7, step 0.00, med 40.05 34.05 27.55 21.05 14.55 8.55 then 0.10.
+- B coincident the same way, 23 strokes at ≤ 0.15 mm: 377, 847, 827, 382, 373, 843, 841, 384, 1267, 854, 831, 851, 834, 381, 374, 844, 840, 855, 1266, 824, 830, 835, 850. The rest are not on a ring (owner none) except c299. c299, 137 mm, byRank 8, owner 0, step 0.00, med 0.02 0.02 0.02 0.02 1.84 1.89 1.82 1.86 3.12 3.72 - 5.24 5.99 - 7.87 9.10 9.47 10.27. Then, length, byRank, step: c2874 58 mm size 30 step 11.29; c3082 45 mm size 6 step 0.00 (nearest ring 0.77); c690 27 mm size 28 step 10.37; c691 27 mm size 28 step 10.18; c696 24 mm size 32 step 14.54; c787 24 mm size 22 step 9.72; c784 23 mm size 22 step 9.25; c695 22 mm size 32 step 13.51; c2870 21 mm size 26 step 11.04; c682 21 mm size 20 step 8.00; c2889 21 mm size 14 step 6.88; c783 21 mm size 20 step 8.02; c763 20 mm size 16 step 7.50; c761 20 mm size 16 step 7.93; c2888 19 mm size 14 step 6.52; c2886 15 mm size 10 step 6.38; c755 14 mm size 12 step 6.86; c753 14 mm size 12 step 6.68; c2885 14 mm size 10 step 5.99; c745 12 mm size 8 step 6.82; c744 11 mm size 8 step 6.43; c2882 9 mm size 6 step 6.76; c2881 9 mm size 6 step 6.00; c3170 7 mm size 32 step 7.10; c746 7 mm size 8 step 5.58; c3159 6 mm size 2 step 5.55; c756 5 mm size 12 step 8.68; c2871 5 mm size 26 step 16.06; c732 5 mm size 4 step 5.73; c3169 5 mm size 12 step 6.73; c3162 4 mm size 14 step 9.43; c2878 3 mm size 0 step 6.49; c718 2 mm size 00 step 6.49; c683 1 mm size 20 step 13.78. Distances for these are in `B.txt`; the nearest ring is several millimetres off except c299 and c3082.
+- F coincident, 0.00–0.07 mm to every closed ring, step ≤ 0.03, owner 0 or 7: 1814 (68 mm, byRank 20), 1842 (65, 28), 1885 (65, 32), 1789 (63, 16), 1754 (61, 8), 1750 (53, 4), and the short ones 1818, 1787, 1748, 1764, 1763, 1762, 1761, 1768. The long ones the rings do separate: c2355, 256 mm, byRank 00, owner 1, step 0.28, med 0.00 0.29 0.74 1.31 1.70 1.76 2.39 2.99 3.74 4.31 4.87 5.18 - - - 7.95 8.03 8.61. c2418, 213 mm, byRank 20, owner 10, step 0.00, med 4.73 4.68 4.43 4.16 4.00 3.58 3.22 2.51 1.76 1.22 0.00 0.00 - - - 3.77 3.86 4.26. c3185, 183 mm, byRank 2, owner 1, step 0.08, med 0.55 0.19 0.00 0.82 1.70 2.48 3.13 2.47 3.22 3.71 4.38 4.35 - - - 7.15 7.52 7.86. c3187, 45 mm, byRank 18, owner 7, step 0.03, med 4.45 … 4.72 then 0.13 0.06 0.05 0.00 0.04. c2417, 6 mm, byRank 20, owner none, step 1.51, nearest ring 1.49 mm.
+- G coincident, ≤ 0.18 mm, step ≤ 0.02: 2786 (68 mm, byRank 20), 2842 (65, 32), 2715 (63, 8), 2744 (61, 16), 2711 (57, 4), 2732, 2733, 2725, 2728, 2729. The rest: c2130, 265 mm, byRank 8, owner 3, step 0.29, med 1.63 1.42 0.84 0.50 0.20 0.98 - - 0.33 0.98 - 1.61 - - - 3.14 3.40 3.86. c2714, 248 mm, byRank 4, owner 2, step 0.34, med 1.13 0.88 0.37 0.00 0.70 1.42 - - 0.79 1.42 - 2.07 - - - 3.51 3.75 4.20. c2713, 174 mm, byRank 4, owner 2, step 0.06, med 0.56 0.24 0.10 0.00 0.26 0.60 - - 0.65 2.04 - 1.79. c3197, 170 mm, byRank 2, owner 1, step 0.44, med 1.00 0.64 0.00 0.46 1.34 2.89. c3061, 142 mm, byRank 30, owner 15, step 0.06, med … 0.10 0.00 0.16 on the last three. c3220, 109 mm, byRank 2, owner 0, step 0.02, med 0.39 0.13 0.00 0.04 0.09 0.17. c3059, 99 mm, byRank 14, owner 4, step 0.14, med 1.36 1.27 0.80 0.60 0.28 0.26 - - 0.00. c2994, 83 mm, byRank 6, owner 3, step 0.69, med 2.37 1.96 1.28 0.69 0.00 3.01. c3224, 21 mm, byRank 30, owner 15, step 0.57, nearest 0.00 on size 30. c2712, 10 mm, byRank 2/4, owner 0, step 0.01. c2724, 8 mm, byRank ten sizes, owner 0, step 0.00, med ≤ 0.18. c2129, 5 mm, byRank 8, owner none, step 0.55, nearest 0.78.
+Verdict: the oracle is not ≥ 98 % on six of seven pieces. The band was not widened. Where the rings coincide the measured step is 0, the band is 0, and a stroke 0.05 mm off every ring stays in the denominator and counts wrong once per `byRank` row. That is all of the E, C and D shortfall. F and G add long edges that sit on one ring and get the neighbour. Lesson: do not open the pen question, and do not rerun Э5, until this denominator is accepted or the owner says the step-0 band should not be 0.
+
+### First-ring ray — DROPPED (18 Nov 2026)
+Hypothesis: a ray that stops at the first other size's ring reaches the inner hem without the leave-one-out damage of a ray that runs to the farthest outline.
+Change: `nest-align.ts` `tune.ray = 'first'`. Each direction is cut 1 mm past the nearest other closed ring; a direction with no ring keeps the old limit (40 mm back, 200 mm forward). Not the default. The unit test checks that the adjacent ring is taken and the ring past it is not.
+Run: `--loo --ray first --costs band` on the Leah base shot, against `--loo --ray fixed --costs band` in the same script.
+Numbers, passes and size 00 p95. Baseline is the first column.
+
+| piece | fixed + band | first ring + band | size 00 p95, first |
+| --- | --- | --- | --- |
+| E | 6/16, 27.98 | 0/16 | 23.40 |
+| A | 1/14, 68.94 | 1/14 | 64.38 |
+| C | 4/16, 31.16 | 4/16 | 24.94 |
+| D | 4/17, 32.98 | 0/17 | 24.34 |
+| B | 2/15, 53.22 | 4/15 | 51.43 |
+| F | 3/14, 12.18 | 2/14 | 14.65 |
+| G | 6/11, 2.88 | 4/11 | 2.82 |
+
+Verdict: DROPPED. Size 00 on E is under 28 mm, but E, D, F and G each pass fewer sizes than the baseline. The ray longer than 40 mm (reach = farthest outline + 30, both ways) stays out as well: that was E 6/16 → 5/16 and size 00 p95 28 → 52, measured earlier and not rerun. Default remains 40 mm back, 200 mm forward.
+
+### Rival and common-line costs — DROPPED (18 Nov 2026)
+Hypothesis: a rival inside the 1.5 mm band, kept only when the cost gap is also within half the local step, and a common line only when the measured t's themselves span ≤ 1.5 mm, does not make leave-one-out worse on any piece. The earlier "accepted" entry mixed this with the long ray, so the leave-one-out move could not be attributed.
+Change: `tune.costs = 'step'` only. Ray stays fixed. The half-step test in `nest-align.test.ts` passes that switch; the default path does not.
+Run: `--loo --ray fixed --costs step` on the Leah base shot.
+Numbers against the same baseline. E 6/16 p00 27.98 (size 6 p95 3.01 → 3.11, still a fail). A 1/14 p00 68.95. C 5/16 p00 31.16. D 4/17 p00 32.98. B 2/15 p00 53.25. F 3/14 p00 11.35. G 5/11 p00 2.88.
+Verdict: DROPPED. C gains a size (4/16 → 5/16). G loses one (6/11 → 5/11). One piece worse is enough. The rule stays in the file behind the switch and is not what a later Э5 would run. Leave-one-out thresholds were not moved. Nothing was wired into `repair-hook.ts` and nothing was committed.
+
+### Rays closed — DROPPED (18 Nov 2026)
+Hypothesis: none left to try. Both cost changes lost a piece on leave-one-out, and the ray that ran to the farthest outline was already refused.
+Change: none. Default stays 40 mm back, 200 mm forward, the plain 1.5 mm band. `tune.ray = 'first'` and `tune.costs = 'step'` stay in the file so the measurement can be repeated. No new ray variant.
+Run: the two `--loo` runs on `.runs/base-leah`, recorded in the entries above.
+Numbers, passes and size 00 p95. Baseline, then the first-ring ray, then the rival rule alone.
+
+| piece | fixed + band | first ring | rival / common |
+| --- | --- | --- | --- |
+| E | 6/16, 27.98 | 0/16, 23.40 | 6/16, 27.98 |
+| A | 1/14, 68.94 | 1/14, 64.38 | 1/14, 68.95 |
+| C | 4/16, 31.16 | 4/16, 24.94 | 5/16, 31.16 |
+| D | 4/17, 32.98 | 0/17, 24.34 | 4/17, 32.98 |
+| B | 2/15, 53.22 | 4/15, 51.43 | 2/15, 53.25 |
+| F | 3/14, 12.18 | 2/14, 14.65 | 3/14, 11.35 |
+| G | 6/11, 2.88 | 4/11, 2.82 | 5/11, 2.88 |
+
+The rejected long ray (farthest outline + 30, both ways) was E 6/16 → 5/16, size 00 p95 28 → 52. Not rerun.
+Verdict: DROPPED, and closed. A new ray shape is not the next experiment.
+
+### Tie at 0.45 mm — DIAGNOSIS (18 Nov 2026)
+Hypothesis: the previous band collapsed to 0 wherever the rings coincide, so a stroke 0.05 mm off every ring stayed in the denominator. A fixed tie of 0.45 mm, the floor of the gfit corridor, takes that length out. The measure is not changed again after this.
+Change: `nest-align-check.ts`. A sample on the piece (within 1 mm of a closed ring) is a tie when two closed rings are each closer than 0.45 mm and the gap between those distances is under 0.45 mm. `TIE_MM` is `corridorMinMm` from `pieces/gfit/repair.ts`. If the tie is more than half the on-piece length, the piece is not measurable. Agreement and the wrong size are computed on what remains.
+Run: `npx vite-node scripts/pattern-import/nest-align-check.ts .runs/base-leah/2-A4-MDF-349-The-Leah-Shift-Dress-00-32- --oracle --miss .runs/oracle-tie`, then the same command without `--oracle` (the default ray and the 1.5 mm band).
+Numbers. Tie millimetres are excluded. Status is ≥ 98 % only when the piece is measurable and agreement on the rest is at least that.
+
+| piece | oracle | wrong | tie mm | status | method | wrong | status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| E | 100 % of 12798 | 0 | 15301 | не измерима | 62.5 % | 0 | не измерима |
+| A | 99.9 % of 17876 | 0 | 8347 | ≥ 98 % | 35.8 % | 0 | ниже |
+| C | 100 % of 18113 | 0 | 9121 | ≥ 98 % | 75.2 % | 0 | ниже |
+| D | 100 % of 9487 | 0 | 9309 | ≥ 98 % | 68.7 % | 0 | ниже |
+| B | 97.3 % of 19876 | 0 | 8820 | ниже | 56.4 % | 0 | ниже |
+| F | 96.4 % of 3634 | 3.4 % | 5071 | не измерима | 19.6 % | 0 | не измерима |
+| G | 80.2 % of 2287 | 19.6 % | 4543 | не измерима | 22.3 % | 0.2 % | не измерима |
+
+D's tie is 9309 of 18796 mm, just under half, so it stays measurable. E's tie is 15301 of 28099 mm.
+Oracle misses that are still a distinguishable edge, chains of 40 mm or more. One line from the zoom (blue = the byRank ring, green = the ring the oracle named, red = the stroke). Pictures: `.runs/oracle-tie/zoom/`.
+- F c2355, 80 mm, byRank 00, oracle size 0. (в) The disputed stretch lies on the size 00 ring (0.00 mm, 95 % of it inside 0.45 mm) and 0.50–0.69 mm off size 0. The oracle names the neighbour because both are inside its 1 mm coverage.
+- F c3185, 44 mm, byRank 2, oracle size 0. (в) Same: 100 % of the stretch is on the size 2 ring, the named neighbour is 0.52–0.76 mm off.
+- G c2714, 86 mm, byRank 4, oracle size 2. (в) On the size 4 ring (0.00 mm); the neighbour is 0.51–0.77 mm off.
+- G c3197, 84 mm, byRank 2, oracle size 0. (в) On the size 2 ring; the neighbour is 0.64–0.72 mm off.
+- G c2994, 83 mm, byRank 6, oracle size 4. (в) On the size 6 ring (0.00–0.01 mm); the neighbour is 0.67–0.74 mm off.
+- G c2130, 138 mm, byRank 8, oracle size 4. (а) The stroke is not on the size 8 ring (1.3–5.2 mm off along the stretch). The nearest ring is size 6 at 0.20 mm. byRank named the wrong size.
+- B c2874, 58 mm, byRank 30, oracle none. (в) A dart across the grade. It meets the side seam and lies on no ring (nearest median 33 mm).
+- B c3082, 45 mm, byRank 6, oracle none. (в) A line parallel to the neck, 0.77 mm off sizes 00 and 0 and 1.8–2.4 mm off size 6. On no ring.
+Counts of those chains: E 0, A 0, C 0, D 0, B (в) 2, F (в) 2, G (а) 1 and (в) 3. No (б). Shorter misses are the same kind as B's dart (owner none, not on a ring) and are not given a line.
+(б) against `/private/tmp/patimport-runs/global-closed-wrong-candidates.json`. Leah there is A 20/22/28/30/32, B 20/22/26/28/30/32, E 22, F 28 and F 30. None of the chains above is one of those cells, and there is no (б) to add. E 22 and F 28/30 do not appear in the distinguishable oracle misses.
+Verdict: Э5 is not GO. F and G have agreement below 98 % on the length that remains, with a non-zero wrong size (F 3.4 %, G 19.6 %). B is below 98 % with wrong 0: the misses are unassigned, not a wrong size. The method is below 98 % on every piece that can be measured. The prototype was not tuned to these chains, not wired into `repair-hook.ts`, and not committed. The next step is the split above, not another ray.
+
+### Э1–Э5 — not GO (18 Nov 2026)
+Hypothesis: one joint alignment, the etalon walked along its normals, names every line, fills the holes and closes the open cells. The plan's second premise was that Leah A24/A26, G10/G12, G18, G24 and F22/F24 are sizes whose lines were given to the neighbour, which is why those cells stay open.
+Change: nothing wired. `repair-hook.ts` does not call the alignment. No commit.
+Run: offline, on `.runs/base-leah` (and the Cassandra and Dyanna base shots for the earlier gate). No new pipeline shot.
+
+What was checked.
+- Э1. A ring point is derived when it is more than 1 mm from that size's own and common lines. Accepted. Leah stayed 110 closed / 16 open, 0 contour regressions.
+- Э2. Three self-crossing dash chains (3090, 2884, 2915). Parked. Not cut, pass 2b not loosened.
+- Э3. `rows.json` can carry style, motif and a size-role legend. The chain shape stayed a point array. Base rows have no style, and the pen was not opened: the oracle never reached 98 % on every piece.
+- Э4. The prototype (`nest-align.ts`) and the synthetic tests. The two cost changes were measured apart and both dropped. Rays are closed.
+- Э5. The gates were not moved. Leave-one-out on the default ray is E 6/16, size 00 p95 27.98 mm. Agreement on the tie measure is below 98 % wherever the piece can be measured.
+
+Why not GO. The owner accepted this. The ring oracle, after the tie rule, is ≥ 98 % only on A, C and D. E is 100 % of the remainder and not measurable. F and G are not measurable, and what remains is below 98 % with a wrong size. The method is 36–75 % with wrong 0 on the measurable pieces. That is not coverage. Э6 is not started.
+
+Report 1. The first agreement measure (a stroke leaves the dispute only when two rings are inside a band that shrinks with the local step). The step is 0 where the rings coincide, so the band was 0 and a stroke 0.05 mm off every ring stayed in. Oracle, wrong size in parentheses: E 80.4 (19.6), A 99.9 (0.1), C 85.4 (14.6), D 83.5 (16.5), B 84.7 (13.0), F 79.2 (20.7), G 68.2 (31.8). Not ≥ 98 % except A. The two cost changes, leave-one-out passes and size 00 p95:
+
+| piece | fixed + band | first ring | rival / common |
+| --- | --- | --- | --- |
+| E | 6/16, 27.98 | 0/16, 23.40 | 6/16, 27.98 |
+| A | 1/14, 68.94 | 1/14, 64.38 | 1/14, 68.95 |
+| C | 4/16, 31.16 | 4/16, 24.94 | 5/16, 31.16 |
+| D | 4/17, 32.98 | 0/17, 24.34 | 4/17, 32.98 |
+| B | 2/15, 53.22 | 4/15, 51.43 | 2/15, 53.25 |
+| F | 3/14, 12.18 | 2/14, 14.65 | 3/14, 11.35 |
+| G | 6/11, 2.88 | 4/11, 2.82 | 5/11, 2.88 |
+
+The ray out to the farthest outline had already made E 6/16 → 5/16 and size 00 p95 28 → 52. All three refused. No new ray.
+
+Report 2. The tie is fixed at 0.45 mm, the floor of the gfit corridor. A piece with more than half its length excluded is not measurable. This is the last change to the measure.
+
+| piece | oracle | wrong | tie mm | status | method | wrong | status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| E | 100 % of 12798 | 0 | 15301 | не измерима | 62.5 % | 0 | не измерима |
+| A | 99.9 % of 17876 | 0 | 8347 | ≥ 98 % | 35.8 % | 0 | ниже |
+| C | 100 % of 18113 | 0 | 9121 | ≥ 98 % | 75.2 % | 0 | ниже |
+| D | 100 % of 9487 | 0 | 9309 | ≥ 98 % | 68.7 % | 0 | ниже |
+| B | 97.3 % of 19876 | 0 | 8820 | ниже | 56.4 % | 0 | ниже |
+| F | 96.4 % of 3634 | 3.4 % | 5071 | не измерима | 19.6 % | 0 | не измерима |
+| G | 80.2 % of 2287 | 19.6 % | 4543 | не измерима | 22.3 % | 0.2 % | не измерима |
+
+The (в) misses on F and G are the oracle, not byRank: its coverage is 1 mm and the tie is 0.45 mm, so a neighbour 0.5–0.8 mm away wins. byRank is right there. The oracle is not fixed; F and G are not measurable anyway. One byRank error, not fixed: G c2130, 138 mm, lies on the size 6 ring (0.20 mm) and is named 8.
+
+Report 3. The named cells, from the base shot. None is closed: every one is `leak`, `from` class, `repair` null. Lengths are the chains of that rank that fall on the piece. «Пусто» is a chain the rays did not claim. Where the stroke sits is the median of dist(smaller ring) / (dist(smaller) + dist(larger)) between the closed rings on either side; a swapped size would sit in the other size's slot.
+
+| cell | closed | rays, mm | between the closed rings | picture |
+| --- | --- | --- | --- | --- |
+| A24 | no | same 919, neighbour 22 is 207, empty 1054, common 164 | 32 % of the way from 22 to 28; size 24 is 33 %, a swap onto 26 is 67 % | no |
+| A26 | no | same 617, empty 1583, common 722, ask 199 | 58 %; size 26 is 67 %, a swap onto 24 is 33 % | no |
+| G10 | no | empty 83, common 199, ask 103 | 49 % from 8 to 14; 46 % of the stroke is on 8, 26 % on 14 | no |
+| G12 | no | empty 26, common 379, ask 65 | 50 %; on 8 and on 14 together | no |
+| G18 | no | empty 128, ask 75, common 29 | 50 %, which is size 18's slot, and within 0.45 mm of both 16 and 20 | can't tell |
+| G24 | no | same 71, empty 48, common 29 | 59 % from 20 to 28; size 24 is 50 %, a swap onto 22 is 25 % | no |
+| F22 | no | empty 3056, common 460 | 50 % from 20 to 28; size 22 is 25 %. The facing's own step is smaller than the test | can't tell |
+| F24 | no | empty 1084, ask 72 | 51 %; size 24 is 50 % | no |
+
+Pictures: `.runs/named-zoom/`. On A the red (24) outline sits inside the blue (26). On G the red (10) sits inside the blue (12), and 18 and 24 follow the facing between the closed rings rather than one neighbour's ring. F's facing has 22 and 24 on top of each other; the other outlines in that picture are pieces the 80 mm window also caught.
+Verdict: the premise is not confirmed. 0 of the 8 cells. Two cannot be told (G18, F22). The rays do not move these strokes onto the size the plan named; the length they do claim stays on the same size or is called common. The open cells are open because the class leaked and repair did not take them, not because the rank is the neighbour's. Stop. The alignment stays offline.
+
 ## 16 Nov 2026 — LADDER_RESCUE (a rescued line that is a rung of a ranked ladder) — IN CODE, measuring (probe flag `LADDER_RESCUE=1`)
 
 - **Trigger:** a rescued 'ignore' line (`walls.ts` `rescuedIgnored`) walls every rank it touches.
@@ -1738,3 +2007,49 @@ Clipping a single matching source chain and replaying it as loose made two cells
 **Next source-reading targets.** In 43 families there are 46 outside ranks where independently reading an original cut would place 159 additional open sizes strictly between two direct references. Of those 46, 38 have nearby distinguishable target ink, with 111 interior sizes between them and an existing reference. These are opportunities for a bracket, not promised closures. Synthetic repairs do not qualify as independent anchors. [Ranked list of all 46 targets](reference-anchor-candidates.csv). Verona G bow at 00 and Nob Hill A upper front at 5XL would each bracket six more sizes. The first is a better source-reading target. Sampling the nearest direct contour every 5 mm, Verona has target-ranked ink within 5 mm at 80/102 points and within 20 mm at 102/102. Nob Hill has it at 15/575 and 46/575. The CSV includes these counts for all 46 outside ranks. Distance to another size can reflect grading and does not prove missing ink. Recover the outside stroke from its size-labelled source, retaining the full-chain role, tile position and competing sizes. Test a source-verified anchor with the existing bracketed repair and measure completed outlines and exports before enabling anything.
 
 The offline tools are `single-reference-rows.mjs` (original PDF and accepted card), `single-reference-check.ts` (whole-outline benchmark), `gap-evidence-check.ts` (masked intervals and source-fragment controls) and `gap-candidate-shot.mjs` (native validation of improved replays). Their file headers document the arguments. Local experiment outputs are under `/private/tmp/patimport-runs`, including `verified-entire-{m,h}.jsonl`, `verified-gap-{m,h}.jsonl` and `native-gaps-{m,h}.json`.
+
+### 19 November 2026 — Verona G bow, printed size groups
+
+Matched the original MDF481 PDF by SHA-256 (`63b77341a77555ad02f90c859f5037dfabd4b1bc518396e77d7102b8ec8d689e`). On printed tile A6 (PDF page 9), the four ranges beside G - BOW each identify one rectangle. The cut corners are present in the vector paint operations. The interrupted straight spans are collinear, run in the same direction and fit the neighbouring dash spaces to within 0.02 mm. The largest such space measured 2.815 mm. On each rectangle, all four sides also match long chains assigned to the same size by the printed legend.
+
+| Printed sizes | Size confirmed on four sides | Width × height in mm |
+| --- | --- | --- |
+| 00–8 | 00 | 139.70 × 101.60 |
+| 10–14 | 12 | 144.70 × 107.60 |
+| 16–24 | 16 | 149.71 × 113.61 |
+| 26–32 | 28 | 154.71 × 119.61 |
+
+Replayed the wizard with the same card and settings in three modes. The control closed 3/18 bow sizes. Supplying only the original 00 cut closed 4/18. None of the six open sizes between 00 and 12 closed in that run. Supplying the four printed groups closed 18/18. Across the garment this is 100, 101 and 115 closed size/piece combinations out of 144. The seven other pieces kept the same cell results. Whole-garment export still stops at offset construction for E - SKIRT FRONT, B - TOP BACK and H - BOW CENTER.
+
+[Standalone bow cut contours, R12 DXF](verona-bow-cuts.dxf). The file contains one closed four-vertex cut polyline per size. An independent read of the emitted DXF checked all 18 block references and vertex coordinates against the source to within 0.001 mm. It contains the bow outline only. Reproduce with `node scripts/pattern-import/verona-bow.mjs <original-pdf> <unused-output-directory> control|anchor|groups`. The experiment uses audited source operator ranges for this edition of the PDF.
+
+A PDF text scan of the same 80 files found other printed range labels on pocket tiles. The current baseline has 11 open sizes for Axel G pockets (PDF page 5), eight for Ventura J pocket (page 79), and five for Cher J patch pockets (page 29). These 24 are candidates for source verification. Cher also prints range labels next to pocket-placement marks and Madison prints them on eyelet templates. A general reader must establish that a label belongs to a cut before sharing that cut across sizes.
+
+### 19 November 2026 — printed size ranges on polygonal cuts
+
+The reader takes the assembled vectors, printed labels, piece seeds and native legend classifications. It uses no garment names, fixed coordinates or PDF operator numbers. It follows successive paint strokes and searches across tile boundaries only when both ends continue in the same direction and the gap fits an adjacent pen's declared dash space. Every corner is drawn in the source. Every segment and joined space must lie on a finite side of the same convex polygon. A single legend size in the printed interval must support more than half of each side. The polygon must enclose one piece seed and a cut instruction. Candidate groups must give a unique partition of the size card. Placement and template labels inside the outline veto it.
+
+Checked the PDF text on all 80 originals with `printed-cut-scan.mjs`. Four passed the necessary page-level test for range labels, a piece identifier and a cut instruction together. The other 76 did not enter geometry replay. Replayed the four eligible PDFs through the native wizard with the existing source-size cards.
+
+* Axel G pockets spans PDF pages 5–6. The four rectangles measure 152.40 × 127.00, 157.40 × 132.00, 162.40 × 137.00 and 167.40 × 142.00 mm.
+* Cher J patch pockets has five corners and four distinct outlines on page 29. Page 9 was a negative control. With the placement veto removed the prototype also accepted a family on the front middle. The placement-aware reader skips it.
+* Verona has separate printed groups for G bow and H bow center on page 9. The four original rectangles for H range from 57.15 × 63.50 to 69.16 × 81.51 mm.
+* Ventura J pocket has six printed groups, including 00–0. Its curved cut across tiles is outside the straight-side proof. Its eight open sizes stay open.
+
+Independently rendered the original pages and sampled each accepted group's perimeter at spacing of at most 1 mm. The largest distances to visible ink were 0.1151 mm over 2364 samples on Axel, 0.1911 mm over 2127 on Cher, 0.1993 mm over 2068 on Verona G and 0.1225 mm over 1096 on Verona H. The raster check corroborates the traced geometry. Label ownership comes from the source vectors, printed ranges and piece annotations.
+
+The offline replay supports three placements of source evidence. In `all`, the source figure replaces all candidates of the family before native repair. It closed 40 additional cells but also changed serialized vertices of 32 already closed cells. In `early`, only leaks at that point receive the source figure. Cher J size 2 was still replaced, because the original repair would close it later. The default `leaks` mode runs after native grade repair and before the final ladder check. The runner compares every previously closed size with the baseline exported cell geometry.
+
+The cut sample DXFs have 18 size blocks each. Their quantity of one denotes a geometry sample. Grain, notches, internal lines and the garment bill of materials are outside those samples. An independent parser checked the closed flag, all block inserts, the vertex count and every coordinate against the source groups to within 0.001 mm. For newly closed cells, the saved native cell vertices agree with the corresponding sample to the native report's 0.1 mm precision.
+
+[Axel pocket cut samples](axel-pocket-cuts.dxf), [Cher patch pocket cut samples](cher-patch-pocket-cuts.dxf), [Verona bow center cut samples](verona-bow-center-cuts.dxf). Reproduce with `node scripts/pattern-import/printed-cut-shot.mjs <original PDF> <new output dir> <baseline run.json> [leaks|early|all]`. The standalone rule and the negative controls are under `scripts/pattern-import/printed-cut-ranges.mjs` and `printed-cut-ranges.test.mjs`. Run the latter with `node --test`. These experiments leave the interactive importer on its existing algorithm.
+
+| Piece | Baseline closed | Final closed | Gain |
+| --- | ---: | ---: | ---: |
+| Axel G pockets | 7/18 | 18/18 | 11 |
+| Cher J patch pockets | 13/18 | 18/18 | 5 |
+| Ventura J pocket | 10/18 | 10/18 | 0 |
+| Verona G bow | 3/18 | 18/18 | 15 |
+| Verona H bow center | 9/18 | 18/18 | 9 |
+
+Across the 80-file baseline this moves 6350 to 6390 closed cells out of 7757. The final leak-only replay preserved the serialized outline of every previously closed cell. No additional whole-garment DXF was written. All four eligible garments still stop at the meaning stage. The gain of 40 includes the 15 Verona G cases recovered by the earlier PDF-specific experiment.
