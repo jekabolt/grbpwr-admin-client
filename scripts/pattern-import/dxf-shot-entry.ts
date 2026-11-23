@@ -3,7 +3,7 @@
 // the written DXF, which is kept on disk. The card's sizes are the sheet's own legend sizes (the
 // operator would create the card with them): a first pass reads them, a second runs with them.
 //   bundled and driven by dxf-shot.mjs (one PDF per process)
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 
 import { setRepairProbeSink, type RepairProbe } from 'lib/pattern-import/pieces/gfit/repair-hook';
@@ -19,7 +19,7 @@ type Rec = Record<string, unknown> & {
 };
 
 export async function main(args: string[]): Promise<number> {
-  const [pdf, out] = args;
+  const [pdf, out, caseFile] = args;
   const id = basename(pdf).replace(/\.pdf$/i, '');
   mkdirSync(out, { recursive: true });
   const base = { id, group: 'pdf' as const, files: [resolve(pdf)] };
@@ -35,9 +35,22 @@ export async function main(args: string[]): Promise<number> {
   process.env.GOLDEN_ANSWERS ??= JSON.stringify({ pages: true, asides: true, outline: 'seam' });
   process.env.AUTOPILOT_OUTLINES ??= '1';
   const t0 = Date.now();
-  // pass 1: a card with no sizes, only to read the legend
-  const first = await run([], null);
-  const labels = first.sizesRead?.labels ?? [];
+  // A saved card keeps both sides of a corpus comparison on the same size selection.
+  const saved = caseFile ? JSON.parse(readFileSync(caseFile, 'utf8')) : null;
+  if (
+    caseFile &&
+    (saved?.id !== id ||
+      !Array.isArray(saved.card) ||
+      !saved.card.every((s: unknown) => typeof s === 'string'))
+  )
+    throw new Error(`Invalid saved size card for ${id}: ${caseFile}`);
+  async function sizeCard(): Promise<Rec> {
+    if (saved) return { sizesRead: { labels: saved.card } };
+    const first = await run([], null);
+    return first;
+  }
+  const discovery = await sizeCard();
+  const labels = discovery.sizesRead?.labels ?? [];
   // GFIT_PROBES=1: every repair try of the final pass as a replayable case (probes.json, read by
   // gfit-replay.ts) — the dev loop for pieces/gfit without re-running the corpus
   const probes: RepairProbe[] = [];
@@ -50,7 +63,7 @@ export async function main(args: string[]): Promise<number> {
     setCornerProbeSink((p) =>
       cornerCalls.push(process.env.CORNER_PROBES === 'full' ? p : liteProbe(p)),
     );
-  const rec = labels.length ? await run(labels, resolve(out, 'dxf')) : first;
+  const rec = saved || labels.length ? await run(labels, resolve(out, 'dxf')) : discovery;
   setRepairProbeSink(null);
   setCornerProbeSink(null);
   // full precision: rounded to 0.01 mm, 1 of 19 Leah tries replayed differently (F · 30, an

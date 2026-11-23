@@ -687,7 +687,7 @@ const CORPUS =
 export const SCOPES: DraftScopeTarget[] = [
   ['MAIN', 'L1', 'main', false, 'FABRIC'],
   ['LINING', 'L2', 'lining', false, 'LINING'],
-  ['INTERLINING', 'L3', 'interlining', true, 'INTERLINING'],
+  ['INTERFACING', 'L3', 'interlining', true, 'INTERLINING'],
 ].map(([p, line, label, inter, sec]) => ({
   scopeKey: `TECH_CARD_BOM_PURPOSE_${p}`,
   fabricPurpose: `TECH_CARD_BOM_PURPOSE_${p}`,
@@ -782,7 +782,7 @@ const bare = sizeKey;
 const fabricOf = (f: unknown): string => {
   const t = String(f ?? '').toLowerCase();
   if (/^lining/.test(t)) return 'TECH_CARD_BOM_PURPOSE_LINING';
-  if (/^(interfacing|interlining)/.test(t)) return 'TECH_CARD_BOM_PURPOSE_INTERLINING';
+  if (/^(interfacing|interlining)/.test(t)) return 'TECH_CARD_BOM_PURPOSE_INTERFACING';
   return 'TECH_CARD_BOM_PURPOSE_MAIN';
 };
 
@@ -1124,10 +1124,12 @@ export async function runCase(c: Case, mutate: string | null) {
     const exp = s.sizes ? exportedRanks(s.sizes.map) : null;
     const len = (p: { x: number; y: number }[]) =>
       p.reduce((a, q, k) => (k ? a + Math.hypot(q.x - p[k - 1].x, q.y - p[k - 1].y) : 0), 0);
-    // GAP MEASURE (13 Nov 2026): what the pieces step's one-click "close the gap" would draw on each
-    // leak — the same findGap call (pieces.tsx gapOf), its width, whether the ends face, how far the
-    // straight bridge lies from the grade's prediction, and whether closed sizes bracket the size
+    // Preserve the old Pieces wall filter separately from the wider diagnostic search so a
+    // batch can distinguish an empty wall list from an actual absence of eligible endpoints.
     const pv = s.chains?.chainPreview ?? [];
+    const ignored = new Set(
+      api.inputs.edits.flatMap((e) => (e.kind === 'ignore-line' ? [e.chain] : [])),
+    );
     const distToPoly = (p: { x: number; y: number }, poly: { x: number; y: number }[]) => {
       let best = Infinity;
       for (let k = 0; k < poly.length; k++) {
@@ -1151,7 +1153,9 @@ export async function runCase(c: Case, mutate: string | null) {
           .filter((k) => k.role === 'common' || (k.role === 'size' && k.sizeLabel === label))
           .flatMap((k) => k.chains),
       );
-      const g = findGap(c.leakAt, pv, new Set(), 40, own);
+      const g = findGap(c.leakAt, pv, ignored, 40, own);
+      const legacy = c.walls.length ? findGap(c.leakAt, pv, ignored, 40, new Set(c.walls)) : null;
+      const legacyEvidence = { candidateWalls: c.walls.length, legacyWallPair: !!legacy };
       const ranks = f.candidates.filter((x) => !exp || exp.has(x.rank));
       const closedRank = (x: PieceCandidate) => x.outcome === 'closed';
       const bracketed =
@@ -1172,6 +1176,7 @@ export async function runCase(c: Case, mutate: string | null) {
           }
         }
         return {
+          ...legacyEvidence,
           found: false,
           bracketed,
           walls: own.size,
@@ -1194,7 +1199,10 @@ export async function runCase(c: Case, mutate: string | null) {
         predMm = Math.round(predMm * 10) / 10;
       }
       return {
+        ...legacyEvidence,
         found: true,
+        chains: g.chains,
+        ends: [g.from, g.to],
         mm: Math.round(g.mm * 10) / 10,
         facing: g.facing,
         predMm,
@@ -1210,7 +1218,10 @@ export async function runCase(c: Case, mutate: string | null) {
           size: rankLabel.get(c.rank) ?? `r${c.rank}`,
           outcome: c.outcome,
           gap: gapMeasure(f, c),
+          ...(c.gapRecovery ? { gapRecovery: c.gapRecovery } : {}),
+          ...(c.gapOptions?.length ? { gapChoices: c.gapOptions.length } : {}),
           from: c.rankFrom ?? null,
+          ...(c.polygonSource ? { polygonSource: c.polygonSource } : {}),
           repair: c.repair?.kind ?? null,
           // the continuity judgement that kept this close (probe: why a far ring passed)
           ...(c.continuityVerdict ? { cont: c.continuityVerdict } : {}),
@@ -1219,8 +1230,12 @@ export async function runCase(c: Case, mutate: string | null) {
           // the pred's source: the two anchor sizes, and whether it reaches past them (a hint)
           predFrom: c.gradeHint?.from ?? null,
           predExtrapolated: c.gradeHint ? !!c.gradeHint.extrapolated : null,
-          // LADDER_JUDGE: why this cell was kept or opened, and the nest verdict of its outline
-          ...(c.ladderReason ? { reason: c.ladderReason, nest: c.ladderNest ?? null } : {}),
+          nest: c.nest ?? null,
+          // LADDER_JUDGE: why this cell was kept or opened, and the nest verdict of its outline.
+          // `ladderNest` stays beside `nest` (the walk record) so the two do not overwrite.
+          ...(c.ladderReason
+            ? { reason: c.ladderReason, ladderNest: c.ladderNest ?? null }
+            : {}),
           derivedMm: Math.round(
             (c.derived ?? []).reduce((a, d) => a + len(d.pts as { x: number; y: number }[]), 0),
           ),
@@ -1389,7 +1404,8 @@ export async function runCase(c: Case, mutate: string | null) {
       .split(';')
       .filter(Boolean)
       .map((t) => t.split(',').map(Number));
-    if (want.length) {
+    if (want.length && live?.sheet) {
+      const sh = live.sheet;
       const R = 20;
       const near = (pts: { x: number; y: number }[], x: number, y: number) =>
         pts.filter((q) => Math.abs(q.x - x) <= R && Math.abs(q.y - y) <= R);

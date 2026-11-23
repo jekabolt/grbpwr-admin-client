@@ -11,7 +11,7 @@
 // can already differ (Leah F · 30). The hook's G15 / D-holes bounds are not replayed.
 // Limits: it replays the repair ALONE. A change upstream (chains, corners, fill) needs new probes
 // (a new dxf-shot); and an accepted repair changes the fill after it, which only a run shows.
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { GRADE_DRAW, type RepairProbe } from 'lib/pattern-import/pieces/gfit/repair-hook';
@@ -20,7 +20,7 @@ import type { PtMm } from 'lib/pattern-import/types';
 
 type Box = { minX: number; minY: number; maxX: number; maxY: number };
 type Cell = { size: string; outcome: string; outer?: [number, number][] };
-type Family = { label: string; cells: Cell[] };
+type Family = { label: string | null; cells: Cell[] };
 
 const args = process.argv.slice(2);
 const flag = (n: string) => args.includes(n);
@@ -61,7 +61,7 @@ const labelOf = (fams: Family[], p: RepairProbe): string => {
     const pts = f.cells.flatMap((c) => (c.outer ?? []).map(([x, y]) => ({ x, y })));
     if (!pts.length) continue;
     const v = iou(pb, boxOf(pts));
-    if (v > bestV) [best, bestV] = [f.label, v];
+    if (v > bestV) [best, bestV] = [f.label ?? '?', v];
   }
   return best;
 };
@@ -69,7 +69,11 @@ const labelOf = (fams: Family[], p: RepairProbe): string => {
 const verdict = (strict: string[], draw: string[] | null) =>
   !strict.length ? 'repaired' : draw && !draw.length ? 'drawn' : 'refused';
 
-const out: unknown[] = [];
+// --out is written file by file (one array of every try): held whole, 40 files ran out of memory
+const o = opt('--out');
+if (o) writeFileSync(o, '[');
+let written = 0;
+let out: unknown[] = [];
 const moved: Record<string, number> = {};
 let total = 0;
 const t0 = Date.now();
@@ -124,9 +128,10 @@ for (const name of readdirSync(shot).sort()) {
       anchors: p.ins.map((x) => ({ rank: x.rank, outer: x.outer as PtMm[] })),
     });
   }
+  if (o) for (const x of out) appendFileSync(o, (written++ ? ',' : '') + JSON.stringify(x));
+  out = [];
 }
 console.log(
   `\n${total} tries in ${((Date.now() - t0) / 1000).toFixed(1)} s · moved ${JSON.stringify(moved)}`,
 );
-const o = opt('--out');
-if (o) writeFileSync(o, JSON.stringify(out));
+if (o) appendFileSync(o, ']');

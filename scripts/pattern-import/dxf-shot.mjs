@@ -3,6 +3,8 @@
 // autopilot.mjs), then every PDF in its own node process; then dxf-check.mjs reads what was written.
 //   node scripts/pattern-import/dxf-shot.mjs <folder> --files <list.txt> --out <dir> [--par 2]
 //   node scripts/pattern-import/dxf-shot.mjs <one.pdf> --out <dir>
+//   --cards <previous-replay-directory> uses each PDF's saved <id>/case.json size card.
+//   --limit 0 disables the wall-clock timeout for laptop runs across system sleep.
 import { build as esbuild } from 'esbuild';
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -26,6 +28,7 @@ const opt = (k, d) => {
 };
 const target = argv[0];
 const OUT = resolve(opt('--out', resolve(tmpdir(), 'dxf-shot')));
+const CARDS = opt('--cards', '');
 const PAR = +opt('--par', '2');
 const LIMIT_S = +opt('--limit', '1800');
 let pdfs;
@@ -40,6 +43,13 @@ else {
     .map((f) => resolve(target, f));
 }
 mkdirSync(OUT, { recursive: true });
+if (CARDS) {
+  for (const pdf of pdfs) {
+    const id = basename(pdf).replace(/\.pdf$/i, '');
+    const input = resolve(CARDS, id, 'case.json');
+    if (!existsSync(input)) throw new Error(`Missing saved size card: ${input}`);
+  }
+}
 
 // SHOT_ROWS=1: each child also writes <dir>/rows.json — the sheet as the fill sees it: every chain's
 // points and which chains are each size's own (byRank) or shared (common). media-diff.mjs draws
@@ -66,7 +76,16 @@ const __rows = new Map();
 globalThis.__ROWS = (set, model) => {
   if (model.mode === 'single') return;
   const r1 = (v) => Math.round(v * 10) / 10;
-  if (!__rows.has(set)) __rows.set(set, { chains: set.chains.map((c) => (c?.pts ?? []).map((p) => [r1(p.x), r1(p.y)])) });
+  if (!__rows.has(set)) __rows.set(set, {
+    chains: set.chains.map((c) => (c?.pts ?? []).map((p) => [r1(p.x), r1(p.y)])),
+    style: set.chains.map((c) => c?.style ?? 0),
+    motif: set.chains.map((c) => (c?.motif ? c.motif.map(r1) : null)),
+    legend: (set.classes ?? []).filter((k) => k.role === 'size').map((k) => ({
+      size: k.sizeLabel ?? null,
+      chains: [...(k.chains ?? [])],
+      evidence: (k.evidence ?? []).map((e) => e.kind),
+    })),
+  });
   const s = __rows.get(set);
   s.byRank = model.byRank.map((x) => [...x]);
   s.common = [...model.common];
@@ -105,14 +124,21 @@ const one = (pdf) =>
     const t0 = Date.now();
     const p = spawn(
       process.execPath,
-      ['--expose-gc', '--max-old-space-size=8192', fileURLToPath(import.meta.url), pdf, dir],
+      [
+        '--expose-gc',
+        '--max-old-space-size=8192',
+        fileURLToPath(import.meta.url),
+        pdf,
+        dir,
+        ...(CARDS ? [resolve(CARDS, basename(dir), 'case.json')] : []),
+      ],
       { env: { ...process.env, SHOT_CHILD: bundle, PATIMPORT_REPO: REPO } },
     );
     let so = '';
     let se = '';
     p.stdout.on('data', (d) => (so += d));
     p.stderr.on('data', (d) => (se = (se + d).slice(-4000)));
-    const kill = setTimeout(() => p.kill('SIGKILL'), LIMIT_S * 1000);
+    const kill = LIMIT_S > 0 ? setTimeout(() => p.kill('SIGKILL'), LIMIT_S * 1000) : undefined;
     p.on('close', (code, sig) => {
       clearTimeout(kill);
       // SHOT_STDOUT=1 keeps the child's stdout (e.g. GRADEP2_DEBUG lines) beside run.json

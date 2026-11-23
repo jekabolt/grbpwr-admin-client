@@ -567,24 +567,6 @@ async function oneFile(pdf: string, cellsPath: string, canvasDir: string, pxPerM
   if (PENS) return { ...base, ...pens(fams, covering) };
 
   const raster = await renderer(pdf, canvasDir, pxPerMm);
-  // self-check on closed cells (learned on the same data — optimistic): does the outline carry an
-  // own pen of its size at r = 1 mm, and of the NEIGHBOURING size (should not)?
-  const check = { trueHit: 0, nbHit: 0, n: 0 };
-  for (const f of fams)
-    f.cells.forEach((c, i) => {
-      const nb = f.cells[i + 1]?.size ?? f.cells[i - 1]?.size;
-      if (c.outcome !== 'closed' || !c.outer || !nb) return;
-      for (const q of c.outer.filter((_, k) => k % 7 === 0)) {
-        const sigs = [...sigsAt(covering, q, 1.0)];
-        check.n++;
-        if (sigs.some((t) => kind(t, c.size) === 'own')) check.trueHit++;
-        if (sigs.some((t) => kind(t, nb) === 'own')) check.nbHit++;
-      }
-    });
-  const selfCheck = {
-    trueOwn: check.n ? +(check.trueHit / check.n).toFixed(2) : 0,
-    neighbourOwn: check.n ? +(check.nbHit / check.n).toFixed(2) : 0,
-  };
   const cells = [];
   for (const f of fams)
     for (const c of f.cells) {

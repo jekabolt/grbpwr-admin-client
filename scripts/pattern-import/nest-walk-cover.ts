@@ -7,7 +7,9 @@
 //   common ≤ 1 mm from a common line
 //   other  ≤ 1 mm from a line of another size (which sizes, samples ≈ mm)
 //   none   nothing within 1 mm (truly derived)
-// next to the walk's own derived share (b.derivedMm / perimeter) and its refusal.
+// next to the walk's own derived share (b.derivedMm / perimeter) and the walk's own refusal
+// ('accepted' = nestWalk built it; the pipeline may still refuse it in repair-hook — drawMaxShare,
+// crosses-own-line — and that verdict is in cells.json).
 // Why (18 Nov 2026): the walk refused A18 / C18 / B24 at 38–76 % derived while 89–98 % of their
 // outline lay on own + common lines — the derived count must follow `none`, not how a point was made.
 import { readFileSync } from 'node:fs';
@@ -55,7 +57,8 @@ const resample = (ring: readonly PtMm[]) => {
     const a = ring[i];
     const b = ring[(i + 1) % ring.length];
     const m = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y)));
-    for (let j = 0; j < m; j++) out.push({ x: a.x + ((b.x - a.x) * j) / m, y: a.y + ((b.y - a.y) * j) / m });
+    for (let j = 0; j < m; j++)
+      out.push({ x: a.x + ((b.x - a.x) * j) / m, y: a.y + ((b.y - a.y) * j) / m });
   }
   return out;
 };
@@ -107,10 +110,19 @@ for (const fam of fams) {
       }
     }
     const n = ring.length;
+    let per = 0;
+    for (let i = 0; i < b.outer.length; i++) {
+      const p = b.outer[i];
+      const q = b.outer[(i + 1) % b.outer.length];
+      per += Math.hypot(q.x - p.x, q.y - p.y);
+    }
     const pc = (x: number) => `${((100 * x) / n).toFixed(0)}%`;
+    const walk = per > 0 ? (100 * (b.derivedMm ?? 0)) / per : 0;
+    const off = (100 * (other + none)) / n;
     console.log(
-      `  ${card[r]}: walk derived ${pc(b.derivedMm ?? 0)}` +
+      `  ${card[r]}: walk derived ${walk.toFixed(0)}%` +
         ` | own ${pc(own)} common ${pc(com)} other ${pc(other)} ${JSON.stringify(who)} none ${pc(none)}` +
+        ` | Δ ${(walk - off).toFixed(1)} pp` +
         ` | ${b.refused ?? 'accepted'}`,
     );
   }
