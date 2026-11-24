@@ -114,6 +114,71 @@ A first attempt that grouped marks by shape before `chainBeads` lost 18 closed c
 Repairs with derived segments: 18 ok, 0 bad. Nest state `confirmed`: 87 ok, 2 bad. For `class`
 cells, "a stretch of 12 mm or more off the own line" flags 37 of 45 bad and 114 of 460 ok.
 
+## Graph walk instead of the fill (experiment, 24 Nov)
+
+An outline of one size is walked, not filled: the size's own chains, the chains of role `common`,
+and stretches where the chains of six or more size classes coincide within 0.3 mm. Ends are joined;
+where two sides meet at an angle the vertex is the intersection of the two sides (the ends are
+extended to it or cut back to it). No walls, no flood. Script: `walk-carry.mjs`.
+
+On the reference set (six pieces of Leah and Kalla, snapshots taken with `ROW_KEEP=1`), 82 ok sizes,
+by the largest deviation from the owner's outline:
+
+| Largest deviation | Before corners | With corners |
+| --- | ---: | ---: |
+| up to 1 mm | 23 | 49 |
+| 1–3 mm | 14 | 12 |
+| over 3 mm | 36 | 12 |
+| no closed walk | 9 | 9 |
+
+"Same outline" by "97 % of the perimeter within 0.6 mm" gave 65 of 82 before corners. That measure
+hides a local miss of several millimetres at a corner; use the largest deviation.
+
+Of the 16 sizes the owner marked bad, the walk (before corners) fixed 8 by eye, went wrong at a
+corner on 4 and did not close 4. Pictures: `walk-leah-g.png`, `walk-kalla-f.png`, `walk-kalla-d.png`.
+
+### Open cells of the 75 files
+
+Lower bound: the 75 snapshots were taken WITHOUT `ROW_KEEP`, so the rows of marks the decoration
+filter drops are not in them. On the two files that have both kinds of snapshot the clean closures
+are 6 without it and 10 with it.
+
+| Outcome, 1151 open cells in 52 files | Cells |
+| --- | ---: |
+| Closed from printed lines and built corners only, nests between its neighbours | 155 |
+| The same, nesting broken | 14 |
+| Closed with a smooth stretch carried from a neighbour | 95 |
+| Closed with a corner carried from a neighbour | 76 |
+| No closed walk | 505 |
+| No closed size in the piece | 175 |
+| No line of the size near the piece | 131 |
+
+One file closes whole (Spokane, one open cell). Four more are left with two or three cells
+(Asheville, Valentina, Alassio, Corella). The 155 are checked by nesting only; on the reference set
+about one walked outline in five is more than 1 mm off somewhere. `walk-open-kalla.png` shows nine
+of them.
+
+### Completion from a neighbour size (hold-out)
+
+`complete-holdout.mjs`: on 544 ok sizes of 47 pieces a stretch of 30, 60 or 90 mm is hidden at
+eight places and redrawn, 13 056 trials. Share of stretches redrawn within 0.5 mm:
+
+| Stretch | Straight bridge | One neighbour | Two neighbours |
+| --- | ---: | ---: | ---: |
+| 30 mm | 76 % | 87 % | 87 % |
+| 60 mm | 52 % | 78 % | 80 % |
+| 90 mm | 39 % | 68 % | 71 % |
+| smooth (turn under 20°) | 69 % | 89 % | 89 % |
+| with a corner (turn 45° or more) | 0.3 % | 29 % | 34 % |
+
+The median error from a neighbour is 0.1 mm. One closed neighbour is nearly as good as two. Inside
+the walk the carried stretch is not yet reliable (2 of 10 verified sizes within 1 mm): the walk
+picks the wrong pair of ends to connect. The 95 and 76 cells above are therefore not counted as
+closed.
+
+Three ways of combining the walk with the completion were tried. Binning the lines by the
+neighbour's arc length cuts corners by 2–5 mm; keep whole printed edges.
+
 ## Tried and dropped
 
 - Geometry-only detectors of a wrong outline on the reference set: at best 20 of 25 bad with 65 of
@@ -140,3 +205,8 @@ cells, "a stretch of 12 mm or more off the own line" flags 37 of 45 bad and 114 
 | `own-share.mjs`, `outline-shift.mjs`, `outline-why.mjs`, `mark-flow.mjs`, `cells-cmp.py` | Two runs compared |
 | `viz-size.mjs`, `strip-shapes.mjs` | Pictures of one size's lines and of a strip of marks |
 | `walk-pen.mjs`, `walk-open-ends.mjs` | Closed outlines of one pen from raw sheet paths, judged by layers |
+| `walk-material.mjs`, `walk-missing.mjs` | Is the material for a verified outline in the raw paths; what lies where it is missing |
+| `walk-size.mjs`, `walk-open.mjs` | The walk without corners, on the reference set and on open cells |
+| `walk-carry.mjs` | The walk with built corners and neighbour-carried joins (`ref` and `open` modes) |
+| `complete-holdout.mjs` | Hide a stretch of a verified outline, redraw it from neighbours, measure |
+| `walk-viz.mjs`, `walk-open-viz.mjs` | Pictures: reference against the walk; open cells the walk closed |
