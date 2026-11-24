@@ -166,6 +166,7 @@ export async function extractPdfWith(
           file: file.id,
           page: p,
           base,
+          pageBox: { minX: 0, minY: 0, maxX: widthMm, maxY: heightMm },
           sagittaMm: sagitta,
           keepFills: opts.keepFills,
           ocName: resolve,

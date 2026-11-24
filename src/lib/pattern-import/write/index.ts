@@ -10,6 +10,7 @@
 
 import type {
   Affine,
+  DerivedEdge,
   DraftScopeTarget,
   EmbedManifestFn,
   ManifestSize,
@@ -25,6 +26,7 @@ import { buildManifest } from './manifest-build';
 import { embedManifest as embedManifestLocal } from '../manifest';
 import { type Plan, pieceInScope, planBlocks } from './plan';
 import type { AuthoredLineSplitInput } from './protected-line-split';
+import { drawnOfBlock } from './drawn';
 import { writeR12 } from './r12';
 import { writeR2000 } from './r2000';
 
@@ -46,6 +48,11 @@ export type WriteOptions = {
   now?: () => Date;
   /** Retain the original grain midpoint when verifying a historical bare R12 fusing row. */
   legacyFusingGrainAnchor?: true;
+  /**
+   * The outline's derived edges (source frame, semantics `derivedOf`): the grade-drawn / grade-filled
+   * ones are copied onto layer GRADE_DRAWN (write/drawn.ts). Absent = no marker layer.
+   */
+  derivedOf?: (sourceIdentity: string, rank: number) => DerivedEdge[] | undefined;
 };
 
 export type WriteDetail = WriteResult & {
@@ -108,6 +115,19 @@ export async function writeDxfWithRetainedLineSplit(
 }
 
 function emitPlannedDxf(job: WriteJob, plan: Plan, opts: WriteOptions): WriteDetail {
+  if (opts.derivedOf)
+    for (const b of plan.blocks) {
+      const d = drawnOfBlock(
+        b.cut,
+        b.transform,
+        opts.derivedOf(b.derivedFrom ?? b.identity, b.rank),
+      );
+      b.drawn = d.stretches;
+      if (d.skipped)
+        plan.warnings.push(
+          `${b.name}: ${d.skipped} drawn stretch(es) not on the written cut line — not marked`,
+        );
+    }
   const createdAt = (opts.now ?? (() => new Date()))().toISOString();
   const manifest = buildManifest(job, plan.specs, plan.blocks, createdAt);
   const sample = job.sizes.length

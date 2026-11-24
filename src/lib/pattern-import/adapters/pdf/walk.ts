@@ -11,6 +11,8 @@
 //  - pdf.js 4.10 `constructPath` args `[ops, flatArgs, minMax]`.
 // Clip is RECORDED on the style, never applied (contract §1, Codex H6).
 
+import { clipFill, convexQuad } from './clip-fill';
+import { visibleEdges } from '../../pieces/source-visibility';
 import type { BoxMm, IRPath, PtMm, Style, WorkBudgetLike } from 'lib/pattern-import/types';
 
 import {
@@ -66,6 +68,15 @@ type GState = {
   fill: [number, number, number] | null;
   clip: BoxMm | null;
   clipId: string | null;
+  rectangularClip: boolean;
+  clipQuad?: PtMm[];
+  fillMasks: PtMm[][];
+  unknownFillClip: boolean;
+  fillOpacity: number;
+  clipPolygon?: PtMm[];
+  localClipPolygon?: PtMm[];
+  strokeOpacity: number;
+  softMask: boolean;
 };
 
 const r2 = (v: number) => Math.round(v * 100) / 100;
@@ -103,6 +114,7 @@ export type WalkOpts = {
   /** User space → page mm (y-up, origin at the view box's lower-left). */
   base: M6;
   sagittaMm: number;
+  pageBox?: BoxMm;
   keepFills: boolean;
   ocName: OcResolver;
   /** C4: points made here are spent from it (adapters/budget.ts). */
@@ -140,6 +152,12 @@ export function walkOperatorList(ol: OpList, o: WalkOpts): WalkOut {
     fill: [0, 0, 0],
     clip: null,
     clipId: null,
+    rectangularClip: true,
+    fillMasks: [],
+    unknownFillClip: false,
+    fillOpacity: 1,
+    strokeOpacity: 1,
+    softMask: false,
   };
   const stack: GState[] = [];
   // Marked-content stack: one entry per BMC/BDC; OC entries carry the OCG name, others null.
@@ -159,6 +177,7 @@ export function walkOperatorList(ol: OpList, o: WalkOpts): WalkOut {
   let cur: { pts: PtMm[]; closed: boolean } | null = null;
   let cp: PtMm | null = null;
   let pendingClip = false;
+  let curvedClip = false;
   let groupBbox: unknown = null;
 
   // Text state for run origins (only positions; glyph advances are not modelled).
@@ -166,7 +185,28 @@ export function walkOperatorList(ol: OpList, o: WalkOpts): WalkOut {
   let tlm: M6 = [1, 0, 0, 1, 0, 0];
   let leading = 0;
 
-  const setClip = (b: BoxMm, tag: string) => {
+  const setClip = (
+    b: BoxMm,
+    tag: string,
+    rectangular: boolean,
+    polygon?: PtMm[],
+    quad?: PtMm[],
+    knownMask = false,
+    localPolygon?: PtMm[],
+  ) => {
+    const parent = st.clip;
+    const withinParent =
+      st.rectangularClip &&
+      (!parent ||
+        (b.minX >= parent.minX &&
+          b.maxX <= parent.maxX &&
+          b.minY >= parent.minY &&
+          b.maxY <= parent.maxY));
+    st.clipPolygon = withinParent ? polygon : undefined;
+    st.localClipPolygon = withinParent ? localPolygon : undefined;
+    st.clipQuad = withinParent && quad?.length === 4 ? quad : undefined;
+    st.unknownFillClip ||= !rectangular && !knownMask;
+    st.rectangularClip &&= rectangular;
     const c = intersectBox(st.clip, b);
     st.clip = c;
     st.clipId = `${tag}:${r2(c.minX)},${r2(c.minY)},${r2(c.maxX)},${r2(c.maxY)}`;
@@ -197,10 +237,74 @@ export function walkOperatorList(ol: OpList, o: WalkOpts): WalkOut {
       layer: L,
       fill: filled,
       clip: st.clipId,
+      ...(filled && !stroked && st.clipQuad && !st.softMask && st.fillOpacity === 1
+        ? { clipQuad: st.clipQuad }
+        : {}),
+      ...(stroked && !filled && st.clipPolygon && st.strokeOpacity === 1 && !st.softMask
+        ? { clipPolygon: st.clipPolygon }
+        : {}),
+      ...(st.localClipPolygon &&
+      !st.softMask &&
+      ((stroked && !filled && st.strokeOpacity === 1) ||
+        (filled && !stroked && st.fillOpacity === 1))
+        ? { localClipPolygon: st.localClipPolygon }
+        : {}),
     });
     pending.forEach((s, sub) => {
       if (s.pts.length < 2) return;
+      const pts =
+        filled && !stroked && pending.length === 1 && st.fillMasks.length
+          ? clipFill(s.pts, st.fillMasks)
+          : s.pts;
+
+      const bounds = o.pageBox ? intersectBox(st.clip, o.pageBox) : st.clip;
+      const unknown =
+        filled &&
+        !stroked &&
+        (!pts ||
+          pending.length !== 1 ||
+          st.unknownFillClip ||
+          st.softMask ||
+          st.fillOpacity !== 1 ||
+          (bounds &&
+            pts.some(
+              (p) =>
+                p.x < bounds.minX - 1e-5 ||
+                p.x > bounds.maxX + 1e-5 ||
+                p.y < bounds.minY - 1e-5 ||
+                p.y > bounds.maxY + 1e-5,
+            )));
+      const shown =
+        (s.closed || (pending.length === 1 && s.pts.length === 2 && !st.dash?.length)) &&
+        stroked &&
+        !filled &&
+        st.rectangularClip &&
+        st.strokeOpacity === 1 &&
+        !st.softMask &&
+        o.pageBox
+          ? visibleEdges(s.pts, intersectBox(st.clip, o.pageBox), s.closed)
+          : undefined;
+      const paper = o.pageBox && intersectBox(st.clip, o.pageBox);
+      const inset = stroked ? (st.lw * sc) / 2 : 0;
+      const visibleMotif =
+        paper &&
+        st.rectangularClip &&
+        !st.softMask &&
+        pending.length === 1 &&
+        (!filled || st.fillOpacity === 1) &&
+        (!stroked || st.strokeOpacity === 1) &&
+        s.pts.every(
+          (p) =>
+            p.x >= paper.minX + inset &&
+            p.x <= paper.maxX - inset &&
+            p.y >= paper.minY + inset &&
+            p.y <= paper.maxY - inset,
+        );
       out.paths.push({
+        ...(visibleMotif ? { visibleMotif: true as const } : {}),
+        ...(pts && pts !== s.pts ? { visibleFill: pts } : {}),
+        ...(unknown ? { unknownFill: true as const } : {}),
+        ...(shown ? { visibleEdges: shown } : {}),
         pts: s.pts,
         closed: s.closed,
         style,
@@ -255,6 +359,7 @@ export function walkOperatorList(ol: OpList, o: WalkOpts): WalkOut {
         made++;
         j += 2;
       } else if (op === OPS.curveTo) {
+        curvedClip = true;
         const p0 = cp;
         if (!p0) moveTo(apply(m, args[j + 4], args[j + 5]));
         else
@@ -270,6 +375,7 @@ export function walkOperatorList(ol: OpList, o: WalkOpts): WalkOut {
           );
         j += 6;
       } else if (op === OPS.curveTo2) {
+        curvedClip = true;
         // `v`: first control point = current point.
         const p0 = cp;
         if (!p0) moveTo(apply(m, args[j + 2], args[j + 3]));
@@ -286,6 +392,7 @@ export function walkOperatorList(ol: OpList, o: WalkOpts): WalkOut {
           );
         j += 4;
       } else if (op === OPS.curveTo3) {
+        curvedClip = true;
         // `y`: second control point = end point.
         const p0 = cp;
         const p3 = apply(m, args[j + 2], args[j + 3]);
@@ -350,7 +457,12 @@ export function walkOperatorList(ol: OpList, o: WalkOpts): WalkOut {
         if (matrix && matrix.length === 6) st.ctm = mul(st.ctm, matrix);
         const bbox = (a[1] as number[] | null) ?? (groupBbox as number[] | null);
         groupBbox = null;
-        if (bbox && bbox.length === 4) setClip(boxOfRect(st.ctm, bbox), `f${i}`);
+        if (bbox && bbox.length === 4)
+          setClip(
+            boxOfRect(st.ctm, bbox),
+            `f${i}`,
+            (st.ctm[1] === 0 && st.ctm[2] === 0) || (st.ctm[0] === 0 && st.ctm[3] === 0),
+          );
         break;
       }
       case OPS.paintFormXObjectEnd:
@@ -360,8 +472,20 @@ export function walkOperatorList(ol: OpList, o: WalkOpts): WalkOut {
         // [id, rect, transform, matrix, hasOwnCanvas]; appearance starts from the page default.
         stack.push({ ...st });
         const rect = a[1] as number[] | null;
-        st = { ...st, ctm: base, clip: null, clipId: null };
-        if (rect && rect.length === 4) setClip(boxOfRect(base, rect), `a${i}`);
+        st = {
+          ...st,
+          ctm: base,
+          clip: null,
+          clipId: null,
+          clipQuad: undefined,
+          fillMasks: [],
+          unknownFillClip: false,
+          clipPolygon: undefined,
+          localClipPolygon: undefined,
+          rectangularClip: true,
+        };
+        if (rect && rect.length === 4)
+          setClip(boxOfRect(base, rect), `a${i}`, base[1] === 0 && base[2] === 0);
         if (Array.isArray(a[2])) st.ctm = mul(st.ctm, a[2] as number[]);
         if (Array.isArray(a[3])) st.ctm = mul(st.ctm, a[3] as number[]);
         break;
@@ -379,6 +503,9 @@ export function walkOperatorList(ol: OpList, o: WalkOpts): WalkOut {
         for (const [k, v] of (a[0] as [string, unknown][]) ?? []) {
           if (k === 'LW' && typeof v === 'number') st.lw = v;
           else if (k === 'D' && Array.isArray(v)) st.dash = dashOf(v[0]);
+          else if (k === 'ca' && typeof v === 'number') st.fillOpacity = v;
+          else if (k === 'CA' && typeof v === 'number') st.strokeOpacity = v;
+          else if (k === 'SMask') st.softMask = v !== false && v !== null;
         }
         break;
       case OPS.setStrokeRGBColor:
@@ -495,10 +622,60 @@ export function walkOperatorList(ol: OpList, o: WalkOpts): WalkOut {
     ) {
       if (pendingClip) {
         const all = pending.flatMap((s) => s.pts);
-        if (all.length) setClip(boxOfPts(all), `c${i}`);
+        if (all.length) {
+          const box = boxOfPts(all);
+          const corners =
+            all.length === 5 && all[0].x === all[4].x && all[0].y === all[4].y
+              ? all.slice(0, 4)
+              : all;
+          const exact =
+            pending.length === 1 &&
+            corners.length === 4 &&
+            new Set(corners.map((p) => p.x + ',' + p.y)).size === 4 &&
+            corners.every(
+              (p, j) =>
+                (p.x === box.minX || p.x === box.maxX) &&
+                (p.y === box.minY || p.y === box.maxY) &&
+                (p.x === corners[(j + 1) % 4].x || p.y === corners[(j + 1) % 4].y),
+            );
+          const smallPolygon =
+            corners.length >= 3 &&
+            corners.length <= 192 &&
+            Math.max(box.maxX - box.minX, box.maxY - box.minY) < 25;
+          const polygon =
+            pending.length === 1 &&
+            pending[0].closed &&
+            !exact &&
+            !curvedClip &&
+            (corners.length === 3 || corners.length === 4)
+              ? corners
+              : undefined;
+          const mask =
+            !exact && !curvedClip && pending.length === 1 ? convexQuad(corners) : undefined;
+          if (mask) st.fillMasks = [...st.fillMasks, mask];
+          const quad =
+            pending.length === 1 &&
+            pending[0].closed &&
+            !curvedClip &&
+            corners.length === 4 &&
+            box.maxX - box.minX < 15 &&
+            box.maxY - box.minY < 15
+              ? corners
+              : undefined;
+          const localPolygon =
+            !exact && pending.length === 1 && pending[0].closed && smallPolygon ? corners : undefined;
+          setClip(box, `c${i}`, exact && !curvedClip, polygon, quad, !!mask, localPolygon);
+        } else {
+          st.rectangularClip = false;
+          st.clipQuad = undefined;
+          st.unknownFillClip = true;
+          st.clipPolygon = undefined;
+          st.localClipPolygon = undefined;
+        }
         pendingClip = false;
       }
       pending = [];
+      curvedClip = false;
       cur = null;
       cp = null;
     }

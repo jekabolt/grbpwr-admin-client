@@ -573,7 +573,11 @@ export function pdfImageStreams(bytes: ArrayBuffer): {
   // dictionary (a payload that spells `obj << /Subtype /Image … >> stream` cannot be patched)
   let next = 0;
   const sizeRefs: [PdfImageStream, 'width' | 'height', string][] = [];
-  for (let i = findBytes(u, STREAM, 0); i !== -1; i = findBytes(u, STREAM, Math.max(next, i + STREAM.length))) {
+  for (
+    let i = findBytes(u, STREAM, 0);
+    i !== -1;
+    i = findBytes(u, STREAM, Math.max(next, i + STREAM.length))
+  ) {
     const after = u[i + STREAM.length];
     const isKw = (i === 0 || !isRegular(u[i - 1])) && !isRegular(after);
     if (!isKw) continue;
@@ -587,7 +591,8 @@ export function pdfImageStreams(bytes: ArrayBuffer): {
     if (!r || r.v.t !== 'dict' || r.next !== tk.length) continue;
     const m = r.v.map;
     const obj = objHeader(u, head - 3);
-    const get = (k: string, short?: string) => (m.get(k) ?? (short ? m.get(short) : undefined))?.val;
+    const get = (k: string, short?: string) =>
+      (m.get(k) ?? (short ? m.get(short) : undefined))?.val;
     // the stream's bytes: after the EOL that follows `stream`, up to /Length (direct) or the
     // `endstream` keyword (its EOL trimmed)
     let at = i + STREAM.length;
@@ -644,7 +649,9 @@ export function pdfImageStreams(bytes: ArrayBuffer): {
       let ok = true;
       for (const [k, e] of pv.map)
         if (e.val.t === 'num') o[k] = e.val.n;
-        else if (['Predictor', 'Colors', 'BitsPerComponent', 'Columns', 'ColorTransform'].includes(k))
+        else if (
+          ['Predictor', 'Colors', 'BitsPerComponent', 'Columns', 'ColorTransform'].includes(k)
+        )
           ok = false;
       parms = ok ? o : 'other';
     } else if (badArr || (pv && !(pv.t === 'kw' && pv.v === 'null'))) parms = 'other';

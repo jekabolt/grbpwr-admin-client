@@ -3205,13 +3205,22 @@ export async function main(): Promise<number> {
       return { inp, built: buildPieceSpecsDetailed(inp) };
     };
 
-    const mild = buildBand([100, 99.8, 99.6]);
+    // #470's rule (owner 24 Nov): within 0.5 % of the largest smaller size is a plateau; past it
+    // blocks, a slow slide included — beta's 1 % per step no longer lets it through.
+    const plateau = buildBand([100, 99.8, 99.6]);
     ck(
-      mild.built.output.pieces.length === 1 &&
-        mild.built.output.blocked.length === 0 &&
-        mild.built.output.warnings.some((warning) => /does not strictly grow/.test(warning)),
-      'sub-1% area reversals warn without hiding the family',
-      mild.built.output.warnings.join('; '),
+      plateau.built.output.pieces.length === 1 &&
+        plateau.built.output.blocked.length === 0 &&
+        !plateau.built.output.warnings.some((warning) => /grow/.test(warning)),
+      'a plateau within 0.5 % of the peak passes without a warning',
+      plateau.built.output.warnings.join('; '),
+    );
+
+    const slide = buildBand([100, 99.7, 99.4]);
+    ck(
+      slide.built.output.blocked.some((row) => row.reason === 'non-monotone'),
+      'a slow slide past 0.5 % of the peak blocks (each step −0.3 %)',
+      slide.built.output.blocked.map((row) => row.reason).join(', ') || 'not blocked',
     );
 
     const broken = buildBand([100, 70, 110]);

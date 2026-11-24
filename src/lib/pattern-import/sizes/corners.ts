@@ -17,12 +17,23 @@
 //            small to be a chain (≤ 3 mm) — and its vertex ≤ 0.5 mm from the crossing of those two
 //            edges' tangents (b). Touching ends of several ranks (a dense corner bundle): only the
 //            rank with (a)+(b), and only when exactly one rank has them — never by proximity.
+//   ARMS     two straight solid strokes (1.5–8 mm), each continuing one own end of the SAME rank.
+//            The stroke may start up to 8 mm ahead of the end, on its outward tangent (cosine
+//            > 0.85, every point ≤ 0.4 mm off the line), in the rank's ink and in a width that
+//            rank's own lines use. The wall keeps those printed points. A vertex the strokes do
+//            not reach is the crossing of the two confirmed sides, and only when that crossing
+//            lies ahead of both within 8 mm. One stroke, two strokes on the same end, or one
+//            stroke continuing two ranks leaves the corner open. Another size's coordinates are
+//            never copied.
 //   EXTEND   no stub (a phase shift), on a sheet that shows the convention (≥ 10 stubs + ramps):
 //            two own ends of one rank, 0.5–8 mm apart, ≥ 20° apart, whose tangents cross ahead of
 //            both within 8 mm, are carried to the crossing (evidence 1) when that vertex lies where
 //            the grading of the nearest ranks drawing the same corner puts it (evidence 2: ≤ 35 %
 //            of one grade step off; nearest rank each side ≤ 3 away, or the step of two on one
 //            side continued) and the new segments cross no line of the rank.
+//            Evidence 2 may instead be drawn at the corner itself, on BOTH edges: CROSS (the edge
+//            runs on through the vertex in a short solid piece of the size's ink and width) or
+//            MARKS (the edge is drawn on into the vertex in the glyphs its own lines are made of).
 // Nothing is merged, extended or re-classed here: every closed corner is a DERIVED WALL of its
 // rank (`CornerWall`, on the chain set), hung on its own lines; the wall model re-checks the rank
 // and pen on the final lines and the fill draws it beside them (pieces/walls.ts, fill.ts).
@@ -45,12 +56,29 @@ export const CORNER = {
   rampAngleDeg: 15,
   rampLateralMm: 0.35,
   extendMaxMm: 8,
+  /** A WIDE extend (ends or vertex past `extendMaxMm`, up to this) needs the trend alone, carried
+   * by at least `wideSupport` other sizes' same corner on one grading line (Leah size 4: its L
+   * stub lost to another row, its ends 9 mm apart). */
+  wideMaxMm: 15,
+  wideSupport: 3,
   /** Stubs + ramps a sheet must show before an open corner is extended (the convention). */
   conventionMin: 10,
   minTurnDeg: 20,
   /** A neighbouring rank's same corner is searched this far from the vertex. */
   trendReachMm: 25,
+  /** MARKS: a glyph is at most this big (bbox's longer side) and at least `markMinMm`… */
+  markMaxMm: 2.5,
+  markMinMm: 0.3,
+  /** …and the glyphs filling an edge's gap stand at most this far apart (one missing glyph of a
+   * 1.3 mm pen still passes). */
+  markStepMm: 2.5,
 };
+
+/**
+ * A glyph on the sheet (a small path: a pre-dashed pen draws a size line as circles / chevrons),
+ * for MARKS. `path` ties it to the chains whose `ranges` use it.
+ */
+export type CornerMark = { path: number; c: PtMm; size: number; closed: boolean; style: number };
 
 type End = {
   /** Chain id. */
@@ -67,10 +95,12 @@ export type CornerLink = {
   b: { c: number; end: 0 | 1 };
   /** Points between the two ends (stub points, or the vertex). */
   via: PtMm[];
-  rule: 'stub' | 'ramp' | 'extend';
+  rule: 'stub' | 'ramp' | 'extend' | 'arms';
   rank: number;
   /** The stub chain absorbed by a 'stub' link. */
   stub?: number;
+  /** The two printed strokes an 'arms' link keeps. */
+  arms?: number[];
 };
 
 export type CornerOut = {
@@ -79,6 +109,12 @@ export type CornerOut = {
   stubs: number;
   ramps: number;
   extended: number;
+  /** Of `extended`: corners whose second evidence was the crossing drawn at the vertex (CROSS). */
+  crossed: number;
+  /** Of `extended`: corners with at least one edge drawn into the vertex in the size's glyphs. */
+  marked: number;
+  /** Of `extended`: WIDE corners (ends or vertex past `extendMaxMm`), closed by the trend alone. */
+  wide: number;
   /** Corners left open for want of a second evidence (per rule). */
   refused: Record<string, number>;
 };
@@ -168,10 +204,30 @@ function vertexOf(pts: readonly PtMm[]): { v: PtMm; turn: number } | null {
 const angleCos = (deg: number) => Math.cos((deg * Math.PI) / 180);
 
 /**
- * Close the corners of every rank (see the head of the file). `own(c)` = chain c is a line of its
- * rank by its own look; `cand(c)` = chain c may be a ramp / stub (not furniture, not ranked by its
- * look). Nothing is mutated: the closures come back as derived walls.
+ * CORNER PROBE (dev loop, scripts only): the exact input of one `closeCorners` call plus its output,
+ * for `scripts/pattern-import/corner-replay.ts` (dxf-shot CORNER_PROBES=1). Nothing is rounded: a
+ * replay that is not bit-exact cannot judge a patch. The two closures are evaluated once per chain
+ * (they are pure functions of the sizes step's state at the call); `rankOf` keeps its insertion
+ * order (it fixes the order of ends and pairs, hence every tie); the `MOOD_*` env switches set at
+ * the call are recorded because corners.ts reads some of them. Collected only when a sink is set.
  */
+export type CornerProbe = {
+  chains: Chain[];
+  rankOf: [number, number][];
+  styles: [number, Style][];
+  own: boolean[];
+  cand: boolean[];
+  n: number;
+  marks: CornerMark[];
+  env: Record<string, string>;
+  out: CornerOut;
+};
+let probeSink: ((p: CornerProbe) => void) | null = null;
+export function setCornerProbeSink(fn: ((p: CornerProbe) => void) | null): void {
+  probeSink = fn;
+}
+
+/** The corner step (see `closeCornersRun`); with a probe sink set it also hands over input + output. */
 export function closeCorners(
   chains: Chain[],
   rankOf: Map<number, number>,
@@ -179,6 +235,42 @@ export function closeCorners(
   own: (c: number) => boolean,
   cand: (c: number) => boolean,
   n: number,
+  marks: readonly CornerMark[] = [],
+): CornerOut {
+  const out = closeCornersRun(chains, rankOf, styles, own, cand, n, marks);
+  if (probeSink)
+    probeSink({
+      chains,
+      rankOf: [...rankOf],
+      styles: [...styles],
+      own: chains.map((_, c) => own(c)),
+      cand: chains.map((_, c) => cand(c)),
+      n,
+      marks: [...marks],
+      env: Object.fromEntries(
+        Object.entries(typeof process !== 'undefined' ? process.env : {}).filter(
+          ([k, v]) => /^MOOD_/.test(k) && v !== undefined,
+        ) as [string, string][],
+      ),
+      out,
+    });
+  return out;
+}
+
+/**
+ * Close the corners of every rank (see the head of the file). `own(c)` = chain c is a line of its
+ * rank by its own look; `cand(c)` = chain c may be a ramp / stub (not furniture, not ranked by its
+ * look). Nothing is mutated: the closures come back as derived walls.
+ */
+/** The corner step itself: never calls the probe sink (a replay must not record itself). */
+export function closeCornersRun(
+  chains: Chain[],
+  rankOf: Map<number, number>,
+  styles: ReadonlyMap<number, Style>,
+  own: (c: number) => boolean,
+  cand: (c: number) => boolean,
+  n: number,
+  marks: readonly CornerMark[] = [],
 ): CornerOut {
   const refused: Record<string, number> = {};
   const refuse = (k: string) => (refused[k] = (refused[k] ?? 0) + 1);
@@ -375,7 +467,7 @@ export function closeCorners(
     });
   }
   // ── EXTEND (no stub) ──
-  type Pair = { k0: number; k1: number; x: PtMm; cost: number; r: number };
+  type Pair = { k0: number; k1: number; x: PtMm; cost: number; r: number; wide: boolean };
   const pairs: Pair[] = [];
   /**
    * the corners the trend may lean on: stubbed corners, corners drawn closed (two ends ≤ 0.5 mm
@@ -385,7 +477,7 @@ export function closeCorners(
   const free = (k: number) => !usedEnd.has(ek(ends[k].c, ends[k].end));
   const cosTurn = angleCos(CORNER.minTurnDeg);
   ends.forEach((A, k0) => {
-    endsNear(A.p, 2 * CORNER.extendMaxMm, (k1) => {
+    endsNear(A.p, 2 * CORNER.wideMaxMm, (k1) => {
       if (k1 <= k0) return;
       const B = ends[k1];
       if (B.rank !== A.rank || (B.c === A.c && B.end === A.end)) return;
@@ -404,11 +496,14 @@ export function closeCorners(
         });
         return;
       }
-      if (gap > CORNER.extendMaxMm || x.a < 0 || x.b < 0) return;
-      if (x.a > CORNER.extendMaxMm || x.b > CORNER.extendMaxMm) return;
-      vertices.push({ r: A.rank, v: x.x, t0: A.t, t1: B.t });
+      if (gap > CORNER.wideMaxMm || x.a < 0 || x.b < 0) return;
+      if (x.a > CORNER.wideMaxMm || x.b > CORNER.wideMaxMm) return;
+      const wide = gap > CORNER.extendMaxMm || x.a > CORNER.extendMaxMm || x.b > CORNER.extendMaxMm;
+      // a wide candidate is no support for the trend until it is accepted
+      if (!wide) vertices.push({ r: A.rank, v: x.x, t0: A.t, t1: B.t });
+      if (wide && typeof process !== 'undefined' && process.env?.MOOD_WIDE_OFF) return;
       if (!free(k0) || !free(k1)) return;
-      pairs.push({ k0, k1, x: x.x, cost: x.a + x.b, r: A.rank });
+      pairs.push({ k0, k1, x: x.x, cost: x.a + x.b, r: A.rank, wide });
     });
   });
   // sharp vertices drawn continuously (a corner that has no gap in that size)
@@ -450,24 +545,25 @@ export function closeCorners(
     return best;
   };
   /**
-   * evidence 2: the vertex lies in the trend of the neighbouring ranks' same corner — the nearest
-   * rank on each side that draws it (≤ 3 ranks away: a neighbour drawn in beads may not show it),
-   * the vertex where the grading between them puts rank r (≤ 35 % of one step off, ≥ 0.5 mm);
-   * at an end of the run, the step of the two nearest ranks on the one side continued.
+   * evidence 2: the vertex lies in the trend of the other ranks' same corner — the nearest rank on
+   * each side that draws it, at any distance in the run (Leah: size 8's corner had only size 12
+   * closed within 3 ranks, yet sizes 12…32 put it on the grade within 0.1 mm), the vertex where
+   * the grading between them puts rank r (≤ 35 % of one step off, ≥ 0.5 mm); at an end of the
+   * run, the step of the two nearest ranks on the one side continued. Returns the SUPPORT: how
+   * many ranks' corners lie on that grading line (the two it is drawn through included), 0 when
+   * the vertex is off it. Continuing a step past 3 ranks, or a wide extend, needs `wideSupport`.
    */
-  const inTrend = (r: number, x: PtMm, t0: PtMm, t1: PtMm): boolean => {
-    const found = (dir: 1 | -1) => {
-      const out: { k: number; v: PtMm }[] = [];
-      for (let d = 1; d <= 3 && out.length < 2; d++) {
-        const k = r + dir * d;
-        if (k < 0 || k >= n) break;
-        const v = cornerOf(k, x, t0, t1, CORNER.trendReachMm * d);
-        if (v) out.push({ k, v });
-      }
-      return out;
-    };
-    const lo = found(-1);
-    const hi = found(1);
+  const trendSupport = (r: number, x: PtMm, t0: PtMm, t1: PtMm): number => {
+    const lo: { k: number; v: PtMm }[] = [];
+    const hi: { k: number; v: PtMm }[] = [];
+    for (let k = 0; k < n; k++) {
+      if (k === r) continue;
+      const d = Math.abs(k - r);
+      const v = cornerOf(k, x, t0, t1, CORNER.trendReachMm * Math.min(d, 3));
+      if (v) (k < r ? lo : hi).push({ k, v });
+    }
+    lo.sort((p, q) => q.k - p.k);
+    hi.sort((p, q) => p.k - q.k);
     let a: { k: number; v: PtMm };
     let b: { k: number; v: PtMm };
     if (lo.length && hi.length) {
@@ -475,12 +571,19 @@ export function closeCorners(
       b = hi[0];
     } else if (lo.length >= 2 || hi.length >= 2) {
       [a, b] = lo.length >= 2 ? [lo[1], lo[0]] : [hi[1], hi[0]];
-    } else return false;
-    // the grading line through a (rank a.k) and b (rank b.k), at rank r
-    const f = (r - a.k) / (b.k - a.k);
-    const e = { x: a.v.x + (b.v.x - a.v.x) * f, y: a.v.y + (b.v.y - a.v.y) * f };
+    } else return 0;
+    // the grading line through a (rank a.k) and b (rank b.k)
     const step = dist(a.v, b.v) / Math.abs(b.k - a.k);
-    return dist(x, e) <= Math.max(0.5, 0.35 * step);
+    const tol = Math.max(0.5, 0.35 * step);
+    const on = (k: number, v: PtMm) => {
+      const f = (k - a.k) / (b.k - a.k);
+      return dist(v, { x: a.v.x + (b.v.x - a.v.x) * f, y: a.v.y + (b.v.y - a.v.y) * f }) <= tol;
+    };
+    if (!on(r, x)) return 0;
+    const support = [...lo, ...hi].filter((w) => on(w.k, w.v)).length;
+    // continuing a step from far away multiplies its noise: it needs a third witness
+    const far = !(lo.length && hi.length) && Math.abs(r - b.k) > 3;
+    return far && support < CORNER.wideSupport ? 0 : support;
   };
   // the rank's lines, for "the new segments cross no line of the rank"
   const rankGrid = new SegGrid(4);
@@ -502,7 +605,146 @@ export function closeCorners(
     });
     return hit;
   };
+  // ── ARMS: the printed stroke is already there. Keep it. A missing vertex is the crossing of
+  // the two confirmed sides. A second continuation, or a stroke that continues two ranks, stops.
+  // A sheet that already cuts corners into stubs and ramps keeps EXTEND for this; arms is the
+  // sheet that has no such convention, where those strokes were being thrown out.
+  if (stubs + ramps < CORNER.conventionMin) {
+    const cosMin = 0.85;
+    const rankWidths = new Map<number, number[]>();
+    for (let c = 0; c < chains.length; c++) {
+      const r = rankOf.get(c);
+      const w = styleOf(c)?.widthMm;
+      if (r === undefined || !own(c) || !(w && w > 0)) continue;
+      const ws = rankWidths.get(r) ?? [];
+      if (!ws.some((v) => Math.abs(v - w) < 1e-3)) ws.push(w);
+      rankWidths.set(r, ws);
+    }
+    type ArmHit = { k: number; c: number; near: 0 | 1 };
+    const hits: ArmHit[] = [];
+    for (let c = 0; c < chains.length; c++) {
+      if (rampOf.has(c) || !cand(c)) continue;
+      const ch = chains[c];
+      const st = styleOf(c);
+      if (ch.closed || ch.pts.length < 2 || ch.lengthMm < 1.5 || ch.lengthMm > 8) continue;
+      if (!st || st.fill || (st.dash && st.dash.some((v) => v > 0.01)) || !(st.widthMm > 0))
+        continue;
+      const a = ch.pts[0];
+      const b = ch.pts[ch.pts.length - 1];
+      const L = dist(a, b);
+      if (L < 0.9 * ch.lengthMm || L < 1e-6) continue;
+      for (const near of [0, 1] as const) {
+        const p = near ? b : a;
+        const q = near ? a : b;
+        const dir = { x: (q.x - p.x) / L, y: (q.y - p.y) / L };
+        endsNear(p, CORNER.extendMaxMm, (k) => {
+          const E = ends[k];
+          if (usedEnd.has(ek(E.c, E.end))) return;
+          const dx = p.x - E.p.x;
+          const dy = p.y - E.p.y;
+          const along = dx * E.t.x + dy * E.t.y;
+          const lat = Math.abs(dx * E.t.y - dy * E.t.x);
+          // ahead of the end, on its line: a dash break, not a stroke beside it
+          if (along < -0.5 || along > CORNER.extendMaxMm || lat > CORNER.armMm) return;
+          if (dir.x * E.t.x + dir.y * E.t.y <= cosMin) return;
+          if (!sameInk(c, E.c)) return;
+          const wr = rankWidths.get(E.rank) ?? [];
+          if (!wr.some((v) => Math.abs(v - st.widthMm) <= 0.03)) return;
+          const off = (pt: PtMm) => Math.abs((pt.x - E.p.x) * E.t.y - (pt.y - E.p.y) * E.t.x);
+          if (ch.pts.some((pt) => off(pt) > CORNER.armMm)) return;
+          hits.push({ k, c, near });
+        });
+      }
+    }
+    const byEnd = new Map<number, ArmHit[]>();
+    const ranksOf = new Map<number, Set<number>>();
+    for (const h of hits) {
+      const list = byEnd.get(h.k) ?? [];
+      if (!list.some((o) => o.c === h.c)) list.push(h);
+      byEnd.set(h.k, list);
+      const rs = ranksOf.get(h.c) ?? new Set<number>();
+      rs.add(ends[h.k].rank);
+      ranksOf.set(h.c, rs);
+    }
+    const shared = new Set<number>();
+    for (const [c, rs] of ranksOf) if (rs.size > 1) shared.add(c);
+    if (shared.size) refuse('arms: two ranks');
+    const armOf = new Map<number, ArmHit>();
+    for (const [k, list] of byEnd) {
+      const uniq = list.filter((h) => !shared.has(h.c));
+      if (uniq.length === 1) armOf.set(k, uniq[0]);
+      else if (uniq.length > 1) refuse('arms: two continuations');
+    }
+    /** Printed points of a stroke that lie strictly between the own end and `vertex`. */
+    const along = (c: number, near: 0 | 1, vertex: PtMm, t: PtMm, tip: PtMm) => {
+      const q = chains[c].pts;
+      const pts = near ? q.slice().reverse() : q.slice();
+      const reach = (vertex.x - tip.x) * t.x + (vertex.y - tip.y) * t.y;
+      const out: PtMm[] = [];
+      for (const p of pts) {
+        const s = (p.x - tip.x) * t.x + (p.y - tip.y) * t.y;
+        if (s <= 0.05 || s > reach + 0.05) continue;
+        out.push(p);
+      }
+      return out;
+    };
+    type ArmPair = { k0: number; k1: number; x: PtMm; cost: number };
+    const armPairs: ArmPair[] = [];
+    for (const [k0, h0] of armOf) {
+      const A = ends[k0];
+      endsNear(A.p, 2 * CORNER.extendMaxMm, (k1) => {
+        if (k1 <= k0) return;
+        const h1 = armOf.get(k1);
+        if (!h1 || h1.c === h0.c) return;
+        const B = ends[k1];
+        if (B.rank !== A.rank || (B.c === A.c && B.end === A.end)) return;
+        if (-(A.t.x * B.t.x + A.t.y * B.t.y) > cosTurn) return;
+        const x = rayCross(A.p, A.t, B.p, B.t);
+        if (!x || x.a < -0.3 || x.b < -0.3) return;
+        if (x.a > CORNER.extendMaxMm || x.b > CORNER.extendMaxMm) return;
+        if (dist(A.p, B.p) <= 0.5) return;
+        armPairs.push({ k0, k1, x: x.x, cost: Math.max(0, x.a) + Math.max(0, x.b) });
+      });
+    }
+    armPairs.sort((p, q) => p.cost - q.cost);
+    const taken = new Set<number>();
+    for (const pr of armPairs) {
+      const h0 = armOf.get(pr.k0);
+      const h1 = armOf.get(pr.k1);
+      if (!h0 || !h1 || taken.has(h0.c) || taken.has(h1.c)) continue;
+      if (!free(pr.k0) || !free(pr.k1)) continue;
+      const A = ends[pr.k0];
+      const B = ends[pr.k1];
+      if (crossesRank(A.p, pr.x, A.rank, new Set([A.c, B.c]))) {
+        refuse('arms: crosses its rank');
+        continue;
+      }
+      if (crossesRank(pr.x, B.p, A.rank, new Set([A.c, B.c]))) {
+        refuse('arms: crosses its rank');
+        continue;
+      }
+      const forward = along(h0.c, h0.near, pr.x, A.t, A.p);
+      const back = along(h1.c, h1.near, pr.x, B.t, B.p).reverse();
+      const via = [...forward];
+      const last = via[via.length - 1];
+      if (!last || dist(last, pr.x) > 0.05) via.push(pr.x);
+      via.push(...back);
+      usedEnd.add(ek(A.c, A.end));
+      usedEnd.add(ek(B.c, B.end));
+      taken.add(h0.c);
+      taken.add(h1.c);
+      links.push({
+        a: { c: A.c, end: A.end },
+        b: { c: B.c, end: B.end },
+        via,
+        rule: 'arms',
+        rank: A.rank,
+        arms: [h0.c, h1.c],
+      });
+    }
+  }
   let extended = 0;
+  let crossed = 0;
   pairs.sort((p, q) => p.cost - q.cost);
   // the phase-shift rule only where the sheet proves the convention: its corners are cut into
   // stubs and ramps (Mood/Illustrator "align dashes to corners") — a sheet without any is not
@@ -511,46 +753,213 @@ export function closeCorners(
     if (pairs.length) refused['extend: no stub/ramp convention on this sheet'] = pairs.length;
     pairs.length = 0;
   }
-  for (const pr of pairs) {
+  // the pen widths each rank's own lines are drawn in (a pre-dashed pen may use two)
+  const rankWidths = new Map<number, number[]>();
+  for (let c = 0; c < chains.length; c++) {
+    const r = rankOf.get(c);
+    const w = styleOf(c)?.widthMm;
+    if (r === undefined || !own(c) || !(w && w > 0)) continue;
+    const ws = rankWidths.get(r) ?? [];
+    if (!ws.some((v) => Math.abs(v - w) < 1e-3)) ws.push(w);
+    rankWidths.set(r, ws);
+  }
+  // short solid pieces that may witness a corner drawn as a crossing (CROSS, below)
+  const witGrid = new SegGrid(4);
+  for (let c = 0; c < chains.length; c++) {
+    if (!cand(c) || rampOf.has(c)) continue;
+    const ch = chains[c];
+    const st = styleOf(c);
+    if (ch.closed || ch.pts.length < 2 || ch.lengthMm > CORNER.stubMaxMm) continue;
+    if (!st || st.fill || (st.dash && st.dash.some((v) => v > 0.01)) || !(st.widthMm > 0)) continue;
+    witGrid.addPolyline(c, ch.pts);
+  }
+  /**
+   * CROSS (evidence 2 without the trend): the corner is inked as a crossing — on the edge of end E
+   * a short solid piece in E's ink and in a width its rank's own lines use lies on E's line (≤ 15°, every point ≤ 0.4 mm off
+   * it) and passes through the vertex (≤ 0.5 mm). Valentina's hem and side seam run on past
+   * their corner in pieces of another graphic state, too short to be chains.
+   */
+  const witnessed = (E: End, x: PtMm, used: Set<number>): number | null => {
+    let hit: number | null = null;
+    const wr = rankWidths.get(rankOf.get(E.c) ?? -1) ?? [];
+    witGrid.near(x, CORNER.vertexMm, (c) => {
+      if (hit !== null || used.has(c) || c === E.c) return;
+      const q = chains[c].pts;
+      let d = Infinity;
+      for (let i = 0; i + 1 < q.length; i++) d = Math.min(d, segNearest(x, q[i], q[i + 1]).d);
+      if (d > CORNER.vertexMm) return;
+      if (!sameInk(c, E.c)) return;
+      const w = styleOf(c)?.widthMm ?? 0;
+      if (!wr.some((v) => Math.abs(v - w) <= 0.03)) return;
+      const a = q[0];
+      const b = q[q.length - 1];
+      const L = dist(a, b);
+      if (L < 1e-6) return;
+      if (Math.abs(((b.x - a.x) * E.t.x + (b.y - a.y) * E.t.y) / L) < angleCos(CORNER.rampAngleDeg))
+        return;
+      const off = (p: PtMm) => Math.abs((p.x - x.x) * E.t.y - (p.y - x.y) * E.t.x);
+      if (q.some((p) => off(p) > CORNER.armMm)) return;
+      hit = c;
+    });
+    return hit;
+  };
+  // ── MARKS: the glyphs each rank's own lines are made of, and who already took each glyph ──
+  const markAt = new Map<number, number>();
+  marks.forEach((m, i) => markAt.set(m.path, i));
+  const markGrid = new SegGrid(4);
+  marks.forEach((m, i) => markGrid.addSeg(i, 0, m.c, m.c));
+  /** per glyph: the rank whose lines take it (-1: several ranks) */
+  const takenBy = new Map<number, number>();
+  const glyphsOf = new Map<number, { size: number; closed: boolean }[]>();
+  if (marks.length)
+    for (const [c, r] of rankOf)
+      for (const g of chains[c].ranges) {
+        const k = markAt.get(g.path);
+        if (k === undefined) continue;
+        takenBy.set(k, takenBy.has(k) && takenBy.get(k) !== r ? -1 : r);
+        if (!own(c)) continue;
+        const m = marks[k];
+        const gs = glyphsOf.get(r) ?? [];
+        if (!gs.some((s) => s.closed === m.closed && Math.abs(s.size - m.size) < 0.02))
+          gs.push({ size: m.size, closed: m.closed });
+        glyphsOf.set(r, gs);
+      }
+  /** one of the chains `cs` runs through p (≤ `armMm`) */
+  const drawnBy = (p: PtMm, cs: readonly number[]): boolean => {
+    let hit = false;
+    rankGrid.near(p, CORNER.armMm, (c, s) => {
+      if (hit || !cs.includes(c)) return;
+      const q = chains[c].pts;
+      if (q[s] && q[s + 1] && segNearest(p, q[s], q[s + 1]).d <= CORNER.armMm) hit = true;
+    });
+    return hit;
+  };
+  /**
+   * MARKS (evidence 2 without the trend, like CROSS): the edge of end E is drawn on into the vertex
+   * in its size's own glyphs — the shapes its own lines are made of (closed or not, size ±10 %),
+   * its ink, taken by no other size's line nor (ahead of the end) by the two lines being joined —
+   * lying on E's line (≤ 0.4 mm), none more than 2.5 mm after the last, from the end up to the
+   * vertex (Valentina's L hem corner: the seam and the hem run their circles and chevrons into the
+   * corner in another graphic state, no chain of them).
+   */
+  const marked = (E: End, x: PtMm, joined: readonly number[]): boolean => {
+    const shapes = glyphsOf.get(E.rank);
+    const ink = styleOf(E.c)?.strokeRgb;
+    if (!shapes?.length || !ink) return false;
+    const g = dist(E.p, x);
+    const along: number[] = [];
+    const mid = { x: (E.p.x + x.x) / 2, y: (E.p.y + x.y) / 2 };
+    markGrid.near(mid, g / 2 + CORNER.markStepMm, (k) => {
+      const m = marks[k];
+      // another size's glyph is not this size's
+      const by = takenBy.get(k);
+      if (by !== undefined && by !== E.rank) return;
+      const dx = m.c.x - E.p.x;
+      const dy = m.c.y - E.p.y;
+      const s = dx * E.t.x + dy * E.t.y;
+      // a glyph ahead of the end that one of the two lines being joined passes through is that
+      // line, already drawn there (Ambrosia 26: its own dash-dot line runs 2 mm back over its head,
+      // its dots "marked" the line onto itself and cut a pocket). Judged by the line's geometry,
+      // not by the glyph's PDF path: one path carries many glyphs, and a line made of part of it
+      // does not own the rest (Estoril 3XL: three real corners lost that way)
+      if (s > CORNER.vertexMm && drawnBy(m.c, joined)) return;
+      if (s < -CORNER.vertexMm || s > g + CORNER.markStepMm) return;
+      if (Math.abs(dx * E.t.y - dy * E.t.x) > CORNER.armMm) return;
+      const mi = styles.get(m.style)?.strokeRgb;
+      if (!mi || Math.hypot(mi[0] - ink[0], mi[1] - ink[1], mi[2] - ink[2]) > 30) return;
+      const fits = (sh: { size: number; closed: boolean }) =>
+        sh.closed === m.closed && Math.abs(sh.size - m.size) <= 0.1 * sh.size + 0.05;
+      if (shapes.some(fits)) along.push(s);
+    });
+    if (along.length < 2) return false;
+    along.sort((p, q) => p - q);
+    let at = 0;
+    for (const s of along) {
+      if (s - at > CORNER.markStepMm) return false;
+      at = Math.max(at, s);
+      if (at >= g - CORNER.vertexMm) return true;
+    }
+    return false;
+  };
+  let marked_ = 0;
+  let wide_ = 0;
+  const wideLinks = new Set<number>(); // debug: which links are wide extends
+  // passes until nothing new closes: a corner closed in one pass is the trend's neighbour in the
+  // next (a size whose neighbours are all open waits for them, not refused at once)
+  let todo = pairs;
+  for (;;) {
+    let progress = false;
+    const pending: Pair[] = [];
+    for (const pr of todo) {
+      if (!free(pr.k0) || !free(pr.k1)) continue;
+      const A = ends[pr.k0];
+      const B = ends[pr.k1];
+      if (!ownLike(A.c) || !ownLike(B.c)) continue;
+      const wa = witnessed(A, pr.x, new Set());
+      const wb = witnessed(B, pr.x, new Set(wa === null ? [] : [wa]));
+      const ma = wa === null && marked(A, pr.x, [A.c, B.c]);
+      const mb = wb === null && marked(B, pr.x, [A.c, B.c]);
+      const crossing = (wa !== null || ma) && (wb !== null || mb);
+      // a wide extend rests on the trend alone, and on more than two sizes
+      const support = trendSupport(pr.r, pr.x, A.t, B.t);
+      const onTrend = pr.wide ? support >= CORNER.wideSupport : crossing || support > 0;
+      if (!onTrend) {
+        // another corner closed later in this pass may still put it on the trend
+        pending.push(pr);
+        continue;
+      }
+      const skip = new Set([A.c, B.c]);
+      if (crossesRank(A.p, pr.x, pr.r, skip) || crossesRank(pr.x, B.p, pr.r, skip)) {
+        refuse('extend: crosses its rank');
+        continue;
+      }
+      usedEnd.add(ek(A.c, A.end));
+      usedEnd.add(ek(B.c, B.end));
+      extended++;
+      if (wa !== null && wb !== null) crossed++;
+      else if (crossing) marked_++;
+      if (pr.wide) wide_++;
+      links.push({
+        a: { c: A.c, end: A.end },
+        b: { c: B.c, end: B.end },
+        via: [pr.x],
+        rule: 'extend',
+        rank: pr.r,
+      });
+      // the closed corner is a neighbour the next pass's trend may lean on
+      if (pr.wide) {
+        wideLinks.add(links.length - 1);
+        vertices.push({ r: pr.r, v: pr.x, t0: A.t, t1: B.t });
+        vGrid.addSeg(vertices.length - 1, 0, pr.x, pr.x);
+      }
+      progress = true;
+    }
+    todo = pending;
+    if (!progress) break;
+  }
+  for (const pr of todo) {
     if (!free(pr.k0) || !free(pr.k1)) continue;
     const A = ends[pr.k0];
     const B = ends[pr.k1];
-    if (!ownLike(A.c) || !ownLike(B.c)) continue;
-    if (!inTrend(pr.r, pr.x, A.t, B.t)) {
-      if (typeof process !== 'undefined' && process.env?.MOOD_F2_DEBUG) {
-        const nb = [-2, -1, 1, 2].map((d) => {
-          const k = pr.r + d;
-          const v = k >= 0 && k < n ? cornerOf(k, pr.x, A.t, B.t, 25 * Math.abs(d)) : null;
-          return v ? `${d}:${v.x.toFixed(1)},${v.y.toFixed(1)}` : `${d}:-`;
-        });
-        console.log(`F2T r${pr.r} at ${pr.x.x.toFixed(1)},${pr.x.y.toFixed(1)} nb ${nb.join(' ')}`);
-      }
-      refuse('extend: off the trend');
-      continue;
+    if (typeof process !== 'undefined' && process.env?.MOOD_F2_DEBUG) {
+      const nb = [-2, -1, 1, 2].map((d) => {
+        const k = pr.r + d;
+        const v = k >= 0 && k < n ? cornerOf(k, pr.x, A.t, B.t, 25 * Math.abs(d)) : null;
+        return v ? `${d}:${v.x.toFixed(1)},${v.y.toFixed(1)}` : `${d}:-`;
+      });
+      console.log(
+        `F2T r${pr.r}${pr.wide ? ' wide' : ''} at ${pr.x.x.toFixed(1)},${pr.x.y.toFixed(1)} ${A.c}:${A.end}@${A.p.x.toFixed(1)},${A.p.y.toFixed(1)} ${B.c}:${B.end}@${B.p.x.toFixed(1)},${B.p.y.toFixed(1)} nb ${nb.join(' ')}`,
+      );
     }
-    const skip = new Set([A.c, B.c]);
-    if (crossesRank(A.p, pr.x, pr.r, skip) || crossesRank(pr.x, B.p, pr.r, skip)) {
-      refuse('extend: crosses its rank');
-      continue;
-    }
-    usedEnd.add(ek(A.c, A.end));
-    usedEnd.add(ek(B.c, B.end));
-    extended++;
-    links.push({
-      a: { c: A.c, end: A.end },
-      b: { c: B.c, end: B.end },
-      via: [pr.x],
-      rule: 'extend',
-      rank: pr.r,
-    });
+    refuse(pr.wide ? 'extend: wide, trend too thin' : 'extend: off the trend');
   }
   if (typeof process !== 'undefined' && process.env?.MOOD_F2_DEBUG)
-    for (const l of links)
+    for (const [li, l] of links.entries())
       console.log(
-        `F2 ${l.rule} r${l.rank} ${l.a.c}:${l.a.end} ${l.b.c}:${l.b.end} at ${(l.a.end ? chains[l.a.c].pts[chains[l.a.c].pts.length - 1] : chains[l.a.c].pts[0]).x.toFixed(1)},${(l.a.end ? chains[l.a.c].pts[chains[l.a.c].pts.length - 1] : chains[l.a.c].pts[0]).y.toFixed(1)} via ${l.via.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')}${l.stub !== undefined ? ` stub ${l.stub}` : ''}`,
+        `F2 ${l.rule}${wideLinks.has(li) ? ' wide' : ''} r${l.rank} ${l.a.c}:${l.a.end} ${l.b.c}:${l.b.end} at ${(l.a.end ? chains[l.a.c].pts[chains[l.a.c].pts.length - 1] : chains[l.a.c].pts[0]).x.toFixed(1)},${(l.a.end ? chains[l.a.c].pts[chains[l.a.c].pts.length - 1] : chains[l.a.c].pts[0]).y.toFixed(1)} via ${l.via.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')}${l.stub !== undefined ? ` stub ${l.stub}` : ''}`,
       );
   const res = { walls: wallsOf(chains, links, rampHost) };
-  return { ...res, stubs, ramps, extended, refused };
+  return { ...res, stubs, ramps, extended, crossed, marked: marked_, wide: wide_, refused };
 }
 
 /**
@@ -595,7 +1004,7 @@ function wallsOf(
       pts: [pa, ...via, tip(l.b)],
       own: [A.c, B.c],
       ends: [`${A.c}:${A.end}`, `${B.c}:${B.end}`],
-      chains: l.stub !== undefined ? [l.stub] : [],
+      chains: l.arms ?? (l.stub !== undefined ? [l.stub] : []),
     });
   }
   return out;

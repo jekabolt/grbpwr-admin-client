@@ -76,6 +76,7 @@ function fixture(sewing = true, clockwise = false, sizeTokens = ['S']): string {
     notches: [],
     transform: { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 },
     derivedFrom: null,
+    drawn: [],
     size: {}, // writeR2000 only consumes the planned drawing fields above.
   } as unknown as PlannedBlock;
   return writeR2000(

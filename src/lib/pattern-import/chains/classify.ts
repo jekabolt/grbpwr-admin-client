@@ -49,6 +49,10 @@ export function furniture(
   texts: readonly IRText[] = [],
   /** Source file per chain when the files are overlays (file per size): repetition evidence. */
   fileOf?: (i: number) => string,
+  /** Keep long straight dashed lines (a size drawn only in straight lines is no guide). */
+  keepGuides = false,
+  /** Keep straight lines of one length repeated (a rectangle of every size is no tile frame). */
+  keepRepeats = false,
 ): (string | null)[] {
   const out: (string | null)[] = chains.map(() => null);
   pageMarginLines(chains, poses, out);
@@ -78,10 +82,36 @@ export function furniture(
           .join('/')}`
       : '';
   const curvedPens = new Set<string>();
+  const curvedList: { rgb: string; w: number; dash: number[] }[] = [];
   chains.forEach((c) => {
     if (c.lengthMm < 40) return;
-    if (!straightAxis(c).straight) curvedPens.add(pen(styles.get(c.style)));
+    if (straightAxis(c).straight) return;
+    const st = styles.get(c.style);
+    const key = pen(st);
+    if (curvedPens.has(key)) return;
+    curvedPens.add(key);
+    if (st?.dash)
+      curvedList.push({ rgb: `${st.strokeRgb}`, w: st.widthMm, dash: normDash(st.dash) });
   });
+  // The same pen is printed a few percent off from tile to tile (a tile's scale moves a dash of
+  // 9.4 mm to 9.75), and the half-mm buckets of `pen` then tell one pen apart as two: a size's
+  // straight edge landed in a bucket no curve was in and was thrown out as a guide, while the
+  // size's own curves, a tile away, were kept. A pen is a curved pen when its colour and width
+  // agree and every dash element is within 6 % (0.3 mm at the least) of one that draws a curve.
+  const isCurvedPen = (st: Style | undefined) => {
+    if (!st) return false;
+    if (curvedPens.has(pen(st))) return true;
+    if (!st.dash) return false;
+    const d = normDash(st.dash);
+    const rgb = `${st.strokeRgb}`;
+    return curvedList.some(
+      (p) =>
+        p.rgb === rgb &&
+        Math.abs(p.w - st.widthMm) <= 0.02 &&
+        p.dash.length === d.length &&
+        p.dash.every((v, k) => Math.abs(v - d[k]) <= Math.max(0.3, 0.06 * Math.max(v, d[k]))),
+    );
+  };
   chains.forEach((c, i) => {
     const st = styles.get(c.style);
     if (greyWhy[i]) {
@@ -90,7 +120,7 @@ export function furniture(
     }
     const { axis, straight } = straightAxis(c);
     if (straight && axis && c.lengthMm >= 40) {
-      if (st?.dash && (st.widthMm <= 0.2 || c.lengthMm >= 150) && !curvedPens.has(pen(st))) {
+      if (!keepGuides && st?.dash && (st.widthMm <= 0.2 || c.lengthMm >= 150) && !isCurvedPen(st)) {
         out[i] = 'dashed guide';
         return;
       }
@@ -170,6 +200,7 @@ export function furniture(
     );
     const n = ov.filter(Boolean).length;
     const corroborated = n >= 2 && 2 * n >= lone.length;
+    if (keepRepeats) continue;
     lone.forEach((i, k) => {
       if (!(corroborated && ov[k])) out[i] = 'tile frame / cut mark';
     });

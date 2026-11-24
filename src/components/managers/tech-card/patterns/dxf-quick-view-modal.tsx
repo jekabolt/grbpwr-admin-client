@@ -1,4 +1,6 @@
+import { notifyFailure } from 'components/shared/notify-failure';
 import { fetchMediaBlob } from 'lib/features/media-blob';
+import { downloadMedia } from 'lib/features/media-open';
 import { useEffect, useRef, useState } from 'react';
 import { formatBytes } from 'utils/pattern';
 import { Button, ConfirmationModal, Text } from 'ui';
@@ -8,6 +10,16 @@ import { Button, ConfirmationModal, Text } from 'ui';
 // dynamically imported inside the modal so three.js and the parser stay out of the main
 // bundle until someone actually opens a DXF. Parse/render failures degrade to a
 // human-readable message + download link; the file itself is always reachable by url.
+/** The stored object's own name: the last path segment of its url. */
+function fileNameOf(url: string): string {
+  const last = url.split(/[?#]/)[0].split('/').pop() || '';
+  try {
+    return decodeURIComponent(last) || 'pattern.dxf';
+  } catch {
+    return last || 'pattern.dxf';
+  }
+}
+
 export function DxfQuickViewModal({
   url,
   title,
@@ -106,10 +118,19 @@ export function DxfQuickViewModal({
             {title}
             {sizeBytes ? ` · ${formatBytes(sizeBytes)}` : ''}
           </Text>
-          <Button asChild variant='secondary' size='xs'>
-            <a href={url || '#'} target='_blank' rel='noopener noreferrer'>
-              download the file
-            </a>
+          <Button
+            type='button'
+            variant='secondary'
+            size='xs'
+            disabled={!url}
+            onClick={() =>
+              url &&
+              downloadMedia(url, fileNameOf(url)).catch((e) =>
+                notifyFailure('PATTERN', 'not downloaded', e),
+              )
+            }
+          >
+            download the file
           </Button>
         </div>
         {state === 'error' ? (
@@ -121,7 +142,10 @@ export function DxfQuickViewModal({
         ) : (
           <div className='relative'>
             {/* dxf-viewer owns this node: it appends its canvas and resizes with the box. */}
-            <div ref={containerRef} className='h-[75vh] w-full border border-borderColor bg-bgColor' />
+            <div
+              ref={containerRef}
+              className='h-[75vh] w-full border border-borderColor bg-bgColor'
+            />
             {state === 'loading' && (
               <div className='pointer-events-none absolute inset-0 flex items-center justify-center'>
                 <Text size='micro' variant='label'>

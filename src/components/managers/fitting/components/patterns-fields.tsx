@@ -7,6 +7,8 @@ import { Button, Close, GroupLabel, Input, Select, Text } from 'ui';
 import { DxfQuickViewModal } from 'components/managers/tech-card/patterns/dxf-quick-view-modal';
 import { PatternUploadButton } from 'components/managers/tech-card/patterns/pattern-upload-button';
 import { MAX_PATTERN_NAME, clampPatternName, formatBytes, isDxfUrl } from 'utils/pattern';
+import { notifyFailure } from 'components/shared/notify-failure';
+import { openMediaInNewTab } from 'lib/features/media-open';
 import { FittingFormData } from './schema';
 
 type Row = {
@@ -161,15 +163,20 @@ export function PatternsFields({ sampleSizeId }: { sampleSizeId?: number }) {
                           {label}
                         </Button>
                       ) : (
-                        <a
-                          href={row.url || '#'}
-                          target='_blank'
-                          rel='noopener noreferrer'
-                          className='block truncate text-textBaseSize underline hover:opacity-70'
+                        <Button
+                          type='button'
+                          disabled={!row.url}
+                          onClick={() =>
+                            row.url &&
+                            openMediaInNewTab(row.url).catch((e) =>
+                              notifyFailure('PATTERN', 'not opened', e),
+                            )
+                          }
+                          className='block max-w-full truncate text-left text-textBaseSize underline hover:opacity-70'
                           title={row.filename}
                         >
                           {label}
-                        </a>
+                        </Button>
                       )}
                       {sub && (
                         <span className='block truncate text-nano text-labelColor'>{sub}</span>

@@ -74,6 +74,7 @@ import {
   translation,
   unionBox,
 } from './geom';
+import { drawnText } from './drawn';
 
 /** L14: the annotation of a half on fold — what the drawing is, and how many units it cuts. */
 export function halfOnFoldText(piecesPerGarment: number): string {
@@ -154,6 +155,11 @@ export type PlannedBlock = {
   transform: Affine;
   /** Identity this block was mirrored from when the writer derived the pair hand; else null. */
   derivedFrom: string | null;
+  /**
+   * Stretches of `cut` drawn from the grade, not read (write/drawn.ts) — open polylines ON the cut
+   * line, copied to layer GRADE_DRAWN. Filled by `writeDxfDetailed` when it is given `derivedOf`.
+   */
+  drawn: PtMm[][];
   /** The written-frame size spec (what the gate compares the file with). */
   size: PieceSizeSpec;
 };
@@ -645,6 +651,9 @@ export function planBlocks(
       if (w.spec.unfoldedFold) annotation.push('UNFOLDED');
       // L14: the drawing is the HALF — said in words, with the count (one unit per garment)
       if (foldIsMirror) annotation.push(halfOnFoldText(w.spec.piecesPerGarment));
+      // the owner's «пометить»: a line drawn from the grade is said on the piece (write/drawn.ts)
+      const drawnWord = drawnText(s);
+      if (drawnWord) annotation.push(drawnWord);
       const srcT = w.srcT.get(s0.rank) ?? IDENTITY;
       const size: PieceSizeSpec = {
         ...s,
@@ -697,6 +706,7 @@ export function planBlocks(
         notches,
         transform: compose(T, srcT),
         derivedFrom: w.derivedFrom,
+        drawn: [],
         size,
       });
     }

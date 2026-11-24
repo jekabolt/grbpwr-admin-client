@@ -39,11 +39,18 @@ const IDCT = (() => {
   const t = new Float32Array(64);
   for (let x = 0; x < 8; x++)
     for (let u = 0; u < 8; u++)
-      t[x * 8 + u] = (u === 0 ? Math.SQRT1_2 : 1) * 0.5 * Math.cos(((2 * x + 1) * u * Math.PI) / 16);
+      t[x * 8 + u] =
+        (u === 0 ? Math.SQRT1_2 : 1) * 0.5 * Math.cos(((2 * x + 1) * u * Math.PI) / 16);
   return t;
 })();
 
-type Huff = { lut: Uint16Array; maxcode: Int32Array; valptr: Int32Array; mincode: Int32Array; vals: Uint8Array };
+type Huff = {
+  lut: Uint16Array;
+  maxcode: Int32Array;
+  valptr: Int32Array;
+  mincode: Int32Array;
+  vals: Uint8Array;
+};
 
 function buildHuff(counts: Uint8Array, vals: Uint8Array): Huff {
   const lut = new Uint16Array(512); // 9-bit lookahead: (len << 8) | symbol, 0 = slow path
@@ -85,7 +92,14 @@ type Comp = {
 };
 
 /** The entropy decoder's state at the start of an MCU row (to resume a later window there). */
-type Checkpoint = { pos: number; buf: number; cnt: number; pad: number; preds: number[]; mcu: number };
+type Checkpoint = {
+  pos: number;
+  buf: number;
+  cnt: number;
+  pad: number;
+  preds: number[];
+  mcu: number;
+};
 
 export class JpegRows implements RowSource {
   readonly width: number;
@@ -114,7 +128,8 @@ export class JpegRows implements RowSource {
     private readonly d: Uint8Array,
     colorTransform?: number,
   ) {
-    if (d[0] !== 0xff || d[1] !== 0xd8) throw new RowsUnsupported('the JPEG data has no start marker');
+    if (d[0] !== 0xff || d[1] !== 0xd8)
+      throw new RowsUnsupported('the JPEG data has no start marker');
     let p = 2;
     const dcT: Huff[] = [];
     const acT: Huff[] = [];
@@ -144,12 +159,26 @@ export class JpegRows implements RowSource {
           const h = d[b + 1] >> 4;
           const v = d[b + 1] & 15;
           if (h < 1 || h > 4 || v < 1 || v > 4) throw new RowsUnsupported('JPEG sampling factors');
-          this.comps.push({ id: d[b], h, v, tq: d[b + 2] & 3, dc: null, ac: null, bpl: 0, band: new Uint8Array(0), pred: 0 });
+          this.comps.push({
+            id: d[b],
+            h,
+            v,
+            tq: d[b + 2] & 3,
+            dc: null,
+            ac: null,
+            bpl: 0,
+            band: new Uint8Array(0),
+            pred: 0,
+          });
         }
         frame = true;
       } else if (m >= 0xc2 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) {
         throw new RowsUnsupported(
-          m === 0xc2 ? 'a progressive JPEG' : m === 0xc3 ? 'a lossless JPEG' : 'an arithmetic-coded or hierarchical JPEG',
+          m === 0xc2
+            ? 'a progressive JPEG'
+            : m === 0xc3
+              ? 'a lossless JPEG'
+              : 'an arithmetic-coded or hierarchical JPEG',
         );
       } else if (m === 0xdb) {
         for (let b = seg; b < end; ) {
@@ -193,7 +222,8 @@ export class JpegRows implements RowSource {
         const ss = d[seg + 1 + 2 * ns];
         const se = d[seg + 2 + 2 * ns];
         const a = d[seg + 3 + 2 * ns];
-        if (ss !== 0 || se !== 63 || a !== 0) throw new RowsUnsupported('a JPEG spectral selection');
+        if (ss !== 0 || se !== 63 || a !== 0)
+          throw new RowsUnsupported('a JPEG spectral selection');
         this.scanAt = end;
         break;
       } else if (m === 0xd9) throw new RowsUnsupported('the JPEG data ends before its scan');
@@ -216,7 +246,11 @@ export class JpegRows implements RowSource {
     const rgbIds = this.comps.length === 3 && this.comps.map((c) => c.id).join() === '82,71,66';
     this.ycc =
       this.comps.length === 3 &&
-      (colorTransform !== undefined ? colorTransform !== 0 : adobe !== null ? adobe !== 0 : !rgbIds);
+      (colorTransform !== undefined
+        ? colorTransform !== 0
+        : adobe !== null
+          ? adobe !== 0
+          : !rgbIds);
     this.checkpoints = new Array(this.mcusY);
   }
 
@@ -304,7 +338,8 @@ export class JpegRows implements RowSource {
         continue;
       }
       k += r;
-      if (k > 63) throw new RowsUnsupported('a JPEG block runs past 64 coefficients (damaged data)');
+      if (k > 63)
+        throw new RowsUnsupported('a JPEG block runs past 64 coefficients (damaged data)');
       const v = JpegRows.extend(this.bits(s), s);
       if (keep) {
         coef[ZIGZAG[k]] = v * q[k];
@@ -315,7 +350,14 @@ export class JpegRows implements RowSource {
     return ac;
   }
 
-  private static idct(coef: Float32Array, ac: boolean, out: Uint8Array, at: number, stride: number, tmp: Float32Array): void {
+  private static idct(
+    coef: Float32Array,
+    ac: boolean,
+    out: Uint8Array,
+    at: number,
+    stride: number,
+    tmp: Float32Array,
+  ): void {
     if (!ac) {
       const v = coef[0] / 8 + 128;
       const b = v <= 0 ? 0 : v >= 255 ? 255 : Math.round(v);
@@ -404,7 +446,14 @@ export class JpegRows implements RowSource {
     let mcu = r * this.mcusX;
     for (; r < r1; r++) {
       if (!this.checkpoints[r])
-        this.checkpoints[r] = { pos: this.pos, buf: this.buf, cnt: this.cnt, pad: this.pad, preds: this.comps.map((c) => c.pred), mcu };
+        this.checkpoints[r] = {
+          pos: this.pos,
+          buf: this.buf,
+          cnt: this.cnt,
+          pad: this.pad,
+          preds: this.comps.map((c) => c.pred),
+          mcu,
+        };
       // the data's end (EOI, or no bytes) before an MCU row starts: it was cut short — padding
       // bits would decode as a plausible grey image, so it is refused instead
       if (this.marker && !(this.d[this.pos + 1] >= 0xd0 && this.d[this.pos + 1] <= 0xd7))
@@ -489,7 +538,8 @@ export class FlateRows implements RowSource {
     if (p.bpc === 1 && p.colors !== 1) throw new RowsUnsupported('a 1-bit colour image');
     if (p.predictor !== 1 && p.predictor !== 2 && p.predictor < 10)
       throw new RowsUnsupported(`predictor ${p.predictor}`);
-    if (p.predictor === 2 && p.bpc !== 8) throw new RowsUnsupported('a TIFF predictor on 1-bit data');
+    if (p.predictor === 2 && p.bpc !== 8)
+      throw new RowsUnsupported('a TIFF predictor on 1-bit data');
     this.channels = p.colors;
     this.rowBytes = Math.ceil((width * p.colors * p.bpc) / 8);
     this.bpp = Math.max(1, Math.ceil((p.colors * p.bpc) / 8));
@@ -553,14 +603,16 @@ export class FlateRows implements RowSource {
         void reader.cancel().catch(() => undefined);
       }
     }
-    if (y < stop) throw new RowsUnsupported(`the image data ends at row ${y} of ${this.height} (damaged data)`);
+    if (y < stop)
+      throw new RowsUnsupported(`the image data ends at row ${y} of ${this.height} (damaged data)`);
   }
 
   private unfilter(cur: Uint8Array, prev: Uint8Array, t: number): void {
     const n = cur.length;
     const bpp = this.bpp;
     if (t < 0) {
-      if (this.p.predictor === 2) for (let i = bpp; i < n; i++) cur[i] = (cur[i] + cur[i - bpp]) & 255;
+      if (this.p.predictor === 2)
+        for (let i = bpp; i < n; i++) cur[i] = (cur[i] + cur[i - bpp]) & 255;
       return;
     }
     switch (t) {
@@ -573,7 +625,8 @@ export class FlateRows implements RowSource {
         for (let i = 0; i < n; i++) cur[i] = (cur[i] + prev[i]) & 255;
         return;
       case 3:
-        for (let i = 0; i < n; i++) cur[i] = (cur[i] + (((i >= bpp ? cur[i - bpp] : 0) + prev[i]) >> 1)) & 255;
+        for (let i = 0; i < n; i++)
+          cur[i] = (cur[i] + (((i >= bpp ? cur[i - bpp] : 0) + prev[i]) >> 1)) & 255;
         return;
       case 4:
         for (let i = 0; i < n; i++) {

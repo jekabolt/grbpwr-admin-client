@@ -70,6 +70,7 @@ import { pageMarginIds, testSquareBoxes } from 'lib/pattern-import/chains/classi
 import { parseSizeToken } from 'lib/pattern-import/sizes/tokens';
 
 import { chainView, faceCapBox, partAt, sheetView } from '../assemble/composite';
+import { markTileNumberFaces } from './tile-number-faces';
 import { drawPolyline, exterior, Grid } from './raster';
 import type { WallItem } from './snap';
 import {
@@ -2109,6 +2110,7 @@ export function faceMap(
       lone.has(it) || common.has(it.chain) ? 'all' : rankOfChain.get(it.chain) ?? null,
   });
   const off = o.off ?? new Set();
+  if (!off.has('background')) markTileNumberFaces(sheet, blobs);
   // a sheet that labels its pieces in text (≥ 2 text seeds) labels every piece: an outline it
   // does not label is a legend box, an overview, a label frame — not seeded (the operator clicks)
   // D6: per tile sheet — a sheet that labels nothing (r4454's interfacing sheet beside a labelled

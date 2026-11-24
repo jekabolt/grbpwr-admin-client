@@ -197,6 +197,7 @@ export function manifestBlock(b: PlannedBlock, sigPts?: number): ManifestBlock {
             holes: b.size.repair.holes,
             holesMm: r1(b.size.repair.holesMm),
             cover: Math.round(b.size.repair.cover * 1000) / 1000,
+            ...(b.size.repair.drawnMm ? { drawnMm: r1(b.size.repair.drawnMm) } : {}),
           },
         }
       : {}),

@@ -166,6 +166,62 @@ export async function main(): Promise<number> {
       `area ${cand ? Math.round(cand.areaMm2 / 100) : '—'} cm², low-confidence ignore row ${asked}`,
     );
   }
+  // Meet: two black halves 8 mm apart, ends pointing at each other, close in the fill.
+  // 20 mm stays open. Parallel strokes 8 mm apart do not (their ends do not point at each other).
+  {
+    const gap = (mm: number) =>
+      sheetOf([
+        {
+          pts: [
+            [200 - mm / 2, 100],
+            [100, 100],
+            [100, 400],
+            [200 - mm / 2, 400],
+          ],
+          style: 1,
+        },
+        {
+          pts: [
+            [200 + mm / 2, 100],
+            [300, 100],
+            [300, 400],
+            [200 + mm / 2, 400],
+          ],
+          style: 1,
+        },
+      ]);
+    const closed = fillAt(gap(8), { x: 200, y: 250 }).cand;
+    const open = fillAt(gap(20), { x: 200, y: 250 }).cand;
+    const parallel = fillAt(
+      sheetOf([
+        {
+          pts: [
+            [100, 100],
+            [100, 400],
+          ],
+          style: 1,
+        },
+        {
+          pts: [
+            [108, 100],
+            [108, 400],
+          ],
+          style: 1,
+        },
+      ]),
+      { x: 104, y: 250 },
+    ).cand;
+    const bridged = !!closed?.derived?.some((d) => d.kind === 'bridge');
+    check(
+      '8 mm facing gap closes in the fill; 20 mm stays open; parallel strokes are not bridged',
+      closed?.outcome === 'closed' &&
+        bridged &&
+        Math.abs((closed?.areaMm2 ?? 0) - 60000) < 800 &&
+        open?.outcome === 'leak' &&
+        !parallel?.derived?.some((d) => d.kind === 'bridge'),
+      `8 mm ${closed?.outcome}${bridged ? ' bridge' : ''} ${closed ? Math.round(closed.areaMm2 / 100) : '—'} cm²; 20 mm ${open?.outcome}; parallel ${parallel?.outcome ?? '—'} derived ${parallel?.derived?.length ?? 0}`,
+    );
+  }
   // S4-c (control): a grey 10 mm lattice is still background, no question
   {
     const draw: { pts: P[]; style: number }[] = [];

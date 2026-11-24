@@ -23,6 +23,7 @@ import type {
   Seed,
 } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
+import { FACING_BRIDGE_MM } from 'lib/pattern-import/pieces/bridges';
 
 import { CORPUS, REPORTS, type Prepared, type Sample } from './pieces-entry';
 import {
@@ -321,7 +322,8 @@ function atArc(pts: readonly PtMm[], s: number): { p: PtMm; i: number } {
 
 /**
  * Gap control (F4b auto-bridges): cut a gap of `gapMm` into the middle of the candidate's longest
- * own-rank wall and fill again. ≤ 3 mm must close again with a derived 'bridge'; longer must leak.
+ * own-rank wall and fill again. ≤ FACING_BRIDGE_MM must close again with a derived 'bridge';
+ * longer must leak, and the operator's addBridge then closes that leak.
  */
 function gapControl(p: Prepared, sr: SampleRun, label: string, gapMm: number) {
   const seed = sr.seeds.find((s) => normLabel(seedLabel(s) ?? '') === label);
@@ -372,7 +374,7 @@ function gapControl(p: Prepared, sr: SampleRun, label: string, gapMm: number) {
   // a gap too long to bridge is the operator's: addBridge over it refills this seed only
   let operator: string | undefined;
   let opPass = true;
-  if (gapMm > 3 && after?.outcome === 'leak') {
+  if (gapMm > FACING_BRIDGE_MM && after?.outcome === 'leak') {
     const ses: PieceSession = {
       sheet: p.sheet,
       set,
@@ -396,7 +398,9 @@ function gapControl(p: Prepared, sr: SampleRun, label: string, gapMm: number) {
     result: res,
     operator,
     pass:
-      (gapMm <= 3 ? after?.outcome === 'closed' && bridged : after?.outcome === 'leak') && opPass,
+      (gapMm <= FACING_BRIDGE_MM
+        ? after?.outcome === 'closed' && bridged
+        : after?.outcome === 'leak') && opPass,
   };
 }
 

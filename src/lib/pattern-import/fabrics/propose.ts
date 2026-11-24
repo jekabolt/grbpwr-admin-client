@@ -107,6 +107,9 @@ const SECONDARY_EXCLUSIVE: ReadonlySet<FabricKind> = new Set([
   'mesh',
 ]);
 
+const MAIN_OR_CONTRAST_CUT =
+  /^(?:(?:main|self)\s+)?fabric\s+or\s+contrast(?:\s+fabric)?\s*:\s*cut\s+\d+(?:\s+on\s+fold)?\.?$/i;
+
 const pageKey = (t: IRText) => `${t.src.file}:${String(t.src.page).padStart(4, '0')}`;
 
 export function proposeFabricsDetailed(input: ProposeFabricsInput): ProposeFabricsDetail {
@@ -165,6 +168,19 @@ export function proposeFabricsDetailed(input: ProposeFabricsInput): ProposeFabri
     // 1. labels inside the piece
     const labelKinds = new Set<FabricKind>();
     for (const l of labels) {
+      // This complete cut instruction offers either cloth. When the card carries only main
+      // fabric, the printed alternative permits it. A separate mandatory contrast label
+      // still contributes its own evidence and refusal below.
+      if (
+        MAIN_OR_CONTRAST_CUT.test(l.trim()) &&
+        !scopeFor('contrast', input.bom) &&
+        scopeFor('main', input.bom)
+      ) {
+        labelKinds.add('main');
+        evidence.push({ kind: 'label', text: l.slice(0, 60), seed });
+        why.push('the cut label allows main fabric or contrast and the BOM carries main fabric');
+        continue;
+      }
       const hits = fabricKindsIn(l);
       for (const h of hits) {
         labelKinds.add(h.kind);
@@ -174,6 +190,8 @@ export function proposeFabricsDetailed(input: ProposeFabricsInput): ProposeFabri
       if (hits.some((h) => h.kind === 'interfacing') && hasFuseVerb(l))
         why.push('the label says to fuse it');
     }
+    // A secondary cloth on its own line can continue the cut instruction on the piece.
+    if (labels.some(l=>/^cut +\d+ of fabric$/i.test(l.trim())) && labels.some(l=>/^and mesh$/i.test(l.trim()))) labelKinds.add('main');
     if (labelKinds.has('main')) explicitMain = true;
     const exclusive = [...labelKinds].filter((k) => SECONDARY_EXCLUSIVE.has(k));
     if (exclusive.length) {

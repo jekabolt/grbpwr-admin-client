@@ -30,6 +30,7 @@ import type {
   ImportSession,
   NameDecision,
   PageMaskEdit,
+  PieceCandidate,
   PieceEdit,
   PtMm,
   ScaleDecision,
@@ -2146,9 +2147,14 @@ export function useImportSession(deps: {
         if (variants.length > 1 && !s.variant) return 'pick the model — one run imports one model';
         // Only the sizes that are exported must close: an unmapped size is never written.
         const mapped = exportedRanks(s.sizes?.map);
-        const open = fams.filter((f) =>
-          f.candidates.some((c) => (!mapped || mapped.has(c.rank)) && c.outcome !== 'closed'),
-        );
+        // PIECES_OPEN_PASS=1 (node probe only, never in the browser): open and held regions do not
+        // stop the step — a scouting run that shows where a file stops AFTER pieces (13 Nov 2026)
+        const openPass = typeof process !== 'undefined' && !!process.env?.PIECES_OPEN_PASS;
+        const open = openPass
+          ? []
+          : fams.filter((f) =>
+              f.candidates.some((c) => (!mapped || mapped.has(c.rank)) && c.outcome !== 'closed'),
+            );
         if (!fams.length) return 'no pieces — click inside a piece to seed it';
         // H1: a region whose sizes were held back has no gap to close — say why instead
         const held = open.filter((f) =>
@@ -2167,7 +2173,7 @@ export function useImportSession(deps: {
           }; reseed elsewhere inside the piece or mark "not a piece"`;
         }
         if (open.length)
-          return `${open.length} ${open.length === 1 ? 'region needs' : 'regions need'} a fix — close the gap, split, or mark "not a piece"`;
+          return `${open.length} ${open.length === 1 ? 'piece needs' : 'pieces need'} outline review before export`;
         // D6: a piece in the export twice (a copy, a sheet drawn again) or in halves is asked
         const sq = sheetQuestion(s.pieces?.sheets, inputs.sheetAnswers);
         if (sq) return sq.text;
@@ -2762,6 +2768,70 @@ export function useImportSession(deps: {
     });
   }
 
+  /** Re-run the chosen preview as an ordinary edit. Publish only if the worker reproduces it. */
+  async function chooseGapOutline(
+    seed: SeedId,
+    rank: number,
+    option: NonNullable<PieceCandidate['gapOptions']>[number],
+  ) {
+    const before = sRef.current.pieces;
+    const leak = before?.families
+      .find((f) => f.seed === seed)
+      ?.candidates.find((c) => c.rank === rank);
+    if (
+      sRef.current.busy ||
+      !before ||
+      leak?.outcome !== 'leak' ||
+      !leak.gapOptions?.includes(option)
+    )
+      return false;
+    operatorActs();
+    return tracked(() =>
+      asMove(async () => {
+        const edits: PieceEdit[] = [
+          ...iRef.current.edits,
+          ...option.bridges.map(
+            (b): PieceEdit => ({ kind: 'bridge', seed, rank, from: b.from, to: b.to }),
+          ),
+        ];
+        const next = { ...iRef.current, edits, shapeFixes: {} };
+        try {
+          const out = await run('pieces', piecesInput(next));
+          const matches = (family: SeedId, size: number, expected: PtMm[]) => {
+            const result = out.families
+              .find((f) => f.seed === family)
+              ?.candidates.find((c) => c.rank === size);
+            return (
+              result?.outcome === 'closed' &&
+              result.outer.length === expected.length &&
+              expected.every((p, i) => p.x === result.outer[i].x && p.y === result.outer[i].y)
+            );
+          };
+          if (
+            !matches(seed, rank, option.outer) ||
+            before.families.some((f) =>
+              f.candidates.some((c) => c.outcome === 'closed' && !matches(f.seed, c.rank, c.outer)),
+            )
+          ) {
+            // The worker already consumed the tentative edit. Restore its pre-move history too.
+            if (move.current) move.current.stopped = true;
+            setNotice('outline changed during the check; previous outlines kept');
+            return false;
+          }
+          iRef.current = next;
+          patchInputs({ edits, shapeFixes: {} });
+          patch({ pieces: out });
+          settleToPieces();
+          prunePassed();
+          return true;
+        } catch (e) {
+          fail(e);
+          return false;
+        }
+      }),
+    );
+  }
+
   /** Append (or, with `undo`, drop the last) piece edit and re-run the fill. */
   async function editPieces(e: PieceEdit | 'undo') {
     // STOPFIX (Codex r2): the inputs it sets are part of the move a stop undoes
@@ -2942,6 +3012,7 @@ export function useImportSession(deps: {
     /** PROMOTE-BATCH: several set-aside outlines are pieces — one pieces run (UX-HOOKS §4). */
     promoteAsides,
     editPieces,
+    chooseGapOutline,
     editName,
     editNames,
     confirmSize,

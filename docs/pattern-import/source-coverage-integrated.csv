@@ -1,0 +1,437 @@
+set,pdf,scope,seed,piece,stop,open,fullPath,compositeCycle,sharedGroup,competing,insufficient
+set40,2-A4-MDF-349-The-Leah-Shift-Dress-00-32-,document,,,pieces,16,0,0,0,0,16
+set40,2-A4-MDF-349-The-Leah-Shift-Dress-00-32-,piece,0,E - SKIRT FRONT,pieces,1,0,0,0,0,1
+set40,2-A4-MDF-349-The-Leah-Shift-Dress-00-32-,piece,1,A - TOP BACK,pieces,3,0,0,0,0,3
+set40,2-A4-MDF-349-The-Leah-Shift-Dress-00-32-,piece,2,C - SLEEVES,pieces,1,0,0,0,0,1
+set40,2-A4-MDF-349-The-Leah-Shift-Dress-00-32-,piece,4,B - TOP FRONT,pieces,2,0,0,0,0,2
+set40,2-A4-MDF-349-The-Leah-Shift-Dress-00-32-,piece,5,F - FRONT NECKLINE FACING,pieces,3,0,0,0,0,3
+set40,2-A4-MDF-349-The-Leah-Shift-Dress-00-32-,piece,6,G - BACK NECKLINE FACING,pieces,6,0,0,0,0,6
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,document,,,pieces,63,1,0,0,0,62
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,piece,0,B - SL,pieces,18,0,0,0,0,18
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,piece,1,IC : CUT 2,pieces,18,0,0,0,0,18
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,piece,2,C - BACK BODICE,pieces,6,0,0,0,0,6
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,piece,3,E - FRON,pieces,6,0,0,0,0,6
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,piece,4,G - BACK SKIRT,pieces,6,1,0,0,0,5
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,piece,5,F - FRONT SKIRT,pieces,6,0,0,0,0,6
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,piece,7,A - FRONT SKIRT FACING,pieces,3,0,0,0,0,3
+set40,MDF363-The-Memoir-Dress-View-A-Sizes-00-32-A4-Letter-Patterns,document,,,pieces,42,0,1,0,0,41
+set40,MDF363-The-Memoir-Dress-View-A-Sizes-00-32-A4-Letter-Patterns,piece,0,N - SLEEVES,pieces,1,0,0,0,0,1
+set40,MDF363-The-Memoir-Dress-View-A-Sizes-00-32-A4-Letter-Patterns,piece,1,L - SKIRT BACK,pieces,2,0,0,0,0,2
+set40,MDF363-The-Memoir-Dress-View-A-Sizes-00-32-A4-Letter-Patterns,piece,2,A - BACK CENTER,pieces,1,0,0,0,0,1
+set40,MDF363-The-Memoir-Dress-View-A-Sizes-00-32-A4-Letter-Patterns,piece,3,O - SLEEVES LOWER,pieces,2,0,0,0,0,2
+set40,MDF363-The-Memoir-Dress-View-A-Sizes-00-32-A4-Letter-Patterns,piece,4,M - SKIRT FRONT,pieces,3,0,0,0,0,3
+set40,MDF363-The-Memoir-Dress-View-A-Sizes-00-32-A4-Letter-Patterns,piece,5,E - SIDE FRONT LOWER,pieces,1,0,0,0,0,1
+set40,MDF363-The-Memoir-Dress-View-A-Sizes-00-32-A4-Letter-Patterns,piece,6,C - SIDE BACK LOWER,pieces,1,0,0,0,0,1
+set40,MDF363-The-Memoir-Dress-View-A-Sizes-00-32-A4-Letter-Patterns,piece,7,D - SIDE FRONT UPPER,pieces,4,0,0,0,0,4
+set40,MDF363-The-Memoir-Dress-View-A-Sizes-00-32-A4-Letter-Patterns,piece,8,G - CUP 2,pieces,7,0,0,0,0,7
+set40,MDF363-The-Memoir-Dress-View-A-Sizes-00-32-A4-Letter-Patterns,piece,9,B - SIDE BACK UPPER,pieces,6,0,1,0,0,5
+set40,MDF363-The-Memoir-Dress-View-A-Sizes-00-32-A4-Letter-Patterns,piece,10,H - CENTER FRONT LOWER,pieces,3,0,0,0,0,3
+set40,MDF363-The-Memoir-Dress-View-A-Sizes-00-32-A4-Letter-Patterns,piece,11,I - ALTERNATIVE BODICE,pieces,5,0,0,0,0,5
+set40,MDF363-The-Memoir-Dress-View-A-Sizes-00-32-A4-Letter-Patterns,piece,12,F - CUP 1,pieces,2,0,0,0,0,2
+set40,MDF363-The-Memoir-Dress-View-A-Sizes-00-32-A4-Letter-Patterns,piece,13,J - ALTERNATIVE BODICE,pieces,3,0,0,0,0,3
+set40,MDF363-The-Memoir-Dress-View-A-Sizes-00-32-A4-Letter-Patterns,piece,14,K- ALTERNATIVE BODICE,pieces,1,0,0,0,0,1
+set40,MDF365-The-Memoir-Dress-View-C-Sizes-00-32-A4-Letter-Patterns,document,,,pieces,22,0,0,0,0,22
+set40,MDF365-The-Memoir-Dress-View-C-Sizes-00-32-A4-Letter-Patterns,piece,0,A - BACK,pieces,2,0,0,0,0,2
+set40,MDF365-The-Memoir-Dress-View-C-Sizes-00-32-A4-Letter-Patterns,piece,1,J - SKIRT BACK,pieces,3,0,0,0,0,3
+set40,MDF365-The-Memoir-Dress-View-C-Sizes-00-32-A4-Letter-Patterns,piece,2,E - FRONT,pieces,5,0,0,0,0,5
+set40,MDF365-The-Memoir-Dress-View-C-Sizes-00-32-A4-Letter-Patterns,piece,3,I - SLEEVES,pieces,3,0,0,0,0,3
+set40,MDF365-The-Memoir-Dress-View-C-Sizes-00-32-A4-Letter-Patterns,piece,4,K - SKIRT FRONT,pieces,1,0,0,0,0,1
+set40,MDF365-The-Memoir-Dress-View-C-Sizes-00-32-A4-Letter-Patterns,piece,5,B - BACK,pieces,4,0,0,0,0,4
+set40,MDF365-The-Memoir-Dress-View-C-Sizes-00-32-A4-Letter-Patterns,piece,6,D - BACK,pieces,2,0,0,0,0,2
+set40,MDF365-The-Memoir-Dress-View-C-Sizes-00-32-A4-Letter-Patterns,piece,7,C - BACK,pieces,2,0,0,0,0,2
+set40,MDF368-The-Albuca-A-Line-Dress-XXS-4XL-A4-Letter-Patterns,document,,,pieces,3,0,0,0,0,3
+set40,MDF368-The-Albuca-A-Line-Dress-XXS-4XL-A4-Letter-Patterns,piece,1,B - FRONT,pieces,3,0,0,0,0,3
+set40,MDF388-The-Rosalina-Bodycon-Dress-Sizes-XXS-4XL-A4-Letter-Patterns,document,,,pieces,6,0,0,0,0,6
+set40,MDF388-The-Rosalina-Bodycon-Dress-Sizes-XXS-4XL-A4-Letter-Patterns,piece,0,A - BACK SELF,pieces,1,0,0,0,0,1
+set40,MDF388-The-Rosalina-Bodycon-Dress-Sizes-XXS-4XL-A4-Letter-Patterns,piece,1,B - FRONT SELF,pieces,3,0,0,0,0,3
+set40,MDF388-The-Rosalina-Bodycon-Dress-Sizes-XXS-4XL-A4-Letter-Patterns,piece,2,C - BACK LINING,pieces,1,0,0,0,0,1
+set40,MDF388-The-Rosalina-Bodycon-Dress-Sizes-XXS-4XL-A4-Letter-Patterns,piece,3,E - SHOULDER STRAPS,pieces,1,0,0,0,0,1
+set40,MDF390-The-Corella-Beach-Cover-Up-Sizes-XXS-4XL-A4-Letter-Patterns,document,,,pieces,6,0,0,0,0,6
+set40,MDF390-The-Corella-Beach-Cover-Up-Sizes-XXS-4XL-A4-Letter-Patterns,piece,0,A - FRONT,pieces,3,0,0,0,0,3
+set40,MDF390-The-Corella-Beach-Cover-Up-Sizes-XXS-4XL-A4-Letter-Patterns,piece,1,B - BACK,pieces,1,0,0,0,0,1
+set40,MDF390-The-Corella-Beach-Cover-Up-Sizes-XXS-4XL-A4-Letter-Patterns,piece,2,C - SLEEVES,pieces,2,0,0,0,0,2
+set40,MDF422-The-Valentina-V-Waist-Dress-Sizes-XXS-4XL-A4-Letter-Patterns,document,,,pieces,8,0,0,0,0,8
+set40,MDF422-The-Valentina-V-Waist-Dress-Sizes-XXS-4XL-A4-Letter-Patterns,piece,1,A - TOP BACK SIDE,pieces,1,0,0,0,0,1
+set40,MDF422-The-Valentina-V-Waist-Dress-Sizes-XXS-4XL-A4-Letter-Patterns,piece,2,B - TOP BACK CENTER,pieces,2,0,0,0,0,2
+set40,MDF422-The-Valentina-V-Waist-Dress-Sizes-XXS-4XL-A4-Letter-Patterns,piece,3,C - TOP FRONT SIDE,pieces,3,0,0,0,0,3
+set40,MDF422-The-Valentina-V-Waist-Dress-Sizes-XXS-4XL-A4-Letter-Patterns,piece,5,D - TOP FRONT CENTER,pieces,2,0,0,0,0,2
+set40,MDF432-Asheville-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,document,,,pieces,7,0,0,0,0,7
+set40,MDF432-Asheville-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,0,F - SKIRT,pieces,2,0,0,0,0,2
+set40,MDF432-Asheville-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,2,D - TOP BACK,pieces,1,0,0,0,0,1
+set40,MDF432-Asheville-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,3,A - TOP FRONT SIDE,pieces,3,0,0,0,0,3
+set40,MDF432-Asheville-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,4,B - TOP FRONT CENTER,pieces,1,0,0,0,0,1
+set40,MDF439-Mendocino-A-Line-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,document,,,pieces,10,0,0,0,0,10
+set40,MDF439-Mendocino-A-Line-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,0,E - SLEEVES,pieces,1,0,0,0,0,1
+set40,MDF439-Mendocino-A-Line-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,1,A - BACK,pieces,2,0,0,0,0,2
+set40,MDF439-Mendocino-A-Line-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,3,B - FRONT,pieces,2,0,0,0,0,2
+set40,MDF439-Mendocino-A-Line-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,4,D - COLLAR RUFFLE,pieces,2,0,0,0,0,2
+set40,MDF439-Mendocino-A-Line-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,5,F - PLACKETS,pieces,1,0,0,0,0,1
+set40,MDF439-Mendocino-A-Line-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,6,G - ARMHOLE PANELS,pieces,2,0,0,0,0,2
+set40,MDF450-Madison-Tea-Length-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,document,,,pieces,65,0,0,0,0,65
+set40,MDF450-Madison-Tea-Length-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,piece,0,K - SKIRT WAISTBAND,pieces,2,0,0,0,0,2
+set40,MDF450-Madison-Tea-Length-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,piece,1,H - SKIRT SHELL,pieces,18,0,0,0,0,18
+set40,MDF450-Madison-Tea-Length-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,piece,2,I - SKIRT LINING,pieces,18,0,0,0,0,18
+set40,MDF450-Madison-Tea-Length-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,piece,3,J - TULLE SKIRT LAYER,pieces,1,0,0,0,0,1
+set40,MDF450-Madison-Tea-Length-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,piece,5,G - BUSTIER BACK,pieces,5,0,0,0,0,5
+set40,MDF450-Madison-Tea-Length-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,piece,6,F - MODESTY PANEL,pieces,1,0,0,0,0,1
+set40,MDF450-Madison-Tea-Length-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,piece,7,E - CUP CENTER,pieces,3,0,0,0,0,3
+set40,MDF450-Madison-Tea-Length-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,piece,8,D - CUP SIDE,pieces,2,0,0,0,0,2
+set40,MDF450-Madison-Tea-Length-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,piece,9,A - BUSTIER FRONT SIDE,pieces,5,0,0,0,0,5
+set40,MDF450-Madison-Tea-Length-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,piece,10,B - BUSTIER FRONT MIDDLE,pieces,7,0,0,0,0,7
+set40,MDF450-Madison-Tea-Length-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,piece,11,C - BUSTIER FRONT CENTER,pieces,3,0,0,0,0,3
+set40,MDF451-Lumiere-Strapless-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,document,,,pieces,12,0,0,0,0,12
+set40,MDF451-Lumiere-Strapless-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,piece,0,A - TOP FRONT,pieces,4,0,0,0,0,4
+set40,MDF451-Lumiere-Strapless-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,piece,1,B - TOP BACK,pieces,2,0,0,0,0,2
+set40,MDF451-Lumiere-Strapless-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,piece,2,C - SKIRT BACK,pieces,2,0,0,0,0,2
+set40,MDF451-Lumiere-Strapless-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,piece,3,D - SKIRT FRONT,pieces,4,0,0,0,0,4
+set40,MDF453-Kitchen-Pickleball-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,document,,,pieces,32,0,0,0,0,32
+set40,MDF453-Kitchen-Pickleball-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,0,N - SKIRT,pieces,6,0,0,0,0,6
+set40,MDF453-Kitchen-Pickleball-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,2,K - SHORTS FRONT,pieces,2,0,0,0,0,2
+set40,MDF453-Kitchen-Pickleball-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,3,L - SHORTS BACK,pieces,3,0,0,0,0,3
+set40,MDF453-Kitchen-Pickleball-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,4,H - TOP - BACK MESH,pieces,1,0,0,0,0,1
+set40,MDF453-Kitchen-Pickleball-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,5,F - TOP - BACK LEFT STRAP,pieces,4,0,0,0,0,4
+set40,MDF453-Kitchen-Pickleball-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,6,I - FRONT WAISTBAND,pieces,3,0,0,0,0,3
+set40,MDF453-Kitchen-Pickleball-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,7,E - TOP - BACK,pieces,6,0,0,0,0,6
+set40,MDF453-Kitchen-Pickleball-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,9,J - BACK WAISTBAND,pieces,1,0,0,0,0,1
+set40,MDF453-Kitchen-Pickleball-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,10,A - TOP - FRONT SIDE UPPER,pieces,2,0,0,0,0,2
+set40,MDF453-Kitchen-Pickleball-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,11,B - TOP - FRONT CENTER UPPER,pieces,1,0,0,0,0,1
+set40,MDF453-Kitchen-Pickleball-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,12,D - TOP - FRONT,pieces,1,0,0,0,0,1
+set40,MDF453-Kitchen-Pickleball-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,13,C - TOP - FRONT SIDE LOWER,pieces,2,0,0,0,0,2
+set40,MDF458-Nob-Hill-Draped-Midi-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,document,,,pieces,11,0,0,0,0,11
+set40,MDF458-Nob-Hill-Draped-Midi-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,0,A - FRONT UPPER,pieces,5,0,0,0,0,5
+set40,MDF458-Nob-Hill-Draped-Midi-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,1,B - FRONT LOWER,pieces,4,0,0,0,0,4
+set40,MDF458-Nob-Hill-Draped-Midi-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,3,D - SLEEVES,pieces,1,0,0,0,0,1
+set40,MDF458-Nob-Hill-Draped-Midi-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,4,E - COLLAR,pieces,1,0,0,0,0,1
+set40,MDF463-Glinda-Gown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,document,,,sheet,0,0,0,0,0,0
+set40,MDF474-Soho-Maxi-Slip-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,document,,,pieces,14,0,0,0,0,14
+set40,MDF474-Soho-Maxi-Slip-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,0,C - FRONT SIDE,pieces,2,0,0,0,0,2
+set40,MDF474-Soho-Maxi-Slip-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,1,B - BACK SIDE,pieces,4,0,0,0,0,4
+set40,MDF474-Soho-Maxi-Slip-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,2,E - SLEEVES,pieces,1,0,0,0,0,1
+set40,MDF474-Soho-Maxi-Slip-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,3,A - BACK CENTER,pieces,2,0,0,0,0,2
+set40,MDF474-Soho-Maxi-Slip-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,4,D - FRONT CENTER,pieces,2,0,0,0,0,2
+set40,MDF474-Soho-Maxi-Slip-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,5,I - NECKLINE RUFFLE,pieces,2,0,0,0,0,2
+set40,MDF474-Soho-Maxi-Slip-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,6,F - SLEEVE RUFFLE,pieces,1,0,0,0,0,1
+set40,MDF485-Riverside-Ruched-Midi-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,document,,,pieces,7,0,0,0,0,7
+set40,MDF485-Riverside-Ruched-Midi-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,0,C - FRONT LOWER,pieces,3,0,0,0,0,3
+set40,MDF485-Riverside-Ruched-Midi-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,2,B - FRONT UPPER,pieces,2,0,0,0,0,2
+set40,MDF485-Riverside-Ruched-Midi-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,3,D - SLEEVES,pieces,2,0,0,0,0,2
+set40,MDF489-Silverstone-Mini-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,document,,,pieces,10,0,0,0,0,10
+set40,MDF489-Silverstone-Mini-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,0,F - SKIRT FRONT,pieces,1,0,0,0,0,1
+set40,MDF489-Silverstone-Mini-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,1,G - SKIRT FRONT LINING,pieces,1,0,0,0,0,1
+set40,MDF489-Silverstone-Mini-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,2,E - SKIRT BACK,pieces,3,0,0,0,0,3
+set40,MDF489-Silverstone-Mini-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,3,H - SLEEVE UPPER,pieces,1,0,0,0,0,1
+set40,MDF489-Silverstone-Mini-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,7,C - TOP FRONT SIDE,pieces,2,0,0,0,0,2
+set40,MDF489-Silverstone-Mini-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,9,B - TOP BACK SIDE,pieces,2,0,0,0,0,2
+set40,MDF515-Selenite-V-Waist-Ballgown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,document,,,pieces,42,0,0,0,0,42
+set40,MDF515-Selenite-V-Waist-Ballgown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,4,J - PETTICOAT SKIRT,pieces,9,0,0,0,0,9
+set40,MDF515-Selenite-V-Waist-Ballgown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,5,K - PETTICOAT WAISTBAND,pieces,9,0,0,0,0,9
+set40,MDF515-Selenite-V-Waist-Ballgown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,6,L - UPPER RUFFLE,pieces,9,0,0,0,0,9
+set40,MDF515-Selenite-V-Waist-Ballgown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,7,M - LOWER RUFFLE,pieces,9,0,0,0,0,9
+set40,MDF515-Selenite-V-Waist-Ballgown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,9,B - CORSET BACK MIDDLE,pieces,1,0,0,0,0,1
+set40,MDF515-Selenite-V-Waist-Ballgown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,10,C - CORSET BACK SIDE,pieces,2,0,0,0,0,2
+set40,MDF515-Selenite-V-Waist-Ballgown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,11,D - CORSET FRONT SIDE,pieces,1,0,0,0,0,1
+set40,MDF515-Selenite-V-Waist-Ballgown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,12,E - CORSET FRONT MIDDLE,pieces,1,0,0,0,0,1
+set40,MDF515-Selenite-V-Waist-Ballgown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,13,F - CORSET FRONT CENTER,pieces,1,0,0,0,0,1
+set40,MDF518-Estoril-Collared-A-Line-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,document,,,pieces,3,0,0,0,0,3
+set40,MDF518-Estoril-Collared-A-Line-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,0,H - SKIRT FRONT,pieces,2,0,0,0,0,2
+set40,MDF518-Estoril-Collared-A-Line-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,7,B - TOP FRONT,pieces,1,0,0,0,0,1
+set40,MDF528-Alassio-Wrap-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog-1,document,,,pieces,10,0,0,0,0,10
+set40,MDF528-Alassio-Wrap-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog-1,piece,0,H - SKIRT FRONT,pieces,1,0,0,0,0,1
+set40,MDF528-Alassio-Wrap-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog-1,piece,3,A - TOP BACK,pieces,3,0,0,0,0,3
+set40,MDF528-Alassio-Wrap-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog-1,piece,4,B - TOP FRONT,pieces,4,0,0,0,0,4
+set40,MDF528-Alassio-Wrap-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog-1,piece,6,D - CUFFS,pieces,2,0,0,0,0,2
+set40,MDF535-Reef-Sleeveless-Cover-Up-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,document,,,pieces,10,0,0,0,0,10
+set40,MDF535-Reef-Sleeveless-Cover-Up-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,1,A - TOP BACK UPPER,pieces,2,0,0,0,0,2
+set40,MDF535-Reef-Sleeveless-Cover-Up-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,2,C - TOP FRONT UPPER,pieces,3,0,0,0,0,3
+set40,MDF535-Reef-Sleeveless-Cover-Up-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,4,D - TOP FRONT LOWER,pieces,1,0,0,0,0,1
+set40,MDF535-Reef-Sleeveless-Cover-Up-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,5,F - SKIRT FRONT,pieces,1,0,0,0,0,1
+set40,MDF535-Reef-Sleeveless-Cover-Up-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,7,I - SKIRT HEM BAND (BACK),pieces,2,0,0,0,0,2
+set40,MDF535-Reef-Sleeveless-Cover-Up-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,8,J - SKIRT HEM BAND (FRONT),pieces,1,0,0,0,0,1
+set40,MDF539-Lynx-Mini-Shift-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,document,,,pieces,9,0,0,0,0,9
+set40,MDF539-Lynx-Mini-Shift-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,0,E - SHORTS BACK,pieces,3,0,0,0,0,3
+set40,MDF539-Lynx-Mini-Shift-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,1,D - SHORTS FRONT,pieces,1,0,0,0,0,1
+set40,MDF539-Lynx-Mini-Shift-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,2,A - DRESS BACK,pieces,3,0,0,0,0,3
+set40,MDF539-Lynx-Mini-Shift-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,5,B - DRESS FRONT,pieces,2,0,0,0,0,2
+set40,2-MDF350-The-Dyanna-Dress-00-32-A4-PATTERNS,document,,,pieces,41,0,0,0,0,41
+set40,2-MDF350-The-Dyanna-Dress-00-32-A4-PATTERNS,piece,1,A - BACK,pieces,2,0,0,0,0,2
+set40,2-MDF350-The-Dyanna-Dress-00-32-A4-PATTERNS,piece,2,B - FRONT TOP,pieces,3,0,0,0,0,3
+set40,2-MDF350-The-Dyanna-Dress-00-32-A4-PATTERNS,piece,3,C - FRONT BOOM,pieces,7,0,0,0,0,7
+set40,2-MDF350-The-Dyanna-Dress-00-32-A4-PATTERNS,piece,4,G - SLEEVE RUFFLES,pieces,3,0,0,0,0,3
+set40,2-MDF350-The-Dyanna-Dress-00-32-A4-PATTERNS,piece,5,F - FRONT,pieces,8,0,0,0,0,8
+set40,2-MDF350-The-Dyanna-Dress-00-32-A4-PATTERNS,piece,6,H - SIDE GODETS,pieces,4,0,0,0,0,4
+set40,2-MDF350-The-Dyanna-Dress-00-32-A4-PATTERNS,piece,7,I - FRONT GODETS,pieces,4,0,0,0,0,4
+set40,2-MDF350-The-Dyanna-Dress-00-32-A4-PATTERNS,piece,8,J - BACK GODETS,pieces,6,0,0,0,0,6
+set40,2-MDF350-The-Dyanna-Dress-00-32-A4-PATTERNS,piece,9,D - BACK NECKLINE FACING,pieces,4,0,0,0,0,4
+set40,A4-MDF348-The-Cassandra-Kaftan-Dress-Sizes-00-32,document,,,pieces,7,0,0,0,0,7
+set40,A4-MDF348-The-Cassandra-Kaftan-Dress-Sizes-00-32,piece,1,A - SHOULDER,pieces,7,0,0,0,0,7
+set40,MDF346-Kalla-Ensemble-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,document,,,pieces,77,0,0,0,0,77
+set40,MDF346-Kalla-Ensemble-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,0,P - SKIRT WAISTBAND,pieces,4,0,0,0,0,4
+set40,MDF346-Kalla-Ensemble-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,1,E - TOP FRONT,pieces,1,0,0,0,0,1
+set40,MDF346-Kalla-Ensemble-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,2,A - BACK YOKE,pieces,18,0,0,0,0,18
+set40,MDF346-Kalla-Ensemble-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,3,B - BACK TOP,pieces,2,0,0,0,0,2
+set40,MDF346-Kalla-Ensemble-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,7,Q - BELT,pieces,8,0,0,0,0,8
+set40,MDF346-Kalla-Ensemble-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,8,M - SKIRT FRONT CENTER,pieces,2,0,0,0,0,2
+set40,MDF346-Kalla-Ensemble-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,9,K - SKIRT BACK SIDE,pieces,2,0,0,0,0,2
+set40,MDF346-Kalla-Ensemble-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,10,G - ARMHOLE OUTER FACING,pieces,12,0,0,0,0,12
+set40,MDF346-Kalla-Ensemble-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,11,G - ARMHOLE OUTER FACING,pieces,12,0,0,0,0,12
+set40,MDF346-Kalla-Ensemble-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,14,L - SKIRT FRONT SIDE,pieces,4,0,0,0,0,4
+set40,MDF346-Kalla-Ensemble-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,15,O - SKIRT FRONT POCKET,pieces,6,0,0,0,0,6
+set40,MDF346-Kalla-Ensemble-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,17,N - SKIRT FRONT POCKET FLAP,pieces,6,0,0,0,0,6
+set40,MDF387-The-Paris-Mini-Dress-Sizes-00-32-A4-Letter-Patterns,document,,,pieces,39,1,0,0,0,38
+set40,MDF387-The-Paris-Mini-Dress-Sizes-00-32-A4-Letter-Patterns,piece,0,L - SKIRT a,pieces,5,0,0,0,0,5
+set40,MDF387-The-Paris-Mini-Dress-Sizes-00-32-A4-Letter-Patterns,piece,1,M - SKIRT b,pieces,6,1,0,0,0,5
+set40,MDF387-The-Paris-Mini-Dress-Sizes-00-32-A4-Letter-Patterns,piece,3,O - SKIRT LINING,pieces,3,0,0,0,0,3
+set40,MDF387-The-Paris-Mini-Dress-Sizes-00-32-A4-Letter-Patterns,piece,4,D - BACK b,pieces,4,0,0,0,0,4
+set40,MDF387-The-Paris-Mini-Dress-Sizes-00-32-A4-Letter-Patterns,piece,5,N - SKIRT c,pieces,7,0,0,0,0,7
+set40,MDF387-The-Paris-Mini-Dress-Sizes-00-32-A4-Letter-Patterns,piece,6,I - BACK b LINING,pieces,1,0,0,0,0,1
+set40,MDF387-The-Paris-Mini-Dress-Sizes-00-32-A4-Letter-Patterns,piece,7,A - FRONT a,pieces,2,0,0,0,0,2
+set40,MDF387-The-Paris-Mini-Dress-Sizes-00-32-A4-Letter-Patterns,piece,8,C - FRONT c,pieces,2,0,0,0,0,2
+set40,MDF387-The-Paris-Mini-Dress-Sizes-00-32-A4-Letter-Patterns,piece,10,H - FRONT c LINING,pieces,5,0,0,0,0,5
+set40,MDF387-The-Paris-Mini-Dress-Sizes-00-32-A4-Letter-Patterns,piece,11,J - FRONT a LINING,pieces,3,0,0,0,0,3
+set40,MDF387-The-Paris-Mini-Dress-Sizes-00-32-A4-Letter-Patterns,piece,13,J - BACK a LINING,pieces,1,0,0,0,0,1
+set40,MDF521-Reims-Soiree-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,document,,,pieces,49,0,0,0,0,49
+set40,MDF521-Reims-Soiree-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,0,M - LOWER SKIRT,pieces,5,0,0,0,0,5
+set40,MDF521-Reims-Soiree-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,1,M - LOWER SKIRT,pieces,4,0,0,0,0,4
+set40,MDF521-Reims-Soiree-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,2,K - TOP SKIRT,pieces,2,0,0,0,0,2
+set40,MDF521-Reims-Soiree-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,3,L - PETTICOAT LINING,pieces,4,0,0,0,0,4
+set40,MDF521-Reims-Soiree-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,4,A - TOP BACK,pieces,8,0,0,0,0,8
+set40,MDF521-Reims-Soiree-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,5,B - TOP FRONT,pieces,5,0,0,0,0,5
+set40,MDF521-Reims-Soiree-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,6,J - SLEEVES,pieces,9,0,0,0,0,9
+set40,MDF521-Reims-Soiree-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,7,I - COLLAR,pieces,2,0,0,0,0,2
+set40,MDF521-Reims-Soiree-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,8,C - CORSET FRONT CENTER,pieces,1,0,0,0,0,1
+set40,MDF521-Reims-Soiree-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,9,C - CORSET BACK CENTER,pieces,2,0,0,0,0,2
+set40,MDF521-Reims-Soiree-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,10,F - CORSET FRONT SIDE,pieces,2,0,0,0,0,2
+set40,MDF521-Reims-Soiree-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,11,D - CORSET BACK MIDDLE,pieces,4,0,0,0,0,4
+set40,MDF521-Reims-Soiree-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,12,G - CORSET FRONT MIDDLE,pieces,1,0,0,0,0,1
+set40,MDF481-Verona-Sheath-Gown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,document,,,pieces,20,0,0,0,0,20
+set40,MDF481-Verona-Sheath-Gown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,0,E - SKIRT FRONT,pieces,2,0,0,0,0,2
+set40,MDF481-Verona-Sheath-Gown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,1,D - SKIRT BACK,pieces,4,0,0,0,0,4
+set40,MDF481-Verona-Sheath-Gown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,2,B - TOP BACK,pieces,2,0,0,0,0,2
+set40,MDF481-Verona-Sheath-Gown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,3,C - TOP FRONT,pieces,6,0,0,0,0,6
+set40,MDF481-Verona-Sheath-Gown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,5,F - SASH,pieces,5,0,0,0,0,5
+set40,MDF481-Verona-Sheath-Gown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,6,A - TOP BACK CENTER,pieces,1,0,0,0,0,1
+set40,MFD393-The-Emma-Double-Tiered-Dress-Sizes-00-32-A4-Letter-Patterns,document,,,pieces,34,0,0,0,0,34
+set40,MFD393-The-Emma-Double-Tiered-Dress-Sizes-00-32-A4-Letter-Patterns,piece,0,H - SKIRT TIER 1 (UNDER TIER) Cut Here,pieces,7,0,0,0,0,7
+set40,MFD393-The-Emma-Double-Tiered-Dress-Sizes-00-32-A4-Letter-Patterns,piece,1,I - SKIRT TIER 2 (OVER TIER) Cut Here,pieces,11,0,0,0,0,11
+set40,MFD393-The-Emma-Double-Tiered-Dress-Sizes-00-32-A4-Letter-Patterns,piece,2,G - SKIRT YOKE BACK,pieces,6,0,0,0,0,6
+set40,MFD393-The-Emma-Double-Tiered-Dress-Sizes-00-32-A4-Letter-Patterns,piece,3,F - SKIRT YOKE FRONT,pieces,1,0,0,0,0,1
+set40,MFD393-The-Emma-Double-Tiered-Dress-Sizes-00-32-A4-Letter-Patterns,piece,4,E - SHOULDER STRAPS,pieces,2,0,0,0,0,2
+set40,MFD393-The-Emma-Double-Tiered-Dress-Sizes-00-32-A4-Letter-Patterns,piece,6,A - TOP FRONT,pieces,5,0,0,0,0,5
+set40,MFD393-The-Emma-Double-Tiered-Dress-Sizes-00-32-A4-Letter-Patterns,piece,7,B - TOP FRONT LINING,pieces,2,0,0,0,0,2
+set40,MDF373-The-Olympia-Tennis-Dress-Sizes-00-32-A4-Letter-Patterns,document,,,pieces,28,0,0,0,0,28
+set40,MDF373-The-Olympia-Tennis-Dress-Sizes-00-32-A4-Letter-Patterns,piece,0,K - OVERLAY SKIRT,pieces,5,0,0,0,0,5
+set40,MDF373-The-Olympia-Tennis-Dress-Sizes-00-32-A4-Letter-Patterns,piece,1,I - SHORTS BACK,pieces,3,0,0,0,0,3
+set40,MDF373-The-Olympia-Tennis-Dress-Sizes-00-32-A4-Letter-Patterns,piece,3,J - UNDER SKIRT,pieces,2,0,0,0,0,2
+set40,MDF373-The-Olympia-Tennis-Dress-Sizes-00-32-A4-Letter-Patterns,piece,4,H - SHORTS FRONT,pieces,1,0,0,0,0,1
+set40,MDF373-The-Olympia-Tennis-Dress-Sizes-00-32-A4-Letter-Patterns,piece,5,B - FRONT UPPER SIDE,pieces,4,0,0,0,0,4
+set40,MDF373-The-Olympia-Tennis-Dress-Sizes-00-32-A4-Letter-Patterns,piece,7,E - BACK WAIST PANEL,pieces,1,0,0,0,0,1
+set40,MDF373-The-Olympia-Tennis-Dress-Sizes-00-32-A4-Letter-Patterns,piece,8,D - BACK UPPER,pieces,2,0,0,0,0,2
+set40,MDF373-The-Olympia-Tennis-Dress-Sizes-00-32-A4-Letter-Patterns,piece,9,G - COLLAR,pieces,7,0,0,0,0,7
+set40,MDF373-The-Olympia-Tennis-Dress-Sizes-00-32-A4-Letter-Patterns,piece,11,A - FRONT UPPER CENTER,pieces,3,0,0,0,0,3
+set40,MDF426-Ophelia-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,document,,,pieces,35,0,0,0,0,35
+set40,MDF426-Ophelia-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,piece,0,H - TRAIN A,pieces,3,0,0,0,0,3
+set40,MDF426-Ophelia-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,piece,1,I - TRAIN B,pieces,2,0,0,0,0,2
+set40,MDF426-Ophelia-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,piece,3,F - SKIRT BACK,pieces,5,0,0,0,0,5
+set40,MDF426-Ophelia-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,piece,4,D - SLEEVES,pieces,2,0,0,0,0,2
+set40,MDF426-Ophelia-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,piece,5,C - TOP BACK RIGHT,pieces,8,0,0,0,0,8
+set40,MDF426-Ophelia-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,piece,6,G - SKIRT FRONT,pieces,3,0,0,0,0,3
+set40,MDF426-Ophelia-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,piece,7,A - TOP FRONT,pieces,4,0,0,0,0,4
+set40,MDF426-Ophelia-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,piece,8,B - TOP BACK LEFT,pieces,8,0,0,0,0,8
+set40,MDF408-The-Axel-Shirt-Dress-Sizes-00-32-A4-Letter-Patterns,document,,,pieces,15,0,0,0,0,15
+set40,MDF408-The-Axel-Shirt-Dress-Sizes-00-32-A4-Letter-Patterns,piece,0,A - FRONT,pieces,2,0,0,0,0,2
+set40,MDF408-The-Axel-Shirt-Dress-Sizes-00-32-A4-Letter-Patterns,piece,1,C- BACK,pieces,3,0,0,0,0,3
+set40,MDF408-The-Axel-Shirt-Dress-Sizes-00-32-A4-Letter-Patterns,piece,2,D - SLEEVES,pieces,2,0,0,0,0,2
+set40,MDF408-The-Axel-Shirt-Dress-Sizes-00-32-A4-Letter-Patterns,piece,3,B- BACK YOKE,pieces,3,0,0,0,0,3
+set40,MDF408-The-Axel-Shirt-Dress-Sizes-00-32-A4-Letter-Patterns,piece,4,H - BELT,pieces,2,0,0,0,0,2
+set40,MDF408-The-Axel-Shirt-Dress-Sizes-00-32-A4-Letter-Patterns,piece,6,F - COLLAR,pieces,3,0,0,0,0,3
+set40,MDF477-Venice-V-Waist-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,document,,,pieces,43,0,0,0,0,43
+set40,MDF477-Venice-V-Waist-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,0,I - SKIRT,pieces,2,0,0,0,0,2
+set40,MDF477-Venice-V-Waist-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,1,H - SLEEVES,pieces,4,0,0,0,0,4
+set40,MDF477-Venice-V-Waist-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,2,G - TOP FRONT UPPER,pieces,6,0,0,0,0,6
+set40,MDF477-Venice-V-Waist-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,3,J - POCKETS,pieces,18,0,0,0,0,18
+set40,MDF477-Venice-V-Waist-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,4,B - TOP BACK MIDDLE,pieces,2,0,0,0,0,2
+set40,MDF477-Venice-V-Waist-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,5,A - TOP BACK CENTER,pieces,3,0,0,0,0,3
+set40,MDF477-Venice-V-Waist-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,6,E - TOP FRONT MIDDLE,pieces,2,0,0,0,0,2
+set40,MDF477-Venice-V-Waist-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,7,C - TOP BACK SIDE,pieces,3,0,0,0,0,3
+set40,MDF477-Venice-V-Waist-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,8,D - TOP FRONT SIDE,pieces,3,0,0,0,0,3
+set40,MDF433-Taos-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics-1,document,,,pieces,22,0,0,0,0,22
+set40,MDF433-Taos-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics-1,piece,0,H - SKIRT LINING,pieces,4,0,0,0,0,4
+set40,MDF433-Taos-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics-1,piece,2,A - TOP FRONT,pieces,5,0,0,0,0,5
+set40,MDF433-Taos-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics-1,piece,3,F - SLEEVES LOWER,pieces,1,0,0,0,0,1
+set40,MDF433-Taos-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics-1,piece,4,E - SLEEVES UPPER,pieces,3,0,0,0,0,3
+set40,MDF433-Taos-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics-1,piece,5,B - TOP BACK,pieces,4,0,0,0,0,4
+set40,MDF433-Taos-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics-1,piece,6,G - SKIRT,pieces,4,0,0,0,0,4
+set40,MDF433-Taos-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics-1,piece,7,C - COLLAR,pieces,1,0,0,0,0,1
+set40,MDF476-Fawn-Mini-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,document,,,pieces,10,0,0,0,0,10
+set40,MDF476-Fawn-Mini-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,3,C - FRONT SIDE,pieces,2,0,0,0,0,2
+set40,MDF476-Fawn-Mini-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,4,E - POCKET FLAP,pieces,3,0,0,0,0,3
+set40,MDF476-Fawn-Mini-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,5,B - BACK SIDE,pieces,1,0,0,0,0,1
+set40,MDF476-Fawn-Mini-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,6,F - POCKET WELT,pieces,4,0,0,0,0,4
+set40,MDF411-The-Ambrosia-Cocktail-Dress-Sizes-00-32-A4-Letter-Patterns,document,,,pieces,18,0,0,0,0,18
+set40,MDF411-The-Ambrosia-Cocktail-Dress-Sizes-00-32-A4-Letter-Patterns,piece,0,E - BACK SKIRT,pieces,1,0,0,0,0,1
+set40,MDF411-The-Ambrosia-Cocktail-Dress-Sizes-00-32-A4-Letter-Patterns,piece,1,F - FRONT SKIRT,pieces,2,0,0,0,0,2
+set40,MDF411-The-Ambrosia-Cocktail-Dress-Sizes-00-32-A4-Letter-Patterns,piece,2,D - SLEEVES,pieces,2,0,0,0,0,2
+set40,MDF411-The-Ambrosia-Cocktail-Dress-Sizes-00-32-A4-Letter-Patterns,piece,3,A - BACK TOP,pieces,1,0,0,0,0,1
+set40,MDF411-The-Ambrosia-Cocktail-Dress-Sizes-00-32-A4-Letter-Patterns,piece,4,C - CUPS,pieces,4,0,0,0,0,4
+set40,MDF411-The-Ambrosia-Cocktail-Dress-Sizes-00-32-A4-Letter-Patterns,piece,5,B - FRONT TOP,pieces,8,0,0,0,0,8
+set40,MDF404-The-Harper-Plisse-Dress-Sizes-00-32-A4-Letter-Patterns,document,,,pieces,21,0,1,0,0,20
+set40,MDF404-The-Harper-Plisse-Dress-Sizes-00-32-A4-Letter-Patterns,piece,0,E - SKIRT,pieces,4,0,0,0,0,4
+set40,MDF404-The-Harper-Plisse-Dress-Sizes-00-32-A4-Letter-Patterns,piece,1,A - TOP FRONT,pieces,6,0,0,0,0,6
+set40,MDF404-The-Harper-Plisse-Dress-Sizes-00-32-A4-Letter-Patterns,piece,2,B - TOP BACK,pieces,2,0,0,0,0,2
+set40,MDF404-The-Harper-Plisse-Dress-Sizes-00-32-A4-Letter-Patterns,piece,3,D - CUFFS,pieces,6,0,1,0,0,5
+set40,MDF404-The-Harper-Plisse-Dress-Sizes-00-32-A4-Letter-Patterns,piece,4,C - SLEEVES,pieces,3,0,0,0,0,3
+set40,MDF364-The-Memoir-Dress-View-B-Sizes-00-32-A4-Letter-PATTERNS,document,,,pieces,54,0,0,0,0,54
+set40,MDF364-The-Memoir-Dress-View-B-Sizes-00-32-A4-Letter-PATTERNS,piece,0,H - SKIRT BACK,pieces,1,0,0,0,0,1
+set40,MDF364-The-Memoir-Dress-View-B-Sizes-00-32-A4-Letter-PATTERNS,piece,1,A - TOP,pieces,2,0,0,0,0,2
+set40,MDF364-The-Memoir-Dress-View-B-Sizes-00-32-A4-Letter-PATTERNS,piece,2,B - TOP,pieces,2,0,0,0,0,2
+set40,MDF364-The-Memoir-Dress-View-B-Sizes-00-32-A4-Letter-PATTERNS,piece,3,C - TOP,pieces,3,0,0,0,0,3
+set40,MDF364-The-Memoir-Dress-View-B-Sizes-00-32-A4-Letter-PATTERNS,piece,4,I - SKIRT FRONT,pieces,18,0,0,0,0,18
+set40,MDF364-The-Memoir-Dress-View-B-Sizes-00-32-A4-Letter-PATTERNS,piece,5,K - SKIRT,pieces,18,0,0,0,0,18
+set40,MDF364-The-Memoir-Dress-View-B-Sizes-00-32-A4-Letter-PATTERNS,piece,6,J - SKIRT,pieces,1,0,0,0,0,1
+set40,MDF364-The-Memoir-Dress-View-B-Sizes-00-32-A4-Letter-PATTERNS,piece,7,D - TOP,pieces,2,0,0,0,0,2
+set40,MDF364-The-Memoir-Dress-View-B-Sizes-00-32-A4-Letter-PATTERNS,piece,8,F - TOP,pieces,1,0,0,0,0,1
+set40,MDF364-The-Memoir-Dress-View-B-Sizes-00-32-A4-Letter-PATTERNS,piece,9,G - TOP,pieces,2,0,0,0,0,2
+set40,MDF364-The-Memoir-Dress-View-B-Sizes-00-32-A4-Letter-PATTERNS,piece,10,L - SHOULDER,pieces,2,0,0,0,0,2
+set40,MDF364-The-Memoir-Dress-View-B-Sizes-00-32-A4-Letter-PATTERNS,piece,11,E - TOP,pieces,2,0,0,0,0,2
+set40,MDF438-Jolie-Sweep-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,document,,,pieces,17,0,0,0,0,17
+set40,MDF438-Jolie-Sweep-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,piece,0,B - BACK,pieces,1,0,0,0,0,1
+set40,MDF438-Jolie-Sweep-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,piece,1,C - RUFFLE,pieces,12,0,0,0,0,12
+set40,MDF438-Jolie-Sweep-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,piece,2,A - FRONT,pieces,3,0,0,0,0,3
+set40,MDF438-Jolie-Sweep-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,piece,3,D - SHOULDER STRAPS,pieces,1,0,0,0,0,1
+holdout40,MDF543-Matrix-Shawl-Collar-Ensemble-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,document,,,pieces,18,0,0,0,0,18
+holdout40,MDF543-Matrix-Shawl-Collar-Ensemble-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,0,F - PANTS WAISTBAND,pieces,5,0,0,0,0,5
+holdout40,MDF543-Matrix-Shawl-Collar-Ensemble-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,1,A - TOP BACK,pieces,3,0,0,0,0,3
+holdout40,MDF543-Matrix-Shawl-Collar-Ensemble-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,2,B - TOP FRONT,pieces,1,0,0,0,0,1
+holdout40,MDF543-Matrix-Shawl-Collar-Ensemble-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,3,E - PANTS BACK,pieces,3,0,0,0,0,3
+holdout40,MDF543-Matrix-Shawl-Collar-Ensemble-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,4,D - PANTS FRONT,pieces,3,0,0,0,0,3
+holdout40,MDF543-Matrix-Shawl-Collar-Ensemble-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,5,H - PANTS POCKETS (B),pieces,1,0,0,0,0,1
+holdout40,MDF543-Matrix-Shawl-Collar-Ensemble-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,6,G - PANTS POCKETS (A),pieces,2,0,0,0,0,2
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,document,,,pieces,61,0,0,0,0,61
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,piece,0,C - BACK UPPER,pieces,4,0,0,0,0,4
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,piece,1,A - FRONT UPPER,pieces,4,0,0,0,0,4
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,piece,2,D - BACK LOWER,pieces,3,0,0,0,0,3
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,piece,3,G - RIGHT SLEEVE UPPER,pieces,3,0,0,0,0,3
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,piece,4,E - LEFT SLEEVE UPPER,pieces,2,0,0,0,0,2
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,piece,5,K - SHORTS FRONT,pieces,10,0,0,0,0,10
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,piece,6,H - RIGHT SLEEVE LOWER,pieces,6,0,0,0,0,6
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,piece,7,F - LEFT SLEEVE LOWER,pieces,8,0,0,0,0,8
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,piece,8,L - SHORTS BACK,pieces,6,0,0,0,0,6
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,piece,9,I - HOOD,pieces,3,0,0,0,0,3
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,piece,10,M - SHORTS WAISTBAND,pieces,7,0,0,0,0,7
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,piece,12,B - FRONT LOWER,pieces,5,0,0,0,0,5
+holdout40,MoodFabrics.com-MDF081-Helios-Pattern,document,,,meaning,0,0,0,0,0,0
+holdout40,MDF066-The-Ursinia-Dress,document,,,meaning,0,0,0,0,0,0
+holdout40,MDF196-The-Terra-Dress-Patterns,document,,,apply,0,0,0,0,0,0
+holdout40,MoodFabrics.com-MDF073-Xeranthemum-Pattern,document,,,pieces,16,0,0,0,0,16
+holdout40,MoodFabrics.com-MDF073-Xeranthemum-Pattern,piece,0,2,pieces,8,0,0,0,0,8
+holdout40,MoodFabrics.com-MDF073-Xeranthemum-Pattern,piece,1,73,pieces,8,0,0,0,0,8
+holdout40,MoodFabrics.com-MDF190-Heather-Pattern,document,,,meaning,0,0,0,0,0,0
+holdout40,MoodFabrics.com-MDF209-Water-Lily-Pattern-1,document,,,meaning,0,0,0,0,0,0
+holdout40,MoodFabrics.com-MDF222-Elderberry-Pattern-1-1,document,,,check,0,0,0,0,0,0
+holdout40,MoodFabrics.com-MDF330-Luthien-Letter-A4,document,,,sheet,0,0,0,0,0,0
+holdout40,MoodFabrics.com-MDF332-Tulip-Pattern-Letter-A4-Tiled-1,document,,,check,0,0,0,0,0,0
+holdout40,MoodFabrics.com-MDF172-Palm-Pattern-1,document,,,meaning,0,0,0,0,0,0
+holdout40,MoodFabrics.com-MDF335-Robin-Letter-A4-Tiled,document,,,sheet,0,0,0,0,0,0
+holdout40,MoodFabrics.com-MDF151-Mother-Daughter-Cypress-Pattern-v1.1,document,,,meaning,0,0,0,0,0,0
+holdout40,MoodFabrics.com-MDF155-Daylily-Pattern,document,,,sheet,0,0,0,0,0,0
+holdout40,MoodFabrics.com-MDF200-Sherwood-Pattern-1,document,,,apply,0,0,0,0,0,0
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,document,,,pieces,39,0,0,0,0,39
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,piece,0,C - FRONT FACING,pieces,2,0,0,0,0,2
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,piece,1,D - FRONT,pieces,1,0,0,0,0,1
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,piece,2,E - BACK,pieces,1,0,0,0,0,1
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,piece,3,H - POCKET LINING,pieces,16,0,0,0,0,16
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,piece,4,F - SLEEVE,pieces,1,0,0,0,0,1
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,piece,5,G - CUFF,pieces,2,0,0,0,0,2
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,piece,7,I - POCKET WELT,pieces,16,0,0,0,0,16
+holdout40,MDF436-Sarasota-Set-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,document,,,pieces,10,0,0,0,0,10
+holdout40,MDF436-Sarasota-Set-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,0,A - TOP FRONT,pieces,3,0,0,0,0,3
+holdout40,MDF436-Sarasota-Set-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,1,B - TOP BACK,pieces,1,0,0,0,0,1
+holdout40,MDF436-Sarasota-Set-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,2,D - PANTS BACK,pieces,2,0,0,0,0,2
+holdout40,MDF436-Sarasota-Set-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,3,C - PANTS FRONT,pieces,3,0,0,0,0,3
+holdout40,MDF436-Sarasota-Set-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,4,E - PANTS WAISTBAND,pieces,1,0,0,0,0,1
+holdout40,MoodFabrics.com-MDF068_Willow_Pattern-v2,document,,,apply,0,0,0,0,0,0
+holdout40,MDF383-The-Cher-Jacket-Sizes-00-32-A4-Letter-Patterns,document,,,pieces,69,0,1,0,0,68
+holdout40,MDF383-The-Cher-Jacket-Sizes-00-32-A4-Letter-Patterns,piece,0,A - BACK YOKE,pieces,8,0,0,0,0,8
+holdout40,MDF383-The-Cher-Jacket-Sizes-00-32-A4-Letter-Patterns,piece,1,B - BACK CENTER,pieces,1,0,0,0,0,1
+holdout40,MDF383-The-Cher-Jacket-Sizes-00-32-A4-Letter-Patterns,piece,3,L - INSEAM POCKETS,pieces,6,0,0,0,0,6
+holdout40,MDF383-The-Cher-Jacket-Sizes-00-32-A4-Letter-Patterns,piece,4,E - FRONT YOKE,pieces,4,0,0,0,0,4
+holdout40,MDF383-The-Cher-Jacket-Sizes-00-32-A4-Letter-Patterns,piece,5,C - BACK SIDE,pieces,4,0,0,0,0,4
+holdout40,MDF383-The-Cher-Jacket-Sizes-00-32-A4-Letter-Patterns,piece,6,D - BACK BELT,pieces,3,0,0,0,0,3
+holdout40,MDF383-The-Cher-Jacket-Sizes-00-32-A4-Letter-Patterns,piece,7,M - WAISTBAND,pieces,1,0,0,0,0,1
+holdout40,MDF383-The-Cher-Jacket-Sizes-00-32-A4-Letter-Patterns,piece,8,P - CUFFS,pieces,7,0,1,0,0,6
+holdout40,MDF383-The-Cher-Jacket-Sizes-00-32-A4-Letter-Patterns,piece,9,G - FRONT MIDDLE,pieces,7,0,0,0,0,7
+holdout40,MDF383-The-Cher-Jacket-Sizes-00-32-A4-Letter-Patterns,piece,10,N - SLEEVE BACK,pieces,7,0,0,0,0,7
+holdout40,MDF383-The-Cher-Jacket-Sizes-00-32-A4-Letter-Patterns,piece,11,F - FRONT SIDE,pieces,4,0,0,0,0,4
+holdout40,MDF383-The-Cher-Jacket-Sizes-00-32-A4-Letter-Patterns,piece,12,O - SLEEVE FRONT,pieces,6,0,0,0,0,6
+holdout40,MDF383-The-Cher-Jacket-Sizes-00-32-A4-Letter-Patterns,piece,13,I - COLLAR,pieces,3,0,0,0,0,3
+holdout40,MDF383-The-Cher-Jacket-Sizes-00-32-A4-Letter-Patterns,piece,14,K - PATCH POCKETS FLAP,pieces,4,0,0,0,0,4
+holdout40,MDF383-The-Cher-Jacket-Sizes-00-32-A4-Letter-Patterns,piece,15,H - FRONT CENTER,pieces,4,0,0,0,0,4
+holdout40,MoodFabrics.com-MDF035-Kerria-Pattern,document,,,check,0,0,0,0,0,0
+holdout40,MoodFabrics.com-MDF084-Blackthorn-pattern.,document,,,meaning,0,0,0,0,0,0
+holdout40,MoodFabrics.com-MDF238-Lita-Pattern,document,,,pieces,10,1,0,0,0,9
+holdout40,MoodFabrics.com-MDF238-Lita-Pattern,piece,5,,pieces,1,0,0,0,0,1
+holdout40,MoodFabrics.com-MDF238-Lita-Pattern,piece,7,,pieces,1,1,0,0,0,0
+holdout40,MoodFabrics.com-MDF238-Lita-Pattern,piece,10,,pieces,8,0,0,0,0,8
+holdout40,MoodFabrics.com-MDF280-Savannah-Pattern,document,,,check,0,0,0,0,0,0
+holdout40,MDF400-The-Penelope-Pants-Sizs-00-32-A4-Letter-Patterns,document,,,pieces,24,0,0,0,0,24
+holdout40,MDF400-The-Penelope-Pants-Sizs-00-32-A4-Letter-Patterns,piece,0,A - FRONT,pieces,7,0,0,0,0,7
+holdout40,MDF400-The-Penelope-Pants-Sizs-00-32-A4-Letter-Patterns,piece,1,B - BACK,pieces,5,0,0,0,0,5
+holdout40,MDF400-The-Penelope-Pants-Sizs-00-32-A4-Letter-Patterns,piece,2,C - WAISTBAND,pieces,12,0,0,0,0,12
+holdout40,MDF549-Sedona-Tailored-Cargo-Shorts-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,document,,,pieces,26,0,0,0,1,25
+holdout40,MDF549-Sedona-Tailored-Cargo-Shorts-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,0,C - WAISTBAND,pieces,1,0,0,0,0,1
+holdout40,MDF549-Sedona-Tailored-Cargo-Shorts-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,1,B - BACK,pieces,3,0,0,0,0,3
+holdout40,MDF549-Sedona-Tailored-Cargo-Shorts-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,2,A - FRONT,pieces,4,0,0,0,0,4
+holdout40,MDF549-Sedona-Tailored-Cargo-Shorts-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,7,H - CARGO POCKET,pieces,9,0,0,0,1,8
+holdout40,MDF549-Sedona-Tailored-Cargo-Shorts-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,8,H - CARGO POCKET,pieces,1,0,0,0,0,1
+holdout40,MDF549-Sedona-Tailored-Cargo-Shorts-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,9,G - SIDE POCKETS (B) FACING,pieces,3,0,0,0,0,3
+holdout40,MDF549-Sedona-Tailored-Cargo-Shorts-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,13,F - SIDE POCKETS (A) FACING,pieces,1,0,0,0,0,1
+holdout40,MDF549-Sedona-Tailored-Cargo-Shorts-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,14,L - BACK POCKET WELT,pieces,3,0,0,0,0,3
+holdout40,MDF549-Sedona-Tailored-Cargo-Shorts-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,15,I - CARGO POCKET FLAP,pieces,1,0,0,0,0,1
+holdout40,MoodFabrics.com-MDF089-Maple-Pattern,document,,,apply,0,0,0,0,0,0
+holdout40,MoodFabrics.com-MDF210-Watsonia-Pattern-2,document,,,sizes,0,0,0,0,0,0
+holdout40,A4-MDF354-The-Georgina-Top-00-32,document,,,pieces,31,0,0,0,0,31
+holdout40,A4-MDF354-The-Georgina-Top-00-32,piece,0,A - BACK CENTER,pieces,3,0,0,0,0,3
+holdout40,A4-MDF354-The-Georgina-Top-00-32,piece,1,B - BACK SIDE,pieces,2,0,0,0,0,2
+holdout40,A4-MDF354-The-Georgina-Top-00-32,piece,2,C - FRONT SIDE,pieces,5,0,0,0,0,5
+holdout40,A4-MDF354-The-Georgina-Top-00-32,piece,3,E - SLEEVES,pieces,2,0,0,0,0,2
+holdout40,A4-MDF354-The-Georgina-Top-00-32,piece,4,D - FRONT CENTER,pieces,18,0,0,0,0,18
+holdout40,A4-MDF354-The-Georgina-Top-00-32,piece,5,F - PEPLUM,pieces,1,0,0,0,0,1
+holdout40,MDF492-Altena-Blouse-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,document,,,pieces,24,0,1,0,0,23
+holdout40,MDF492-Altena-Blouse-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,0,A - FRONT,pieces,3,0,0,0,0,3
+holdout40,MDF492-Altena-Blouse-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,1,B - BACK,pieces,6,0,0,0,0,6
+holdout40,MDF492-Altena-Blouse-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,2,C - SLEEVES,pieces,1,0,0,0,0,1
+holdout40,MDF492-Altena-Blouse-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,3,D - COLLAR,pieces,14,0,1,0,0,13
+holdout40,MDF501-Spokane-Hoodie-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,document,,,pieces,3,0,0,0,0,3
+holdout40,MDF501-Spokane-Hoodie-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,2,B - FRONT,pieces,2,0,0,0,0,2
+holdout40,MDF501-Spokane-Hoodie-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,5,A - BACK,pieces,1,0,0,0,0,1
+holdout40,MDF502-Harrington-Hoodie-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,document,,,pieces,3,0,0,0,0,3
+holdout40,MDF502-Harrington-Hoodie-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,1,A - BACK,pieces,1,0,0,0,0,1
+holdout40,MDF502-Harrington-Hoodie-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,4,G - WAISTBAND,pieces,1,0,0,0,0,1
+holdout40,MDF502-Harrington-Hoodie-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,6,E - POCKETS,pieces,1,0,0,0,0,1
+holdout40,MDF522-Merano-Balloon-Sleeve-Blouse-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,document,,,pieces,6,0,0,0,0,6
+holdout40,MDF522-Merano-Balloon-Sleeve-Blouse-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,0,B - FRONT,pieces,3,0,0,0,0,3
+holdout40,MDF522-Merano-Balloon-Sleeve-Blouse-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,1,A - BACK,pieces,1,0,0,0,0,1
+holdout40,MDF522-Merano-Balloon-Sleeve-Blouse-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,2,D - FRONT FACING,pieces,1,0,0,0,0,1
+holdout40,MDF522-Merano-Balloon-Sleeve-Blouse-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,piece,3,C - BACK FACING,pieces,1,0,0,0,0,1
+holdout40,MoodFabrics.com-MDF160-Elaeis-Pattern,document,,,meaning,0,0,0,0,0,0
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,document,,,pieces,24,16,0,0,0,8
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,piece,2,,pieces,8,8,0,0,0,0
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,piece,3,,pieces,8,8,0,0,0,0
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,piece,5,,pieces,8,0,0,0,0,8
+holdout40,MoodFabrics.com-MDF338-Colleen-Letter-A4-Tiled,document,,,apply,0,0,0,0,0,0
+holdout40,MDF435-Biarritz-Skort-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,document,,,pieces,6,0,0,0,0,6
+holdout40,MDF435-Biarritz-Skort-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,2,B - FRONT CENTER,pieces,4,0,0,0,0,4
+holdout40,MDF435-Biarritz-Skort-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,3,C - BACK,pieces,1,0,0,0,0,1
+holdout40,MDF435-Biarritz-Skort-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,5,F - BACK FACING,pieces,1,0,0,0,0,1
+holdout40,MoodFabrics.com-MDF030-Iris-Pattern,document,,,meaning,0,0,0,0,0,0
+holdout40,MoodFabrics.com-MDF140-Viola-Pattern,document,,,apply,0,0,0,0,0,0
+holdout40,MDF456-Anne-Waistcoat-Ensemble-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,document,,,pieces,16,0,0,0,0,16
+holdout40,MDF456-Anne-Waistcoat-Ensemble-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,3,H - PANTS FRONT,pieces,1,0,0,0,0,1
+holdout40,MDF456-Anne-Waistcoat-Ensemble-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,4,I - PANTS BACK,pieces,3,0,0,0,0,3
+holdout40,MDF456-Anne-Waistcoat-Ensemble-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,7,L - PANTS,pieces,1,0,0,0,0,1
+holdout40,MDF456-Anne-Waistcoat-Ensemble-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,8,A - WAISTCOAT,pieces,3,0,0,0,0,3
+holdout40,MDF456-Anne-Waistcoat-Ensemble-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,10,C - WAISTCOAT,pieces,1,0,0,0,0,1
+holdout40,MDF456-Anne-Waistcoat-Ensemble-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,11,E - WAISTCOAT,pieces,2,0,0,0,0,2
+holdout40,MDF456-Anne-Waistcoat-Ensemble-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,12,N - PANTS,pieces,2,0,0,0,0,2
+holdout40,MDF456-Anne-Waistcoat-Ensemble-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,13,B - WAISTCOAT,pieces,1,0,0,0,0,1
+holdout40,MDF456-Anne-Waistcoat-Ensemble-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,piece,14,O - PANTS,pieces,2,0,0,0,0,2

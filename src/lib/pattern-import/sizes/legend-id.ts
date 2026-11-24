@@ -50,6 +50,7 @@ export function legendIdentity(
   hits: LegendHit[],
   key: string[],
 ): LegendIdentity | null {
+  const dirFree = typeof process !== 'undefined' && !!process.env?.MOTIF_DIR_FREE;
   const idxOf = new Map(key.map((l, k) => [l, k]));
   const samples = hits.filter((h) => idxOf.has(h.label) && h.chain < sigs.length);
   if (samples.length < 3) return null;
@@ -125,12 +126,30 @@ export function legendIdentity(
     return false;
   };
 
-  const scaled = new Map(samples.map((h) => [h.chain, scaledVecs(sigs[h.chain])]));
+  // MOTIF_DIR_FREE: a sample is read in both walks and the better one counts — for EVERY key, so
+  // the margin between keys compares like with like (the sheet's line and the key's sample may be
+  // walked in opposite directions; the rhythm vector is not symmetric under reversal)
+  const walks = (s: Signature): Signature[] => (dirFree && s.rev ? [s, s.rev] : [s]);
+  const scaled = new Map(samples.map((h) => [h.chain, walks(sigs[h.chain]).map(scaledVecs)]));
+  /** Best shape cosine over the sample's walks, and which walk gave it (0 = as linked, 1 = reversed). */
+  const shapeOf = (h: LegendHit, v: Float64Array): [number, number] => {
+    const ws = scaled.get(h.chain)!;
+    let best = -Infinity;
+    let wi = 0;
+    ws.forEach((w, j) => {
+      const c = shapeCosineBest(w, v);
+      if (c > best + 1e-12) {
+        best = c;
+        wi = j;
+      }
+    });
+    return [best, wi];
+  };
   const score = (h: LegendHit, g: G) => {
     const sd = declOf(h.chain);
     if (sd && g.dash) return sameDashShape(g.dash, sd) ? 1 : 0;
     const sv = sigs[h.chain].vec;
-    const c = shapeCosineBest(scaled.get(h.chain)!, g.vec!) + 0.02 * sameStroke(sv, g.vec!);
+    const c = shapeOf(h, g.vec!)[0] + 0.02 * sameStroke(sv, g.vec!);
     // a declared sample has no beads to compare (viola's 46 is a 0/0.89 dash with round caps)
     return !sd && g.decor && decorClash(sigs[h.chain].decorPer10, g.decor) ? c / 2 : c;
   };
@@ -169,10 +188,14 @@ export function legendIdentity(
   for (const [a, sa] of keySig)
     for (const [b, sb] of keySig) {
       if (a >= b) continue;
-      const c = Math.max(
-        shapeCosineBest(scaledVecs(sa), sb.vec),
-        shapeCosineBest(scaledVecs(sb), sa.vec),
-      );
+      let c = -Infinity;
+      for (const wa of walks(sa))
+        for (const wb of walks(sb))
+          c = Math.max(
+            c,
+            shapeCosineBest(scaledVecs(wa), wb.vec),
+            shapeCosineBest(scaledVecs(wb), wa.vec),
+          );
       if (c >= LEGEND_ID.minScore) {
         alike[a].push(b);
         alike[b].push(a);
@@ -221,6 +244,38 @@ export function legendIdentity(
     if (agree.length === 1) return { ...d, k: agree[0][0], s: agree[0][1], ok: true };
     return { ...d, ok: false };
   };
+  // debug (F3_LEGEND): the reversed walk's own score when it differs, and per group how its
+  // members' winning walks split against the group's best key (a ~50/50 split = suspicious)
+  const walkNote = (h: LegendHit, v: Float64Array) => {
+    if (!dirFree || scaled.get(h.chain)!.length < 2 || declOf(h.chain)) return '';
+    const ws = scaled.get(h.chain)!;
+    const f = shapeCosineBest(ws[0], v);
+    const r = shapeCosineBest(ws[1], v);
+    return Math.abs(f - r) >= 0.005 ? `(f${f.toFixed(3)}/r${r.toFixed(3)})` : '';
+  };
+  const walkSplit = (g: G) => {
+    const d = decide((si) => score(samples[si], g));
+    if (d.k < 0) return '-';
+    const hs = samples.filter((h) => idxOf.get(h.label) === d.k);
+    let fw = 0;
+    let rv = 0;
+    for (const i of g.members) {
+      if (!sigs[i].reliable) continue;
+      let best = -Infinity;
+      let wi = 0;
+      for (const h of hs) {
+        const [c, w] = shapeOf(h, sigs[i].vec);
+        if (c > best) {
+          best = c;
+          wi = w;
+        }
+      }
+      if (wi) rv += chains[i].lengthMm;
+      else fw += chains[i].lengthMm;
+    }
+    const t = fw + rv;
+    return t ? `${key[d.k]}:f${((100 * fw) / t).toFixed(0)}%` : '-';
+  };
   const per2 = key.map(() => ({ len: 0, second: 0 }));
   const tally = new Map<string, { idx: number; group: string; lengthMm: number; score: number }>();
   for (const g of groups) {
@@ -228,7 +283,7 @@ export function legendIdentity(
     const gd = decide((si) => score(samples[si], g));
     if (typeof process !== 'undefined' && process.env?.F3_LEGEND && g.len > 500)
       console.log(
-        `legend-id ${g.name} ${(g.len / 1000).toFixed(1)}m: ${samples.map((h) => `${h.label}:c${h.chain}=${score(h, g).toFixed(2)}`).join(' ')}`,
+        `legend-id ${g.name} ${(g.len / 1000).toFixed(1)}m: ${samples.map((h) => `${h.label}:c${h.chain}=${score(h, g).toFixed(2)}${walkNote(h, g.vec!)}`).join(' ')}${dirFree ? ` walks=${walkSplit(g)}` : ''}`,
       );
     if (g.dash) {
       // a declared shape is one size whatever its length

@@ -20,6 +20,7 @@ import type {
 } from 'lib/pattern-import/types';
 
 import { bboxOf, dist, SegGrid, segIntersect, segNearest } from './geom';
+import type { AmbiguousLanding } from './ambiguous-landing';
 import { chainLook, onPen, rankGuard, rankLooks, type RankGuard } from './identity';
 import type { WallItem } from './snap';
 import { endTicks, type EndTick } from './ticks';
@@ -556,7 +557,9 @@ export function lonePortions(set: ChainSet, m: WallModel, sideMm = 20): WallItem
         // the foot within 3 mm (along the line) of its end counts as the end: chains often finish
         // with a short hook (a zigzag's last tooth) that would otherwise look "beside"
         const fromEnd = Math.min(arcTo(op, b.i, b.u), arcFrom(op, b.i, b.u));
-        if (fromEnd < 3) continue;
+        // A closed cut has no free end. Its first vertex is only the PDF path's seam.
+        // Keep the foot on the segment: beyond the corner another size may still need the edge.
+        if (fromEnd < 3 && (!set.chains[o].closed || b.u === 0 || b.u === 1)) continue;
         const q0 = op[b.i];
         const q1 = op[b.i + 1];
         const ol = dist(q0, q1) || 1;
@@ -646,7 +649,7 @@ export function landingPlugs(
   m: WallModel,
   r: number,
   lone: WallItem[],
-  o: { attachMm?: number; landMm?: number; maxWalkMm?: number } = {},
+  o: { attachMm?: number; landMm?: number; maxWalkMm?: number; refused?: AmbiguousLanding[] } = {},
 ): WallItem[] {
   const attach = o.attachMm ?? 0.8;
   const land = o.landMm ?? 0.8;
@@ -708,59 +711,116 @@ export function landingPlugs(
       { at: p[p.length - 1], t: tan(p[p.length - 1], back(1)) },
     ];
   };
-  const walk = (start: PtMm, t: PtMm, from: number, depth: number) => {
+  type Host = { id: number; i: number; u: number; d: number };
+  const keyed = new Map<ChainId, string>();
+  for (const row of set.classes) {
+    if (row.role !== 'size' || !row.sizeLabel) continue;
+    if (
+      row.evidence.some(
+        (e) =>
+          e.kind === 'legend-sample' &&
+          e.label === row.sizeLabel &&
+          e.nestingOnly === false &&
+          e.alike?.length === 0,
+      )
+    )
+      for (const id of row.chains) keyed.set(id, row.sizeLabel);
+  }
+  const outside = (p: PtMm, line: PtMm[]) =>
+    line.slice(1).every((q, i) => segNearest(p, line[i], q).d > 2 * land);
+  const walk = (start: PtMm, t: PtMm, from: number, depth: number): 'ambiguous' | undefined => {
     if (depth > 2) return;
     // nearest other line at the end
-    let best: { id: number; i: number; u: number; d: number } | null = null;
+    let best: Host | null = null;
+    const alternatives = depth > 0 ? new Map<number, Host>() : undefined;
     og.near(start, land, (id, i) => {
       if (id === from) return;
       const pts = set.chains[id].pts;
       const s = segNearest(start, pts[i], pts[i + 1]);
-      if (s.d <= land && (!best || s.d < best.d)) best = { id, i, u: s.u, d: s.d };
+      if (s.d > land) return;
+      const host = { id, i, u: s.u, d: s.d };
+      if (!best || s.d < best.d) best = host;
+      if (alternatives && keyed.has(id) && s.d < (alternatives.get(id)?.d ?? Infinity))
+        alternatives.set(id, host);
     });
-    const b = best as { id: number; i: number; u: number; d: number } | null;
-    if (!b) return;
-    const pts = set.chains[b.id].pts;
-    const a0 = pts[b.i];
-    const a1 = pts[b.i + 1];
-    const L = dist(a0, a1) || 1;
-    const dot = (t.x * (a1.x - a0.x) + t.y * (a1.y - a0.y)) / L;
-    if (Math.abs(dot) < 0.3) return; // a T-junction, not a landing
-    const dir = dot > 0 ? 1 : -1;
-    const stretch: PtMm[] = [{ x: a0.x + (a1.x - a0.x) * b.u, y: a0.y + (a1.y - a0.y) * b.u }];
-    let walked = 0;
-    let k = dir > 0 ? b.i + 1 : b.i;
-    let prev = stretch[0];
-    while (k >= 0 && k < pts.length && walked < maxWalk) {
-      const q = pts[k];
-      const seg = dist(prev, q);
-      // test along the segment every 0.5 mm for a rank-r wall
-      const n = Math.max(1, Math.ceil(seg / 0.5));
-      for (let j = 1; j <= n; j++) {
-        const x = { x: prev.x + ((q.x - prev.x) * j) / n, y: prev.y + ((q.y - prev.y) * j) / n };
-        if (walked + (seg * j) / n > 1.5 && nearWall(x, -1)) {
-          stretch.push(x);
-          out.push({ chain: b.id, pts: stretch });
-          return;
+    const selected = best as Host | null;
+    if (!selected) return;
+    const trace = (b: Host) => {
+      const pts = set.chains[b.id].pts;
+      const a0 = pts[b.i];
+      const a1 = pts[b.i + 1];
+      const L = dist(a0, a1) || 1;
+      const dot = (t.x * (a1.x - a0.x) + t.y * (a1.y - a0.y)) / L;
+      if (Math.abs(dot) < 0.3) return; // a T-junction, not a landing
+      const dir = dot > 0 ? 1 : -1;
+      const direction = { x: ((a1.x - a0.x) * dir) / L, y: ((a1.y - a0.y) * dir) / L };
+      const stretch: PtMm[] = [{ x: a0.x + (a1.x - a0.x) * b.u, y: a0.y + (a1.y - a0.y) * b.u }];
+      let walked = 0;
+      let k = dir > 0 ? b.i + 1 : b.i;
+      let prev = stretch[0];
+      while (k >= 0 && k < pts.length && walked < maxWalk) {
+        const q = pts[k];
+        const seg = dist(prev, q);
+        // test along the segment every 0.5 mm for a rank-r wall
+        const n = Math.max(1, Math.ceil(seg / 0.5));
+        for (let j = 1; j <= n; j++) {
+          const x = { x: prev.x + ((q.x - prev.x) * j) / n, y: prev.y + ((q.y - prev.y) * j) / n };
+          if (walked + (seg * j) / n > 1.5 && nearWall(x, -1)) {
+            stretch.push(x);
+            return { pts: stretch, landed: true, dir: direction };
+          }
         }
+        walked += seg;
+        stretch.push(q);
+        prev = q;
+        k += dir;
       }
-      walked += seg;
-      stretch.push(q);
-      prev = q;
-      k += dir;
+      if (walked >= maxWalk || stretch.length < 2) return;
+      // ran off the end of the line landed on: it may land again
+      return { pts: stretch, landed: false, dir: direction };
+    };
+    const route = trace(selected);
+    if (!route) return;
+    // After leaving its own pen, the end of a borrowed line can meet a fan of
+    // different keyed sizes. Proximity at the fan does not identify the next
+    // cut when two paths lead forward to physically separate landings.
+    if (route.landed && alternatives && keyed.has(selected.id)) {
+      for (const alt of alternatives.values()) {
+        if (keyed.get(alt.id) === keyed.get(selected.id)) continue;
+        const other = trace(alt);
+        if (
+          other?.landed &&
+          route.dir.x * other.dir.x + route.dir.y * other.dir.y >= 0.95 &&
+          outside(route.pts[route.pts.length - 1], other.pts) &&
+          outside(other.pts[other.pts.length - 1], route.pts)
+        )
+          return 'ambiguous';
+      }
     }
-    if (walked >= maxWalk || stretch.length < 2) return;
-    // ran off the end of the line landed on: it may land again
-    out.push({ chain: b.id, pts: stretch });
+    const stretch = route.pts;
+    out.push({ chain: selected.id, pts: stretch });
+    if (route.landed) return;
     const e = stretch[stretch.length - 1];
     const pe = stretch[stretch.length - 2];
     const le = dist(e, pe) || 1;
-    walk(e, { x: (e.x - pe.x) / le, y: (e.y - pe.y) / le }, b.id, depth + 1);
+    return walk(e, { x: (e.x - pe.x) / le, y: (e.y - pe.y) / le }, selected.id, depth + 1);
   };
   for (const id of own)
     for (const e of endsOf(id)) {
       if (nearWall(e.at, id)) continue;
-      walk(e.at, e.t, id, 0);
+      const before = out.length;
+      if (walk(e.at, e.t, id, 0) === 'ambiguous') {
+        const dropped = out.splice(before);
+        const junction = dropped.at(-1)?.pts.at(-1);
+        if (junction)
+          o.refused?.push({
+            owner: id,
+            from: e.at,
+            junction,
+            walkedMm: dropped.reduce((l, w) => l + polyLen(w.pts), 0),
+            reachMm: land,
+          });
+      }
     }
   return out;
 }

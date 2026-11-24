@@ -577,6 +577,70 @@ function grainLines(inner: readonly Chain[], isGrainClass: (id: number) => boole
   return out;
 }
 
+/** A filled, notched arrow at each end of a labelled shaft. Closed fills can be
+ * absent from the chain set while remaining fully visible in the source sheet. */
+function filledArrowPair(line: GrainLine, sheet: Sheet | undefined): boolean {
+  if (!sheet || line.ranges.length !== 1 || line.dashed) return false;
+  const shaft = sheet.paths.find((p) => p.id === line.ranges[0].path);
+  if (!shaft?.visibleMotif || shaft.pts.length !== 2 || shaft.closed) return false;
+  const pen = sheet.styles[shaft.style];
+  const heads = sheet.paths.filter((p) => {
+    const style = sheet.styles[p.style];
+    return (
+      p.src.page === shaft.src.page &&
+      p.src.file === shaft.src.file &&
+      p.closed &&
+      p.visibleMotif &&
+      !p.background &&
+      p.pts.length === 4 &&
+      style.fill &&
+      style.layer === pen.layer &&
+      String(style.strokeRgb) === String(pen.strokeRgb) &&
+      Math.min(dist(p.pts[0], line.a), dist(p.pts[0], line.b)) < GRAIN_HEAD_MAX_MM
+    );
+  });
+  const ends = [line.a, line.b];
+  const matches = ends.map((end, i) => {
+    const other = ends[1 - i],
+      ux = (end.x - other.x) / line.len,
+      uy = (end.y - other.y) / line.len;
+    return heads.flatMap((head) => {
+      const pts = head.pts.map((p) => ({
+        t: (p.x - end.x) * ux + (p.y - end.y) * uy,
+        n: -(p.x - end.x) * uy + (p.y - end.y) * ux,
+      }));
+      const k = pts.indexOf(pts.reduce((a, b) => (a.t > b.t ? a : b)));
+      const tip = pts[k],
+        left = pts[(k + 1) % 4],
+        notch = pts[(k + 2) % 4],
+        right = pts[(k + 3) % 4];
+      const span = tip.t - (left.t + right.t) / 2,
+        half = Math.abs(left.n - right.n) / 2;
+      if (
+        tip.t <= 0 ||
+        tip.t > GRAIN_HEAD_END_MM ||
+        notch.t >= 0 ||
+        notch.t <= Math.max(left.t, right.t) ||
+        Math.abs(tip.n) > 0.12 ||
+        Math.abs(notch.n) > 0.12 ||
+        Math.abs(left.t - right.t) > 0.15 ||
+        Math.abs(left.n + right.n) > 0.2 ||
+        left.n * right.n >= 0 ||
+        span > GRAIN_HEAD_MAX_MM ||
+        half < 0.5 ||
+        half / span < 0.25 ||
+        half / span > 1
+      )
+        return [];
+      return [{ span, half }];
+    });
+  });
+  return (
+    matches.every((m) => m.length === 1) &&
+    Math.abs(matches[0][0].span - matches[1][0].span) < 0.2 &&
+    Math.abs(matches[0][0].half - matches[1][0].half) < 0.15
+  );
+}
 /**
  * (a) Arrowheads: barbs — segments of chains ≤ GRAIN_HEAD_MAX_MM — whose tip is ≤ GRAIN_HEAD_END_MM
  * from a line end and which run back along the line at 15–60°. They count at BOTH ends, or as a
@@ -835,7 +899,7 @@ function bestGrain(
     const ungraded = ungradedOf(l);
     const evidence: GrainEvidenceKind[] = [
       ...(l.grainClass ? (['class'] as const) : []),
-      ...(heads ? (['arrowheads'] as const) : []),
+      ...(heads || (along.has(l) && filledArrowPair(l, sheet)) ? (['arrowheads'] as const) : []),
       ...(word ? (['word'] as const) : []),
       ...(ungraded ? (['ungraded'] as const) : []),
       ...(l.dashed ? (['dashes'] as const) : []),

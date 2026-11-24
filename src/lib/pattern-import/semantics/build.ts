@@ -15,7 +15,7 @@
 //   5. grain   — detected/declared, else the operator's two clicks, else 'no-grain';
 //   6. pairs   — a drawn L/R twin keeps its hand; "cut 2" of an asymmetric piece / "pair" →
 //                `_L` drawn + `_R` = its mirror across the grain (G12), ppg per hand;
-//   7. growth  — cut area must grow with size (G8) → 'non-monotone' when > 2 sizes.
+//   7. growth  — cut area must not shrink with size (G8; a plateau within 0.5 % passes) → 'non-monotone' when > 2 sizes.
 
 import {
   equalAxisPoint,
@@ -24,6 +24,7 @@ import {
   matchesSavedFoldRank,
 } from '../adapters/dxf/product-fold-axis';
 import { nativeCutLoopPathIds, resolveNativeCutLoops } from '../adapters/dxf/native-cut-holes';
+import { liningCut } from '../pieces/material-cut';
 import { isMirrorSymmetric } from '../ai/geom';
 import { chainView, partAt, sheetView } from '../assemble/composite';
 import { parseQuantity, saysFold } from '../ai/evidence';
@@ -89,6 +90,7 @@ import {
   sharedEdges,
 } from '../pieces/identity';
 import { wallModel } from '../pieces/walls';
+import { fullyVisibleSourcePath } from '../pieces/source-visibility';
 import { hausdorffMm } from '../pieces/fill';
 import { silentRead, type SilentRead } from '../pieces/gfit/silent-inputs';
 import { sameDxfRankOutline, silentOff } from '../pieces/gfit/silent';
@@ -139,6 +141,9 @@ import {
   straightRuns,
   unfold,
 } from './fold';
+import { sizeLabelledButtons } from './size-labelled-buttons';
+import { sizeLabelledFold } from './size-labelled-fold';
+import { labelledFoldNotches } from './size-labelled-fold-notches';
 import {
   IDENTITY,
   SegIndex,
@@ -226,6 +231,7 @@ type WallMap = {
 };
 
 export type SemanticsDetail = {
+  lining?: SemanticsDetail;
   output: SemanticsOutput;
   /**
    * Source walls per written identity × rank, in the identity's own (source) frame: unfolded
@@ -285,6 +291,9 @@ const sameLine = (g: { a: PtMm; b: PtMm }, h: { a: PtMm; b: PtMm }) => {
   const d = (p: PtMm, q: PtMm) => Math.hypot(p.x - q.x, p.y - q.y);
   return (d(g.a, h.a) <= 2 && d(g.b, h.b) <= 2) || (d(g.a, h.b) <= 2 && d(g.b, h.a) <= 2);
 };
+
+/** G8 growth: an area drop up to this share of the largest smaller size is a plateau, not a block. */
+const AREA_PLATEAU_TOL = 0.005;
 
 const blockOffset = (r: OffsetReport): BlockReason =>
   r.loops !== 1 ? 'offset-topology' : r.selfIntersects ? 'offset-self-intersection' : 'offset-hull';
@@ -780,9 +789,10 @@ function f5Off(): boolean {
   return typeof process !== 'undefined' && !!process.env?.MOOD_F5_OFF;
 }
 
-export function buildPieceSpecsDetailed(
+function buildForMaterial(
   input: SemanticsInput,
   progress?: Progress,
+  lining = false,
 ): SemanticsDetail {
   const cardIdentities = new Set(
     (input.presegmentedIdentities ?? []).map((identity) => identity.trim().toUpperCase()),
@@ -865,10 +875,15 @@ export function buildPieceSpecsDetailed(
     const ov = pieceOverrides[seed] ?? {};
     const sorted = [...fam.candidates].sort((a, b) => a.rank - b.rank) as (PieceCandidate &
       DxfExtra)[];
-    const mapped = sorted.flatMap((c) => {
+    const mapped0 = sorted.flatMap((c) => {
       const card = cardOfRank.get(c.rank);
       return card ? [{ c, card }] : [];
     });
+    // PIECES_OPEN_PASS=1 (node scouting only): a piece is built from the sizes that closed, the open
+    // ones are left out — shows where a file stops after pieces; never in the browser
+    const openPass = typeof process !== 'undefined' && !!process.env?.PIECES_OPEN_PASS;
+    const closedOnly = mapped0.filter((m) => m.c.outcome === 'closed');
+    const mapped = openPass && closedOnly.length ? closedOnly : mapped0;
     if (!mapped.length) {
       block(
         seed,
@@ -1328,6 +1343,38 @@ export function buildPieceSpecsDetailed(
     const internalWords = new Set<string>();
     let famLinesMemo: OtherLines | null = null;
     const famLines = () => (famLinesMemo ??= otherLinesNear(p.fam, set));
+    // An ON FOLD instruction in the title can run along an unrelated edge. A separately
+    // labelled two-ended bracket points to the cut itself, independently for each size.
+    let labelledEdges: Map<number, FoldEdge> | null = null;
+    let printedBracket: FoldBracket | undefined;
+    if (!opFold && foldWords.some((w) => w.inside && saysCutOnFold(w.t.text))) {
+      const marks = foldWords
+        .filter((w) => w.inside && /^fold$/i.test(w.t.text))
+        .map((w) => foldBracket(w.t, famLines(), true))
+        .filter((br): br is FoldBracket => !!br);
+      if (
+        marks.length === 1 &&
+        p.cands.every(
+          ({ c }) => bracketEdges(marks[0], c.outer, straightRuns(c.outer)).length === 1,
+        )
+      ) {
+        printedBracket = marks[0];
+        refEdge = bracketEdges(printedBracket, largest.outer, straightRuns(largest.outer))[0];
+        refWhy = 'the printed fold bracket points at the edge in each size';
+      } else if (!marks.length) {
+        labelledEdges = sizeLabelledFold(
+          p.cands.map(({ c }) => c),
+          run.sizes,
+          set.chains,
+          sheet.texts,
+          famLines(),
+        );
+        if (labelledEdges) {
+          refEdge = labelledEdges.get(largest.rank)!;
+          refWhy = 'each size labels its own translated edge beside the printed fold';
+        }
+      }
+    }
     if (!refEdge && foldWords.length) {
       const lines = famLines();
       for (const { c } of [...p.cands].reverse()) {
@@ -1523,6 +1570,23 @@ export function buildPieceSpecsDetailed(
     // SHAPE-KINK: the operator's one-shape moves on this piece (api.fixShape / api.dropSize)
     const fixOf = (token: string) => input.shapeFixes?.[shapeFixKey(seed, token)];
     const shapeFixes: ShapeFixRecord[] = [];
+    const foldNotches =
+      labelledEdges && p.cands.every(({ c }) => !featuresOf(c).length)
+        ? labelledFoldNotches(
+            labelledEdges,
+            p.cands.map(({ c }) => c),
+            set,
+          )
+        : null;
+    const buttons =
+      !traced && p.cands.every(({ c }) => !c.dxf && !featuresOf(c).length)
+        ? sizeLabelledButtons(
+            p.cands.map(({ c }) => c),
+            run.sizes.map((s) => s.label),
+            sheet,
+            set,
+          )
+        : null;
     const featsOf = new Map<PieceCandidate, ReturnType<typeof classifyFeatures>>();
     const featsFor = (c: PieceCandidate) => {
       let f = featsOf.get(c);
@@ -1532,6 +1596,8 @@ export function buildPieceSpecsDetailed(
           folds: facingOf.get(c),
           ownClass: run.sizes[c.rank]?.classId ?? null,
         });
+        if (foldNotches) f = foldNotches(f, c.rank);
+        if (buttons) f = buttons(f, c.rank);
         featsOf.set(c, f);
       }
       return f;
@@ -1879,7 +1945,10 @@ export function buildPieceSpecsDetailed(
             why.kind === 'unfolds' ? `${card.token} would unfold` : `${card.token} ${why.kind}`,
           );
         } else if (refEdge) {
-          let e = matchFoldEdge(foldEdges(outer), refEdge, refBox, c.bbox);
+          let e = printedBracket
+            ? bracketEdges(printedBracket, outer, straightRuns(outer))[0]
+            : labelledEdges?.get(c.rank) ??
+              matchFoldEdge(foldEdges(outer), refEdge, refBox, c.bbox);
           // E4: no clean straight edge in this size (a notch bump, a drift): the loose match
           if (!e && refBox) {
             e = looseFoldEdge(outer, refEdge, refBox, c.bbox);
@@ -2032,7 +2101,7 @@ export function buildPieceSpecsDetailed(
         offset = r.report;
         derived = { base: seam, mm: allowMm };
         pieceNotes.push(
-          `${card.token}: cut = seam + ${allowMm} mm, deviation ${r.report.maxDeviationMm.toFixed(3)} mm, hull ${r.report.hullRatio.toFixed(4)} (source ${r.sourceHullRatio.toFixed(4)})`,
+          `${card.token}: cut = seam + ${allowMm} mm, deviation ${r.report.maxDeviationMm.toFixed(3)} mm, hull ${r.report.hullRatio.toFixed(4)} (source ${r.sourceHullRatio.toFixed(4)})${r.report.dropped ? `, ${r.report.dropped.loops} offset remnant(s) dropped (≤ ${r.report.dropped.maxAreaMm2} mm²)` : ''}`,
         );
         if (!r.report.ok) {
           blockedHere = {
@@ -2055,7 +2124,7 @@ export function buildPieceSpecsDetailed(
           offset = r.report;
           derived = { base: cut, mm: -allowMm };
           pieceNotes.push(
-            `${card.token}: seam = cut − ${allowMm} mm, deviation ${r.report.maxDeviationMm.toFixed(3)} mm`,
+            `${card.token}: seam = cut − ${allowMm} mm, deviation ${r.report.maxDeviationMm.toFixed(3)} mm${r.report.dropped ? `, ${r.report.dropped.loops} offset remnant(s) dropped (≤ ${r.report.dropped.maxAreaMm2} mm²)` : ''}`,
           );
           if (!r.report.ok) {
             blockedHere = {
@@ -2239,11 +2308,16 @@ export function buildPieceSpecsDetailed(
       if (c.rankFrom === 'repair' && c.repair) {
         const tok = tokOfRank;
         const rp = c.repair;
-        pieceNotes.push(
-          `size ${card.token} repaired from the grade of ${tok(rp.from[0])} and ${tok(rp.from[1])} on its own lines (${Math.round(rp.cover * 100)} %)${
-            rp.kind === 'neighbour' ? " — it had closed on another size's line" : ''
-          }${rp.holes ? ` — ${rp.holesMm} mm in ${rp.holes} hole${rp.holes > 1 ? 's' : ''} not drawn, filled from the grade (D5)` : ''}`,
-        );
+        if (rp.walk)
+          pieceNotes.push(
+            `size ${card.token} built by the nest walk from size ${tok(rp.walk.etalon)}${rp.drawnMm ? ` — ${rp.drawnMm} mm not drawn, carried from the nest (flagged)` : ''}`,
+          );
+        else
+          pieceNotes.push(
+            `size ${card.token} repaired from the grade of ${tok(rp.from[0])} and ${tok(rp.from[1])} on its own lines (${Math.round(rp.cover * 100)} %)${
+              rp.kind === 'neighbour' ? " — it had closed on another size's line" : ''
+            }${rp.holes ? ` — ${rp.holesMm} mm in ${rp.holes} hole${rp.holes > 1 ? 's' : ''} not drawn, filled from the grade (D5)` : ''}`,
+          );
       }
       if (derived) derivedFrom.set(spec, derived);
       wallMaps.push({
@@ -2415,12 +2489,19 @@ export function buildPieceSpecsDetailed(
     // so its area need not grow with the garment size; its individual topology still passed above.
     // operator grain given after a size already borrowed nothing: fine. Monotone growth (G8).
     if (!p.ungraded && sizes.length > 1 && !exactSourceGeometry) {
-      const grows = sizes.every((s, i) => i === 0 || s.areaMm2 > sizes[i - 1].areaMm2);
+      // a plateau grows too: one pocket for every size, or one block per size group (Asheville,
+      // Estoril, Verona: 0.03–0.27 % offset noise). A drop over 0.5 % stays a block — it is a
+      // size closed on a wrong line (Verona 24: −58 %) or two sizes swapped (Silverstone 4XL/5XL).
+      // Against the largest smaller size, not the previous one: a slow slide (−0.4 % a step)
+      // must not pass step by step. (#470's rule, owner 24 Nov; beta's 1 % per step is gone.)
+      let peak = 0;
+      const grows = sizes.every((s) => {
+        const ok = s.areaMm2 >= peak * (1 - AREA_PLATEAU_TOL);
+        peak = Math.max(peak, s.areaMm2);
+        return ok;
+      });
       if (!grows) {
-        const gross = sizes.some(
-          (s, i) => i > 0 && s.areaMm2 < sizes[i - 1].areaMm2 * (1 - PATIMPORT.areaGrowthTolerance),
-        );
-        if (sizes.length > 2 && gross) {
+        if (sizes.length > 2) {
           block(
             seed,
             'non-monotone',
@@ -2428,7 +2509,7 @@ export function buildPieceSpecsDetailed(
           );
           continue;
         }
-        warnings.push(`${name.code}: area does not strictly grow with size`);
+        warnings.push(`${name.code}: area does not grow between its two sizes`);
       }
     }
     // ── pair / quantity
@@ -2901,18 +2982,48 @@ export function buildPieceSpecsDetailed(
     }
     return lines.map((l) => l.map((q) => applyAffine(w.t, q)));
   };
+  const materialInk = families.some((f) => f.candidates.some((c) => c.materialMarkPaths))
+    ? new Map([...sheet.paths, ...(sheet.materialMarks ?? [])].map((p) => [p.id, p]))
+    : undefined;
   const wallsOf = (identity: string, rank: number): PtMm[][] | undefined => {
     const src = sourceOf(identity, rank);
     if (!src) return undefined;
     // a closed chain's polyline does not repeat its first vertex: close it, or the gate's walls
     // (open polylines) miss the closing edge
-    const lines = src.cand.walls
+    let lines = src.cand.walls
       .map((id) => set.chains[id])
       .filter((ch) => !!ch && ch.pts.length > 1)
       .map((ch) => (ch.closed ? [...ch.pts, ch.pts[0]] : ch.pts));
     // Source chains ONLY (F14b, Codex C1): the outline's derived stretches (an auto or operator
     // bridge, a band cut) are never walls — measured against them, G3/G4 certified edges the
     // pipeline itself drew. They go to the gate separately (`derivedOf` → G15).
+    if (src.cand.materialMarkPaths?.length)
+      lines = src.cand.materialMarkPaths.flatMap((id) => {
+        const p = materialInk?.get(id);
+        if (!p) return [];
+        const points = p.visibleFill ?? p.pts;
+        return [p.closed ? [...points, points[0]] : points];
+      });
+    if (lining && src.cand.liningCut) {
+      const {
+        segment: [a, b],
+        side,
+      } = src.cand.liningCut;
+      const height = (p: PtMm) => side * ((b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x));
+      lines = lines.flatMap((line) =>
+        line.slice(1).flatMap((q, i) => {
+          const p = line[i],
+            h = height(p),
+            k = height(q);
+          if (h < 0 && k < 0) return [];
+          if (h >= 0 && k >= 0) return [[p, q]];
+          const t = h / (h - k),
+            m = { x: p.x + t * (q.x - p.x), y: p.y + t * (q.y - p.y) };
+          return [h >= 0 ? [p, m] : [m, q]];
+        }),
+      );
+      lines.push([a, b]);
+    }
     if (!lines.length) return undefined;
     return toFrame(src.w, lines);
   };
@@ -2936,6 +3047,7 @@ export function buildPieceSpecsDetailed(
   };
   // MOOD Ф0 (G22): the pen each rank is drawn with, and the common edges every rank may use
   const styles = new Map(sheet.styles.map((st) => [st.id, st]));
+  const cutPaths = new Map(sheet.paths.map((p) => [p.id, p]));
   const idLooks = rankLooks(set, run, styles);
   let commonIds: Set<ChainId> | null = null;
   // D6: on a composite drawing each tile sheet's common edges are its own wall model's (the model
@@ -2993,6 +3105,27 @@ export function buildPieceSpecsDetailed(
       look.every((l) => l.kind !== 'motif') &&
       // every look of it another size's: no look left that is this size's alone (Codex)
       look.every((l) => allLooks.some((p, k) => k !== src.cand.rank && p.length && onPen(l, p)));
+    if (penShared && !idLooks.absent[src.cand.rank]) {
+      // A shared pen establishes identity only along its own independently bracketed
+      // source loop. Require the entire resolved cut to coincide in sheet coordinates.
+      const proofs = (set.bracketedOutlines ?? []).filter(({ chain, label }) => {
+        if (label !== run.sizes[src.cand.rank]?.label) return false;
+        const ch = set.chains[chain];
+        if (!ch?.closed) return false;
+        const b = bboxOf(ch.pts);
+        if (Math.abs(b.minX - src.cand.bbox.minX) > 1 || Math.abs(b.minY - src.cand.bbox.minY) > 1)
+          return false;
+        return hausdorffMm(ch.pts, src.cand.outer) <= 0.2;
+      });
+      if (proofs.length === 1)
+        return {
+          pen: describePen(look) + ' (bracketed outline)',
+          own: toFrame(src.w, linesOfIds([proofs[0].chain])),
+          excused: [],
+          keyed: true,
+          exact: true,
+        };
+    }
     if (idLooks.absent[src.cand.rank] || penShared)
       return {
         pen: null,
@@ -3019,7 +3152,11 @@ export function buildPieceSpecsDetailed(
     // as common): never an edge every size uses — at most an edge this size shares (≤ half, below)
     const foreignSet = new Set(foreign);
     const isCommon = (id: ChainId) => common.has(id) && !foreignSet.has(id);
-    const excused = toFrame(src.w, linesOfIds(src.cand.walls.filter(isCommon)));
+    const materialLine = lining && src.cand.liningCut ? [src.cand.liningCut.segment] : [];
+    const excused = toFrame(src.w, [
+      ...linesOfIds(src.cand.walls.filter(isCommon)),
+      ...materialLine,
+    ]);
     const walls = src.cand.walls.filter((id) => !isCommon(id) && !ownSet.has(id));
     // an edge this size shares with another size of the same piece — drawn once (viola, zhaket:
     // one line where two sizes coincide) or landed on (robe: the sizes end on 46's line). The gate
@@ -3040,13 +3177,35 @@ export function buildPieceSpecsDetailed(
     // KINKS (G25): a measured look may be two sizes' (Mood's S and L motifs): a line another
     // size's class holds is not this size's line to bend along
     const strict = exact ? own : own.filter((id) => !others.has(id));
+    // G19 can distinguish a nearby registration line only with the complete original cut.
+    const keyed = cls?.evidence.some((e) => e.kind === 'legend-sample');
+    const wall = src.cand.walls.length === 1 ? set.chains[src.cand.walls[0]] : undefined;
+    const r = wall?.ranges.length === 1 ? wall.ranges[0] : undefined;
+    const rawCut = r && cutPaths.get(r.path);
+    const cutStyle = rawCut && styles.get(rawCut.style);
+    const direct =
+      exact &&
+      keyed &&
+      !src.w.fold &&
+      !src.cand.derived?.length &&
+      wall?.closed &&
+      ownSet.has(wall.id) &&
+      cls?.chains.includes(wall.id) &&
+      rawCut &&
+      r.from === 0 &&
+      r.to === rawCut.pts.length &&
+      fullyVisibleSourcePath(rawCut) &&
+      cutStyle &&
+      !cutStyle.fill &&
+      cutStyle.widthMm > 0;
     return {
       // keyed by the drawing but no one look: the rank's own lines as F3 read them
       pen: look.length ? describePen(look) : 'its own size lines',
       ...(exact ? { exact: true } : {}),
       own: map(own),
+      ...(direct ? { visibleSourceCut: toFrame(src.w, [rawCut.pts])[0] } : {}),
       ...(strict.length !== own.length ? { ownStrict: map(strict) } : {}),
-      ...(cls?.evidence.some((e) => e.kind === 'legend-sample') ? { keyed: true } : {}),
+      ...(keyed ? { keyed: true } : {}),
       excused,
       ...(shared.length ? { shared: map(shared) } : {}),
       ...(foreign.length ? { foreign: map(foreign) } : {}),
@@ -3181,6 +3340,54 @@ export function buildPieceSpecsDetailed(
     dxfSewingProvenanceOf,
     notes,
   };
+}
+
+export function buildPieceSpecsDetailed(
+  input: SemanticsInput,
+  progress?: Progress,
+): SemanticsDetail {
+  const main = buildForMaterial(input, progress);
+  const changed = new Set(
+    input.families.filter((f) => f.candidates.some((c) => c.liningCut)).map((f) => f.seed),
+  );
+  if (!changed.size) return main;
+  const families = input.families.map((f) =>
+    changed.has(f.seed)
+      ? {
+          ...f,
+          candidates: f.candidates.map((c) => {
+            if (!c.liningCut) return c;
+            const seed = input.seedAts?.[f.seed];
+            const cut = seed && liningCut(input.sheet, c.outer, seed);
+            if (!cut || cut.path !== c.liningCut.path) return { ...c, liningCut: undefined };
+            const outer = ccw(cut.cut);
+            return { ...c, liningCut: cut, outer, bbox: bboxOf(outer), areaMm2: areaOf(outer) };
+          }),
+        }
+      : f,
+  );
+  const lining = buildForMaterial({ ...input, families }, undefined, true);
+  for (const p of main.output.pieces) {
+    if (!changed.has(p.seed)) continue;
+    const other = lining.output.pieces.find((q) => q.identity === p.identity && q.seed === p.seed);
+    const family = families.find((f) => f.seed === p.seed)!;
+    const missing = p.sizes.find(
+      (z) => !family.candidates.find((c) => c.rank === z.rank)?.liningCut,
+    );
+    if (
+      !missing &&
+      other &&
+      other.sizes.every((z, i) => p.sizes[i]?.rank === z.rank) &&
+      other.sizes.length === p.sizes.length
+    )
+      p.liningSizes = other.sizes;
+    else
+      p.liningProblem = missing
+        ? 'No complete labelled lining cut for ' + missing.sizeToken
+        : lining.output.blocked.find((b) => b.seed === p.seed)?.detail ??
+          'The lining cut needs a separate piece decision';
+  }
+  return { ...main, lining };
 }
 
 export const buildPieceSpecs: BuildPieceSpecsFn = (input, progress) =>
