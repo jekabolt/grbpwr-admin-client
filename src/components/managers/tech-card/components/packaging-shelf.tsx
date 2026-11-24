@@ -225,13 +225,15 @@ function ItemMedia({
   resolvedMedia?: readonly common_TechCardMediaFull[];
 }) {
   const library = useMediaMap();
-  const url =
-    mediaUrl(item.pickedThumbnail) ||
-    mediaUrl(labelMediaOf(wireInt(item.mediaIds?.[0]), resolvedMedia, library));
+  const resolved = labelMediaOf(wireInt(item.mediaIds?.[0]), resolvedMedia, library);
+  const media = mediaUrl(item.pickedThumbnail) ? item.pickedThumbnail : resolved;
+  const url = mediaUrl(media);
   return url ? (
     <Media
       src={url}
       alt={item.pickedName || item.key || 'packaging item'}
+      pixelPreview={media?.media?.pixelPreview}
+      blurhash={media?.media?.blurhash}
       aspectRatio='1/1'
       fit='contain'
     />
@@ -244,7 +246,14 @@ function PickMedia({ pick }: { pick: Pick }) {
   if (pick.type === 'material') {
     const url = materialImageUrl(pick.material);
     return url ? (
-      <Media src={url} alt={pick.name} aspectRatio='1/1' fit='contain' />
+      <Media
+        src={url}
+        alt={pick.name}
+        pixelPreview={pick.material.image?.media?.pixelPreview}
+        blurhash={pick.material.image?.media?.blurhash}
+        aspectRatio='1/1'
+        fit='contain'
+      />
     ) : (
       <Placeholder label='item' className='aspect-square w-full' />
     );
@@ -378,9 +387,17 @@ function PackedPhotos({
   return (
     <div {...intake.regionHandlers} className='flex min-w-0 flex-wrap items-start gap-2.5'>
       {packedMediaIds.map((id, index) => {
-        const url = mediaUrl(labelMediaOf(id, resolvedMedia, library));
+        const media = labelMediaOf(id, resolvedMedia, library);
+        const url = mediaUrl(media);
         const picture = url ? (
-          <Media src={url} alt={`packed photo ${index + 1}`} aspectRatio='auto' fit='cover' />
+          <Media
+            src={url}
+            alt={`packed photo ${index + 1}`}
+            pixelPreview={media?.media?.pixelPreview}
+            blurhash={media?.media?.blurhash}
+            aspectRatio='auto'
+            fit='cover'
+          />
         ) : (
           <Placeholder label='photo' className='h-full w-full border-0' />
         );

@@ -51,7 +51,15 @@ export function ItemRow({
     >
       <span className='block size-10 shrink-0 bg-pageBg'>
         {thumb ? (
-          <Media src={thumb} type='image' alt={name} aspectRatio='1/1' fit='contain' />
+          <Media
+            src={thumb}
+            type='image'
+            alt={name}
+            pixelPreview={item.media?.media?.pixelPreview}
+            blurhash={item.media?.media?.blurhash}
+            aspectRatio='1/1'
+            fit='contain'
+          />
         ) : (
           <Placeholder label={extensionOf(item.name ?? '')} className='size-10' />
         )}

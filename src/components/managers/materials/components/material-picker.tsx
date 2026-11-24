@@ -968,7 +968,14 @@ function ArticleTile({
   // Квадрат, как плитка матрицы колорвеев: фото, иначе цвет артикула, иначе бледная пиктограмма
   // секции. Серой плашки с названием секции больше нет.
   const strip = url ? (
-    <Media src={url} alt='' aspectRatio='auto' fit='cover' />
+    <Media
+      src={url}
+      alt=''
+      pixelPreview={m.image?.media?.pixelPreview}
+      blurhash={m.image?.media?.blurhash}
+      aspectRatio='auto'
+      fit='cover'
+    />
   ) : colour ? (
     <span aria-hidden className='block h-full w-full' style={{ background: colour }} />
   ) : (
@@ -1084,7 +1091,14 @@ export function MaterialHoverCard({
     <div className='flex flex-col'>
       {url ? (
         <div className='h-[140px] w-full overflow-hidden border-b border-borderColor'>
-          <Media src={url} alt={m.name || 'material'} aspectRatio='auto' fit='cover' />
+          <Media
+            src={url}
+            alt={m.name || 'material'}
+            pixelPreview={m.image?.media?.pixelPreview}
+            blurhash={m.image?.media?.blurhash}
+            aspectRatio='auto'
+            fit='cover'
+          />
         </div>
       ) : colour ? (
         <span

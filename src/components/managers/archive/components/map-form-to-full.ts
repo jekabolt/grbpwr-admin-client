@@ -47,7 +47,13 @@ function toMediaFull(id?: number, url?: string | null): common_MediaFull | undef
     // вынесена на провод). Здесь строится ПОДДЕЛКА MediaFull из формы, у которой байтов нет вовсе,
     // поэтому честное значение — отсутствие.
     contentHash: undefined,
-    media: { fullSize: info, thumbnail: info, compressed: info, blurhash: undefined },
+    media: {
+      fullSize: info,
+      thumbnail: info,
+      compressed: info,
+      pixelPreview: undefined,
+      blurhash: undefined,
+    },
   };
 }
 

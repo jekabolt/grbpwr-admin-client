@@ -108,7 +108,14 @@ export function ProductIdsField() {
                     sub={product ? `#${cwId}` : undefined}
                     media={
                       url ? (
-                        <Media src={url} alt={name} aspectRatio='3/4' fit='cover' />
+                        <Media
+                          src={url}
+                          alt={name}
+                          pixelPreview={product?.display?.thumbnail?.media?.pixelPreview}
+                          blurhash={product?.display?.thumbnail?.media?.blurhash}
+                          aspectRatio='3/4'
+                          fit='cover'
+                        />
                       ) : (
                         <Placeholder aspect='3/4' />
                       )

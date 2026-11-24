@@ -110,6 +110,8 @@ export function ArchivePicker({ open, onClose, onSave, selectedArchiveId }: Prop
                           src={archive.thumbnail.media.thumbnail.mediaUrl}
                           alt='Thumbnail'
                           type='image'
+                          pixelPreview={archive.thumbnail.media.pixelPreview}
+                          blurhash={archive.thumbnail.media.blurhash}
                           className='w-[100px] h-auto object-contain'
                         />
                       )}

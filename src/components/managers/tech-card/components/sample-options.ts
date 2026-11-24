@@ -66,10 +66,14 @@ export function sampleNeutralChipClass(): string {
 
 // First photo for a card thumbnail, resolved in mediaIds order (falls back to the first resolved
 // item if the two ever fall out of step). undefined = no photo — the caller shows a placeholder.
-export function sampleThumbUrl(s?: common_Sample): string | undefined {
+export function sampleThumbMedia(s?: common_Sample) {
   const ids = s?.sample?.mediaIds ?? [];
   const media = s?.media ?? [];
   const byId = new Map(media.map((m) => [m.id, m]));
-  const first = (ids.length ? byId.get(ids[0]) : undefined) ?? media[0];
+  return (ids.length ? byId.get(ids[0]) : undefined) ?? media[0];
+}
+
+export function sampleThumbUrl(s?: common_Sample): string | undefined {
+  const first = sampleThumbMedia(s);
   return first?.media?.thumbnail?.mediaUrl || first?.media?.fullSize?.mediaUrl || undefined;
 }

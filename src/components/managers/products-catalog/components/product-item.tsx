@@ -117,6 +117,8 @@ export function ProductItem({
                 src={thumbnail || ''}
                 alt=''
                 type={isVideo(thumbnail) ? 'video' : 'image'}
+                pixelPreview={product.display?.thumbnail?.media?.pixelPreview}
+                blurhash={product.display?.thumbnail?.media?.blurhash}
                 controls={isVideo(thumbnail)}
               />
             </div>

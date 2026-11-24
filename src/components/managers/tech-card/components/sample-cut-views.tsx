@@ -691,7 +691,14 @@ export function SampleFabricMap({
       <div>
         {url ? (
           <div className='relative border border-borderColor'>
-            <Media src={url} alt='technical sketch' aspectRatio={mediaAspect(sketch)} fit='cover' />
+            <Media
+              src={url}
+              alt='technical sketch'
+              pixelPreview={sketch?.media?.pixelPreview}
+              blurhash={sketch?.media?.blurhash}
+              aspectRatio={mediaAspect(sketch)}
+              fit='cover'
+            />
             {placed.map(({ p, c }) => {
               const x = decimalNum(c.posX);
               const y = decimalNum(c.posY);

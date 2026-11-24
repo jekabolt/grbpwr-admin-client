@@ -79,6 +79,8 @@ export function Thumbnail({ product, control, variant = 'primary', editMode }: P
     <div className='space-y-2 flex-1 min-w-0'>
       <MediaPreviewWithSelector
         mediaUrl={mediaLink}
+        pixelPreview={thumbnail?.media?.pixelPreview}
+        blurhash={thumbnail?.media?.blurhash}
         aspectRatio={['4:5']}
         allowMultiple={false}
         showVideos={false}

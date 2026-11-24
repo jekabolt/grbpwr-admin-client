@@ -3,7 +3,7 @@ import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useState } from 'react';
 import { Media, Placeholder, GenericPopover, Text, Tile, Tiles } from 'ui';
-import { samplePurposeLabel, sampleRoundLabel, sampleThumbUrl } from './sample-options';
+import { samplePurposeLabel, sampleRoundLabel, sampleThumbMedia } from './sample-options';
 import { useSamples } from './useSamples';
 
 // Visual chooser of a tech card's samples (NF-04): labels each sample by its per-card number,
@@ -15,11 +15,20 @@ export function sampleLabel(s: common_Sample, sizeName?: string): string {
 
 // Square thumbnail shared by the trigger and the mini cards — the striped Placeholder when the
 // sample has no photo (a picker option shouldn't wait on one).
-function SampleThumb({ url, className }: { url?: string; className?: string }) {
+function SampleThumb({ sample, className }: { sample?: common_Sample; className?: string }) {
+  const media = sampleThumbMedia(sample);
+  const url = media?.media?.thumbnail?.mediaUrl || media?.media?.fullSize?.mediaUrl;
   if (!url) return <Placeholder aspect='square' className={className} />;
   return (
     <span className={`block overflow-hidden border border-borderColor ${className ?? ''}`}>
-      <Media src={url} alt='' aspectRatio='1/1' fit='cover' />
+      <Media
+        src={url}
+        alt=''
+        pixelPreview={media?.media?.pixelPreview}
+        blurhash={media?.media?.blurhash}
+        aspectRatio='1/1'
+        fit='cover'
+      />
     </span>
   );
 }
@@ -84,7 +93,7 @@ export function SamplePicker({
             isDisabled ? 'bg-pageBg text-labelColor' : 'hover:border-textColor'
           }`}
         >
-          <SampleThumb url={picked ? sampleThumbUrl(picked) : undefined} className='size-5' />
+          <SampleThumb sample={picked} className='size-5' />
           <Text size='micro' className='min-w-0 flex-1 truncate'>
             {triggerLabel}
           </Text>
@@ -120,7 +129,7 @@ export function SamplePicker({
                 key={s.id}
                 selected={s.id === value}
                 onClick={() => pick(s.id ?? 0)}
-                media={<SampleThumb url={sampleThumbUrl(s)} />}
+                media={<SampleThumb sample={s} />}
                 name={sampleLabel(s, sizeNameFor(s))}
                 sub={sampleRoundLabel(s.sample?.roundNumber)}
               />

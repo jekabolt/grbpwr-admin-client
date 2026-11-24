@@ -173,7 +173,14 @@ export function AttachmentTiles({
                 className='relative block w-full cursor-zoom-in bg-pageBg focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor disabled:cursor-default'
               >
                 {thumb ? (
-                  <Media src={thumb} alt='' aspectRatio='1/1' fit='contain' />
+                  <Media
+                    src={thumb}
+                    alt=''
+                    pixelPreview={m.pixelPreview}
+                    blurhash={m.blurhash}
+                    aspectRatio='1/1'
+                    fit='contain'
+                  />
                 ) : (
                   <span className='flex aspect-square w-full items-center justify-center'>
                     <Text size='micro' variant='label' component='span' className='uppercase'>

@@ -194,8 +194,7 @@ export function MediaGallerySelector({
     if (!uploaded.id) throw new Error('upload failed');
     const latest = mediaRef.current;
     const current = latest[index];
-    if (!current || current.id !== sourceId)
-      throw new Error('slot changed');
+    if (!current || current.id !== sourceId) throw new Error('slot changed');
 
     const next = latest.slice();
     next[index] = uploaded;
@@ -237,6 +236,7 @@ export function MediaGallerySelector({
                   type={video ? 'video' : 'image'}
                   src={url}
                   alt={m.id != null ? `media ${m.id}` : `frame ${i + 1}`}
+                  pixelPreview={m.media?.pixelPreview}
                   blurhash={m.media?.blurhash}
                   fit={video ? 'contain' : fit}
                   aspectRatio='auto'

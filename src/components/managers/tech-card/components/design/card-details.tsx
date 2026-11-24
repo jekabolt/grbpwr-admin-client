@@ -569,7 +569,14 @@ function LinkedProducts({
                 media={
                   <div className='relative'>
                     {url ? (
-                      <Media src={url} alt={name} aspectRatio='3/4' fit='cover' />
+                      <Media
+                        src={url}
+                        alt={name}
+                        pixelPreview={product?.display?.thumbnail?.media?.pixelPreview}
+                        blurhash={product?.display?.thumbnail?.media?.blurhash}
+                        aspectRatio='3/4'
+                        fit='cover'
+                      />
                     ) : (
                       <Placeholder aspect='3/4' />
                     )}
@@ -921,7 +928,12 @@ export function CardDetails({
             data-style-lock={seededLocked ? 'locked' : 'open'}
             title={seededLocked ? 'needs products:write' : undefined}
           >
-            <InputField name='brand' label='brand' placeholder={brandPlaceholder} disabled={seededLocked} />
+            <InputField
+              name='brand'
+              label='brand'
+              placeholder={brandPlaceholder}
+              disabled={seededLocked}
+            />
             <StyleLockNote locked={seededLocked} />
           </div>
         </div>

@@ -357,6 +357,8 @@ export function BlockEditor({ index, item, productApi }: BlockEditorProps) {
                         <Media
                           src={p.display?.thumbnail?.media?.thumbnail?.mediaUrl || ''}
                           alt=''
+                          pixelPreview={p.display?.thumbnail?.media?.pixelPreview}
+                          blurhash={p.display?.thumbnail?.media?.blurhash}
                           aspectRatio='1/1'
                           fit='cover'
                         />

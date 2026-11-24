@@ -59,6 +59,7 @@ export function useTaskMediaViewer({ media }: { media: TaskMedia[] }) {
         return {
           src,
           thumbnail: m.thumbnail,
+          pixelPreview: m.pixelPreview,
           blurhash: m.blurhash,
           type: isVideo(src) ? 'video' : 'image',
           alt: `attachment ${i + 1}`,

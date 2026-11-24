@@ -77,6 +77,8 @@ export function HeroProductPicker({
             <Media
               src={p.display?.thumbnail?.media?.thumbnail?.mediaUrl || ''}
               alt='product'
+              pixelPreview={p.display?.thumbnail?.media?.pixelPreview}
+              blurhash={p.display?.thumbnail?.media?.blurhash}
               aspectRatio='1/1'
               fit='cover'
             />

@@ -141,6 +141,8 @@ export const HeroProductTable: FC<
             src={product.display?.thumbnail?.media?.thumbnail?.mediaUrl}
             alt='Thumbnail'
             type='image'
+            pixelPreview={product.display?.thumbnail?.media?.pixelPreview}
+            blurhash={product.display?.thumbnail?.media?.blurhash}
             className='w-[100px] h-auto object-contain'
           />
         )}

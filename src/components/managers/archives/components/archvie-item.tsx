@@ -71,6 +71,8 @@ export function ArchiveItem({ archive }: ArchiveItemProps) {
           <Media
             src={archive.thumbnail.media.fullSize.mediaUrl}
             alt={archive.translations?.[0]?.heading || 'Archive'}
+            pixelPreview={archive.thumbnail.media.pixelPreview}
+            blurhash={archive.thumbnail.media.blurhash}
             aspectRatio='auto'
             fit='cover'
           />

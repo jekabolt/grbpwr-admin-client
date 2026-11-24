@@ -25,6 +25,7 @@ type MediaProps = {
   alt: string;
   src: string;
   aspectRatio?: string;
+  pixelPreview?: string;
   blurhash?: string;
   fit?: 'cover' | 'contain';
   type?: 'image' | 'video';
@@ -40,6 +41,7 @@ export default function MediaComponent({
   aspectRatio = '4/5',
   src,
   alt,
+  pixelPreview,
   blurhash,
   fit = 'cover',
   type = 'image',
@@ -56,6 +58,7 @@ export default function MediaComponent({
         <BlurhashImage
           src={src}
           alt={alt}
+          pixelPreview={pixelPreview}
           blurhash={blurhash}
           load={load}
           className={`absolute inset-0 block h-full w-full object-center ${

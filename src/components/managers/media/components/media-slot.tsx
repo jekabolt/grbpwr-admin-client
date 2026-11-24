@@ -27,6 +27,8 @@ import { MediaSelector } from './media-selector';
 export type MediaSlotProps = {
   /** Адрес того, что уже лежит в слоте. Пусто — плейсхолдер. */
   mediaUrl?: string;
+  pixelPreview?: string;
+  blurhash?: string;
   alt?: string;
   /** Пропорции, которые предлагает пикер и с которыми открывается кроп. */
   aspectRatio?: string[];
@@ -120,6 +122,8 @@ export type MediaSlotProps = {
 
 export function MediaSlot({
   mediaUrl,
+  pixelPreview,
+  blurhash,
   alt = 'media',
   aspectRatio = ['Custom'],
   frameAspect,
@@ -327,6 +331,8 @@ export function MediaSlot({
       <Media
         src={mediaUrl}
         alt={alt}
+        pixelPreview={pixelPreview}
+        blurhash={blurhash}
         aspectRatio='auto'
         type={mediaIsVideo ? 'video' : 'image'}
         // Ролик ВПИСЫВАЕТСЯ, картинка ЗАПОЛНЯЕТ: у видео нет обещанных слотом пропорций, и

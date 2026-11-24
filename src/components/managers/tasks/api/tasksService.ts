@@ -150,6 +150,7 @@ function mapMedia(m: common_MediaFull): TaskMedia {
     id: m.id ?? 0,
     thumbnail: m.media?.thumbnail?.mediaUrl,
     fullSize: m.media?.fullSize?.mediaUrl,
+    pixelPreview: m.media?.pixelPreview,
     blurhash: m.media?.blurhash,
   };
 }

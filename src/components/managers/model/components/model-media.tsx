@@ -115,8 +115,7 @@ export function ModelMedia({
   const replacePhoto = async (dataUrl: string, item: MediaViewerItem) => {
     const sourceId = item.meta?.id ?? 0;
     const before = getValues('mediaIds') ?? [];
-    if (!sourceId || before[0] !== sourceId)
-      throw new Error('slot changed');
+    if (!sourceId || before[0] !== sourceId) throw new Error('slot changed');
 
     const uploaded = await uploadMedia.mutateAsync(dataUrl);
     const newId = uploaded.id;
@@ -133,6 +132,8 @@ export function ModelMedia({
     <div className='group relative w-full'>
       <MediaSlot
         mediaUrl={photoUrl || undefined}
+        pixelPreview={photo?.media?.pixelPreview}
+        blurhash={photo?.media?.blurhash}
         alt='model photo'
         aspectRatio={['3:4']}
         frameAspect='3/4'

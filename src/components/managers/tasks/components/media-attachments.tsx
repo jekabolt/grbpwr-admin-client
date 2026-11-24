@@ -21,6 +21,7 @@ export function mergePickedMedia(value: number[], picked: common_MediaFull[]): n
       id: m.id as number,
       thumbnail: m.media?.thumbnail?.mediaUrl,
       fullSize: m.media?.fullSize?.mediaUrl,
+      pixelPreview: m.media?.pixelPreview,
       blurhash: m.media?.blurhash,
     }));
   rememberMedia(media);
@@ -85,7 +86,13 @@ export function MediaAttachments({
                     onClick={() => viewer.openIndex(index)}
                     className='block h-full w-full cursor-zoom-in'
                   >
-                    <Media src={m.thumbnail} alt='' aspectRatio='auto' />
+                    <Media
+                      src={m.thumbnail}
+                      alt=''
+                      pixelPreview={m.pixelPreview}
+                      blurhash={m.blurhash}
+                      aspectRatio='auto'
+                    />
                   </Button>
                 ) : (
                   <div className='flex h-full w-full items-center justify-center'>

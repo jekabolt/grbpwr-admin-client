@@ -63,6 +63,7 @@ export interface TaskMedia {
   id: number;
   thumbnail?: string;
   fullSize?: string;
+  pixelPreview?: string;
   blurhash?: string;
 }
 

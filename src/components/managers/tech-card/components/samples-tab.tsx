@@ -18,7 +18,7 @@ import {
   Tiles,
 } from 'ui';
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
-import { sampleStatusLabel, sampleThumbUrl } from './sample-options';
+import { sampleStatusLabel, sampleThumbMedia } from './sample-options';
 import { fittingsNewestFirst, verdictTone } from './sample-panels';
 import { SampleQuiz } from './sample-quiz';
 import { SAMPLE_STAGING_PREFIX, SampleScreen } from './sample-screen';
@@ -206,12 +206,12 @@ function SampleCard({
 }) {
   // Two clicks, in place: ✕ arms, the red word deletes; leaving the tile disarms.
   const [armed, setArmed] = useState(false);
-  const thumb =
-    sampleThumbUrl(sample) ||
+  const thumbMedia =
+    sampleThumbMedia(sample) ??
     fittingsNewestFirst(fittings)
       .flatMap((f) => f.media ?? [])
-      .map((m) => m.media?.thumbnail?.mediaUrl || m.media?.fullSize?.mediaUrl)
-      .find(Boolean);
+      .find((m) => m.media?.thumbnail?.mediaUrl || m.media?.fullSize?.mediaUrl);
+  const thumb = thumbMedia?.media?.thumbnail?.mediaUrl || thumbMedia?.media?.fullSize?.mediaUrl;
   const latest = fittingsNewestFirst(fittings)[0]?.fitting;
 
   return (
@@ -228,6 +228,8 @@ function SampleCard({
               <Media
                 src={thumb}
                 alt={`sample #${sample.number ?? '?'}`}
+                pixelPreview={thumbMedia?.media?.pixelPreview}
+                blurhash={thumbMedia?.media?.blurhash}
                 aspectRatio='auto'
                 fit='cover'
               />

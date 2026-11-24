@@ -31,7 +31,14 @@ export function MaterialSwatch({ material }: { material?: common_Material }) {
   if (url) {
     return (
       <span className='block aspect-square overflow-hidden border border-borderColor'>
-        <Media src={url} alt={material?.name || 'material'} aspectRatio='1/1' fit='cover' />
+        <Media
+          src={url}
+          alt={material?.name || 'material'}
+          pixelPreview={material?.image?.media?.pixelPreview}
+          blurhash={material?.image?.media?.blurhash}
+          aspectRatio='1/1'
+          fit='cover'
+        />
       </span>
     );
   }

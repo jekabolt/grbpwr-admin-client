@@ -1370,7 +1370,14 @@ export function PictureTile({
             </Text>
           </div>
         ) : url ? (
-          <Media src={faceSrc} alt={alt} aspectRatio='auto' fit={fit} />
+          <Media
+            src={faceSrc}
+            alt={alt}
+            pixelPreview={gallery?.pixelPreview}
+            blurhash={gallery?.blurhash}
+            aspectRatio='auto'
+            fit={fit}
+          />
         ) : (
           // Пустой адрес — не повод для молчаливой дыры: человек обязан отличить «картинки нет»
           // от «картинка не загрузилась».

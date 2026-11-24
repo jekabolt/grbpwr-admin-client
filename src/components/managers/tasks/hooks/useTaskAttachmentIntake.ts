@@ -232,6 +232,7 @@ export function useTaskAttachmentIntake({ enabled, onMedia, onFile }: IntakeOpti
               id,
               thumbnail: media.media?.thumbnail?.mediaUrl,
               fullSize: media.media?.fullSize?.mediaUrl,
+              pixelPreview: media.media?.pixelPreview,
               blurhash: media.media?.blurhash,
             },
           ]);

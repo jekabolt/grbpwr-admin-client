@@ -226,8 +226,9 @@ export function DetailsEditor({
     else setCustomKeys((prev) => prev.filter((k) => k !== key));
   };
 
+  const mediaOf = (id: number) => mediaById.get(id) ?? libraryMap.get(id);
   const urlOf = (id: number) => {
-    const m = mediaById.get(id) ?? libraryMap.get(id);
+    const m = mediaOf(id);
     return cache.get(id) || m?.media?.thumbnail?.mediaUrl || m?.media?.fullSize?.mediaUrl || '';
   };
 
@@ -239,6 +240,8 @@ export function DetailsEditor({
       return {
         src: m?.media?.fullSize?.mediaUrl || m?.media?.compressed?.mediaUrl || thumb,
         thumbnail: thumb,
+        pixelPreview: m?.media?.pixelPreview,
+        blurhash: m?.media?.blurhash,
       };
     });
 
@@ -353,6 +356,7 @@ export function DetailsEditor({
                 ids={d?.mediaIds ?? []}
                 inputIds={inputIds}
                 urlOf={urlOf}
+                mediaOf={mediaOf}
                 onText={(text) => upsert(key, { text })}
                 enhanceContext={enhanceContext}
                 onAddImages={(picked) => addImages(key, picked)}
@@ -500,6 +504,7 @@ function AspectRow({
   ids,
   inputIds,
   urlOf,
+  mediaOf,
   onText,
   onAddImages,
   onRemoveImage,
@@ -516,6 +521,7 @@ function AspectRow({
   /** Кадры, которые ТА ЖЕ карточка держит референсом входа шага FLAT. */
   inputIds: Set<number>;
   urlOf: (id: number) => string;
+  mediaOf: (id: number) => common_MediaFull | undefined;
   onText: (text: string) => void;
   onAddImages: (picked: common_MediaFull[]) => void;
   onRemoveImage: (id: number) => void;
@@ -615,6 +621,7 @@ function AspectRow({
           лента переставала стоять по верхнему краю. */}
       <div className='mt-2 flex flex-wrap items-start gap-1.5'>
         {ids.map((id, imgIndex) => {
+          const media = mediaOf(id);
           const url = urlOf(id);
           return (
             <div key={id} className='min-w-[100px]' data-c19-aspect-pic={id}>
@@ -627,7 +634,14 @@ function AspectRow({
                   className='block size-full cursor-zoom-in'
                 >
                   {url ? (
-                    <Media src={url} alt='ref' aspectRatio='1/1' fit='cover' />
+                    <Media
+                      src={url}
+                      alt='ref'
+                      pixelPreview={media?.media?.pixelPreview}
+                      blurhash={media?.media?.blurhash}
+                      aspectRatio='1/1'
+                      fit='cover'
+                    />
                   ) : (
                     <span className='flex size-full items-center justify-center text-micro'>
                       #{id}

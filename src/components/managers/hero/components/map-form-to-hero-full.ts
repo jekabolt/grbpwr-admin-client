@@ -52,6 +52,7 @@ function toMediaFull(id?: number, url?: string | null): common_MediaFull | undef
       fullSize: info,
       thumbnail: info,
       compressed: info,
+      pixelPreview: undefined,
       blurhash: undefined,
     },
   };

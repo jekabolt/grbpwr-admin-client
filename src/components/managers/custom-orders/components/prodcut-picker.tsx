@@ -160,6 +160,8 @@ export function ProductPicker({
                         <Media
                           src={product.display?.thumbnail?.media?.thumbnail?.mediaUrl || ''}
                           alt={product.display?.translations?.[0]?.name || 'product'}
+                          pixelPreview={product.display?.thumbnail?.media?.pixelPreview}
+                          blurhash={product.display?.thumbnail?.media?.blurhash}
                           aspectRatio='1/1'
                           fit='contain'
                         />
@@ -189,11 +191,17 @@ export function ProductPicker({
                         <Media
                           src={product.display?.thumbnail?.media?.thumbnail?.mediaUrl || ''}
                           alt={product.display?.translations?.[0]?.name || 'product'}
+                          pixelPreview={product.display?.thumbnail?.media?.pixelPreview}
+                          blurhash={product.display?.thumbnail?.media?.blurhash}
                           aspectRatio='1/1'
                           fit='contain'
                         />
                       </div>
-                      <Text size='micro' component='span' className='min-w-0 flex-1 truncate uppercase'>
+                      <Text
+                        size='micro'
+                        component='span'
+                        className='min-w-0 flex-1 truncate uppercase'
+                      >
                         {product.display?.translations?.[0]?.name || `#${product.id}`}
                       </Text>
                       <Button

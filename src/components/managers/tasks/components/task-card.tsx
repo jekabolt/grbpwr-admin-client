@@ -156,7 +156,14 @@ export function TaskCardBody({
               : 'border-b border-borderColor',
           )}
         >
-          <Media src={coverUrl} alt='' aspectRatio={compact ? 'auto' : '4/3'} fit='cover' />
+          <Media
+            src={coverUrl}
+            alt=''
+            pixelPreview={cover.pixelPreview}
+            blurhash={cover.blurhash}
+            aspectRatio={compact ? 'auto' : '4/3'}
+            fit='cover'
+          />
         </div>
       )}
 

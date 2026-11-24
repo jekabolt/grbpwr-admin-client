@@ -72,6 +72,8 @@ export function SelectedProduct({
         <Media
           src={product?.display?.thumbnail?.media?.thumbnail?.mediaUrl ?? ''}
           alt={name || 'product'}
+          pixelPreview={product?.display?.thumbnail?.media?.pixelPreview}
+          blurhash={product?.display?.thumbnail?.media?.blurhash}
           aspectRatio='4/5'
           fit='contain'
         />

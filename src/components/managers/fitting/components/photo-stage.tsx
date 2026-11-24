@@ -328,6 +328,7 @@ function PhotoThumbnail({
             type='image'
             src={url}
             alt=''
+            pixelPreview={media?.media?.pixelPreview}
             blurhash={media?.media?.blurhash}
             aspectRatio='auto'
             fit='cover'
@@ -481,16 +482,14 @@ export function PhotoStage() {
     const sourceId = item.meta?.id ?? 0;
     const before = getValues('mediaIds') ?? [];
     const targetIndex = before.indexOf(sourceId);
-    if (!sourceId || targetIndex < 0)
-      throw new Error('slot changed');
+    if (!sourceId || targetIndex < 0) throw new Error('slot changed');
 
     const uploaded = await uploadMedia.mutateAsync(dataUrl);
     const newId = uploaded.id;
     if (!newId) throw new Error('upload failed');
 
     const latest = getValues('mediaIds') ?? [];
-    if (latest[targetIndex] !== sourceId)
-      throw new Error('slot changed');
+    if (latest[targetIndex] !== sourceId) throw new Error('slot changed');
 
     addPicked([uploaded]);
     const nextIds = latest.slice();

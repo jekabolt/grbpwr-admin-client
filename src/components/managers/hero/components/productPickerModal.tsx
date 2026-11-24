@@ -187,6 +187,8 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
             <Media
               src={product.display?.thumbnail?.media?.thumbnail?.mediaUrl || ''}
               alt='thumbnail'
+              pixelPreview={product.display?.thumbnail?.media?.pixelPreview}
+              blurhash={product.display?.thumbnail?.media?.blurhash}
               aspectRatio='1/1'
               fit='contain'
             />

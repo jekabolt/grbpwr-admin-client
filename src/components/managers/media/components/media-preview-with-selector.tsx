@@ -10,6 +10,8 @@ import { MediaViewer, useMediaViewer } from 'components/shared/media-viewer/medi
 // прежняя подпись пропсов, которой пользуются полтора десятка экранов.
 interface MediaPreviewWithSelectorProps {
   mediaUrl?: string;
+  pixelPreview?: string;
+  blurhash?: string;
   aspectRatio: string[];
   allowMultiple?: boolean;
   showVideos?: boolean;
@@ -30,6 +32,8 @@ interface MediaPreviewWithSelectorProps {
 
 export function MediaPreviewWithSelector({
   mediaUrl,
+  pixelPreview,
+  blurhash,
   aspectRatio,
   allowMultiple = false,
   showVideos = true,
@@ -59,6 +63,8 @@ export function MediaPreviewWithSelector({
     <>
       <MediaSlot
         mediaUrl={mediaUrl}
+        pixelPreview={pixelPreview}
+        blurhash={blurhash}
         alt={alt}
         aspectRatio={aspectRatio}
         frameAspect={previewAspectRatio}
@@ -80,7 +86,15 @@ export function MediaPreviewWithSelector({
 
       {mediaUrl && (
         <MediaViewer
-          items={[{ src: mediaUrl, type: mediaIsVideo ? 'video' : 'image', alt }]}
+          items={[
+            {
+              src: mediaUrl,
+              type: mediaIsVideo ? 'video' : 'image',
+              alt,
+              pixelPreview,
+              blurhash,
+            },
+          ]}
           {...viewer}
           onReplace={editMode ? replaceMedia : undefined}
         />

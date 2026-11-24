@@ -98,7 +98,14 @@ function MaterialTile({
       onClick={onClick}
       media={
         url ? (
-          <Media src={url} alt={material.name || 'material'} aspectRatio='1/1' fit='cover' />
+          <Media
+            src={url}
+            alt={material.name || 'material'}
+            pixelPreview={material.image?.media?.pixelPreview}
+            blurhash={material.image?.media?.blurhash}
+            aspectRatio='1/1'
+            fit='cover'
+          />
         ) : (
           <Placeholder aspect='square' label={quietCode(code)} />
         )

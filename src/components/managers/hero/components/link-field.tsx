@@ -148,6 +148,8 @@ export function LinkField({ name, label, optional }: LinkFieldProps) {
                   <Media
                     src={showProduct.display.thumbnail.media.thumbnail.mediaUrl}
                     alt='product'
+                    pixelPreview={showProduct.display.thumbnail.media.pixelPreview}
+                    blurhash={showProduct.display.thumbnail.media.blurhash}
                     aspectRatio='1/1'
                     fit='cover'
                   />
@@ -256,6 +258,8 @@ function ArchiveBody({
                   <Media
                     src={a.thumbnail?.media?.thumbnail?.mediaUrl || ''}
                     alt={heading}
+                    pixelPreview={a.thumbnail?.media?.pixelPreview}
+                    blurhash={a.thumbnail?.media?.blurhash}
                     aspectRatio='4/5'
                     fit='cover'
                   />

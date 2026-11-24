@@ -25,6 +25,7 @@ export function ItemPicture({
         src={src}
         type={isVideo(src) ? 'video' : 'image'}
         alt={item.name || KIND_WORD[item.kind ?? 'LIBRARY_KIND_UNSPECIFIED']}
+        pixelPreview={item.media.media?.pixelPreview}
         blurhash={item.media.media?.blurhash}
         controls={false}
         preload={load ? 'metadata' : 'none'}

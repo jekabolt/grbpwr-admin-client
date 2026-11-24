@@ -874,6 +874,8 @@ export function MaterialExpand({
         {phone ? (
           <MediaSlot
             mediaUrl={imageUrl}
+            pixelPreview={d.image?.media?.pixelPreview}
+            blurhash={d.image?.media?.blurhash}
             alt={d.name || 'material image'}
             aspectRatio={['1:1', 'Custom']}
             frameAspect='1/1'
@@ -912,6 +914,8 @@ export function MaterialExpand({
           <div className={cn('w-48 shrink-0', lowerSlot)}>
             <MediaPreviewWithSelector
               mediaUrl={imageUrl}
+              pixelPreview={d.image?.media?.pixelPreview}
+              blurhash={d.image?.media?.blurhash}
               aspectRatio={['1:1', 'Custom']}
               allowMultiple={false}
               showVideos={false}
@@ -968,6 +972,8 @@ export function MaterialExpand({
           <div className={lowerSlot}>
             <MediaPreviewWithSelector
               mediaUrl={imageUrl}
+              pixelPreview={d.image?.media?.pixelPreview}
+              blurhash={d.image?.media?.blurhash}
               aspectRatio={['1:1', 'Custom']}
               allowMultiple={false}
               showVideos={false}

@@ -1,5 +1,5 @@
-import { decode } from 'blurhash';
 import { cn } from 'lib/utility';
+import { drawBlurhashPreview, drawPixelPreview, loadPixelPreview } from 'lib/pixel-mosaic';
 import {
   forwardRef,
   useCallback,
@@ -8,72 +8,15 @@ import {
   useState,
   type ImgHTMLAttributes,
   type SyntheticEvent,
-  type TransitionEvent,
 } from 'react';
 
-const PLACEHOLDER_SIZE = 32;
-const PLACEHOLDER_CACHE_LIMIT = 2000;
-const FADE_DURATION_MS = 300;
-const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
-
-const placeholderCache = new Map<string, string | null>();
-
-function cachedPlaceholder(hash: string): string | null | undefined {
-  if (!placeholderCache.has(hash)) return undefined;
-
-  const value = placeholderCache.get(hash) ?? null;
-  placeholderCache.delete(hash);
-  placeholderCache.set(hash, value);
-  return value;
-}
-
-function rememberPlaceholder(hash: string, value: string | null): void {
-  placeholderCache.delete(hash);
-  placeholderCache.set(hash, value);
-
-  if (placeholderCache.size > PLACEHOLDER_CACHE_LIMIT) {
-    const oldest = placeholderCache.keys().next().value;
-    if (oldest !== undefined) placeholderCache.delete(oldest);
-  }
-}
-
-function decodePlaceholder(blurhash?: string): string | null {
-  const hash = blurhash?.trim();
-  if (!hash || typeof document === 'undefined') return null;
-
-  const cached = cachedPlaceholder(hash);
-  if (cached !== undefined) return cached;
-
-  let dataUrl: string | null = null;
-
-  try {
-    const pixels = decode(hash, PLACEHOLDER_SIZE, PLACEHOLDER_SIZE);
-    const canvas = document.createElement('canvas');
-    canvas.width = PLACEHOLDER_SIZE;
-    canvas.height = PLACEHOLDER_SIZE;
-    const context = canvas.getContext('2d');
-
-    if (context) {
-      const imageData = context.createImageData(PLACEHOLDER_SIZE, PLACEHOLDER_SIZE);
-      imageData.data.set(pixels);
-      context.putImageData(imageData, 0, 0);
-      dataUrl = canvas.toDataURL();
-    }
-  } catch {
-    // Invalid hashes stay on the neutral surface below.
-  }
-
-  rememberPlaceholder(hash, dataUrl);
-  return dataUrl;
-}
-
-function prefersReducedMotion(): boolean {
-  return typeof window !== 'undefined' && !!window.matchMedia?.(REDUCED_MOTION_QUERY).matches;
-}
+const MOSAIC_WIDTHS = [2, 3, 6] as const;
+const MOSAIC_STEP_MS = 90;
 
 export interface BlurhashImageProps
   extends Omit<ImgHTMLAttributes<HTMLImageElement>, 'alt' | 'className' | 'src'> {
   src: string;
+  pixelPreview?: string;
   blurhash?: string;
   alt: string;
   className?: string;
@@ -82,22 +25,16 @@ export interface BlurhashImageProps
 
 export const BlurhashImage = forwardRef<HTMLImageElement, BlurhashImageProps>(
   function BlurhashImage(
-    { src, blurhash, alt, className, load = true, onLoad, onError, onTransitionEnd, ...imageProps },
+    { src, pixelPreview, blurhash, alt, className, load = true, onLoad, onError, ...imageProps },
     forwardedRef,
   ) {
+    // eslint-disable-next-line react/prop-types -- The legacy rule misses typed forwardRef props.
+    const preview = pixelPreview?.trim() ?? '';
     const hash = blurhash?.trim() ?? '';
-    const [placeholderState, setPlaceholderState] = useState<{
-      hash: string;
-      value: string | null;
-    }>({ hash: '', value: null });
-    const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
-    const [settledSrc, setSettledSrc] = useState<string | null>(null);
-    const [failedSrc, setFailedSrc] = useState<string | null>(null);
-    const instantSrc = useRef<string | null>(null);
-    const loaded = load && loadedSrc === src;
-    const failed = load && failedSrc === src;
-    const showPlaceholder = !failed && (!load || settledSrc !== src);
-    const placeholder = placeholderState.hash === hash ? placeholderState.value : null;
+    const hasMosaic = !!(preview || hash);
+    const [mosaicSrc, setMosaicSrc] = useState<string | null>(null);
+    const canvasRef = useRef<HTMLCanvasElement | null>(null);
+    const showMosaic = hasMosaic && mosaicSrc === src;
 
     const setImageRef = useCallback(
       (node: HTMLImageElement | null) => {
@@ -105,65 +42,53 @@ export const BlurhashImage = forwardRef<HTMLImageElement, BlurhashImageProps>(
         else if (forwardedRef) forwardedRef.current = node;
 
         const requestedSrc = node?.getAttribute('src');
-        if (!node || !requestedSrc || !node.complete || node.naturalWidth === 0) return;
-
-        instantSrc.current = requestedSrc;
-        setLoadedSrc(requestedSrc);
-        setSettledSrc(requestedSrc);
+        if (!node || !requestedSrc || !hasMosaic) return;
+        setMosaicSrc(node.complete && node.naturalWidth > 0 ? null : requestedSrc);
       },
-      [forwardedRef],
+      [forwardedRef, hasMosaic],
     );
 
     const handleLoad = (event: SyntheticEvent<HTMLImageElement>) => {
       const requestedSrc = event.currentTarget.getAttribute('src') ?? src;
-      setFailedSrc(null);
-      setLoadedSrc(requestedSrc);
-      if (instantSrc.current === requestedSrc || prefersReducedMotion()) {
-        setSettledSrc(requestedSrc);
-      }
+      setMosaicSrc((current) => (current === requestedSrc ? null : current));
       onLoad?.(event);
     };
 
     const handleError = (event: SyntheticEvent<HTMLImageElement>) => {
-      const requestedSrc = event.currentTarget.getAttribute('src') ?? src;
-      setFailedSrc(requestedSrc);
       onError?.(event);
     };
 
-    const handleTransitionEnd = (event: TransitionEvent<HTMLImageElement>) => {
-      if (event.propertyName === 'opacity') {
-        setSettledSrc(event.currentTarget.getAttribute('src') ?? src);
-      }
-      onTransitionEnd?.(event);
-    };
+    useEffect(() => {
+      if (load) return;
+      setMosaicSrc(hasMosaic ? src : null);
+    }, [hasMosaic, load, src]);
 
     useEffect(() => {
-      if (!loaded || settledSrc === src) return;
-      const timeout = window.setTimeout(() => setSettledSrc(src), FADE_DURATION_MS);
-      return () => window.clearTimeout(timeout);
-    }, [loaded, settledSrc, src]);
+      const canvas = canvasRef.current;
+      if (!canvas || !showMosaic) return;
 
-    useEffect(() => {
-      if (!hash || !showPlaceholder || typeof document === 'undefined') return;
-
-      const cached = cachedPlaceholder(hash);
-      if (cached !== undefined) {
-        setPlaceholderState({ hash, value: cached });
-        return;
+      let cancelled = false;
+      const timers: number[] = [];
+      if (preview) {
+        void loadPixelPreview(preview).then((image) => {
+          if (!image || cancelled) return;
+          MOSAIC_WIDTHS.forEach((width, index) => {
+            const draw = () => {
+              if (!cancelled) drawPixelPreview(canvas, image, width);
+            };
+            if (index === 0) draw();
+            else timers.push(window.setTimeout(draw, index * MOSAIC_STEP_MS));
+          });
+        });
+      } else if (hash) {
+        drawBlurhashPreview(canvas, hash);
       }
 
-      const decodeHash = () => {
-        setPlaceholderState({ hash, value: decodePlaceholder(hash) });
+      return () => {
+        cancelled = true;
+        timers.forEach(window.clearTimeout);
       };
-
-      if (typeof window.requestIdleCallback === 'function') {
-        const idle = window.requestIdleCallback(decodeHash, { timeout: 1000 });
-        return () => window.cancelIdleCallback(idle);
-      }
-
-      const timeout = window.setTimeout(decodeHash, 0);
-      return () => window.clearTimeout(timeout);
-    }, [hash, showPlaceholder]);
+    }, [hash, preview, showMosaic, src]);
 
     return (
       <span
@@ -171,23 +96,6 @@ export const BlurhashImage = forwardRef<HTMLImageElement, BlurhashImageProps>(
         aria-label={!load && alt ? alt : undefined}
         className={cn('relative inline-block overflow-hidden bg-pageBg', className)}
       >
-        {showPlaceholder && (
-          <span
-            aria-hidden
-            className='pointer-events-none absolute inset-0 block h-full w-full bg-pageBg'
-            style={
-              placeholder
-                ? {
-                    backgroundImage: `url(${placeholder})`,
-                    backgroundPosition: 'center',
-                    backgroundRepeat: 'no-repeat',
-                    backgroundSize: '100% 100%',
-                  }
-                : undefined
-            }
-          />
-        )}
-
         {load && (
           <img
             {...imageProps}
@@ -197,12 +105,15 @@ export const BlurhashImage = forwardRef<HTMLImageElement, BlurhashImageProps>(
             alt={alt}
             onLoad={handleLoad}
             onError={handleError}
-            onTransitionEnd={handleTransitionEnd}
-            className={cn(
-              'block transition-opacity duration-300 ease-out motion-reduce:transition-none',
-              className,
-              loaded || failed ? 'opacity-100' : 'opacity-0',
-            )}
+            className={cn('block', className)}
+          />
+        )}
+        {showMosaic && (
+          <canvas
+            ref={canvasRef}
+            aria-hidden
+            className='pointer-events-none absolute inset-0 block h-full w-full [image-rendering:crisp-edges]'
+            style={{ imageRendering: 'pixelated' }}
           />
         )}
       </span>

@@ -67,6 +67,7 @@ export interface MediaViewerItem {
   /** Accessible label / caption. */
   alt?: string;
   /** Compact placeholder shown while an image rendition loads. */
+  pixelPreview?: string;
   blurhash?: string;
   /** Short word stamped on the filmstrip thumb (`new`). */
   badge?: string;
@@ -116,6 +117,7 @@ export function mediaFullToViewerItem(m: common_MediaFull): MediaViewerItem {
     thumbnail,
     type: isVideo(src) ? 'video' : 'image',
     alt: 'media',
+    pixelPreview: media?.pixelPreview,
     blurhash: media?.blurhash,
     meta: {
       id: m.id,
@@ -1173,6 +1175,7 @@ export function MediaViewer({
                         <BlurhashImage
                           ref={gestures.imgRef}
                           src={current.src}
+                          pixelPreview={current.pixelPreview}
                           blurhash={current.blurhash}
                           alt={current.alt || ''}
                           width={currentDimensions.width}

@@ -137,6 +137,8 @@ export function FittingsReadonlyList({ productId, modelId }: Props) {
                         <Media
                           src={fitting.media?.[0]?.media?.thumbnail?.mediaUrl || ''}
                           alt={`fitting #${id}`}
+                          pixelPreview={fitting.media?.[0]?.media?.pixelPreview}
+                          blurhash={fitting.media?.[0]?.media?.blurhash}
                           aspectRatio='3/4'
                           fit='cover'
                         />
@@ -173,6 +175,8 @@ export function FittingsReadonlyList({ productId, modelId }: Props) {
                 <Media
                   src={fitting.media?.[0]?.media?.thumbnail?.mediaUrl || ''}
                   alt={`fitting #${id}`}
+                  pixelPreview={fitting.media?.[0]?.media?.pixelPreview}
+                  blurhash={fitting.media?.[0]?.media?.blurhash}
                   aspectRatio='3/4'
                   fit='cover'
                 />

@@ -1459,6 +1459,8 @@ export function MaterialModal({
             </Text>
             <MediaPreviewWithSelector
               mediaUrl={mediaThumbUrl(image)}
+              pixelPreview={image?.media?.pixelPreview}
+              blurhash={image?.media?.blurhash}
               aspectRatio={['1:1', 'Custom']}
               allowMultiple={false}
               showVideos={false}
