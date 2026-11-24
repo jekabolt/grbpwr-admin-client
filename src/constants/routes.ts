@@ -209,6 +209,8 @@ export enum ROUTES {
   people = '/people',
   // The team's brand and people (wave «teams»). On team hosts only.
   workspace = '/workspace',
+  // The team's own shop: on/off, domain, payments, mail (lane X18). On team hosts only.
+  shop = '/shop',
   // lekalo hosts: the root sheet and the team host's own entry points (design §5).
   signIn = '/login',
   confirm = '/confirm',

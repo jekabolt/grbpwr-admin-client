@@ -304,6 +304,9 @@ export async function stubAnswer(method: string, body: string | null, path = '')
       const { homeStubAnswer } = await import('components/home/dev-stub');
       const home = homeStubAnswer(method, body, path);
       if (home !== undefined) return home;
+      const { shopStubAnswer } = await import('components/shop/dev-stub');
+      const shop = shopStubAnswer(method, body);
+      if (shop !== undefined) return shop;
       const { workspaceStubAnswer } = await import('components/workspace/dev-stub');
       const ws = workspaceStubAnswer(method, body);
       if (ws !== undefined) return ws;

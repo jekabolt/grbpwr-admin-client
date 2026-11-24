@@ -190,6 +190,7 @@ export function TeamDetail({
   const ro = isReadOnly(team);
   const on = new Set(team.features ?? []);
   const [deleting, setDeleting] = useState(false);
+  const act = useConsoleActions();
 
   return (
     <div className='sticky left-0 flex w-[100cqw] flex-col gap-1.5 px-3 pb-3.5 pt-2.5'>
@@ -221,6 +222,16 @@ export function TeamDetail({
       <div className='flex min-h-8 flex-wrap items-center gap-x-4 gap-y-2 border-b border-borderColor pb-1 md:gap-x-5'>
         <span className='mr-auto text-micro font-bold tracking-group text-labelColor'>people</span>
         <CapControl key={`${team.storageCapBytes}-${team.storageCapDefault}`} team={team} />
+        {(team.shop ?? 'off') !== 'off' && (
+          <FeatureSquare
+            name={`shop-${slug}`}
+            checked={team.shop === 'closed'}
+            locked={act.savingShop(slug)}
+            onChange={(v) => act.setShopClosed(slug, v)}
+          >
+            shop closed
+          </FeatureSquare>
+        )}
         <FeatureSquare name={`ro-${slug}`} checked={ro} locked={teamOne} onChange={onReadOnly}>
           read only
         </FeatureSquare>

@@ -163,6 +163,16 @@ export function useConsoleActions() {
     onError: fail,
   });
 
+  // The operator's close of a team's shop (lane X18): the row takes the server's answer.
+  const shop = useMutation({
+    mutationFn: (v: { slug: string; closed: boolean }) =>
+      platformService.SetTeamShop({ teamSlug: v.slug, closed: v.closed }),
+    onSuccess: (r, v) => {
+      if (r.team) setRows((rows) => patchTeam(rows, v.slug, (t) => ({ ...t, ...r.team })));
+    },
+    onError: fail,
+  });
+
   const busy = (m: { isPending: boolean; variables?: unknown }, slug: string) =>
     m.isPending && m.variables === slug;
 
@@ -178,6 +188,8 @@ export function useConsoleActions() {
         () => true,
         () => false,
       ),
+    setShopClosed: (slug: string, closed: boolean) => shop.mutate({ slug, closed }),
+    savingShop: (slug: string) => shop.isPending && shop.variables?.slug === slug,
     savingCap: (slug: string) => storageCap.isPending && storageCap.variables?.slug === slug,
     approving: (slug: string) => busy(approve, slug),
     declining: (slug: string) => busy(decline, slug),

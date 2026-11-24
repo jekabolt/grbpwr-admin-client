@@ -322,6 +322,7 @@ const RootApp = lazyRoute(() => import('components/auth/root-app'));
 const ConsoleApp = lazyRoute(() => import('components/shell/console-layout'));
 const ConsoleHome = lazyRoute(() => import('components/console/console-page'));
 const WorkspacePage = lazyRoute(() => import('components/workspace/workspace-page'));
+const ShopPage = lazyRoute(() => import('components/shop/shop-page'));
 const MyWork = lazyRoute(() => import('components/home/my-work'));
 const Handoff = lazyRoute(() =>
   import('components/auth/handoff').then((m) => ({ default: m.Handoff })),
@@ -593,6 +594,7 @@ const app = (
                   {HOST_KIND === 'team' && (
                     <Route path={ROUTES.workspace} element={<WorkspacePage />} />
                   )}
+                  {HOST_KIND === 'team' && <Route path={ROUTES.shop} element={<ShopPage />} />}
                   {HOST_KIND === 'team' && (
                     <Route
                       path={ROUTES.people}

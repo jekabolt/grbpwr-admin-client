@@ -50,6 +50,8 @@ const t = (slug: string, extra: Partial<PlatformTeam> = {}): PlatformTeam => ({
   storageUsedBytes: 0,
   storageCapBytes: 0,
   storageCapDefault: true,
+  shop: undefined,
+  shopHost: undefined,
   ...extra,
 });
 
