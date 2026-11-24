@@ -1043,6 +1043,8 @@ function fillOneSheet(
             {
               from: 'innerPlug',
               build: () => {
+                // measurement only: smaller ranks never plug this rank
+                if (typeof process !== "undefined" && process.env?.INNER_PLUG_OFF) return base;
                 const plugs = landingPlugs(set, model, r, lone, {
                   refused: refusedLandings,
                 }).filter(keep);

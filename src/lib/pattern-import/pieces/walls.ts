@@ -500,6 +500,8 @@ export function itemsOf(set: ChainSet, ids: Iterable<ChainId>): WallItem[] {
  * the parallel size beside it — leonie's junk face seeds).
  */
 export function lonePortions(set: ChainSet, m: WallModel, sideMm = 20): WallItem[] {
+  // measurement only: no lone stretch is a wall of every rank
+  if (typeof process !== "undefined" && process.env?.LONE_OFF) return [];
   if (m.mode === 'single') return [];
   const rank = new Map<ChainId, number>();
   m.byRank.forEach((ids, r) => ids.forEach((id) => rank.set(id, r)));

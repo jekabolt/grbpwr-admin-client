@@ -136,6 +136,7 @@ export function cellsOf(out: StageIO['pieces']['out'], ranks: RankInfo[] | null)
             (c.derived ?? []).reduce((a, d) => a + len(d.pts as { x: number; y: number }[]), 0),
           ),
           gapRecovery: !!c.gapRecovery,
+          ...(process.env.BENCH_OUTER ? { outer: c.outer.map((q) => [Math.round(q.x * 100) / 100, Math.round(q.y * 100) / 100]) } : {}),
           geo: createHash('md5')
             .update(
               JSON.stringify([

@@ -48,7 +48,7 @@ function targets(): { dir: string; snap: string }[] {
   const out: { dir: string; snap: string }[] = [];
   for (const root of roots)
     for (const d of readdirSync(root, { withFileTypes: true })) {
-      if (!d.isDirectory()) continue;
+      if (!d.isDirectory() && !d.isSymbolicLink()) continue;
       const dir = resolve(root, d.name);
       const snaps = readdirSync(dir)
         .map((f) => /^pieces-(\d+)\.snap\.gz$/.exec(f))
