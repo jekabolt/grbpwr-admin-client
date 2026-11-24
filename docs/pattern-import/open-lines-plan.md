@@ -29,7 +29,7 @@ outlines that are right on the owner's reference set and by files that get throu
 | Diagnosis, scripts, pictures, this plan | `fix-pattern-pdf-open-lines` (PR #470) | pushed |
 | Stages 1A and 2 | `open-lines-rows`, commit `aacf5976f` | pushed, **to be merged into the PR head** |
 | Measurement switches for the bench (`LONE_OFF`, `INNER_PLUG_OFF`, outlines in the bench output) | `open-lines-bench-switches`, commit `deb6b2824` | pushed, not for merging |
-| The owner's reference set (`scripts/pattern-import/reference.json`, 50 pieces, 548 ok and 63 bad sizes) | worktree `reference-set` | **not committed: to be committed** |
+| The owner's reference set (`scripts/pattern-import/reference.json`, 50 pieces, 548 ok and 63 bad sizes), `family-fit.md`, `family-research/` | `reference-set`, commit `c2aa54469` | pushed, **not merged into the PR head: the owner decides** |
 
 ## Stages
 
@@ -72,8 +72,10 @@ Open: Clark H POCKET LINING and I POCKET WELT (32 cells) look drawn once too and
 ### Housekeeping — open
 
 - Merge `open-lines-rows` into `fix-pattern-pdf-open-lines`.
-- Commit the reference set and the scripts that build and read it. Every acceptance number of
-  this plan depends on it.
+- The reference set is pushed on branch `reference-set` (24 Nov). Merging it into the PR head is
+  the owner's decision; every acceptance number of this plan depends on it.
+- The switches `PDF_LAYERS_OFF` and `SNAPSHOT_STAGE` (read a layered PDF with its layers hidden,
+  snapshot at the sizes step) exist only in the `reference-set` worktree, uncommitted.
 - Replace the stale "Where it stands" section of `src/lib/pattern-import/CLAUDE.md` (dated 18 Nov).
 - Re-capture the 75 files with snapshots once the rows are in. Every corpus number so far is a
   lower bound, because the saved snapshots were taken without them.
