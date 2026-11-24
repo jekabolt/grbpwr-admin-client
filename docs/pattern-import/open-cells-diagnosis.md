@@ -182,6 +182,19 @@ On the Kalla snapshot taken with `ROW_KEEP` the back yoke closes 16 of 18 sizes,
 area (`walk-kalla-back-yoke.png`); one of them carries a rectangular mark of the left edge in its
 outline.
 
+What the pieces that close nothing are (looked at one by one):
+
+- **Venice J POCKETS** is drawn once for every size: one outline, half of it in role `common` and
+  half in `internal`, no size line (`walk-venice-pockets.png`). A walk over the lines that carry no
+  size closes it round the label: 669 mm, 302 cm². That is 18 cells with one outline.
+- **Selenite J, K, L, M** are not pieces on the sheet. Their four labels stand in a column beside a
+  small cutting diagram of rectangles and a quarter circle (`walk-selenite-diagram.png`). 36 cells
+  are open for a drawing that is not there at full size.
+- **Clark H POCKET LINING, I POCKET WELT** look drawn once too, in a `common` line
+  (`walk-clark-pocket-lining.png`); the walk does not close them yet, cause not found. 32 cells.
+- **Lita (no label), Sedona**: not explained. A wider straight join (6 or 10 mm instead of 3) does
+  not help any of these and does not change the accuracy on the verified outlines.
+
 ### Completion from a neighbour size (hold-out)
 
 `complete-holdout.mjs`: on 544 ok sizes of 47 pieces a stretch of 30, 60 or 90 mm is hidden at
