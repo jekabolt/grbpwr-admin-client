@@ -68,9 +68,21 @@ top). This section stays ≤ ~80 lines: replace, never append.
 
 ### How to verify
 
-- Controls: Leah (MDF349), Cassandra (MDF348), Dyanna, in `~/Downloads/archive 600 pcs/dresses`.
-  One file: `dxf-shot.mjs "<dresses>" --files <list> --out <dir> --par 1`, then `dxf-check.mjs`.
-  Nothing else heavy running. Upstream changes (chains / sizes / fill) need a fresh shot.
+- Pieces bench (`pieces-bench.ts`): replays only the pieces step from `pieces-N.snap.gz` snapshots
+  (`.runs/snap-set40`, `.runs/snap-holdout40`, 75 files). Chains, sizes and clean are frozen in the
+  snapshot, so it judges pieces-step code only. `--verify` on unchanged code must give 0 diffs;
+  `--env K=V` per switch, `--par 3`, `--out run.json`. A full run is about an hour.
+- Bench baseline is `AUTO_GAP_OFF=1`: Node runs the automatic gap unless told not to, the browser
+  only with `VITE_PATTERN_IMPORT_AUTO_GAP=1` (`worker/session.ts`). Compare like with like.
+- Reference set (`scripts/pattern-import/reference.json`): pieces the owner judged by eye, per size
+  ok / bad, kept as the outline points. `reference-check.ts reference.json --base <clone with .runs>`
+  finds each size again by geometry: ok → held / MOVED / LOST, bad → RETURNED / changed. Exit 1 on
+  MOVED or LOST only; RETURNED must go down. Tolerance per size: min(1 mm, half the distance to the
+  neighbouring size); noise on unchanged code ≤ 0.4 mm. Pieces of set `confirm` (holdout40) never
+  tune a rule. To grow it: `reference-export.ts` → review page → `reference-build.ts`.
+- Overlap with a neighbouring size is not a jump detector: true shared lines overlap as much.
+- Full pipeline (chains / sizes / fill changes): `dxf-shot.mjs "<dresses>" --files <list> --out
+  <dir> --par 1`, then `dxf-check.mjs`. Controls: Leah (MDF349), Cassandra (MDF348), Dyanna.
 - `gfit-replay.ts` replays `repairSize` on `GFIT_PROBES=1` snapshots. Nest walk:
   `NEST_WALK_DUMP=<dir>` plus `nest-walk-check.ts` / `nest-walk-cover.ts --dump`.
 - Unit: `npx vitest run src/lib/pattern-import`. Do not run `yarn lint` / `yarn fix` (they rewrite
@@ -90,20 +102,20 @@ top). This section stays ≤ ~80 lines: replace, never append.
 - On with `=1` (off in the browser): `GFIT_EDGE_ACCEPT` `GFIT_LOCAL_CORRIDOR`
   `OFFSET_HULL_POCKETS`.
 
-### Where it stands (18 Nov 2026, new agreement measure)
+### Where it stands (24 Nov 2026)
 
-- Nest walk unchanged. Leah `.runs/base-leah`: 110 closed / 16 open. Alignment is offline, not in
-  `repair-hook.ts`. Drawn-line loops 3090, 2884, 2915 stay. Pass 2b was not loosened.
-- Agreement ignores a tie and a chain that only clips the +80 mm window. A sample counts within
-  1 mm of a closed ring. It is a tie when two closed rings are each closer than 0.45 mm and the
-  gap between those distances is under 0.45 mm (`corridorMinMm`; the measure adds no threshold
-  of its own). A piece with more than half its on-piece length excluded is not measurable.
-- On that measure the ring oracle is ≥ 98 % on A, C, D. E is 100 % of what remains and not
-  measurable (tie 15.3 m of 28.1). B is 97.3 %, wrong 0. F and G are not measurable and the
-  remainder is below 98 % with a wrong size (F 3.4 %, G 19.6 %). The method is below 98 % on
-  every measurable piece. Э5 is not GO. Not wired.
-- Rays are closed. On the measurable pieces the method agrees 36–75 % with wrong 0.
-  The swapped-rank premise (A24/A26, G10/G12/G18/G24, F22/F24) is not confirmed: 0 of 8.
+- Success is files reaching DXF over the corpus, not closed cells: closed went 6390 → 6633 while
+  accepted DXF stayed 10 for three snapshots (`docs/pattern-import/material-corpus-80.md`). Point
+  fixes stay paused; switch ablation on the bench runs (groups, then halving).
+- Main direction (owner): the shared line. Open cells miss whole sides, not gaps (of 847 with a
+  prediction, 21 miss ≤ 12 mm, median longest miss 400–500 mm). On the reference set the line an
+  ok outline rides instead of its own is, for 86–98 % of the length, a line 8+ sizes run on (an
+  ungraded edge), ~80 % of it a `size` chain given to one arbitrary size, the rest internal /
+  ignore. 10 % of ok sizes have their own chain on under half the outline.
+- Already in the fill: lone stretches (`walls.ts`, wall for every rank), `landed-borrow.ts` (≥ 3
+  sizes, only between the size's own ends), the inner plug. Next: measure which open length these
+  miss, then replay "a chain ≥ 3 other closed sizes run on is a wall for all" on the snapshots,
+  judged by `reference-check` (no MOVED/LOST). Plan: `docs/pattern-import/family-fit.md` §4.
 
 ### Dead ends — do not retry
 
@@ -112,6 +124,10 @@ top). This section stays ≤ ~80 lines: replace, never append.
 - Raising `drawMaxShare`, dropping `walk:blind`, or cutting loops in `ringCheck`.
 - Grade slope only from diverging rays (E stayed 26 %, leave-one-out 6/16).
 - A shared edge given to the smallest outline that contains it (E 44 %, wrong 27 %).
+- Shared-line ownership as a consecutive block of sizes: holds on 94 % of `tune`, 60 % of `confirm`.
+- Jump detectors as a stop-gate: whole-outline grade deviation (3 of 32 bad on unseen pieces);
+  local checks by sheet strokes or own-chain cover (best on `confirm`: 20 of 25 bad, 65 of 210 ok
+  flagged). A correct outline on another size's line is normal, so cover cannot separate them.
 - Joint ray alignment does not cover the piece (agreement 36–75 % with 0 wrong). Do not
   retry a ray shape or the cost fixes. The long ray, the first-ring ray and the half-step
   rival rule each lost a piece on leave-one-out; the numbers are in the journal.
