@@ -2815,9 +2815,7 @@ export function useImportSession(deps: {
           ) {
             // The worker already consumed the tentative edit. Restore its pre-move history too.
             if (move.current) move.current.stopped = true;
-            setNotice(
-              'The selected outline changed during the check. Your previous outlines were kept.',
-            );
+            setNotice('outline changed during the check; previous outlines kept');
             return false;
           }
           iRef.current = next;

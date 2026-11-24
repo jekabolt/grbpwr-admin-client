@@ -459,15 +459,12 @@ type SeenRow = { order: number; label: string; seed?: number };
 
 /** Explain the first documented reason that this size could not be reconstructed. */
 function leakReason(c: PieceCandidate): string {
-  if (c.gapOptions?.length) return 'The highlighted segments show where each outline closes.';
+  if (c.gapOptions?.length) return 'highlighted segments show where each outline closes';
   const why = c.gradeHint?.refusals[0] ?? c.gradeTryWhy?.[0];
-  if (why === 'not-bracketed')
-    return 'Reconstruction needs a confirmed smaller and larger outline for this piece.';
-  if (why?.startsWith('E1'))
-    return 'Too little of the outline could be traced to lines for this size.';
-  if (why?.startsWith('E2'))
-    return 'The lines for this size leave an unsupported stretch at the gap.';
-  return 'The lines on the sheet could not confirm a closed cut for this size.';
+  if (why === 'not-bracketed') return 'rebuild needs confirmed smaller and larger size outlines';
+  if (why?.startsWith('E1')) return 'too little of the outline traced to sheet lines';
+  if (why?.startsWith('E2')) return 'lines leave an unsupported stretch at the gap';
+  return 'sheet lines do not confirm a closed cut';
 }
 
 export function PiecesStep({
