@@ -195,6 +195,20 @@ What the pieces that close nothing are (looked at one by one):
 - **Lita (no label), Sedona**: not explained. A wider straight join (6 or 10 mm instead of 3) does
   not help any of these and does not change the accuracy on the verified outlines.
 
+Across all 75 files (`by-measure.mjs`, `walk-carry.mjs plainscan`):
+
+- Pieces cut by measurements: only the four of Selenite. The text beside their labels says "Cut a
+  rectangle / a strip of fabric with the following dimensions", one side given in inches (4, 8, 10)
+  and the other as "Your waist circumference x 2" or "Petticoat hem measurement x 2.5"; the fourth
+  is a spoken alteration of another piece. 36 open cells that have no outline to close.
+- Pieces drawn once for every size, among the pieces with open cells: Venice J POCKETS only (18
+  cells); Clark's two pocket pieces are the likely others (32). The scan also returned the tile
+  frame as an "outline" in three files (978 mm, 585 cm², the same in each): a size-less loop the
+  size of a page is the frame, not a piece.
+
+So 36 open cells are not missing lines at all and 18 to 50 more need one shared outline: 5–7 % of
+the 1151.
+
 ### Completion from a neighbour size (hold-out)
 
 `complete-holdout.mjs`: on 544 ok sizes of 47 pieces a stretch of 30, 60 or 90 mm is hidden at
@@ -246,4 +260,5 @@ neighbour's arc length cuts corners by 2–5 mm; keep whole printed edges.
 | `walk-size.mjs`, `walk-open.mjs` | The walk without corners, on the reference set and on open cells |
 | `walk-carry.mjs` | The walk with built corners and neighbour-carried joins (`ref` and `open` modes) |
 | `complete-holdout.mjs` | Hide a stretch of a verified outline, redraw it from neighbours, measure |
+| `by-measure.mjs` | Pieces cut by measurements, found by the text beside the label |
 | `walk-viz.mjs`, `walk-open-viz.mjs` | Pictures: reference against the walk; open cells the walk closed |

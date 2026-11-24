@@ -97,6 +97,15 @@ if (mode === 'lone' || mode === 'lonecheck') {
   console.log(JSON.stringify(t));
   for (const r of out) console.log(`${r.label.slice(0, 26).padEnd(26)} ${r.size.padEnd(3)} → ${r.result}${r.result === 'closed' ? ` · own ${pct(r.own)} shared ${pct(r.shared)} · corners ${r.corners} · ${r.areaCm2} cm²${r.maxDev !== undefined ? ` · max deviation ${r.maxDev} mm` : ''}` : r.perMm ? ` · perimeter ${r.perMm} mm · ${r.areaCm2} cm² · corners ${r.corners}` : ''}`);
   if (rest[2]) writeFileSync(rest[2], JSON.stringify(out));
+} else if (mode === 'plainscan') {
+  // every piece with open cells: is there a closed outline round its label made of lines that carry no size?
+  const id = dir.split('/').filter(Boolean).pop(); const seeds = seedsOf(rest[1], id); const cells = JSON.parse(readFileSync(dir + '/cells.json', 'utf8')); const out = [];
+  for (const fam of cells) { const open = fam.cells.filter((c) => c.outcome !== 'closed').length; if (!open) continue; const at = seeds.get(fam.seed); if (!at) continue;
+    const r1 = walk(null, null, fam.seed + ':plain', at, true); if (!r1?.best) continue; const b = r1.best; const closed = fam.cells.filter((c) => c.outcome === 'closed' && c.outer?.length > 3);
+    // how the plain outline sits against the sizes the fill closed: the same line, or inside / outside them
+    const devs = closed.map((c) => { const T = c.outer.map(([x, y]) => ({ x, y })); return Math.max(dev(b.pts, T).max, dev(T, b.pts).max); }); const A = areaOf(b.pts); const areas = closed.map((c) => areaOf(c.outer.map(([x, y]) => ({ x, y }))));
+    out.push({ id, label: (fam.label ?? '').trim(), cells: fam.cells.length, open, closed: closed.length, perMm: Math.round(lenOf([...b.pts, b.pts[0]])), areaCm2: Math.round(A / 100), sameAsClosed: devs.filter((d) => d <= 1).length, minDev: devs.length ? +Math.min(...devs).toFixed(1) : null, vsClosedArea: areas.length ? (A < Math.min(...areas) * 0.98 ? 'smaller than every closed size' : A > Math.max(...areas) * 1.02 ? 'larger than every closed size' : 'within the closed sizes') : 'no closed size' }); }
+  for (const r of out) console.log(JSON.stringify(r));
 } else if (mode === 'reflone') {
   // the label-seeded walk (no neighbour) against the owner's verified outlines
   const raw = JSON.parse(readFileSync(rest[0], 'utf8')); const pieces = Array.isArray(raw) ? raw : raw.pieces; const id = dir.split('/').filter(Boolean).pop();
