@@ -1,3 +1,4 @@
+import { PATIMPORT } from '../types';
 // gate/chrome.ts (A8b) — the signatures of a cut line traced around tile chrome, for G19.
 //
 // Redcafe "Толстовка 44" (owner, 10.10): the tile corner brackets — filled 15 × 1 mm bars at the
@@ -190,7 +191,12 @@ export type OnChrome = { from: PtMm; to: PtMm; lengthMm: number };
  * offset: a garment curve that CROSSES a frame line at a shallow angle (Redcafe's side seams, 2°)
  * or touches it (a neckline apex) is within 0.3 mm of it for 12–17 mm too, but its offset sweeps.
  */
-export function onChrome(pts: readonly PtMm[], closed: boolean, idx: ChromeIndex): OnChrome[] {
+export function onChrome(
+  pts: readonly PtMm[],
+  closed: boolean,
+  idx: ChromeIndex,
+  source?: ChromeIndex,
+): OnChrome[] {
   const out: OnChrome[] = [];
   if (!idx.size || pts.length < 2) return out;
   const n = pts.length;
@@ -216,7 +222,10 @@ export function onChrome(pts: readonly PtMm[], closed: boolean, idx: ChromeIndex
     for (let j = 0; j < k; j++) {
       const p = { x: a.x + (dx * L * j) / k, y: a.y + (dy * L * j) / k };
       const d = idx.along(p, dx, dy, CHROME_GATE.touchMm);
-      if (d !== null) {
+      // Keep coincident or ambiguous marks. A distinct, independently keyed complete
+      // cut can pass parallel to a mark within the same geometric contact tolerance.
+      const ink = d !== null && source ? source.along(p, dx, dy, PATIMPORT.sagittaMm) : null;
+      if (d !== null && !(ink !== null && Math.abs(d) - Math.abs(ink) > 2 * PATIMPORT.sagittaMm)) {
         if (run) {
           run.L += len(run.to, p);
           run.to = p;

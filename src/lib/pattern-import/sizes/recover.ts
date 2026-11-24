@@ -32,8 +32,11 @@ import { dist, endTangent, PtGrid, resample, SegGrid, segNearest } from '../chai
 import { cosine, describeSig, type Signature } from '../chains/motif';
 import { type Group } from './align';
 import { ranksFromCoords, seriate } from './seriate';
-import { closeCorners, type CornerWall } from './corners';
+import { CORNER, closeCorners, type CornerMark, type CornerWall } from './corners';
 import { overlayShare, type OverlayLines } from './overlay';
+import { rankAlikeNests } from './alike-nests';
+import { sharedCutOutlines } from './shared-cut';
+import { adoptDashTrains, rankRhythms } from './dash-train';
 import { bridgeSameRank, landEnds, type Landing } from './land';
 import { legendIdentity, type LegendIdentity } from './legend-id';
 import { LABEL_FRAME_WHY, labelFrames } from './label-frame';
@@ -86,7 +89,74 @@ export type RecoverOut = {
   diag: Record<string, unknown>;
   /** MOOD Ф2: corners closed by a size's own stub / ramps / extended edges, as derived walls. */
   cornerWalls: CornerWall[];
+  bracketedOutlines?: { chain: number; label: string }[];
 };
+
+/** Keyed fragments form a loop when their ends pair uniquely at the
+ * spacing of the printed motif. Every other fragment must retain its own key rank. */
+export function keyedFragmentLoop(chain: number, peers: readonly Chain[], gap: number): boolean {
+  const start = peers.find((c) => c.id === chain);
+  if (!start || start.closed || !(gap > 0)) return false;
+  const ends = peers.filter((c) => !c.closed).flatMap((c) => [
+    { id: c.id, side: 0, p: c.pts[0] }, { id: c.id, side: 1, p: c.pts[c.pts.length - 1] },
+  ]);
+  const mate = (a: (typeof ends)[number]) => {
+    const hits = ends.filter((b) => b.id !== a.id && Math.hypot(a.p.x-b.p.x, a.p.y-b.p.y) <= gap);
+    return hits.length === 1 ? hits[0] : undefined;
+  };
+  const first = ends.find((e) => e.id === chain)!;
+  const visited = new Set<number>();
+  let at = first;
+  while (!visited.has(at.id)) {
+    visited.add(at.id);
+    const next = mate(at);
+    if (!next || mate(next) !== at) return false;
+    at = ends.find((o) => o.id === next.id && o.side !== next.side)!;
+  }
+  return at === first && visited.size >= 3;
+}
+
+/** A PDF key may paint a long dash row as a patterned centre between equal solid caps.
+ * The cap under the label locates the row; the middle stroke declares its rhythm. */
+export function cappedLegendSample(
+  cap: Chain,
+  chains: Chain[],
+  styles: ReadonlyMap<number, Style>,
+): Chain | undefined {
+  const paint = styles.get(cap.style);
+  if (!paint || paint.dash?.some((x) => x > 0) || cap.pts.length !== 2 || cap.closed) return;
+  const [a, b] = cap.pts;
+  const length = dist(a, b);
+  if (!length) return;
+  const ux = (b.x - a.x) / length;
+  const uy = (b.y - a.y) / length;
+  const along = (p: PtMm) => (p.x - a.x) * ux + (p.y - a.y) * uy;
+  const across = (p: PtMm) => Math.abs((p.y - a.y) * ux - (p.x - a.x) * uy);
+  const row = chains.filter((c) => {
+    if (c === cap || c.closed || c.pts.length !== 2) return false;
+    const style = styles.get(c.style);
+    return (
+      style !== undefined &&
+      style.clip === paint.clip &&
+      style.widthMm === paint.widthMm &&
+      style.layer === paint.layer &&
+      String(style.strokeRgb) === String(paint.strokeRgb) &&
+      c.pts.every((p) => across(p) <= 0.02)
+    );
+  });
+  const matches = row.filter((c) => {
+    const dash = styles.get(c.style)?.dash;
+    if (!dash?.some((x) => x > 0) || c.lengthMm < 2 * length) return false;
+    const [start, end] = c.pts.map(along).sort((x, y) => x - y);
+    if (start < length - 0.02 || start - length > length / 2) return false;
+    return row.some((tail) => {
+      if (tail.style !== cap.style || Math.abs(tail.lengthMm - length) > 0.02) return false;
+      const gap = Math.min(...tail.pts.map(along)) - end;
+      return gap >= -0.02 && gap <= length / 2;
+    });
+  });
+  return matches.length === 1 ? matches[0] : undefined;
+}
 
 function lenOf(chains: Chain[], ids: Iterable<number>) {
   let L = 0;
@@ -202,7 +272,11 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
   const hits0 = tokenHits(allTexts, chains, cand, 6);
   // labels ALONG long lines (r4454) vs labels next to short sample strokes (a legend: viola p29)
   const onLine = hits0.filter((h) => chains[h.chain].lengthMm >= 150);
-  const legendHits0 = alignedLegend(legendEndHits(allTexts, chains, cand), chains);
+  const rawLegend = alignedLegend(legendEndHits(allTexts, chains, cand), chains);
+  const legendHits0 = rawLegend.map((hit) => {
+    const sample = cappedLegendSample(chains[hit.chain], chains, styles);
+    return sample ? { ...hit, chain: sample.id } : hit;
+  });
   const hitRun = labelRun(onLine, 2);
   let hits = onLine.filter((h) => hitRun.has(h.label));
   {
@@ -258,7 +332,9 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       .filter((r) => r.labels.length >= 3 && (r.keyword || r.kind === 'legend'))
       .filter((r) => {
         const inRun = r.labels.filter((l) => spelling.has(keyOf(l))).length;
-        return inRun >= 3 && inRun > legendRun.size && inRun >= spelling.size - 2;
+        // a hole of the run (a key entry with no sample) is no sample: count the labels that have one
+        const sampled = [...legendRun].filter((l) => spelling.has(keyOf(l))).length;
+        return inRun >= 3 && inRun > sampled && inRun >= spelling.size - 2;
       })
       .sort((a, b) => b.labels.length - a.labels.length)[0];
     if (stated) legendRun = new Set(stated.labels.map((l) => spelling.get(keyOf(l)) ?? l));
@@ -1633,6 +1709,19 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       const top = [...e.to].sort((x, y) => y[1] - x[1])[0];
       // a fragment (< 15 mm) is not worth a question on a whole row: it only loses its rank
       const to = top && top[1] >= 0.7 * e.against && chains[c].lengthMm >= 15 ? top[0] : -1;
+      // A cross-section at a crossing can put an outer size inside another
+      // one. A unique cycle traced with its keyed bead row supplies the missing
+      // local evidence when the sections propose no consistent alternative.
+      if (to < 0 && sigs[c]?.period === 'o' && legendId?.label[c] === unit[c]) {
+        const peers = chains.filter((ch, id) => {
+          if (rankOf.get(id) !== from || legendId?.label[id] !== unit[c] ||
+              sigs[id]?.period !== 'o' || ch.lengthMm < 15) return false;
+          const vote = per.get(id);
+          return id === c || !vote || vote.against < 3 || vote.against < 2 * vote.agree;
+        });
+        const pitch = chains[c].lengthMm / Math.max(1, chains[c].ranges.length - 1);
+        if (keyedFragmentLoop(c, peers, Math.min(4.5, 3.1 * pitch))) continue;
+      }
       if (to >= 0) {
         rankOf.set(c, to);
         into.add(to);
@@ -1708,9 +1797,68 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
     if (frames.size) diag.labelFrames = frames.size;
   }
 
+  // ── sizes drawn in ONE pen (the key prints one sample for several): their closed outlines are
+  // told apart by how they nest, between the outlines of the sizes whose ranks are known
+  const bracketedOutlines: { chain: number; label: string }[] = [];
+  if (legendHits.length >= 3 && !debugFlag('ALIKE_NESTS_OFF')) {
+    const keyRank = new Map<string, number>();
+    labels.forEach((l, r) => l && keyRank.set(l, r));
+    const given = rankAlikeNests({
+      chains,
+      rankOf,
+      styles,
+      anchorRank: (i) => keyRank.get(legendKey[legendId?.label[i] ?? -1]),
+      onBracket: (chain, rank) => bracketedOutlines.push({ chain, label: labels[rank]! }),
+      samples: legendHits.map((h) => ({ label: h.label, chain: h.chain })),
+      keyRank,
+      candidate: (i) => i < N0 && cand[i] && !furniture[i],
+    });
+    if (given.size) {
+      diag.alikeNests = given.size;
+      // the key's sample of a size that has a line now is no longer "matching no line"
+      for (const r of given) {
+        const l = labels[r];
+        if (!l) continue;
+        for (let k = ambiguities.length - 1; k >= 0; k--)
+          if (
+            ambiguities[k].kind === 'size-empty' &&
+            ambiguities[k].message.includes(`sample for ${l} `)
+          )
+            ambiguities.splice(k, 1);
+      }
+    }
+  }
+
   // ── shared stretches of size lines → common ─────────────────────────────────────────────────
   const sharedFrom = new Map<number, number>();
+  // dashes of a size line the linker left apart (< 8 mm): ranked by the rhythm of the pen the
+  // drawing's key named — only where the legend named the ranks (sizes/dash-train.ts)
+  const adopted = new Map<number, number>();
+  if (legendId && !debugFlag('DASH_TRAIN_OFF')) {
+    const lid = legendId;
+    const rhythms = rankRhythms(
+      rankOf,
+      (c) => c < N0 && c < sigs.length && lid.label[c] >= 0,
+      (c) => sigs[c].declared ?? sigs[c].motif,
+      (c) => chains[c].lengthMm,
+    );
+    for (const [f, h] of adoptDashTrains({
+      chains,
+      rankOf,
+      rhythms,
+      candidate: (i) => i < N0 && !furniture[i],
+      debug: debugFlag('DT_DEBUG')
+        ? (r, l) => console.log(`DT size ${labels[r] ?? r} ${l}`)
+        : undefined,
+    }))
+      adopted.set(f, h);
+    if (adopted.size) {
+      diag.dashTrains = adopted.size;
+      diag.dashTrainList = [...adopted].map(([f, h]) => ({ f, h, rank: rankOf.get(h) }));
+    }
+  }
   const joined = bridgeSameRank(chains, rankOf);
+  for (const [f, h] of adopted) joined.set(f, h);
   let cornerWalls: CornerWall[] = [];
   // MOOD Ф2: corners closed by the size's own stub / ramps / extended edges (sizes/corners.ts) —
   // only where a chain's own look names its rank (declared dashes, the drawing's key)
@@ -1724,9 +1872,18 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       (c) => ownLook(c) && !joined.has(c),
       (c) => c < N0 && !furniture[c] && !joined.has(c) && !ownLook(c),
       n,
+      debugFlag('MOOD_MARKS_OFF') ? [] : glyphMarks(sheet),
     );
     cornerWalls = cc.walls;
-    diag.corners = { stubs: cc.stubs, ramps: cc.ramps, extended: cc.extended, refused: cc.refused };
+    diag.corners = {
+      stubs: cc.stubs,
+      ramps: cc.ramps,
+      extended: cc.extended,
+      crossed: cc.crossed,
+      marked: cc.marked,
+      arms: cc.walls.filter((w) => w.rule === 'arms').length,
+      refused: cc.refused,
+    };
   }
   const landings = landEnds(
     chains,
@@ -1895,6 +2052,19 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
   });
   if (overlaid.length)
     diag.overlayOrphans = `${overlaid.length}/${(lenOf(chains, overlaid) / 1000).toFixed(2)}m`;
+  if (legendId && legendHits0.some((hit, i) => rawLegend[i].chain !== hit.chain)) {
+    // The patterned centre identifies the legend size. A separate, fully drawn
+    // ungraded cut can use the solid pen of the caps without being an internal mark.
+    const shared = sharedCutOutlines(
+      sheet, chains, internal, new Set([...rankOf.keys(), ...orphans]), legendKey,
+    );
+    if (shared.size) {
+      common.push(...shared);
+      for (let i = internal.length - 1; i >= 0; i--) {
+        if (shared.has(internal[i])) internal.splice(i, 1);
+      }
+    }
+  }
 
   // ── classes ─────────────────────────────────────────────────────────────────────────────────
   const sizes: SizeClassOut[] = [];
@@ -2054,6 +2224,7 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
   diag.unitRank = unitRank;
   diag.unitPurity = unitPurity.map((p) => +p.toFixed(2));
   return {
+    bracketedOutlines,
     cornerWalls,
     encoding,
     n,
@@ -2474,6 +2645,36 @@ function medianWidth(
   }
   ws.sort((a, b) => a - b);
   return ws.length ? ws[0] : 0;
+}
+
+/** The sheet's glyphs (small paths of line work) for MOOD Ф2 MARKS (`sizes/corners.ts`). */
+function glyphMarks(sheet: Sheet): CornerMark[] {
+  const out: CornerMark[] = [];
+  for (const p of sheet.paths) {
+    if (p.background || p.pts.length < 2) continue;
+    let x0 = Infinity;
+    let y0 = Infinity;
+    let x1 = -Infinity;
+    let y1 = -Infinity;
+    for (const q of p.pts) {
+      x0 = Math.min(x0, q.x);
+      y0 = Math.min(y0, q.y);
+      x1 = Math.max(x1, q.x);
+      y1 = Math.max(y1, q.y);
+    }
+    const size = Math.max(x1 - x0, y1 - y0);
+    if (size < CORNER.markMinMm || size > CORNER.markMaxMm) continue;
+    const a = p.pts[0];
+    const b = p.pts[p.pts.length - 1];
+    out.push({
+      path: p.id,
+      c: { x: (x0 + x1) / 2, y: (y0 + y1) / 2 },
+      size,
+      closed: p.closed || Math.hypot(a.x - b.x, a.y - b.y) < 0.05,
+      style: p.style,
+    });
+  }
+  return out;
 }
 
 /** Size label in a file name: "44.pdf", "wm_kka_15_01_xl_wykroj.pdf", "Толстовка 48". */

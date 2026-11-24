@@ -73,3 +73,6 @@ scripts/.draft-shape-*
 # Playwright (yarn test:ui-kit)
 /test-results/
 /playwright-report/
+
+# pattern-import generated measurement output (scripts/pattern-import/*.mjs)
+/scripts/pattern-import/out/

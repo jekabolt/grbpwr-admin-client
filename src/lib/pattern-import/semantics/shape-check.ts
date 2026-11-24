@@ -47,6 +47,46 @@ function along(pts: readonly PtMm[], i: number, d: number, dir: 1 | -1): PtMm {
   return pts[k];
 }
 
+const comparePoint = (a: PtMm, b: PtMm) => a.x - b.x || a.y - b.y;
+
+/** Douglas–Peucker splits a ring at its first vertex and resolves ties in traversal order.
+ * Give the shape measurement a fixed traversal before simplifying; preserve the written cut. */
+function simplifyForTurns(outline: readonly PtMm[]): PtMm[] {
+  const ring = outline.filter((p, i) => !i || comparePoint(p, outline[i - 1]) !== 0);
+  if (ring.length > 1 && comparePoint(ring[0], ring[ring.length - 1]) === 0) ring.pop();
+  const n = ring.length;
+  if (n < 3) return [];
+  let first = 0;
+  for (let i = 1; i < n; i++) if (comparePoint(ring[i], ring[first]) < 0) first = i;
+  const minimum = ring[first];
+  let direction = 1;
+  // Usually the minimum is unique and its two neighbours decide the traversal.
+  // Compare further only when equal vertices or a retraced segment tie.
+  for (let i = first; i < n; i++) {
+    if (comparePoint(ring[i], minimum) !== 0) continue;
+    for (const step of [1, -1]) {
+      if (i === first && step === direction) continue;
+      for (let k = 1; k < n; k++) {
+        const cmp = comparePoint(
+          ring[(i + step * k + n) % n],
+          ring[(first + direction * k + n) % n],
+        );
+        if (cmp === 0) continue;
+        if (cmp < 0) {
+          first = i;
+          direction = step;
+        }
+        break;
+      }
+    }
+  }
+  return simplify(
+    ring.map((_, k) => ring[(first + direction * k + n) % n]),
+    true,
+    0.4,
+  );
+}
+
 /**
  * Signed turn angles (deg; > 0 = left turn on the counter-clockwise outline, i.e. convex) at each
  * vertex of the simplified closed outline, measured between the line `reach` mm before and after
@@ -56,7 +96,7 @@ export function turnsOf(
   outline: readonly PtMm[],
   reach = CORNER_REACH_MM,
 ): { at: PtMm; deg: number }[] {
-  return turnsOn(simplify(outline, true, 0.4), reach);
+  return turnsOn(simplifyForTurns(outline), reach);
 }
 
 /** turnsOf on the outline already simplified at 0.4 mm (a shape measures both scales on one). */
@@ -133,7 +173,7 @@ function eventsOf(cut: readonly PtMm[]): {
   const events: { key: string; strong: number; weak: number; at: PtMm[] }[] = [];
   let corners: PtMm[] = [];
   let weak = 0;
-  const simple = simplify(cut, true, 0.4);
+  const simple = simplifyForTurns(cut);
   SCALES.forEach((sc, k) => {
     const t = turnsOn(simple, sc.reach);
     if (k === 0) {

@@ -49,6 +49,22 @@ export const GFIT_TOL_P0: GfitTol = {
   extrapMul: 2.5,
 };
 
+/**
+ * Hand-graded PDFs (MDF series: Leah, Dyanna, Cassandra, 19 pieces closed on ≥ 3 sizes): the same
+ * leave-one-out on the pieces the fill closed gives a median p95 of 1.13 mm per size, 73 % of the
+ * sizes within 2 mm, 90 % within 5 mm (owner's run, docs/pattern-import/grade-loo-report.md);
+ * 1.2 / 0.9 mm (kombinezon, CAD-graded) leaves 4 of 7 families of Leah `inconsistent` (× 2: 3 of 7, × 3: none). 2 mm on the
+ * edge p95, 2.4 mm on a grade point (the ratio of P0), extrapolation × 2.5 as before. Only used
+ * where the model is bracketed (interpolation): a size is never graded from one side.
+ */
+export const GFIT_TOL_PDF: GfitTol = {
+  ptMm: 2.4,
+  ptStep: 0,
+  edgeMm: 2.0,
+  edgeStep: 0,
+  extrapMul: 2.5,
+};
+
 export type GfitSizeIn = {
   rank: number;
   outer: readonly PtMm[];
@@ -127,6 +143,8 @@ export type GfitFamily = {
   topoSkips: number;
   /** Worst uniqueness ratio over the anchor pairs (second / best). */
   minRatio: number;
+  /** Anchors left out of the corner chain because their pair with a neighbour was ambiguous (they stay checked sizes). */
+  droppedAmbiguous?: number[];
   /** Median grade step per rank over the grade points of neighbouring trusted anchors, mm (≈ 0: the
    * sizes are drawn alike — an ungraded piece, or sizes that all took one line). */
   stepMm: number;
@@ -284,7 +302,7 @@ export function fitFamily(input: readonly GfitSizeIn[], opts: FitOpts = {}): Gfi
     if (o) sizes.push({ rank: s.rank, anchor: s.anchor, o, off: { x: 0, y: 0 }, idx: [] });
   }
   sizes.sort((a, b) => a.rank - b.rank);
-  const anchors = sizes.filter((s) => s.anchor);
+  let anchors = sizes.filter((s) => s.anchor);
   const base: GfitFamily = {
     model: false,
     frame: 'stacked',
@@ -320,17 +338,54 @@ export function fitFamily(input: readonly GfitSizeIn[], opts: FitOpts = {}): Gfi
   const frame: GfitFamily['frame'] = stacked ? 'stacked' : 'registered';
   if (!stacked) for (const s of sizes) s.off = mean(s.o.pts);
   // anchor pairs
-  const matches: GfitMatch[] = [];
-  let minRatio = Infinity;
-  let topoSkips = 0;
-  for (let k = 1; k < anchors.length; k++) {
-    const m = matchOf(anchors[k - 1].o, anchors[k].o, anchors[k - 1].off, anchors[k].off);
-    if (!m) return { ...base, frame, why: 'no-match' };
-    matches.push(m);
-    minRatio = Math.min(minRatio, m.ratio);
-    topoSkips += m.skipStrongA + m.skipStrongB;
+  const chain = (list: readonly Size[]) => {
+    const ms: GfitMatch[] = [];
+    let ratio = Infinity;
+    let skips = 0;
+    let bad = 1;
+    for (let k = 1; k < list.length; k++) {
+      const m = matchOf(list[k - 1].o, list[k].o, list[k - 1].off, list[k].off);
+      if (!m) return null;
+      ms.push(m);
+      if (m.ratio < ratio) {
+        ratio = m.ratio;
+        bad = k;
+      }
+      skips += m.skipStrongA + m.skipStrongB;
+    }
+    return { ms, ratio, skips, bad };
+  };
+  let cur = chain(anchors);
+  if (!cur) return { ...base, frame, why: 'no-match' };
+  // An ambiguous pair is usually ONE anchor whose outline was read differently from its neighbours
+  // (19 strong corners against 6; two sizes drawn alike): leave the worse end of the worst pair out of
+  // the corner chain — it stays a checked size — while the rest of the chain is unique. At most two,
+  // never below three anchors (AMBIGUOUS_DROP_OFF=1: the bisect switch).
+  const ratio0 = cur.ratio;
+  const skips0 = cur.skips;
+  const droppedAmbiguous: number[] = [];
+  const dropOff = typeof process !== 'undefined' && !!process.env?.AMBIGUOUS_DROP_OFF;
+  while (!dropOff && cur.ratio < 1.5 && droppedAmbiguous.length < 2 && anchors.length > 3) {
+    let best: { list: Size[]; c: NonNullable<ReturnType<typeof chain>>; out: Size } | null = null;
+    for (const out of [anchors[cur.bad - 1], anchors[cur.bad]] as Size[]) {
+      const list: Size[] = anchors.filter((x) => x !== out);
+      const c = chain(list);
+      if (c && (!best || c.ratio > best.c.ratio)) best = { list, c, out };
+    }
+    if (!best || best.c.ratio <= cur.ratio) break;
+    best.out.anchor = false;
+    droppedAmbiguous.push(best.out.rank);
+    anchors = best.list;
+    cur = best.c;
   }
-  if (minRatio < 1.5) return { ...base, frame, minRatio, topoSkips, why: 'ambiguous' };
+  const matches = cur.ms;
+  const minRatio = cur.ratio;
+  const topoSkips = cur.skips;
+  if (minRatio < 1.5) {
+    // unchanged verdict: every size back as it was
+    for (const s of sizes) if (droppedAmbiguous.includes(s.rank)) s.anchor = true;
+    return { ...base, frame, minRatio: ratio0, topoSkips: skips0, why: 'ambiguous' };
+  }
   // grade points: corners of the middle anchor carried through every anchor
   const mid = anchors.length >> 1;
   const fwd = matches.map((m) => new Map(m.pairs.map(([a, b]) => [a, b])));
@@ -731,6 +786,7 @@ export function fitFamily(input: readonly GfitSizeIn[], opts: FitOpts = {}): Gfi
     strongGradePoints: gps.filter((g) => g.strong).length,
     topoSkips,
     minRatio,
+    ...(droppedAmbiguous.length ? { droppedAmbiguous } : {}),
     stepMm: (() => {
       const tr = anchors.filter((s) => trusted.has(s.rank));
       const st: number[] = [];

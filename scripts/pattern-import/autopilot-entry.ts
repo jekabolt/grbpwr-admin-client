@@ -11,6 +11,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 
+import { poseBox } from 'lib/pattern-import/assemble/holes';
 import { readManifest } from 'lib/pattern-import/manifest';
 import { sizeKey } from 'lib/pattern-import/sizes/map';
 import { PATIMPORT, SLIVER_MM } from 'lib/pattern-import/types';
@@ -19,12 +20,16 @@ import { Session, type StageCtx } from 'lib/pattern-import/worker/session';
 import { toWireError } from 'lib/pattern-import/worker/errors';
 import type {
   CardSize,
+  ChainSet,
   DraftScopeTarget,
   PageClassification,
+  PieceCandidate,
   PieceFamily,
   Seed,
   SeedId,
+  Sheet,
   SizeMapEntry,
+  SourceDoc,
   StageIO,
   StageName,
 } from 'lib/pattern-import/types';
@@ -33,6 +38,7 @@ import type {
   ImportClient,
 } from 'components/managers/tech-card/components/pattern-import/client';
 import { stubBuildDraft } from 'components/managers/tech-card/components/pattern-import/stub-client';
+import { findGap } from 'components/managers/tech-card/components/pattern-import/steps/gap';
 import {
   exportedRanks,
   useImportSession,
@@ -681,7 +687,7 @@ const CORPUS =
 export const SCOPES: DraftScopeTarget[] = [
   ['MAIN', 'L1', 'main', false, 'FABRIC'],
   ['LINING', 'L2', 'lining', false, 'LINING'],
-  ['INTERLINING', 'L3', 'interlining', true, 'INTERLINING'],
+  ['INTERFACING', 'L3', 'interlining', true, 'INTERLINING'],
 ].map(([p, line, label, inter, sec]) => ({
   scopeKey: `TECH_CARD_BOM_PURPOSE_${p}`,
   fabricPurpose: `TECH_CARD_BOM_PURPOSE_${p}`,
@@ -744,7 +750,8 @@ export function sessionClient() {
     },
     alive: () => true,
   };
-  return { client, outs };
+  // diagnostics only: the live session (its private sheet / chain set, read by the seam dump)
+  return { client, outs, session: () => s };
 }
 
 // ── truth ───────────────────────────────────────────────────────────────────────────────────────
@@ -775,7 +782,7 @@ const bare = sizeKey;
 const fabricOf = (f: unknown): string => {
   const t = String(f ?? '').toLowerCase();
   if (/^lining/.test(t)) return 'TECH_CARD_BOM_PURPOSE_LINING';
-  if (/^(interfacing|interlining)/.test(t)) return 'TECH_CARD_BOM_PURPOSE_INTERLINING';
+  if (/^(interfacing|interlining)/.test(t)) return 'TECH_CARD_BOM_PURPOSE_INTERFACING';
   return 'TECH_CARD_BOM_PURPOSE_MAIN';
 };
 
@@ -819,7 +826,7 @@ export async function runCase(c: Case, mutate: string | null) {
     styleLabel: 'autopilot',
     ...(c.cardName ? { cardName: c.cardName } : {}),
   };
-  const { client, outs } = sessionClient();
+  const { client, outs, session } = sessionClient();
   // A9: `--page-roles` = the recorded AI page roles (fixtures/page-roles.json, never a paid call);
   // `--mutate=page-role` = with a real tile answered "instructions" 0.99 in every call
   const roles =
@@ -1108,6 +1115,145 @@ export async function runCase(c: Case, mutate: string | null) {
   rec.setAside = (s.pieces?.setAside ?? []).map(
     (a) => `${a.reason} ${Math.round(a.areaMm2 / 100)}cm² ${a.seed?.text?.text ?? ''}`,
   );
+  // DXF SHOT: every region × size as the pieces stage left it (the sizes the map exports only) —
+  // the matrix the acceptance reads even where the run stops before the write
+  {
+    const rankLabel = new Map(
+      (s.sizes?.map.entries ?? []).map((e) => [e.source.rank, e.source.label || '∅']),
+    );
+    const exp = s.sizes ? exportedRanks(s.sizes.map) : null;
+    const len = (p: { x: number; y: number }[]) =>
+      p.reduce((a, q, k) => (k ? a + Math.hypot(q.x - p[k - 1].x, q.y - p[k - 1].y) : 0), 0);
+    // Preserve the old Pieces wall filter separately from the wider diagnostic search so a
+    // batch can distinguish an empty wall list from an actual absence of eligible endpoints.
+    const pv = s.chains?.chainPreview ?? [];
+    const ignored = new Set(
+      api.inputs.edits.flatMap((e) => (e.kind === 'ignore-line' ? [e.chain] : [])),
+    );
+    const distToPoly = (p: { x: number; y: number }, poly: { x: number; y: number }[]) => {
+      let best = Infinity;
+      for (let k = 0; k < poly.length; k++) {
+        const a = poly[k];
+        const b = poly[(k + 1) % poly.length];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const l2 = dx * dx + dy * dy || 1;
+        const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2));
+        best = Math.min(best, Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy));
+      }
+      return best;
+    };
+    const gapMeasure = (f: PieceFamily, c: PieceCandidate) => {
+      if (c.outcome !== 'leak' || !c.leakAt) return null;
+      // a leak carries no walls (fill.ts leaves `walls` empty on a region that ran out), so the
+      // ends are taken from the size's OWN lines (its 'size' class) and the common lines
+      const label = rankLabel.get(c.rank);
+      const own = new Set<number>(
+        (s.chains?.classes ?? [])
+          .filter((k) => k.role === 'common' || (k.role === 'size' && k.sizeLabel === label))
+          .flatMap((k) => k.chains),
+      );
+      const g = findGap(c.leakAt, pv, ignored, 40, own);
+      const legacy = c.walls.length ? findGap(c.leakAt, pv, ignored, 40, new Set(c.walls)) : null;
+      const legacyEvidence = { candidateWalls: c.walls.length, legacyWallPair: !!legacy };
+      const ranks = f.candidates.filter((x) => !exp || exp.has(x.rank));
+      const closedRank = (x: PieceCandidate) => x.outcome === 'closed';
+      const bracketed =
+        ranks.some((x) => closedRank(x) && x.rank < c.rank) &&
+        ranks.some((x) => closedRank(x) && x.rank > c.rank);
+      if (!g) {
+        // why nothing: the walls' open ends and the nearest of them to the leak point
+        let open = 0;
+        let nearMm = Infinity;
+        for (const w of own) {
+          const a = pv[w];
+          if (!a || a.length < 4) continue;
+          const n = a.length;
+          if (Math.hypot(a[0] - a[n - 2], a[1] - a[n - 1]) <= 0.5) continue;
+          for (const k of [0, n - 2]) {
+            open++;
+            nearMm = Math.min(nearMm, Math.hypot(a[k] - c.leakAt.x, a[k + 1] - c.leakAt.y));
+          }
+        }
+        return {
+          ...legacyEvidence,
+          found: false,
+          bracketed,
+          walls: own.size,
+          openEnds: open,
+          nearEndMm: Number.isFinite(nearMm) ? Math.round(nearMm) : null,
+        };
+      }
+      const pred = c.gradeHint?.pred;
+      let predMm: number | null = null;
+      if (pred && pred.length > 2) {
+        predMm = 0;
+        for (let k = 0; k <= 10; k++) {
+          const t = k / 10;
+          const p = {
+            x: g.from.x + (g.to.x - g.from.x) * t,
+            y: g.from.y + (g.to.y - g.from.y) * t,
+          };
+          predMm = Math.max(predMm, distToPoly(p, pred));
+        }
+        predMm = Math.round(predMm * 10) / 10;
+      }
+      return {
+        ...legacyEvidence,
+        found: true,
+        chains: g.chains,
+        ends: [g.from, g.to],
+        mm: Math.round(g.mm * 10) / 10,
+        facing: g.facing,
+        predMm,
+        bracketed,
+      };
+    };
+    rec.families = (s.pieces?.families ?? []).map((f) => ({
+      seed: f.seed,
+      label: s.pieces?.seeds.find((x) => x.id === f.seed)?.text?.text?.slice(0, 32) ?? null,
+      cells: f.candidates
+        .filter((c) => !exp || exp.has(c.rank))
+        .map((c) => ({
+          size: rankLabel.get(c.rank) ?? `r${c.rank}`,
+          outcome: c.outcome,
+          gap: gapMeasure(f, c),
+          ...(c.gapRecovery ? { gapRecovery: c.gapRecovery } : {}),
+          ...(c.gapOptions?.length ? { gapChoices: c.gapOptions.length } : {}),
+          from: c.rankFrom ?? null,
+          ...(c.polygonSource ? { polygonSource: c.polygonSource } : {}),
+          repair: c.repair?.kind ?? null,
+          // the continuity judgement that kept this close (probe: why a far ring passed)
+          ...(c.continuityVerdict ? { cont: c.continuityVerdict } : {}),
+          refusal:
+            c.gradeRefusal ?? c.gradeHint?.refusals?.join('|') ?? c.gradeTryWhy?.join('|') ?? null,
+          // the pred's source: the two anchor sizes, and whether it reaches past them (a hint)
+          predFrom: c.gradeHint?.from ?? null,
+          predExtrapolated: c.gradeHint ? !!c.gradeHint.extrapolated : null,
+          nest: c.nest ?? null,
+          // LADDER_JUDGE: why this cell was kept or opened, and the nest verdict of its outline.
+          // `ladderNest` stays beside `nest` (the walk record) so the two do not overwrite.
+          ...(c.ladderReason
+            ? { reason: c.ladderReason, ladderNest: c.ladderNest ?? null }
+            : {}),
+          derivedMm: Math.round(
+            (c.derived ?? []).reduce((a, d) => a + len(d.pts as { x: number; y: number }[]), 0),
+          ),
+          // env AUTOPILOT_OUTLINES=1: the geometry too, for the picture (0.1 mm)
+          ...(process.env.AUTOPILOT_OUTLINES
+            ? {
+                outer: c.outer.map((p) => [Math.round(p.x * 10) / 10, Math.round(p.y * 10) / 10]),
+                leakAt: c.leakAt ? [c.leakAt.x, c.leakAt.y] : null,
+                pred: c.gradeHint?.pred.map((p) => [Math.round(p.x), Math.round(p.y)]) ?? null,
+                derived: (c.derived ?? []).map((d) => ({
+                  kind: d.kind,
+                  pts: d.pts.map((p) => [Math.round(p.x * 10) / 10, Math.round(p.y * 10) / 10]),
+                })),
+              }
+            : {}),
+        })),
+    }));
+  }
   rec.sizesRead = s.sizes
     ? {
         labels: s.sizes.run.sizes.map((x) => x.label),
@@ -1123,6 +1269,12 @@ export async function runCase(c: Case, mutate: string | null) {
   rec.ticks = ticks;
   rec.clicks = 0;
   rec.verdict = done?.ok ? 'apply' : 'stopped';
+  // the semantics blocks with their detail (areas, offset report) — the stop line keeps the reason only
+  rec.blocked = (s.semantics?.blocked ?? []).map((b) => ({
+    seed: b.seed,
+    reason: b.reason,
+    detail: b.detail,
+  }));
   if (done && !done.ok) rec.stop = done.stop;
   else if (!done) rec.stop = { step: s.step, reason: 'tick budget spent' };
   if (rec.verdict === 'stopped' && c.group === 'refusal') rec.expectedStop = true;
@@ -1222,6 +1374,119 @@ export async function runCase(c: Case, mutate: string | null) {
     mkdirSync(process.env.AUTOPILOT_DXF_OUT, { recursive: true });
     for (const sc of wr.scopes)
       writeFileSync(resolve(process.env.AUTOPILOT_DXF_OUT, `${sc.target.label}.dxf`), sc.dxfText);
+  }
+  // diagnostics: env AUTOPILOT_POSES_OUT = the placed pages' paper boxes (sheet mm), to lay the
+  // open stretches over the page seams
+  if (process.env.AUTOPILOT_POSES_OUT && s.sheet?.sheet) {
+    const live = session() as unknown as {
+      sheet: Sheet | null;
+      chains: ChainSet | null;
+      docs: SourceDoc[] | null;
+    } | null;
+    const sh = live?.sheet ?? s.sheet.sheet;
+    writeFileSync(
+      process.env.AUTOPILOT_POSES_OUT,
+      JSON.stringify({
+        bbox: sh.bbox,
+        parts: sh.parts ?? null,
+        poses: sh.poses.map((p) => ({
+          page: p.page,
+          row: p.row,
+          col: p.col,
+          box: poseBox(p),
+          rot: [p.toSheet.a, p.toSheet.b],
+        })),
+      }),
+    );
+    // env AUTOPILOT_SEAM_PTS = "x,y;x,y…": every source path and chain within 20 mm of each point,
+    // its page, look and (chain) row — what each page draws round a gap at a page seam
+    const want = (process.env.AUTOPILOT_SEAM_PTS ?? '')
+      .split(';')
+      .filter(Boolean)
+      .map((t) => t.split(',').map(Number));
+    if (want.length && live?.sheet) {
+      const sh = live.sheet;
+      const R = 20;
+      const near = (pts: { x: number; y: number }[], x: number, y: number) =>
+        pts.filter((q) => Math.abs(q.x - x) <= R && Math.abs(q.y - y) <= R);
+      const r1 = (v: number) => Math.round(v * 10) / 10;
+      const cs = live?.chains ?? null;
+      const rowOf = new Map<number, string>();
+      for (const k of cs?.classes ?? [])
+        for (const id of k.chains)
+          rowOf.set(id, `${k.role}${k.sizeLabel ? ' ' + k.sizeLabel : ''}`);
+      const look = (id: number) => {
+        const st = sh.styles[id];
+        return st
+          ? `w${st.widthMm.toFixed(2)} rgb${st.strokeRgb?.join(',') ?? '-'} dash${st.dash?.map((v) => v.toFixed(1)).join('/') ?? '-'}`
+          : `style${id}`;
+      };
+      const pathById = new Map((sh.paths ?? []).map((p) => [p.id, p]));
+      writeFileSync(
+        process.env.AUTOPILOT_POSES_OUT.replace(/\.json$/, '') + '.seam.json',
+        JSON.stringify(
+          want.map(([x, y]) => ({
+            at: [x, y],
+            paths: (sh.paths ?? [])
+              .filter((p) => !p.background && near(p.pts, x, y).length)
+              .map((p) => ({
+                id: p.id,
+                page: p.src.page,
+                op: p.src.op,
+                look: look(p.style),
+                ends: [p.pts[0], p.pts[p.pts.length - 1]].map((q) => [r1(q.x), r1(q.y)]),
+                n: p.pts.length,
+              })),
+            // the pages as read, BEFORE the overlap dedupe: each pose's own paths moved by its pose
+            raw: sh.poses.flatMap((ps) => {
+              const pg = (live?.docs ?? [])
+                .flatMap((d) => d.pages)
+                .find((q) => q.file === ps.file && q.page === ps.page);
+              if (!pg) return [];
+              const m = ps.toSheet;
+              return pg.paths
+                .filter((p) => !p.background)
+                .map((p) => ({
+                  p,
+                  pts: p.pts.map((q) => ({
+                    x: m.a * q.x + m.c * q.y + m.e,
+                    y: m.b * q.x + m.d * q.y + m.f,
+                  })),
+                }))
+                .filter((o) => near(o.pts, x, y).length)
+                .map(({ p, pts }) => {
+                  const st = pg.styles[p.style];
+                  return {
+                    page: ps.page,
+                    op: p.src.op,
+                    look: st
+                      ? `w${st.widthMm.toFixed(2)} rgb${st.strokeRgb?.join(',') ?? '-'} dash${st.dash?.map((v) => v.toFixed(1)).join('/') ?? '-'}`
+                      : '?',
+                    clip: st?.clip ?? null,
+                    ends: [pts[0], pts[pts.length - 1]].map((q) => [r1(q.x), r1(q.y)]),
+                    xr: [
+                      r1(Math.min(...pts.map((q) => q.x))),
+                      r1(Math.max(...pts.map((q) => q.x))),
+                    ],
+                    n: pts.length,
+                  };
+                });
+            }),
+            chains: (cs?.chains ?? [])
+              .filter((c) => near(c.pts, x, y).length)
+              .map((c) => ({
+                id: c.id,
+                row: rowOf.get(c.id) ?? '?',
+                motif: c.motif,
+                pages: [...new Set(c.ranges.map((r) => pathById.get(r.path)?.src.page))],
+                ends: [c.pts[0], c.pts[c.pts.length - 1]].map((q) => [r1(q.x), r1(q.y)]),
+              })),
+          })),
+          null,
+          1,
+        ),
+      );
+    }
   }
   if (wr && s.step !== 'fabrics') {
     const want = autopilotRecordOf(as, new Set((s.semantics?.pieces ?? []).map((p) => p.seed)))

@@ -1,0 +1,481 @@
+set,pdf,baseline,change,old_seed,new_seed,piece,size
+set40,2-A4-MDF-349-The-Leah-Shift-Dress-00-32-,initial,shape-changed,5,5,F - FRONT NECKLINE FACING,10
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,initial,shape-changed,2,2,C - BACK BODICE,8
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,initial,gained,5,5,F - FRONT SKIRT,6
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,initial,new-closed,,6,D - BACK SKIRT FACING,00
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,initial,new-closed,,6,D - BACK SKIRT FACING,0
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,initial,new-closed,,6,D - BACK SKIRT FACING,2
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,initial,new-closed,,6,D - BACK SKIRT FACING,4
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,initial,new-closed,,6,D - BACK SKIRT FACING,6
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,initial,new-closed,,6,D - BACK SKIRT FACING,8
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,initial,new-closed,,6,D - BACK SKIRT FACING,10
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,initial,new-closed,,6,D - BACK SKIRT FACING,12
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,initial,new-closed,,6,D - BACK SKIRT FACING,14
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,initial,new-closed,,6,D - BACK SKIRT FACING,16
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,initial,new-closed,,6,D - BACK SKIRT FACING,18
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,initial,new-closed,,6,D - BACK SKIRT FACING,20
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,initial,new-closed,,6,D - BACK SKIRT FACING,22
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,initial,new-closed,,6,D - BACK SKIRT FACING,24
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,initial,new-closed,,6,D - BACK SKIRT FACING,26
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,initial,new-closed,,6,D - BACK SKIRT FACING,28
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,initial,new-closed,,6,D - BACK SKIRT FACING,30
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,initial,new-closed,,6,D - BACK SKIRT FACING,32
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,initial,new-closed,,7,A - FRONT SKIRT FACING,00
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,initial,new-closed,,7,A - FRONT SKIRT FACING,0
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,initial,new-closed,,7,A - FRONT SKIRT FACING,2
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,initial,new-closed,,7,A - FRONT SKIRT FACING,4
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,initial,new-closed,,7,A - FRONT SKIRT FACING,6
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,initial,new-closed,,7,A - FRONT SKIRT FACING,8
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,initial,new-closed,,7,A - FRONT SKIRT FACING,12
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,initial,new-closed,,7,A - FRONT SKIRT FACING,14
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,initial,new-closed,,7,A - FRONT SKIRT FACING,16
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,initial,new-closed,,7,A - FRONT SKIRT FACING,20
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,initial,new-closed,,7,A - FRONT SKIRT FACING,22
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,initial,new-closed,,7,A - FRONT SKIRT FACING,28
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,initial,new-closed,,7,A - FRONT SKIRT FACING,32
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,previous,gained,5,5,F - FRONT SKIRT,6
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,previous,lost-open,7,7,A - FRONT SKIRT FACING,24
+set40,MDF340-THE-OPAL-DRESS-FREE-PATTERN,previous,lost-open,7,7,A - FRONT SKIRT FACING,26
+set40,MDF363-The-Memoir-Dress-View-A-Sizes-00-32-A4-Letter-Patterns,initial,shape-changed,0,0,N - SLEEVES,2
+set40,MDF363-The-Memoir-Dress-View-A-Sizes-00-32-A4-Letter-Patterns,initial,shape-changed,0,0,N - SLEEVES,10
+set40,MDF363-The-Memoir-Dress-View-A-Sizes-00-32-A4-Letter-Patterns,initial,shape-changed,0,0,N - SLEEVES,14
+set40,MDF363-The-Memoir-Dress-View-A-Sizes-00-32-A4-Letter-Patterns,initial,shape-changed,1,1,L - SKIRT BACK,6
+set40,MDF363-The-Memoir-Dress-View-A-Sizes-00-32-A4-Letter-Patterns,initial,lost-open,3,3,O - SLEEVES LOWER,6
+set40,MDF363-The-Memoir-Dress-View-A-Sizes-00-32-A4-Letter-Patterns,initial,shape-changed,6,6,C - SIDE BACK LOWER,0
+set40,MDF363-The-Memoir-Dress-View-A-Sizes-00-32-A4-Letter-Patterns,initial,shape-changed,6,6,C - SIDE BACK LOWER,2
+set40,MDF363-The-Memoir-Dress-View-A-Sizes-00-32-A4-Letter-Patterns,initial,shape-changed,6,6,C - SIDE BACK LOWER,4
+set40,MDF363-The-Memoir-Dress-View-A-Sizes-00-32-A4-Letter-Patterns,initial,shape-changed,7,7,D - SIDE FRONT UPPER,4
+set40,MDF363-The-Memoir-Dress-View-A-Sizes-00-32-A4-Letter-Patterns,initial,shape-changed,7,7,D - SIDE FRONT UPPER,6
+set40,MDF363-The-Memoir-Dress-View-A-Sizes-00-32-A4-Letter-Patterns,initial,gained,9,9,B - SIDE BACK UPPER,8
+set40,MDF363-The-Memoir-Dress-View-A-Sizes-00-32-A4-Letter-Patterns,previous,lost-open,3,3,O - SLEEVES LOWER,6
+set40,MDF363-The-Memoir-Dress-View-A-Sizes-00-32-A4-Letter-Patterns,previous,gained,9,9,B - SIDE BACK UPPER,8
+set40,MDF365-The-Memoir-Dress-View-C-Sizes-00-32-A4-Letter-Patterns,previous,shape-changed,7,7,C - BACK,14
+set40,MDF368-The-Albuca-A-Line-Dress-XXS-4XL-A4-Letter-Patterns,initial,shape-changed,1,1,B - FRONT,XL
+set40,MDF388-The-Rosalina-Bodycon-Dress-Sizes-XXS-4XL-A4-Letter-Patterns,initial,shape-changed,0,0,A - BACK SELF,S
+set40,MDF388-The-Rosalina-Bodycon-Dress-Sizes-XXS-4XL-A4-Letter-Patterns,initial,shape-changed,0,0,A - BACK SELF,XL
+set40,MDF388-The-Rosalina-Bodycon-Dress-Sizes-XXS-4XL-A4-Letter-Patterns,initial,shape-changed,0,0,A - BACK SELF,2XL
+set40,MDF388-The-Rosalina-Bodycon-Dress-Sizes-XXS-4XL-A4-Letter-Patterns,initial,shape-changed,0,0,A - BACK SELF,3XL
+set40,MDF388-The-Rosalina-Bodycon-Dress-Sizes-XXS-4XL-A4-Letter-Patterns,initial,shape-changed,1,1,B - FRONT SELF,XXS
+set40,MDF388-The-Rosalina-Bodycon-Dress-Sizes-XXS-4XL-A4-Letter-Patterns,initial,shape-changed,1,1,B - FRONT SELF,S
+set40,MDF388-The-Rosalina-Bodycon-Dress-Sizes-XXS-4XL-A4-Letter-Patterns,initial,shape-changed,1,1,B - FRONT SELF,M
+set40,MDF388-The-Rosalina-Bodycon-Dress-Sizes-XXS-4XL-A4-Letter-Patterns,initial,shape-changed,1,1,B - FRONT SELF,L
+set40,MDF390-The-Corella-Beach-Cover-Up-Sizes-XXS-4XL-A4-Letter-Patterns,initial,shape-changed,0,0,A - FRONT,S
+set40,MDF390-The-Corella-Beach-Cover-Up-Sizes-XXS-4XL-A4-Letter-Patterns,initial,shape-changed,1,1,B - BACK,3XL
+set40,MDF390-The-Corella-Beach-Cover-Up-Sizes-XXS-4XL-A4-Letter-Patterns,previous,shape-changed,1,1,B - BACK,3XL
+set40,MDF432-Asheville-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,initial,shape-changed,0,0,F - SKIRT,M
+set40,MDF439-Mendocino-A-Line-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,initial,shape-changed,4,4,D - COLLAR RUFFLE,XL
+set40,MDF451-Lumiere-Strapless-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,initial,gained,0,0,A - TOP FRONT,6
+set40,MDF451-Lumiere-Strapless-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,previous,gained,0,0,A - TOP FRONT,6
+set40,MDF453-Kitchen-Pickleball-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,initial,shape-changed,0,0,N - SKIRT,L
+set40,MDF453-Kitchen-Pickleball-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,initial,gained,2,2,K - SHORTS FRONT,3XL
+set40,MDF453-Kitchen-Pickleball-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,initial,gained,3,3,L - SHORTS BACK,3XL
+set40,MDF453-Kitchen-Pickleball-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,initial,shape-changed,5,5,F - TOP - BACK LEFT STRAP,L
+set40,MDF453-Kitchen-Pickleball-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,initial,gained,7,7,E - TOP - BACK,2XL
+set40,MDF453-Kitchen-Pickleball-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,initial,gained,10,10,A - TOP - FRONT SIDE UPPER,3XL
+set40,MDF453-Kitchen-Pickleball-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,previous,gained,2,2,K - SHORTS FRONT,3XL
+set40,MDF453-Kitchen-Pickleball-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,previous,gained,3,3,L - SHORTS BACK,3XL
+set40,MDF453-Kitchen-Pickleball-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,previous,gained,7,7,E - TOP - BACK,2XL
+set40,MDF453-Kitchen-Pickleball-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,previous,gained,10,10,A - TOP - FRONT SIDE UPPER,3XL
+set40,MDF458-Nob-Hill-Draped-Midi-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,initial,shape-changed,0,0,A - FRONT UPPER,XS
+set40,MDF458-Nob-Hill-Draped-Midi-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,initial,shape-changed,0,0,A - FRONT UPPER,S
+set40,MDF458-Nob-Hill-Draped-Midi-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,initial,gained,0,0,A - FRONT UPPER,M
+set40,MDF458-Nob-Hill-Draped-Midi-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,initial,gained,0,0,A - FRONT UPPER,L
+set40,MDF458-Nob-Hill-Draped-Midi-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,initial,gained,0,0,A - FRONT UPPER,XL
+set40,MDF458-Nob-Hill-Draped-Midi-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,initial,gained,0,0,A - FRONT UPPER,2XL
+set40,MDF458-Nob-Hill-Draped-Midi-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,initial,gained,0,0,A - FRONT UPPER,3XL
+set40,MDF458-Nob-Hill-Draped-Midi-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,initial,gained,0,0,A - FRONT UPPER,4XL
+set40,MDF458-Nob-Hill-Draped-Midi-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,initial,gained,0,0,A - FRONT UPPER,5XL
+set40,MDF458-Nob-Hill-Draped-Midi-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,initial,shape-changed,2,2,C - BACK,XS
+set40,MDF458-Nob-Hill-Draped-Midi-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,initial,shape-changed,2,2,C - BACK,S
+set40,MDF458-Nob-Hill-Draped-Midi-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,initial,shape-changed,2,2,C - BACK,M
+set40,MDF458-Nob-Hill-Draped-Midi-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,initial,shape-changed,2,2,C - BACK,XL
+set40,MDF458-Nob-Hill-Draped-Midi-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,previous,shape-changed,0,0,A - FRONT UPPER,XS
+set40,MDF458-Nob-Hill-Draped-Midi-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,previous,shape-changed,0,0,A - FRONT UPPER,S
+set40,MDF458-Nob-Hill-Draped-Midi-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,previous,gained,0,0,A - FRONT UPPER,M
+set40,MDF458-Nob-Hill-Draped-Midi-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,previous,gained,0,0,A - FRONT UPPER,XL
+set40,MDF458-Nob-Hill-Draped-Midi-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,previous,gained,0,0,A - FRONT UPPER,2XL
+set40,MDF458-Nob-Hill-Draped-Midi-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,previous,gained,0,0,A - FRONT UPPER,3XL
+set40,MDF458-Nob-Hill-Draped-Midi-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,previous,gained,0,0,A - FRONT UPPER,4XL
+set40,MDF474-Soho-Maxi-Slip-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,gained,1,1,B - BACK SIDE,2XL
+set40,MDF474-Soho-Maxi-Slip-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,gained,1,1,B - BACK SIDE,3XL
+set40,MDF474-Soho-Maxi-Slip-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,gained,8,8,G - SLEEVE TIES,3XL
+set40,MDF474-Soho-Maxi-Slip-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,previous,gained,1,1,B - BACK SIDE,2XL
+set40,MDF474-Soho-Maxi-Slip-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,previous,gained,1,1,B - BACK SIDE,3XL
+set40,MDF474-Soho-Maxi-Slip-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,previous,shape-changed,2,2,E - SLEEVES,4XL
+set40,MDF474-Soho-Maxi-Slip-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,previous,shape-changed,2,2,E - SLEEVES,5XL
+set40,MDF485-Riverside-Ruched-Midi-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,gained,2,2,B - FRONT UPPER,2XL
+set40,MDF485-Riverside-Ruched-Midi-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,previous,gained,2,2,B - FRONT UPPER,2XL
+set40,MDF489-Silverstone-Mini-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,0,0,F - SKIRT FRONT,4XL
+set40,MDF489-Silverstone-Mini-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,1,1,G - SKIRT FRONT LINING,4XL
+set40,MDF489-Silverstone-Mini-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,1,1,G - SKIRT FRONT LINING,5XL
+set40,MDF489-Silverstone-Mini-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,2,2,E - SKIRT BACK,XS
+set40,MDF489-Silverstone-Mini-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,2,2,E - SKIRT BACK,M
+set40,MDF489-Silverstone-Mini-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,2,2,E - SKIRT BACK,L
+set40,MDF489-Silverstone-Mini-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,2,2,E - SKIRT BACK,4XL
+set40,MDF489-Silverstone-Mini-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,2,2,E - SKIRT BACK,5XL
+set40,MDF489-Silverstone-Mini-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,gained,7,7,C - TOP FRONT SIDE,L
+set40,MDF489-Silverstone-Mini-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,previous,shape-changed,0,0,F - SKIRT FRONT,4XL
+set40,MDF489-Silverstone-Mini-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,previous,shape-changed,1,1,G - SKIRT FRONT LINING,4XL
+set40,MDF489-Silverstone-Mini-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,previous,shape-changed,1,1,G - SKIRT FRONT LINING,5XL
+set40,MDF489-Silverstone-Mini-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,previous,shape-changed,2,2,E - SKIRT BACK,4XL
+set40,MDF489-Silverstone-Mini-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,previous,shape-changed,2,2,E - SKIRT BACK,5XL
+set40,MDF489-Silverstone-Mini-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,previous,gained,7,7,C - TOP FRONT SIDE,L
+set40,MDF515-Selenite-V-Waist-Ballgown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,gained,1,1,H - CUFFS,30-32
+set40,MDF515-Selenite-V-Waist-Ballgown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,2,2,I - SKIRT,00-0
+set40,MDF515-Selenite-V-Waist-Ballgown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,2,2,I - SKIRT,2-4
+set40,MDF515-Selenite-V-Waist-Ballgown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,2,2,I - SKIRT,6-8
+set40,MDF515-Selenite-V-Waist-Ballgown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,2,2,I - SKIRT,10-12
+set40,MDF515-Selenite-V-Waist-Ballgown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,2,2,I - SKIRT,14-16
+set40,MDF515-Selenite-V-Waist-Ballgown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,2,2,I - SKIRT,18-20
+set40,MDF515-Selenite-V-Waist-Ballgown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,2,2,I - SKIRT,22-24
+set40,MDF515-Selenite-V-Waist-Ballgown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,2,2,I - SKIRT,26-28
+set40,MDF518-Estoril-Collared-A-Line-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,0,0,H - SKIRT FRONT,4XL
+set40,MDF518-Estoril-Collared-A-Line-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,0,0,H - SKIRT FRONT,5XL
+set40,MDF518-Estoril-Collared-A-Line-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,2,2,J - BELT,M
+set40,MDF518-Estoril-Collared-A-Line-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,4,4,I - POCKETS,XL
+set40,MDF518-Estoril-Collared-A-Line-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,7,7,B - TOP FRONT,4XL
+set40,MDF518-Estoril-Collared-A-Line-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,9,9,C - COLLAR STAND,4XL
+set40,MDF518-Estoril-Collared-A-Line-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,9,9,C - COLLAR STAND,5XL
+set40,MDF518-Estoril-Collared-A-Line-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,previous,shape-changed,0,0,H - SKIRT FRONT,4XL
+set40,MDF518-Estoril-Collared-A-Line-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,previous,shape-changed,0,0,H - SKIRT FRONT,5XL
+set40,MDF518-Estoril-Collared-A-Line-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,previous,shape-changed,7,7,B - TOP FRONT,4XL
+set40,MDF518-Estoril-Collared-A-Line-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,previous,shape-changed,9,9,C - COLLAR STAND,4XL
+set40,MDF518-Estoril-Collared-A-Line-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,previous,shape-changed,9,9,C - COLLAR STAND,5XL
+set40,MDF528-Alassio-Wrap-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog-1,initial,shape-changed,1,1,G - SKIRT BACK,26-28
+set40,MDF528-Alassio-Wrap-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog-1,initial,gained,4,4,B - TOP FRONT,18-20
+set40,MDF528-Alassio-Wrap-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog-1,initial,gained,4,4,B - TOP FRONT,22-24
+set40,MDF528-Alassio-Wrap-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog-1,initial,shape-changed,8,8,E - COLLAR BAND,30-32
+set40,MDF528-Alassio-Wrap-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog-1,previous,shape-changed,1,1,G - SKIRT BACK,26-28
+set40,MDF528-Alassio-Wrap-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog-1,previous,gained,4,4,B - TOP FRONT,18-20
+set40,MDF528-Alassio-Wrap-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog-1,previous,gained,4,4,B - TOP FRONT,22-24
+set40,MDF528-Alassio-Wrap-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog-1,previous,shape-changed,8,8,E - COLLAR BAND,30-32
+set40,MDF535-Reef-Sleeveless-Cover-Up-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,0,0,E - SKIRT BACK,XL
+set40,MDF535-Reef-Sleeveless-Cover-Up-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,2,2,C - TOP FRONT UPPER,M
+set40,MDF535-Reef-Sleeveless-Cover-Up-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,5,5,F - SKIRT FRONT,4XL
+set40,MDF535-Reef-Sleeveless-Cover-Up-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,5,5,F - SKIRT FRONT,5XL
+set40,MDF535-Reef-Sleeveless-Cover-Up-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,7,7,I - SKIRT HEM BAND (BACK),M
+set40,MDF535-Reef-Sleeveless-Cover-Up-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,previous,shape-changed,5,5,F - SKIRT FRONT,4XL
+set40,MDF535-Reef-Sleeveless-Cover-Up-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,previous,shape-changed,5,5,F - SKIRT FRONT,5XL
+set40,MDF539-Lynx-Mini-Shift-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,gained,0,0,E - SHORTS BACK,22-24
+set40,MDF539-Lynx-Mini-Shift-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,5,5,B - DRESS FRONT,14-16
+set40,MDF539-Lynx-Mini-Shift-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,previous,gained,0,0,E - SHORTS BACK,22-24
+set40,2-MDF350-The-Dyanna-Dress-00-32-A4-PATTERNS,initial,gained,2,2,B - FRONT TOP,10
+set40,2-MDF350-The-Dyanna-Dress-00-32-A4-PATTERNS,initial,gained,3,3,C - FRONT BOOM,12
+set40,2-MDF350-The-Dyanna-Dress-00-32-A4-PATTERNS,initial,gained,4,4,G - SLEEVE RUFFLES,4
+set40,2-MDF350-The-Dyanna-Dress-00-32-A4-PATTERNS,initial,gained,5,5,F - FRONT,10
+set40,2-MDF350-The-Dyanna-Dress-00-32-A4-PATTERNS,initial,gained,5,5,F - FRONT,12
+set40,2-MDF350-The-Dyanna-Dress-00-32-A4-PATTERNS,previous,gained,2,2,B - FRONT TOP,10
+set40,2-MDF350-The-Dyanna-Dress-00-32-A4-PATTERNS,previous,gained,3,3,C - FRONT BOOM,12
+set40,2-MDF350-The-Dyanna-Dress-00-32-A4-PATTERNS,previous,gained,4,4,G - SLEEVE RUFFLES,4
+set40,2-MDF350-The-Dyanna-Dress-00-32-A4-PATTERNS,previous,gained,5,5,F - FRONT,10
+set40,2-MDF350-The-Dyanna-Dress-00-32-A4-PATTERNS,previous,gained,5,5,F - FRONT,12
+set40,A4-MDF348-The-Cassandra-Kaftan-Dress-Sizes-00-32,initial,gained,1,1,A - SHOULDER,0
+set40,A4-MDF348-The-Cassandra-Kaftan-Dress-Sizes-00-32,initial,gained,1,1,A - SHOULDER,2
+set40,A4-MDF348-The-Cassandra-Kaftan-Dress-Sizes-00-32,initial,gained,1,1,A - SHOULDER,6
+set40,A4-MDF348-The-Cassandra-Kaftan-Dress-Sizes-00-32,initial,gained,1,1,A - SHOULDER,10
+set40,A4-MDF348-The-Cassandra-Kaftan-Dress-Sizes-00-32,initial,gained,1,1,A - SHOULDER,18
+set40,A4-MDF348-The-Cassandra-Kaftan-Dress-Sizes-00-32,initial,gained,1,1,A - SHOULDER,24
+set40,A4-MDF348-The-Cassandra-Kaftan-Dress-Sizes-00-32,initial,gained,1,1,A - SHOULDER,26
+set40,A4-MDF348-The-Cassandra-Kaftan-Dress-Sizes-00-32,previous,gained,1,1,A - SHOULDER,0
+set40,A4-MDF348-The-Cassandra-Kaftan-Dress-Sizes-00-32,previous,gained,1,1,A - SHOULDER,2
+set40,A4-MDF348-The-Cassandra-Kaftan-Dress-Sizes-00-32,previous,gained,1,1,A - SHOULDER,6
+set40,A4-MDF348-The-Cassandra-Kaftan-Dress-Sizes-00-32,previous,gained,1,1,A - SHOULDER,10
+set40,A4-MDF348-The-Cassandra-Kaftan-Dress-Sizes-00-32,previous,gained,1,1,A - SHOULDER,18
+set40,A4-MDF348-The-Cassandra-Kaftan-Dress-Sizes-00-32,previous,gained,1,1,A - SHOULDER,24
+set40,A4-MDF348-The-Cassandra-Kaftan-Dress-Sizes-00-32,previous,gained,1,1,A - SHOULDER,26
+set40,MDF346-Kalla-Ensemble-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,gained,17,17,N - SKIRT FRONT POCKET FLAP,10
+set40,MDF346-Kalla-Ensemble-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,gained,17,17,N - SKIRT FRONT POCKET FLAP,28
+set40,MDF387-The-Paris-Mini-Dress-Sizes-00-32-A4-Letter-Patterns,initial,shape-changed,3,3,O - SKIRT LINING,22
+set40,MDF387-The-Paris-Mini-Dress-Sizes-00-32-A4-Letter-Patterns,initial,shape-changed,3,3,O - SKIRT LINING,24
+set40,MDF387-The-Paris-Mini-Dress-Sizes-00-32-A4-Letter-Patterns,initial,shape-changed,3,3,O - SKIRT LINING,26
+set40,MDF387-The-Paris-Mini-Dress-Sizes-00-32-A4-Letter-Patterns,initial,gained,8,8,C - FRONT c,6
+set40,MDF387-The-Paris-Mini-Dress-Sizes-00-32-A4-Letter-Patterns,initial,shape-changed,9,9,B - FRONT b,26
+set40,MDF387-The-Paris-Mini-Dress-Sizes-00-32-A4-Letter-Patterns,initial,shape-changed,9,9,B - FRONT b,30
+set40,MDF387-The-Paris-Mini-Dress-Sizes-00-32-A4-Letter-Patterns,previous,gained,8,8,C - FRONT c,6
+set40,MDF521-Reims-Soiree-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,5,5,B - TOP FRONT,2
+set40,MDF521-Reims-Soiree-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,gained,5,5,B - TOP FRONT,28
+set40,MDF521-Reims-Soiree-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,12,12,G - CORSET FRONT MIDDLE,22
+set40,MDF521-Reims-Soiree-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,previous,gained,5,5,B - TOP FRONT,28
+set40,MDF481-Verona-Sheath-Gown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,1,1,D - SKIRT BACK,00
+set40,MDF481-Verona-Sheath-Gown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,1,1,D - SKIRT BACK,0
+set40,MDF481-Verona-Sheath-Gown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,1,1,D - SKIRT BACK,2
+set40,MDF481-Verona-Sheath-Gown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,1,1,D - SKIRT BACK,4
+set40,MDF481-Verona-Sheath-Gown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,1,1,D - SKIRT BACK,6
+set40,MDF481-Verona-Sheath-Gown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,1,1,D - SKIRT BACK,8
+set40,MDF481-Verona-Sheath-Gown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,1,1,D - SKIRT BACK,12
+set40,MDF481-Verona-Sheath-Gown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,1,1,D - SKIRT BACK,14
+set40,MDF481-Verona-Sheath-Gown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,1,1,D - SKIRT BACK,20
+set40,MDF481-Verona-Sheath-Gown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,1,1,D - SKIRT BACK,22
+set40,MDF481-Verona-Sheath-Gown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,1,1,D - SKIRT BACK,24
+set40,MDF481-Verona-Sheath-Gown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,1,1,D - SKIRT BACK,28
+set40,MDF481-Verona-Sheath-Gown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,5,5,F - SASH,8
+set40,MFD393-The-Emma-Double-Tiered-Dress-Sizes-00-32-A4-Letter-Patterns,initial,gained,7,7,B - TOP FRONT LINING,26
+set40,MFD393-The-Emma-Double-Tiered-Dress-Sizes-00-32-A4-Letter-Patterns,previous,gained,7,7,B - TOP FRONT LINING,26
+set40,MDF373-The-Olympia-Tennis-Dress-Sizes-00-32-A4-Letter-Patterns,initial,shape-changed,6,6,C - FRONT WAIST PANEL,0
+set40,MDF373-The-Olympia-Tennis-Dress-Sizes-00-32-A4-Letter-Patterns,initial,shape-changed,6,6,C - FRONT WAIST PANEL,2
+set40,MDF373-The-Olympia-Tennis-Dress-Sizes-00-32-A4-Letter-Patterns,initial,shape-changed,6,6,C - FRONT WAIST PANEL,10
+set40,MDF373-The-Olympia-Tennis-Dress-Sizes-00-32-A4-Letter-Patterns,initial,shape-changed,6,6,C - FRONT WAIST PANEL,12
+set40,MDF373-The-Olympia-Tennis-Dress-Sizes-00-32-A4-Letter-Patterns,initial,shape-changed,6,6,C - FRONT WAIST PANEL,14
+set40,MDF373-The-Olympia-Tennis-Dress-Sizes-00-32-A4-Letter-Patterns,initial,shape-changed,6,6,C - FRONT WAIST PANEL,16
+set40,MDF373-The-Olympia-Tennis-Dress-Sizes-00-32-A4-Letter-Patterns,initial,shape-changed,6,6,C - FRONT WAIST PANEL,18
+set40,MDF373-The-Olympia-Tennis-Dress-Sizes-00-32-A4-Letter-Patterns,initial,shape-changed,6,6,C - FRONT WAIST PANEL,20
+set40,MDF373-The-Olympia-Tennis-Dress-Sizes-00-32-A4-Letter-Patterns,initial,shape-changed,6,6,C - FRONT WAIST PANEL,24
+set40,MDF373-The-Olympia-Tennis-Dress-Sizes-00-32-A4-Letter-Patterns,initial,shape-changed,6,6,C - FRONT WAIST PANEL,26
+set40,MDF373-The-Olympia-Tennis-Dress-Sizes-00-32-A4-Letter-Patterns,initial,shape-changed,6,6,C - FRONT WAIST PANEL,30
+set40,MDF426-Ophelia-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,initial,gained,5,5,C - TOP BACK RIGHT,4
+set40,MDF426-Ophelia-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,initial,gained,5,5,C - TOP BACK RIGHT,8
+set40,MDF426-Ophelia-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,initial,gained,5,5,C - TOP BACK RIGHT,10
+set40,MDF426-Ophelia-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,initial,gained,6,6,G - SKIRT FRONT,8
+set40,MDF426-Ophelia-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,previous,gained,5,5,C - TOP BACK RIGHT,4
+set40,MDF426-Ophelia-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,previous,gained,5,5,C - TOP BACK RIGHT,8
+set40,MDF426-Ophelia-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,previous,gained,5,5,C - TOP BACK RIGHT,10
+set40,MDF426-Ophelia-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,previous,gained,6,6,G - SKIRT FRONT,8
+set40,MDF477-Venice-V-Waist-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,0,0,I - SKIRT,22
+set40,MDF477-Venice-V-Waist-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,7,7,C - TOP BACK SIDE,0
+set40,MDF433-Taos-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics-1,initial,shape-changed,0,0,H - SKIRT LINING,2
+set40,MDF433-Taos-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics-1,initial,shape-changed,0,0,H - SKIRT LINING,6
+set40,MDF433-Taos-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics-1,initial,shape-changed,4,4,E - SLEEVES UPPER,2
+set40,MDF433-Taos-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics-1,initial,lost-open,4,4,E - SLEEVES UPPER,26
+set40,MDF433-Taos-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics-1,previous,shape-changed,4,4,E - SLEEVES UPPER,2
+set40,MDF433-Taos-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics-1,previous,lost-open,4,4,E - SLEEVES UPPER,26
+set40,MDF476-Fawn-Mini-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,gained,4,4,E - POCKET FLAP,2XL
+set40,MDF476-Fawn-Mini-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,gained,6,6,F - POCKET WELT,L
+set40,MDF476-Fawn-Mini-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,gained,6,6,F - POCKET WELT,2XL
+set40,MDF364-The-Memoir-Dress-View-B-Sizes-00-32-A4-Letter-PATTERNS,initial,shape-changed,0,0,H - SKIRT BACK,8
+set40,MDF364-The-Memoir-Dress-View-B-Sizes-00-32-A4-Letter-PATTERNS,initial,shape-changed,6,6,J - SKIRT,8
+set40,MDF364-The-Memoir-Dress-View-B-Sizes-00-32-A4-Letter-PATTERNS,initial,shape-changed,7,7,D - TOP,14
+holdout40,MDF543-Matrix-Shawl-Collar-Ensemble-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,gained,0,0,F - PANTS WAISTBAND,L
+holdout40,MDF543-Matrix-Shawl-Collar-Ensemble-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,0,0,F - PANTS WAISTBAND,4XL
+holdout40,MDF543-Matrix-Shawl-Collar-Ensemble-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,3,3,E - PANTS BACK,M
+holdout40,MDF543-Matrix-Shawl-Collar-Ensemble-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,previous,gained,0,0,F - PANTS WAISTBAND,L
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,initial,gained,0,0,C - BACK UPPER,10
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,initial,shape-changed,2,2,D - BACK LOWER,2
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,initial,gained,5,5,K - SHORTS FRONT,12
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,initial,gained,6,6,H - RIGHT SLEEVE LOWER,8
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,initial,gained,6,6,H - RIGHT SLEEVE LOWER,10
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,initial,gained,7,7,F - LEFT SLEEVE LOWER,4
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,initial,gained,7,7,F - LEFT SLEEVE LOWER,10
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,initial,shape-changed,7,7,F - LEFT SLEEVE LOWER,26
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,initial,shape-changed,11,11,J - POCKET,00
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,initial,gained,11,11,J - POCKET,10
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,initial,gained,11,11,J - POCKET,12
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,initial,gained,11,11,J - POCKET,14
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,initial,gained,11,11,J - POCKET,18
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,initial,gained,11,11,J - POCKET,24
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,initial,gained,11,11,J - POCKET,26
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,initial,gained,11,11,J - POCKET,28
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,initial,gained,11,11,J - POCKET,30
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,initial,gained,12,12,B - FRONT LOWER,8
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,previous,gained,0,0,C - BACK UPPER,10
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,previous,gained,5,5,K - SHORTS FRONT,12
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,previous,gained,6,6,H - RIGHT SLEEVE LOWER,8
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,previous,gained,6,6,H - RIGHT SLEEVE LOWER,10
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,previous,gained,7,7,F - LEFT SLEEVE LOWER,4
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,previous,gained,7,7,F - LEFT SLEEVE LOWER,10
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,previous,gained,12,12,B - FRONT LOWER,8
+holdout40,MoodFabrics.com-MDF332-Tulip-Pattern-Letter-A4-Tiled-1,initial,shape-changed,0,0,F - BACK SKIRT,8
+holdout40,MoodFabrics.com-MDF332-Tulip-Pattern-Letter-A4-Tiled-1,initial,gained,0,0,F - BACK SKIRT,24
+holdout40,MoodFabrics.com-MDF332-Tulip-Pattern-Letter-A4-Tiled-1,initial,gained,0,0,F - BACK SKIRT,30
+holdout40,MoodFabrics.com-MDF332-Tulip-Pattern-Letter-A4-Tiled-1,initial,shape-changed,0,0,F - BACK SKIRT,32
+holdout40,MoodFabrics.com-MDF332-Tulip-Pattern-Letter-A4-Tiled-1,initial,gained,4,4,A - FRONT BODICE,00
+holdout40,MoodFabrics.com-MDF332-Tulip-Pattern-Letter-A4-Tiled-1,initial,gained,4,4,A - FRONT BODICE,0
+holdout40,MoodFabrics.com-MDF332-Tulip-Pattern-Letter-A4-Tiled-1,initial,gained,4,4,A - FRONT BODICE,2
+holdout40,MoodFabrics.com-MDF332-Tulip-Pattern-Letter-A4-Tiled-1,initial,gained,4,4,A - FRONT BODICE,4
+holdout40,MoodFabrics.com-MDF332-Tulip-Pattern-Letter-A4-Tiled-1,initial,gained,4,4,A - FRONT BODICE,6
+holdout40,MoodFabrics.com-MDF332-Tulip-Pattern-Letter-A4-Tiled-1,initial,gained,4,4,A - FRONT BODICE,8
+holdout40,MoodFabrics.com-MDF332-Tulip-Pattern-Letter-A4-Tiled-1,initial,gained,4,4,A - FRONT BODICE,10
+holdout40,MoodFabrics.com-MDF332-Tulip-Pattern-Letter-A4-Tiled-1,initial,gained,4,4,A - FRONT BODICE,12
+holdout40,MoodFabrics.com-MDF332-Tulip-Pattern-Letter-A4-Tiled-1,initial,gained,4,4,A - FRONT BODICE,14
+holdout40,MoodFabrics.com-MDF332-Tulip-Pattern-Letter-A4-Tiled-1,initial,gained,4,4,A - FRONT BODICE,16
+holdout40,MoodFabrics.com-MDF332-Tulip-Pattern-Letter-A4-Tiled-1,initial,gained,4,4,A - FRONT BODICE,18
+holdout40,MoodFabrics.com-MDF332-Tulip-Pattern-Letter-A4-Tiled-1,initial,gained,4,4,A - FRONT BODICE,20
+holdout40,MoodFabrics.com-MDF332-Tulip-Pattern-Letter-A4-Tiled-1,initial,gained,4,4,A - FRONT BODICE,22
+holdout40,MoodFabrics.com-MDF332-Tulip-Pattern-Letter-A4-Tiled-1,initial,gained,4,4,A - FRONT BODICE,24
+holdout40,MoodFabrics.com-MDF332-Tulip-Pattern-Letter-A4-Tiled-1,initial,gained,4,4,A - FRONT BODICE,26
+holdout40,MoodFabrics.com-MDF332-Tulip-Pattern-Letter-A4-Tiled-1,initial,gained,4,4,A - FRONT BODICE,28
+holdout40,MoodFabrics.com-MDF332-Tulip-Pattern-Letter-A4-Tiled-1,initial,gained,4,4,A - FRONT BODICE,30
+holdout40,MoodFabrics.com-MDF332-Tulip-Pattern-Letter-A4-Tiled-1,initial,gained,4,4,A - FRONT BODICE,32
+holdout40,MoodFabrics.com-MDF332-Tulip-Pattern-Letter-A4-Tiled-1,previous,shape-changed,0,0,F - BACK SKIRT,8
+holdout40,MoodFabrics.com-MDF332-Tulip-Pattern-Letter-A4-Tiled-1,previous,shape-changed,0,0,F - BACK SKIRT,30
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,initial,shape-changed,1,1,D - FRONT,2
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,initial,shape-changed,1,1,D - FRONT,4
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,initial,shape-changed,1,1,D - FRONT,6
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,initial,gained,1,1,D - FRONT,8
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,initial,shape-changed,2,2,E - BACK,0
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,initial,shape-changed,2,2,E - BACK,4
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,initial,shape-changed,2,2,E - BACK,6
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,initial,gained,2,2,E - BACK,8
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,initial,shape-changed,2,2,E - BACK,10
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,initial,shape-changed,2,2,E - BACK,12
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,initial,shape-changed,2,2,E - BACK,16
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,initial,shape-changed,2,2,E - BACK,18
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,initial,shape-changed,2,2,E - BACK,20
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,initial,shape-changed,2,2,E - BACK,22
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,initial,shape-changed,2,2,E - BACK,24
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,initial,shape-changed,2,2,E - BACK,26
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,initial,shape-changed,2,2,E - BACK,28
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,initial,gained,4,4,F - SLEEVE,8
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,previous,shape-changed,1,1,D - FRONT,2
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,previous,shape-changed,1,1,D - FRONT,4
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,previous,shape-changed,1,1,D - FRONT,6
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,previous,gained,1,1,D - FRONT,8
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,previous,shape-changed,2,2,E - BACK,0
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,previous,shape-changed,2,2,E - BACK,4
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,previous,shape-changed,2,2,E - BACK,6
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,previous,gained,2,2,E - BACK,8
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,previous,shape-changed,2,2,E - BACK,10
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,previous,shape-changed,2,2,E - BACK,12
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,previous,shape-changed,2,2,E - BACK,16
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,previous,shape-changed,2,2,E - BACK,18
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,previous,shape-changed,2,2,E - BACK,20
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,previous,shape-changed,2,2,E - BACK,22
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,previous,shape-changed,2,2,E - BACK,24
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,previous,shape-changed,2,2,E - BACK,26
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,previous,shape-changed,2,2,E - BACK,28
+holdout40,MoodFabrics.com-MDF271-Clark-Pattern,previous,gained,4,4,F - SLEEVE,8
+holdout40,MDF436-Sarasota-Set-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,initial,shape-changed,1,1,B - TOP BACK,XL
+holdout40,MDF436-Sarasota-Set-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,initial,shape-changed,1,1,B - TOP BACK,3XL
+holdout40,MDF436-Sarasota-Set-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,initial,shape-changed,1,1,B - TOP BACK,4XL
+holdout40,MDF436-Sarasota-Set-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,initial,shape-changed,4,4,E - PANTS WAISTBAND,XS
+holdout40,MDF436-Sarasota-Set-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,initial,shape-changed,4,4,E - PANTS WAISTBAND,M
+holdout40,MDF436-Sarasota-Set-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,initial,shape-changed,4,4,E - PANTS WAISTBAND,XL
+holdout40,MDF383-The-Cher-Jacket-Sizes-00-32-A4-Letter-Patterns,initial,gained,5,5,C - BACK SIDE,10
+holdout40,MDF383-The-Cher-Jacket-Sizes-00-32-A4-Letter-Patterns,initial,gained,6,6,D - BACK BELT,4
+holdout40,MDF383-The-Cher-Jacket-Sizes-00-32-A4-Letter-Patterns,initial,gained,6,6,D - BACK BELT,22
+holdout40,MDF383-The-Cher-Jacket-Sizes-00-32-A4-Letter-Patterns,initial,gained,8,8,P - CUFFS,22
+holdout40,MDF383-The-Cher-Jacket-Sizes-00-32-A4-Letter-Patterns,initial,gained,12,12,O - SLEEVE FRONT,10
+holdout40,MDF383-The-Cher-Jacket-Sizes-00-32-A4-Letter-Patterns,initial,gained,14,14,K - PATCH POCKETS FLAP,28
+holdout40,MDF383-The-Cher-Jacket-Sizes-00-32-A4-Letter-Patterns,initial,gained,14,14,K - PATCH POCKETS FLAP,30
+holdout40,MDF383-The-Cher-Jacket-Sizes-00-32-A4-Letter-Patterns,initial,gained,14,14,K - PATCH POCKETS FLAP,32
+holdout40,MDF383-The-Cher-Jacket-Sizes-00-32-A4-Letter-Patterns,initial,gained,15,15,H - FRONT CENTER,30
+holdout40,MDF383-The-Cher-Jacket-Sizes-00-32-A4-Letter-Patterns,previous,gained,5,5,C - BACK SIDE,10
+holdout40,MDF383-The-Cher-Jacket-Sizes-00-32-A4-Letter-Patterns,previous,gained,6,6,D - BACK BELT,4
+holdout40,MDF383-The-Cher-Jacket-Sizes-00-32-A4-Letter-Patterns,previous,gained,6,6,D - BACK BELT,22
+holdout40,MDF383-The-Cher-Jacket-Sizes-00-32-A4-Letter-Patterns,previous,gained,8,8,P - CUFFS,22
+holdout40,MDF383-The-Cher-Jacket-Sizes-00-32-A4-Letter-Patterns,previous,gained,12,12,O - SLEEVE FRONT,10
+holdout40,MDF383-The-Cher-Jacket-Sizes-00-32-A4-Letter-Patterns,previous,gained,15,15,H - FRONT CENTER,30
+holdout40,MoodFabrics.com-MDF238-Lita-Pattern,initial,shape-changed,2,2,,4/6
+holdout40,MoodFabrics.com-MDF280-Savannah-Pattern,initial,shape-changed,3,3,D - POCKET,32
+holdout40,MoodFabrics.com-MDF280-Savannah-Pattern,initial,gained,6,6,G - BACK SLEEVE,22
+holdout40,MoodFabrics.com-MDF280-Savannah-Pattern,initial,gained,6,6,G - BACK SLEEVE,24
+holdout40,MoodFabrics.com-MDF280-Savannah-Pattern,initial,gained,6,6,G - BACK SLEEVE,26
+holdout40,MoodFabrics.com-MDF280-Savannah-Pattern,initial,gained,6,6,G - BACK SLEEVE,28
+holdout40,MoodFabrics.com-MDF280-Savannah-Pattern,initial,gained,6,6,G - BACK SLEEVE,30
+holdout40,MDF400-The-Penelope-Pants-Sizs-00-32-A4-Letter-Patterns,initial,shape-changed,0,0,A - FRONT,6
+holdout40,MDF549-Sedona-Tailored-Cargo-Shorts-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,0,0,C - WAISTBAND,6-8
+holdout40,MDF549-Sedona-Tailored-Cargo-Shorts-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,gained,1,1,B - BACK,22-24
+holdout40,MDF549-Sedona-Tailored-Cargo-Shorts-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,2,2,A - FRONT,00-0
+holdout40,MDF549-Sedona-Tailored-Cargo-Shorts-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,2,2,A - FRONT,6-8
+holdout40,MDF549-Sedona-Tailored-Cargo-Shorts-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,gained,2,2,A - FRONT,10-12
+holdout40,MDF549-Sedona-Tailored-Cargo-Shorts-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,2,2,A - FRONT,30-32
+holdout40,MDF549-Sedona-Tailored-Cargo-Shorts-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,5,5,E - SIDE POCKETS (B),00-0
+holdout40,MDF549-Sedona-Tailored-Cargo-Shorts-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,5,5,E - SIDE POCKETS (B),6-8
+holdout40,MDF549-Sedona-Tailored-Cargo-Shorts-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,5,5,E - SIDE POCKETS (B),14-16
+holdout40,MDF549-Sedona-Tailored-Cargo-Shorts-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,5,5,E - SIDE POCKETS (B),22-24
+holdout40,MDF549-Sedona-Tailored-Cargo-Shorts-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,gained,13,13,F - SIDE POCKETS (A) FACING,26-28
+holdout40,MDF549-Sedona-Tailored-Cargo-Shorts-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,gained,15,15,I - CARGO POCKET FLAP,10-12
+holdout40,MDF549-Sedona-Tailored-Cargo-Shorts-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,previous,gained,1,1,B - BACK,22-24
+holdout40,MDF549-Sedona-Tailored-Cargo-Shorts-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,previous,gained,2,2,A - FRONT,10-12
+holdout40,MDF549-Sedona-Tailored-Cargo-Shorts-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,previous,shape-changed,2,2,A - FRONT,30-32
+holdout40,MDF549-Sedona-Tailored-Cargo-Shorts-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,previous,gained,13,13,F - SIDE POCKETS (A) FACING,26-28
+holdout40,A4-MDF354-The-Georgina-Top-00-32,initial,gained,2,2,C - FRONT SIDE,10
+holdout40,A4-MDF354-The-Georgina-Top-00-32,previous,gained,2,2,C - FRONT SIDE,10
+holdout40,MDF501-Spokane-Hoodie-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,0,0,D - HOOD,5XL
+holdout40,MDF501-Spokane-Hoodie-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,1,1,E - POCKETS,5XL
+holdout40,MDF501-Spokane-Hoodie-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,2,2,B - FRONT,3XL
+holdout40,MDF501-Spokane-Hoodie-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,2,2,B - FRONT,5XL
+holdout40,MDF501-Spokane-Hoodie-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,3,3,C - SLEEVES,M
+holdout40,MDF501-Spokane-Hoodie-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,4,4,F - CUFFS,M
+holdout40,MDF501-Spokane-Hoodie-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,4,4,F - CUFFS,XL
+holdout40,MDF501-Spokane-Hoodie-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,previous,shape-changed,0,0,D - HOOD,5XL
+holdout40,MDF502-Harrington-Hoodie-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,3,3,D - HOOD,50
+holdout40,MDF502-Harrington-Hoodie-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,initial,shape-changed,6,6,E - POCKETS,40
+holdout40,MDF502-Harrington-Hoodie-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,previous,shape-changed,3,3,D - HOOD,50
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,initial,gained,2,2,,0/2
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,initial,gained,2,2,,4/6
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,initial,gained,2,2,,8/10
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,initial,gained,2,2,,12/14
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,initial,gained,2,2,,16/18
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,initial,gained,2,2,,20/22
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,initial,gained,2,2,,24/26
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,initial,gained,2,2,,28/30
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,initial,gained,3,3,,0/2
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,initial,gained,3,3,,4/6
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,initial,gained,3,3,,8/10
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,initial,gained,3,3,,12/14
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,initial,gained,3,3,,16/18
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,initial,gained,3,3,,20/22
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,initial,gained,3,3,,24/26
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,initial,gained,3,3,,28/30
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,initial,lost-absent,4,,,0/2
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,initial,lost-absent,4,,,4/6
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,initial,lost-absent,4,,,8/10
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,initial,lost-absent,4,,,12/14
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,initial,lost-absent,4,,,16/18
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,initial,lost-absent,4,,,20/22
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,initial,lost-absent,4,,,24/26
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,initial,lost-absent,4,,,28/30
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,previous,gained,2,2,,0/2
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,previous,gained,2,2,,4/6
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,previous,gained,2,2,,8/10
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,previous,gained,2,2,,12/14
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,previous,gained,2,2,,16/18
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,previous,gained,2,2,,20/22
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,previous,gained,2,2,,24/26
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,previous,gained,2,2,,28/30
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,previous,gained,3,3,,0/2
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,previous,gained,3,3,,4/6
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,previous,gained,3,3,,8/10
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,previous,gained,3,3,,12/14
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,previous,gained,3,3,,16/18
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,previous,gained,3,3,,20/22
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,previous,gained,3,3,,24/26
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,previous,gained,3,3,,28/30
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,previous,lost-absent,4,,,0/2
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,previous,lost-absent,4,,,4/6
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,previous,lost-absent,4,,,8/10
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,previous,lost-absent,4,,,12/14
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,previous,lost-absent,4,,,16/18
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,previous,lost-absent,4,,,20/22
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,previous,lost-absent,4,,,24/26
+holdout40,MoodFabrics.com-MDF235-Layton-Pattern-1,previous,lost-absent,4,,,28/30
+holdout40,MoodFabrics.com-MDF338-Colleen-Letter-A4-Tiled,initial,shape-changed,0,0,G - SIDE BACK,00
+holdout40,MoodFabrics.com-MDF338-Colleen-Letter-A4-Tiled,initial,shape-changed,0,0,G - SIDE BACK,8
+holdout40,MoodFabrics.com-MDF338-Colleen-Letter-A4-Tiled,initial,shape-changed,0,0,G - SIDE BACK,16
+holdout40,MoodFabrics.com-MDF338-Colleen-Letter-A4-Tiled,initial,shape-changed,0,0,G - SIDE BACK,30
+holdout40,MoodFabrics.com-MDF338-Colleen-Letter-A4-Tiled,initial,shape-changed,2,2,B - SIDE FRONT BODICE,24
+holdout40,MoodFabrics.com-MDF338-Colleen-Letter-A4-Tiled,initial,shape-changed,6,6,A - FRONT BODICE,18
+holdout40,MoodFabrics.com-MDF338-Colleen-Letter-A4-Tiled,initial,new-closed,,7,F - BACK FACING,00
+holdout40,MoodFabrics.com-MDF338-Colleen-Letter-A4-Tiled,initial,new-closed,,7,F - BACK FACING,0
+holdout40,MoodFabrics.com-MDF338-Colleen-Letter-A4-Tiled,initial,new-closed,,7,F - BACK FACING,2
+holdout40,MoodFabrics.com-MDF338-Colleen-Letter-A4-Tiled,initial,new-closed,,7,F - BACK FACING,4
+holdout40,MoodFabrics.com-MDF338-Colleen-Letter-A4-Tiled,initial,new-closed,,7,F - BACK FACING,6
+holdout40,MoodFabrics.com-MDF338-Colleen-Letter-A4-Tiled,initial,new-closed,,7,F - BACK FACING,8
+holdout40,MoodFabrics.com-MDF338-Colleen-Letter-A4-Tiled,initial,new-closed,,7,F - BACK FACING,10
+holdout40,MoodFabrics.com-MDF338-Colleen-Letter-A4-Tiled,initial,new-closed,,7,F - BACK FACING,12
+holdout40,MoodFabrics.com-MDF338-Colleen-Letter-A4-Tiled,initial,new-closed,,7,F - BACK FACING,14
+holdout40,MoodFabrics.com-MDF338-Colleen-Letter-A4-Tiled,initial,new-closed,,7,F - BACK FACING,16
+holdout40,MoodFabrics.com-MDF338-Colleen-Letter-A4-Tiled,initial,new-closed,,7,F - BACK FACING,18
+holdout40,MoodFabrics.com-MDF338-Colleen-Letter-A4-Tiled,initial,new-closed,,7,F - BACK FACING,20
+holdout40,MoodFabrics.com-MDF338-Colleen-Letter-A4-Tiled,initial,new-closed,,7,F - BACK FACING,22
+holdout40,MoodFabrics.com-MDF338-Colleen-Letter-A4-Tiled,initial,new-closed,,7,F - BACK FACING,24
+holdout40,MoodFabrics.com-MDF338-Colleen-Letter-A4-Tiled,initial,new-closed,,7,F - BACK FACING,26
+holdout40,MoodFabrics.com-MDF338-Colleen-Letter-A4-Tiled,initial,new-closed,,7,F - BACK FACING,28
+holdout40,MoodFabrics.com-MDF338-Colleen-Letter-A4-Tiled,initial,new-closed,,7,F - BACK FACING,30
+holdout40,MoodFabrics.com-MDF338-Colleen-Letter-A4-Tiled,initial,new-closed,,7,F - BACK FACING,32
+holdout40,MDF435-Biarritz-Skort-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,initial,shape-changed,0,0,D - FRONT PANEL,4XL
+holdout40,MDF435-Biarritz-Skort-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,initial,gained,2,2,B - FRONT CENTER,2XL
+holdout40,MDF435-Biarritz-Skort-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,initial,shape-changed,4,4,E - FRONT FACING,4XL
+holdout40,MDF435-Biarritz-Skort-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,initial,shape-changed,4,4,E - FRONT FACING,5XL
+holdout40,MDF435-Biarritz-Skort-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,previous,shape-changed,0,0,D - FRONT PANEL,4XL
+holdout40,MDF435-Biarritz-Skort-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,previous,gained,2,2,B - FRONT CENTER,2XL
+holdout40,MDF435-Biarritz-Skort-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,previous,shape-changed,4,4,E - FRONT FACING,4XL
+holdout40,MDF435-Biarritz-Skort-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,previous,shape-changed,4,4,E - FRONT FACING,5XL
+holdout40,MDF456-Anne-Waistcoat-Ensemble-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,initial,gained,7,7,L - PANTS,3XL
+holdout40,MDF456-Anne-Waistcoat-Ensemble-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,initial,gained,8,8,A - WAISTCOAT,L
+holdout40,MDF456-Anne-Waistcoat-Ensemble-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,previous,shape-changed,2,2,J - PANTS,4XL
+holdout40,MDF456-Anne-Waistcoat-Ensemble-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,previous,shape-changed,2,2,J - PANTS,5XL
+holdout40,MDF456-Anne-Waistcoat-Ensemble-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,previous,shape-changed,5,5,K - PANTS LINING FRONT,4XL
+holdout40,MDF456-Anne-Waistcoat-Ensemble-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,previous,shape-changed,5,5,K - PANTS LINING FRONT,5XL
+holdout40,MDF456-Anne-Waistcoat-Ensemble-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,previous,gained,7,7,L - PANTS,3XL
+holdout40,MDF456-Anne-Waistcoat-Ensemble-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,previous,gained,8,8,A - WAISTCOAT,L

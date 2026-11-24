@@ -18,6 +18,8 @@
 //   13  drill holes: POINT at the centre
 //   14  sew line
 //   15  annotation text: the piece's human name, "HALF - CUT n ON FOLD" (a half's drawing)
+// plus one non-AAMA layer, only in a file that has them: GRADE_DRAWN — a copy of the cut-line
+// stretches drawn from the grade (write/drawn.ts); other CADs ignore a layer they do not know.
 // TABLES declare every layer (LTYPE BYBLOCK/BYLAYER/CONTINUOUS + DASHED for the sew line, STYLE
 // STANDARD); POLYLINEs carry no header point (as CLO-AAMA writes them, and our readers expect); text is
 // ASCII by transliteration (`asciiText`), never `\U+` escapes (R2000+ only).
@@ -28,6 +30,7 @@ import type { PlannedBlock } from './plan';
 import { GRAIN_SHAFT_MM, halfOnFoldText } from './plan';
 import { AUTHORED_POINT_LAYERS } from '../manifest/authored-point';
 import { drillMark, insertsOf, labelAnchor } from './r2000';
+import { DRAWN_ACI, DRAWN_LAYER } from './drawn';
 import { type Tag, asciiText, num, serialize } from './format';
 
 /** AAMA layers we write: name, ACI colour, linetype, what the layer means. */
@@ -131,6 +134,10 @@ export function writeR12(
   const layers = [
     ...AAMA_LAYERS,
     ...[...markLayers].map((name) => ({ name, color: 8, ltype: 'CONTINUOUS' })),
+    // GRADE_DRAWN (write/drawn.ts) only in a file that has drawn stretches
+    ...(blocks.some((b) => b.drawn.length)
+      ? [{ name: DRAWN_LAYER, color: DRAWN_ACI, ltype: 'CONTINUOUS' }]
+      : []),
   ];
   E(70, String(layers.length));
   for (const l of layers) {
@@ -208,6 +215,7 @@ export function writeR12(
     pl('1', b.cut, true);
     for (const loop of b.cutLoops) pl('1', loop, true);
     if (b.seam) pl('14', b.seam, true);
+    for (const st of b.drawn) pl(DRAWN_LAYER, st, false); // a marker ON the cut, not a line
     if (b.grain) {
       // a 2-point axis, 180 mm, no barb
       const g = b.grain;

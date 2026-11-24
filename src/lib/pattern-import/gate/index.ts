@@ -329,6 +329,7 @@ export function identityByBlockFor(
     out[b.name] = {
       pen: g.pen,
       own: map(g.own),
+      ...(g.visibleSourceCut ? { visibleSourceCut: map([g.visibleSourceCut])[0] } : {}),
       excused: map(g.excused),
       ...(g.shared?.length ? { shared: map(g.shared) } : {}),
       ...(g.foreign?.length ? { foreign: map(g.foreign) } : {}),
@@ -479,7 +480,7 @@ export async function writeAndGate(
 ): Promise<{ detail: WriteDetail; dxfText: string; report: GateReport; expect: GateExpectation }> {
   const embed = ctx.embed ?? embedManifestLocal;
   const read = ctx.read ?? readManifestLocal;
-  const options = { embed: null, now: ctx.now };
+  const options = { embed: null, now: ctx.now, derivedOf: ctx.derivedOf };
   const detail0 = ctx.retainedLineSplit
     ? await writeDxfWithRetainedLineSplit(job, ctx.retainedLineSplit, options)
     : writeDxfDetailed(job, options);

@@ -1384,9 +1384,13 @@ function piecesStep(snap: Snap): AutopilotDecision {
   }
   if (!blocker) return NONE;
   const mapped = exportedRanks(s.sizes?.map);
-  const open = fams.filter((f) =>
-    f.candidates.some((c) => (!mapped || mapped.has(c.rank)) && c.outcome !== 'closed'),
-  );
+  // PIECES_OPEN_PASS=1: the scouting switch of the step's blocker (use-import-session.ts), node only
+  const openPass = typeof process !== 'undefined' && !!process.env?.PIECES_OPEN_PASS;
+  const open = openPass
+    ? []
+    : fams.filter((f) =>
+        f.candidates.some((c) => (!mapped || mapped.has(c.rank)) && c.outcome !== 'closed'),
+      );
   // Codex #3: a region of piece size that does not close (or whose sizes are held back) is never
   // made "not a piece" to silence the question — it is a stop
   if (open.length) {

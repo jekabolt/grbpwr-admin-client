@@ -135,8 +135,30 @@ export function assembleAllSheets(
     const dx = n ? x + ((((want - x) % GRID_PHASE_MM) + GRID_PHASE_MM) % GRID_PHASE_MM) : 0;
     const dy = n ? finite(b0.minY) - finite(s.bbox.minY) : 0;
     const remap = s.styles.map((st) => {
-      const t: Style = { ...st, clip: shiftClip(st.clip, dx, dy) };
-      const key = JSON.stringify([t.strokeRgb, t.widthMm, t.dash, t.layer, t.fill, t.clip]);
+      const t: Style = {
+        ...st,
+        clip: shiftClip(st.clip, dx, dy),
+        ...(st.clipQuad
+          ? { clipQuad: st.clipQuad.map((p) => ({ x: p.x + dx, y: p.y + dy })) }
+          : {}),
+        ...(st.clipPolygon
+          ? { clipPolygon: st.clipPolygon.map((p) => ({ x: p.x + dx, y: p.y + dy })) }
+          : {}),
+        ...(st.localClipPolygon
+          ? { localClipPolygon: st.localClipPolygon.map((p) => ({ x: p.x + dx, y: p.y + dy })) }
+          : {}),
+      };
+      const key = JSON.stringify([
+        t.strokeRgb,
+        t.widthMm,
+        t.dash,
+        t.layer,
+        t.fill,
+        t.clip,
+        t.clipQuad,
+        t.clipPolygon,
+        t.localClipPolygon,
+      ]);
       let id = styleIds.get(key);
       if (id === undefined) {
         id = styles.length;
@@ -149,9 +171,17 @@ export function assembleAllSheets(
       paths.push({
         ...p,
         id: paths.length,
+        ...(p.printedGlyph && (dx || dy)
+          ? { printedGlyph: p.printedGlyph.map((v) => ({ x: v.x + dx, y: v.y + dy })) }
+          : {}),
+        ...(p.visibleFill && (dx || dy)
+          ? { visibleFill: p.visibleFill.map((v) => ({ x: v.x + dx, y: v.y + dy })) }
+          : {}),
         pts: dx || dy ? p.pts.map((v) => ({ x: v.x + dx, y: v.y + dy })) : p.pts,
         style: remap[p.style] ?? p.style,
       });
+    if (!multi && s.materialMarks?.length)
+      out.materialMarks = s.materialMarks.map((p) => ({ ...p, style: remap[p.style] }));
     for (const t of s.texts)
       texts.push({
         ...t,

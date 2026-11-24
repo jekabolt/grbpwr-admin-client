@@ -72,6 +72,7 @@ import {
   pad,
   suspectsOf,
 } from './size-lines';
+import { litOutline } from './borrowed-edges';
 
 const ROLES: { value: ChainRole; label: string }[] = [
   { value: 'size', label: 'a size' },
@@ -713,6 +714,14 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
       ? new Set(chains.classes.find((c) => c.id === quizClass)?.chains ?? [])
       : hot;
   const litBlue = hotRow != null || !!quizLit;
+  // A row's own lines leave its outline looking open: an edge the PDF draws once for every size
+  // sits in another row, and two ends stop a fraction of a millimetre short. The row is shown
+  // closed — the same way the pieces step will close it (borrowed-edges.ts).
+  const hotClass = hotRow != null && !quizLit ? chains.classes.find((c) => c.id === hotRow) : null;
+  const outline =
+    hotClass?.role === 'size' && chains.chainPreview
+      ? litOutline(chains, chains.chainPreview, hotClass)
+      : null;
   // the row question open by the operator's click; the row the footer asks about opens by itself
   const qOpen = (key: string, active: boolean) => qOverride[key] ?? active;
   const toggleQ = (key: string, active: boolean) =>
@@ -1074,6 +1083,25 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
                           />
                         ),
                       )}
+                    {outline?.lines.map((l, i) => (
+                      <polyline
+                        key={`way-${i}`}
+                        points={f32Attr(l)}
+                        stroke={SHEET_INK.blue}
+                        strokeWidth={unit * 2.4}
+                      />
+                    ))}
+                    {outline?.bridges.map((s, i) => (
+                      <line
+                        key={`bridge-${i}`}
+                        x1={s[0]}
+                        y1={vy(s[1])}
+                        x2={s[2]}
+                        y2={vy(s[3])}
+                        stroke={SHEET_INK.blue}
+                        strokeWidth={unit * 2.4}
+                      />
+                    ))}
                   </g>
                   {flagged?.at && (
                     <circle

@@ -1,0 +1,44 @@
+# holdout (owner, 16 Nov 2026): ≤ 40 files from the whole archive, none from set40; MDF patterns only
+# (extras / junk / dresses-excluded skipped), proportional per folder (≥ 1 each), seed 20261116.
+# Paths relative to the archive root: dxf-shot.mjs "<archive>" --files holdout40.txt. A rule is
+# accepted only if it also holds here (0 WORSE, gains of the same order) — set40 is where rules are made.
+accessories/MDF543-Matrix-Shawl-Collar-Ensemble-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog.pdf
+activewear/MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns.pdf
+cosplay/MoodFabrics.com-MDF081-Helios-Pattern.pdf
+dresses/MDF066-The-Ursinia-Dress.pdf
+dresses/MDF196-The-Terra-Dress-Patterns.pdf
+dresses/MoodFabrics.com-MDF073-Xeranthemum-Pattern.pdf
+dresses/MoodFabrics.com-MDF190-Heather-Pattern.pdf
+dresses/MoodFabrics.com-MDF209-Water-Lily-Pattern-1.pdf
+dresses/MoodFabrics.com-MDF222-Elderberry-Pattern-1-1.pdf
+dresses/MoodFabrics.com-MDF330-Luthien-Letter-A4.pdf
+dresses/MoodFabrics.com-MDF332-Tulip-Pattern-Letter-A4-Tiled-1.pdf
+jumpsuits/MoodFabrics.com-MDF172-Palm-Pattern-1.pdf
+jumpsuits/MoodFabrics.com-MDF335-Robin-Letter-A4-Tiled.pdf
+kids/MoodFabrics.com-MDF151-Mother-Daughter-Cypress-Pattern-v1.1.pdf
+lingerie_swim/MoodFabrics.com-MDF155-Daylily-Pattern.pdf
+lingerie_swim/MoodFabrics.com-MDF200-Sherwood-Pattern-1.pdf
+menswear/MoodFabrics.com-MDF271-Clark-Pattern.pdf
+other/MDF436-Sarasota-Set-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics.pdf
+other/MoodFabrics.com-MDF068_Willow_Pattern-v2.pdf
+outerwear/MDF383-The-Cher-Jacket-Sizes-00-32-A4-Letter-Patterns.pdf
+outerwear/MoodFabrics.com-MDF035-Kerria-Pattern.pdf
+outerwear/MoodFabrics.com-MDF084-Blackthorn-pattern..pdf
+outerwear/MoodFabrics.com-MDF238-Lita-Pattern.pdf
+outerwear/MoodFabrics.com-MDF280-Savannah-Pattern.pdf
+pants_shorts/MDF400-The-Penelope-Pants-Sizs-00-32-A4-Letter-Patterns.pdf
+pants_shorts/MDF549-Sedona-Tailored-Cargo-Shorts-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog.pdf
+pants_shorts/MoodFabrics.com-MDF089-Maple-Pattern.pdf
+pants_shorts/MoodFabrics.com-MDF210-Watsonia-Pattern-2.pdf
+shirts_tops/A4-MDF354-The-Georgina-Top-00-32.pdf
+shirts_tops/MDF492-Altena-Blouse-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog.pdf
+shirts_tops/MDF501-Spokane-Hoodie-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog.pdf
+shirts_tops/MDF502-Harrington-Hoodie-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog.pdf
+shirts_tops/MDF522-Merano-Balloon-Sleeve-Blouse-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog.pdf
+shirts_tops/MoodFabrics.com-MDF160-Elaeis-Pattern.pdf
+shirts_tops/MoodFabrics.com-MDF235-Layton-Pattern-1.pdf
+shirts_tops/MoodFabrics.com-MDF338-Colleen-Letter-A4-Tiled.pdf
+skirts/MDF435-Biarritz-Skort-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics.pdf
+skirts/MoodFabrics.com-MDF030-Iris-Pattern.pdf
+skirts/MoodFabrics.com-MDF140-Viola-Pattern.pdf
+suits/MDF456-Anne-Waistcoat-Ensemble-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics.pdf

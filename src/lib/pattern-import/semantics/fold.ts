@@ -953,8 +953,13 @@ export type FoldBracket = {
  * another line starting there, ≤ 1 mm), ≥ 45° to the body, ≥ 2 mm off it — turned to the same side.
  * The nearest such body wins. Arrowheads at a leg's far end are not needed.
  */
-export function foldBracket(t: FoldText, lines: OtherLines): FoldBracket | null {
-  if (!lines.within || !saysCutOnFold(t.text)) return null;
+export function foldBracket(
+  t: FoldText,
+  lines: OtherLines,
+  cutOnFoldConfirmed = false,
+): FoldBracket | null {
+  const labelledSymbol = cutOnFoldConfirmed && /^fold$/i.test(t.text.trim());
+  if (!lines.within || !(labelledSymbol || saysCutOnFold(t.text))) return null;
   const within = lines.within;
   const maxD = Math.max(FOLD_TEXT_MAX_MM, 4 * t.sizeMm);
   // a body passes within maxD of the text (it lies under it); its ticks are looked up at its ends

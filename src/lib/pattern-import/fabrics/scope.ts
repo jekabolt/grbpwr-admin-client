@@ -177,7 +177,11 @@ export function liningIdentity(identity: string): string {
 /** One spec as it is written into one scope's file (fabrics = that scope; lining renamed). */
 export function scopedSpec(p: PieceSpec, t: DraftScopeTarget): PieceSpec {
   const fabrics = [...new Set([t.scopeKey, t.fabricPurpose, t.bomLineKey].filter(Boolean))];
-  if (!isLiningScope(t) || codeWordsOf(p.identity).includes(LIN)) return { ...p, fabrics };
+  const { liningSizes, liningProblem, ...base } = p;
+  if (!isLiningScope(t)) return { ...base, fabrics };
+  if (liningProblem) throw new Error(liningProblem);
+  p = { ...base, sizes: liningSizes ?? p.sizes };
+  if (codeWordsOf(p.identity).includes(LIN)) return { ...p, fabrics };
   return {
     ...p,
     fabrics,
@@ -247,7 +251,13 @@ export function planScopes(
     seen.add(t.scopeKey);
     const ticked = new Set(a.byPurpose[t.scopeKey] ?? []);
     const src = included.filter((p) => ticked.has(p.seed));
-    const specs = src.map((p) =>
+    const refused = isLiningScope(t) ? src.filter((p) => p.liningProblem) : [];
+    for (const p of refused) {
+      placed.add(p.seed);
+      problems.push({ kind: 'refused', seeds: [p.seed], message: p.liningProblem! });
+    }
+    const allowed = src.filter((p) => !refused.includes(p));
+    const specs = allowed.map((p) =>
       scopedSpec(
         // An omitted, separately drawn hand must not be synthesized by the writer.
         p.pairOf && omittedIdentities.has(p.pairOf) ? { ...p, pairHand: null, pairOf: null } : p,
@@ -258,7 +268,7 @@ export function planScopes(
     const sourceOf: Record<PieceKey, PieceKey> = {};
     const byId = new Map<string, SeedId[]>();
     specs.forEach((s, i) => {
-      sourceOf[s.identity] = src[i].identity;
+      sourceOf[s.identity] = allowed[i].identity;
       byId.set(s.identity, [...(byId.get(s.identity) ?? []), s.seed]);
       placed.add(s.seed);
     });
