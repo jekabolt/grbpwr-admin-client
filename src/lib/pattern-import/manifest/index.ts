@@ -304,6 +304,7 @@ const DERIVED_KINDS = new Set<string>([
   'operator-bridge',
   'band-cut',
   'grade-fill',
+  'grade-draw',
 ] satisfies DerivedEdgeKind[]);
 const isPair = (v: unknown): v is [number, number] =>
   Array.isArray(v) && v.length === 2 && v.every(isNum);
@@ -910,7 +911,8 @@ export function validateManifest(x: unknown): ConversionManifest {
         (gr.holesMm as number) <= 1000 &&
         isNum(gr.cover) &&
         (gr.cover as number) >= 0 &&
-        (gr.cover as number) <= 1
+        (gr.cover as number) <= 1 &&
+        (gr.drawnMm === undefined || (isNum(gr.drawnMm) && (gr.drawnMm as number) >= 0))
       )
     )
       fail(`${p}.grade`, "needs geometryOrigin 'repaired', two anchor tokens, holes and cover");
@@ -1079,6 +1081,7 @@ export function validateManifest(x: unknown): ConversionManifest {
               holes: gr.holes as number,
               holesMm: gr.holesMm as number,
               cover: gr.cover as number,
+              ...(isNum(gr.drawnMm) ? { drawnMm: gr.drawnMm as number } : {}),
             },
           }
         : {}),

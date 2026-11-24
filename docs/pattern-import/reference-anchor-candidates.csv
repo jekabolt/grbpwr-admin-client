@@ -1,0 +1,47 @@
+corpus,pdf,seed,piece,size_to_read_from_source,distinct_target_ink_within_20mm,additional_sizes_between_anchors,sizes,nearest_direct_reference,reference_samples_every_5mm,samples_with_target_ink_within_5mm,samples_with_target_ink_within_20mm
+set40,MDF481-Verona-Sheath-Gown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,4,G - BOW,00,yes,6,"0, 2, 4, 6, 8, 10",12,102,80,102
+set40,MDF458-Nob-Hill-Draped-Midi-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,0,A - FRONT UPPER,5XL,yes,6,"M, L, XL, 2XL, 3XL, 4XL",S,575,15,46
+holdout40,MDF383-The-Cher-Jacket-Sizes-00-32-A4-Letter-Patterns,9,G - FRONT MIDDLE,32,yes,5,"22, 24, 26, 28, 30",20,202,175,202
+set40,MDF481-Verona-Sheath-Gown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,4,G - BOW,32,yes,5,"22, 24, 26, 28, 30",20,106,86,106
+set40,MDF404-The-Harper-Plisse-Dress-Sizes-00-32-A4-Letter-Patterns,3,D - CUFFS,00,yes,5,"0, 2, 4, 6, 8",12,163,123,129
+holdout40,MDF383-The-Cher-Jacket-Sizes-00-32-A4-Letter-Patterns,8,P - CUFFS,00,yes,5,"0, 2, 4, 6, 8",12,171,126,138
+set40,MDF426-Ophelia-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,5,C - TOP BACK RIGHT,0,yes,5,"2, 4, 6, 8, 10",12,273,52,81
+holdout40,MDF383-The-Cher-Jacket-Sizes-00-32-A4-Letter-Patterns,14,K - PATCH POCKETS FLAP,32,yes,4,"24, 26, 28, 30",22,81,81,81
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,10,M - SHORTS WAISTBAND,32,yes,4,"24, 26, 28, 30",20,529,508,514
+set40,MDF438-Jolie-Sweep-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,1,C - RUFFLE,00,yes,4,"0, 2, 4, 6",8,465,221,234
+set40,MDF411-The-Ambrosia-Cocktail-Dress-Sizes-00-32-A4-Letter-Patterns,5,B - FRONT TOP,32,yes,4,"24, 26, 28, 30",22,270,105,140
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,5,K - SHORTS FRONT,32,yes,4,"24, 26, 28, 30",22,344,127,155
+set40,MDF453-Kitchen-Pickleball-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,0,N - SKIRT,5XL,yes,4,"XL, 2XL, 3XL, 4XL",M,635,214,220
+set40,MDF521-Reims-Soiree-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,4,A - TOP BACK,32,yes,4,"24, 26, 28, 30",22,266,79,147
+set40,MDF481-Verona-Sheath-Gown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,7,H - BOW CENTER,0,yes,3,"2, 6, 8",10,53,53,53
+set40,MDF481-Verona-Sheath-Gown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,7,H - BOW CENTER,32,yes,3,"24, 26, 28",20,57,57,57
+set40,MDF346-Kalla-Ensemble-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,17,N - SKIRT FRONT POCKET FLAP,30,yes,3,"24, 26, 28",22,127,122,127
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,11,J - POCKET,30,yes,3,"24, 26, 28",22,162,130,162
+set40,MDF521-Reims-Soiree-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,11,D - CORSET BACK MIDDLE,32,yes,3,"24, 26, 28",22,146,74,129
+set40,MDF453-Kitchen-Pickleball-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,5,F - TOP - BACK LEFT STRAP,XS,yes,3,"S, M, XL",2XL,184,73,119
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,8,L - SHORTS BACK,32,yes,3,"26, 28, 30",22,376,132,148
+holdout40,MDF383-The-Cher-Jacket-Sizes-00-32-A4-Letter-Patterns,2,J - PATCH POCKETS,30,yes,3,"24, 26, 28",22,109,37,96
+set40,MDF481-Verona-Sheath-Gown-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,5,F - SASH,28,yes,2,"24, 26",22,416,365,416
+set40,MDF404-The-Harper-Plisse-Dress-Sizes-00-32-A4-Letter-Patterns,1,A - TOP FRONT,32,yes,2,"28, 30",26,365,138,209
+holdout40,MDF383-The-Cher-Jacket-Sizes-00-32-A4-Letter-Patterns,12,O - SLEEVE FRONT,30,yes,2,"24, 26",22,343,84,188
+set40,MDF363-The-Memoir-Dress-View-A-Sizes-00-32-A4-Letter-Patterns,8,G - CUP 2,30,yes,2,"24, 26",22,177,31,93
+holdout40,MDF456-Anne-Waistcoat-Ensemble-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,4,I - PANTS BACK,XS,yes,2,"S, M",L,610,98,353
+holdout40,MDF372-The-Ventura-Sweatsuit-Ensemble-Sizes-00-32-A4-Letter-Patterns,12,B - FRONT LOWER,00,yes,2,"0, 2",6,351,38,143
+set40,MFD393-The-Emma-Double-Tiered-Dress-Sizes-00-32-A4-Letter-Patterns,0,H - SKIRT TIER 1 (UNDER TIER) Cu,32,yes,1,30,28,343,333,339
+set40,MDF453-Kitchen-Pickleball-Dress-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,6,I - FRONT WAISTBAND,4XL,yes,1,3XL,2XL,126,118,124
+set40,MFD393-The-Emma-Double-Tiered-Dress-Sizes-00-32-A4-Letter-Patterns,1,I - SKIRT TIER 2 (OVER TIER) Cut,32,yes,1,30,28,522,460,478
+set40,MDF387-The-Paris-Mini-Dress-Sizes-00-32-A4-Letter-Patterns,1,M - SKIRT b,00,yes,1,2,4,245,182,245
+set40,MDF426-Ophelia-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics,8,B - TOP BACK LEFT,32,yes,1,30,28,223,122,197
+holdout40,MDF456-Anne-Waistcoat-Ensemble-Free-Sewing-Pattern-Sizes-XS-5XL-A4-Letter-Patterns-Mood-Fabrics,8,A - WAISTCOAT,XS,yes,1,S,M,295,146,233
+set40,MDF521-Reims-Soiree-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,4,A - TOP BACK,00,yes,1,2,4,211,104,194
+set40,MDF433-Taos-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics-1,5,B - TOP BACK,32,yes,1,30,28,346,97,165
+set40,MDF433-Taos-Dress-Free-Sewing-Pattern-Sizes-00-32-A4-Letter-Patterns-Mood-Fabrics-1,6,G - SKIRT,00,yes,1,0,4,555,4,381
+set40,MDF474-Soho-Maxi-Slip-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,3,A - BACK CENTER,XS,yes,1,M,XL,704,5,81
+holdout40,MDF492-Altena-Blouse-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,3,D - COLLAR,32,no,12,"8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30",2,225,196,202
+set40,MDF346-Kalla-Ensemble-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,10,G - ARMHOLE OUTER FACING,00,no,8,"0, 2, 4, 6, 8, 10, 12, 14",16,277,0,0
+set40,MDF346-Kalla-Ensemble-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,11,G - ARMHOLE OUTER FACING,32,no,8,"16, 18, 20, 22, 24, 26, 28, 30",12,258,0,0
+holdout40,MDF400-The-Penelope-Pants-Sizs-00-32-A4-Letter-Patterns,2,C - WAISTBAND,00,no,7,"0, 2, 4, 6, 10, 14, 18",20,468,281,287
+set40,MDF521-Reims-Soiree-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,6,J - SLEEVES,00,no,6,"0, 2, 4, 6, 8, 10",12,246,0,0
+set40,MDF346-Kalla-Ensemble-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,7,Q - BELT,00,no,3,"0, 2, 4",8,381,319,325
+set40,MDF477-Venice-V-Waist-Dress-Free-Sewing-Pattern-A4-Letter-Patterns-Mood-Fabrics-Sewciety-Blog,2,G - TOP FRONT UPPER,32,no,3,"26, 28, 30",24,237,123,129
+set40,MDF408-The-Axel-Shirt-Dress-Sizes-00-32-A4-Letter-Patterns,5,G- POCKETS,32,no,1,30,28,124,68,82

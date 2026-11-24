@@ -94,9 +94,62 @@ export function flood(
   out: Uint8Array,
   within?: Uint8Array,
 ): number {
+  // hot path (exterior / region floods over the whole sheet): no `within` → a test without it
+  if (within) return floodWithin(g, wall, seeds, out, within);
   const W = g.W;
   const H = g.H;
-  const ok = (k: number) => !wall[k] && !out[k] && (!within || within[k] === 1);
+  const stack: number[] = [];
+  for (const s of seeds) if (!wall[s] && !out[s]) stack.push(s);
+  let count = 0;
+  while (stack.length) {
+    const k = stack.pop()!;
+    if (wall[k] || out[k]) continue;
+    const y = (k / W) | 0;
+    const row = y * W;
+    let x = k - row;
+    while (x > 0 && !wall[row + x - 1] && !out[row + x - 1]) x--;
+    const up = y > 0 ? row - W : -1;
+    const down = y + 1 < H ? row + W : -1;
+    let upOpen = false;
+    let downOpen = false;
+    for (; x < W; x++) {
+      const c = row + x;
+      if (wall[c] || out[c]) break;
+      out[c] = 1;
+      count++;
+      if (up >= 0) {
+        const u = up + x;
+        if (!wall[u] && !out[u]) {
+          if (!upOpen) {
+            stack.push(u);
+            upOpen = true;
+          }
+        } else upOpen = false;
+      }
+      if (down >= 0) {
+        const d = down + x;
+        if (!wall[d] && !out[d]) {
+          if (!downOpen) {
+            stack.push(d);
+            downOpen = true;
+          }
+        } else downOpen = false;
+      }
+    }
+  }
+  return count;
+}
+
+function floodWithin(
+  g: { W: number; H: number },
+  wall: Uint8Array,
+  seeds: number[],
+  out: Uint8Array,
+  within: Uint8Array,
+): number {
+  const W = g.W;
+  const H = g.H;
+  const ok = (k: number) => !wall[k] && !out[k] && within[k] === 1;
   const stack: number[] = [];
   for (const s of seeds) if (ok(s)) stack.push(s);
   let count = 0;
@@ -135,6 +188,96 @@ export function flood(
   return count;
 }
 
+/**
+ * Chebyshev dilation by r px (a (2r+1)² square): rows then columns, each a two-sweep running
+ * distance — O(W·H) whatever r, the same pixels as stamping the square around every set pixel.
+ */
+export function dilateSquare(g: { W: number; H: number }, src: Uint8Array, r: number): Uint8Array {
+  return dilateAxis(g, dilateAxis(g, src, r, 1), r, g.W);
+}
+
+/**
+ * Vertical dilation only (each column grown by r px up and down). `box` (pixel rows/columns that
+ * hold every set pixel of `src`) limits the work to that window grown by r.
+ */
+export function dilateColumns(
+  g: { W: number; H: number },
+  src: Uint8Array,
+  r: number,
+  box?: { x0: number; y0: number; x1: number; y1: number },
+): Uint8Array {
+  if (!box) return dilateAxis(g, src, r, g.W);
+  const { W, H } = g;
+  const dst = new Uint8Array(W * H);
+  const x0 = Math.max(0, box.x0);
+  const x1 = Math.min(W - 1, box.x1);
+  const ya = Math.max(0, box.y0 - r);
+  const yb = Math.min(H - 1, box.y1 + r);
+  if (x1 < x0 || yb < ya) return dst;
+  const last = new Int32Array(W).fill(-(r + 1) - H);
+  for (let y = ya; y <= yb; y++) {
+    const row = y * W;
+    for (let x = x0; x <= x1; x++) {
+      if (src[row + x]) last[x] = y;
+      if (y - last[x] <= r) dst[row + x] = 1;
+    }
+  }
+  last.fill(2 * H + r + 1);
+  for (let y = yb; y >= ya; y--) {
+    const row = y * W;
+    for (let x = x0; x <= x1; x++) {
+      if (src[row + x]) last[x] = y;
+      if (last[x] - y <= r) dst[row + x] = 1;
+    }
+  }
+  return dst;
+}
+
+/** Dilation along one axis (step 1 = rows, step W = columns) by r px. */
+function dilateAxis(
+  g: { W: number; H: number },
+  src: Uint8Array,
+  r: number,
+  step: number,
+): Uint8Array {
+  const { W, H } = g;
+  const dst = new Uint8Array(W * H);
+  if (step === 1) {
+    for (let y = 0; y < H; y++) {
+      const row = y * W;
+      let last = -Infinity;
+      for (let x = 0; x < W; x++) {
+        if (src[row + x]) last = x;
+        if (x - last <= r) dst[row + x] = 1;
+      }
+      let next = Infinity;
+      for (let x = W - 1; x >= 0; x--) {
+        if (src[row + x]) next = x;
+        if (next - x <= r) dst[row + x] = 1;
+      }
+    }
+    return dst;
+  }
+  // columns, walked row by row (one running distance per column keeps the walk in memory order)
+  const last = new Int32Array(W).fill(-(r + 1));
+  for (let y = 0; y < H; y++) {
+    const row = y * W;
+    for (let x = 0; x < W; x++) {
+      if (src[row + x]) last[x] = y;
+      if (y - last[x] <= r) dst[row + x] = 1;
+    }
+  }
+  last.fill(H + r + 1);
+  for (let y = H - 1; y >= 0; y--) {
+    const row = y * W;
+    for (let x = 0; x < W; x++) {
+      if (src[row + x]) last[x] = y;
+      if (last[x] - y <= r) dst[row + x] = 1;
+    }
+  }
+  return dst;
+}
+
 /** Exterior = everything reachable from the raster border without crossing a wall. */
 export function exterior(g: Grid, wall: Uint8Array): Uint8Array {
   const W = g.W;
@@ -160,18 +303,31 @@ export function regionOf(g: Grid, ext: Uint8Array, k: number) {
 
 /** Bounding box of a mask in pixel coordinates. */
 export function maskBox(g: Grid, mask: Uint8Array) {
-  let x0 = g.W;
-  let y0 = g.H;
-  let x1 = -1;
-  let y1 = -1;
-  for (let y = 0; y < g.H; y++) {
-    const row = y * g.W;
-    for (let x = 0; x < g.W; x++)
+  const W = g.W;
+  const n = g.W * g.H;
+  // first / last set pixel bound the rows; inside them each row is scanned only from its ends
+  // inwards, up to the extent already found (a region is small against the sheet raster)
+  let first = 0;
+  while (first < n && !mask[first]) first++;
+  if (first === n) return { x0: g.W, y0: g.H, x1: -1, y1: -1 };
+  let last = n - 1;
+  while (!mask[last]) last--;
+  const y0 = (first / W) | 0;
+  const y1 = (last / W) | 0;
+  let x0 = first - y0 * W;
+  let x1 = last - y1 * W;
+  if (x1 < x0) [x0, x1] = [x1, x0];
+  for (let y = y0; y <= y1; y++) {
+    const row = y * W;
+    for (let x = 0; x < x0; x++)
       if (mask[row + x]) {
-        if (x < x0) x0 = x;
-        if (x > x1) x1 = x;
-        if (y < y0) y0 = y;
-        if (y > y1) y1 = y;
+        x0 = x;
+        break;
+      }
+    for (let x = W - 1; x > x1; x--)
+      if (mask[row + x]) {
+        x1 = x;
+        break;
       }
   }
   return { x0, y0, x1, y1 };
@@ -254,36 +410,48 @@ export function openMask(g: Grid, mask: Uint8Array, r: number, keep: number): Ui
   let a = new Uint8Array(w * h);
   for (let y = 0; y < h; y++)
     for (let x = 0; x < w; x++) a[y * w + x] = mask[(y + y0) * W + x + x0];
+  // separable square, rows then columns; outside the window counts as 0. Each 1-D pass is a
+  // two-sweep running distance to the nearest pixel of the other kind: erode keeps a pixel when no
+  // 0 lies within r (the window edge is a 0), dilate sets it when a 1 lies within r.
+  const line = (
+    src: Uint8Array,
+    dst: Uint8Array,
+    o: number,
+    n: number,
+    st: number,
+    erode: boolean,
+  ) => {
+    if (erode) {
+      // keep a pixel when the nearest 0 (positions -1 and n count as 0) is further than r
+      let last = -1;
+      for (let i = 0; i < n; i++) {
+        if (!src[o + i * st]) last = i;
+        dst[o + i * st] = i - last > r ? 1 : 0;
+      }
+      let next = n;
+      for (let i = n - 1; i >= 0; i--) {
+        if (!src[o + i * st]) next = i;
+        if (next - i <= r) dst[o + i * st] = 0;
+      }
+    } else {
+      // set a pixel when a 1 lies within r
+      let last = -Infinity;
+      for (let i = 0; i < n; i++) {
+        if (src[o + i * st]) last = i;
+        dst[o + i * st] = i - last <= r ? 1 : 0;
+      }
+      let next = Infinity;
+      for (let i = n - 1; i >= 0; i--) {
+        if (src[o + i * st]) next = i;
+        if (next - i <= r) dst[o + i * st] = 1;
+      }
+    }
+  };
   const pass = (src: Uint8Array, erode: boolean) => {
-    // separable square: rows then columns; outside the window counts as 0
     const tmp = new Uint8Array(w * h);
     const dst = new Uint8Array(w * h);
-    for (let y = 0; y < h; y++)
-      for (let x = 0; x < w; x++) {
-        let v = erode ? 1 : 0;
-        for (let k = -r; k <= r; k++) {
-          const xx = x + k;
-          const s = xx < 0 || xx >= w ? 0 : src[y * w + xx];
-          if (erode ? !s : s) {
-            v = erode ? 0 : 1;
-            break;
-          }
-        }
-        tmp[y * w + x] = v;
-      }
-    for (let y = 0; y < h; y++)
-      for (let x = 0; x < w; x++) {
-        let v = erode ? 1 : 0;
-        for (let k = -r; k <= r; k++) {
-          const yy = y + k;
-          const s = yy < 0 || yy >= h ? 0 : tmp[yy * w + x];
-          if (erode ? !s : s) {
-            v = erode ? 0 : 1;
-            break;
-          }
-        }
-        dst[y * w + x] = v;
-      }
+    for (let y = 0; y < h; y++) line(src, tmp, y * w, w, 1, erode);
+    for (let x = 0; x < w; x++) line(tmp, dst, x, h, w, erode);
     return dst;
   };
   a = pass(pass(a, true), false);
@@ -298,19 +466,38 @@ export function openMask(g: Grid, mask: Uint8Array, r: number, keep: number): Ui
   if (kx >= 0 && ky >= 0 && kx < w && ky < h && a[ky * w + kx])
     got = flood(sub, inv, [ky * w + kx], comp);
   if (!got) {
-    // largest component
-    const seen = new Uint8Array(w * h);
+    // largest component (first in scan order on a tie): label every component once
+    const lab = new Int32Array(w * h);
     let best = 0;
+    let bestLab = 0;
+    let next = 0;
+    const stack: number[] = [];
     for (let k = 0; k < w * h; k++) {
-      if (!a[k] || seen[k]) continue;
-      const c = new Uint8Array(w * h);
-      const n = flood(sub, inv, [k], c);
-      for (let j = 0; j < w * h; j++) if (c[j]) seen[j] = 1;
+      if (!a[k] || lab[k]) continue;
+      lab[k] = ++next;
+      stack.push(k);
+      let n = 0;
+      while (stack.length) {
+        const c = stack.pop()!;
+        n++;
+        const cx = c % w;
+        const visit = (j: number) => {
+          if (a[j] && !lab[j]) {
+            lab[j] = next;
+            stack.push(j);
+          }
+        };
+        if (cx > 0) visit(c - 1);
+        if (cx + 1 < w) visit(c + 1);
+        if (c >= w) visit(c - w);
+        if (c + w < w * h) visit(c + w);
+      }
       if (n > best) {
         best = n;
-        comp = c;
+        bestLab = next;
       }
     }
+    if (bestLab) for (let k = 0; k < w * h; k++) comp[k] = lab[k] === bestLab ? 1 : 0;
   }
   for (let y = 0; y < h; y++)
     for (let x = 0; x < w; x++) if (comp[y * w + x]) out[(y + y0) * W + x + x0] = 1;

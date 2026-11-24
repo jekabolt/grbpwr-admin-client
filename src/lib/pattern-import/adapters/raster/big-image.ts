@@ -89,7 +89,13 @@ function sourceOf(
       if (bpc !== 8 && !(bpc === 1 && n === 1)) return `${bpc ?? '?'} bits per sample`;
       const pr = rec.parms ?? {};
       const predictor = pr.Predictor ?? 1;
-      if (!(predictor === 1 || predictor === 2 || (Number.isInteger(predictor) && predictor >= 10 && predictor <= 15)))
+      if (
+        !(
+          predictor === 1 ||
+          predictor === 2 ||
+          (Number.isInteger(predictor) && predictor >= 10 && predictor <= 15)
+        )
+      )
         return `predictor ${predictor}`;
       if (predictor > 1) {
         if ((pr.Colors ?? 1) !== n || (pr.BitsPerComponent ?? 8) !== bpc || (pr.Columns ?? 1) !== w)
@@ -122,11 +128,17 @@ export function planBigImages(
   const u = new Uint8Array(bytes);
   const { images, iccN, encrypted } = pdfImageStreams(bytes);
   const direct = images.filter(
-    (r) => r.width !== null && r.height !== null && r.width * r.height > max && r.widthSpan && r.heightSpan,
+    (r) =>
+      r.width !== null &&
+      r.height !== null &&
+      r.width * r.height > max &&
+      r.widthSpan &&
+      r.heightSpan,
   );
   // an oversized image the index cannot place (indirect size, a dictionary it does not read)
   const seen = new Map<string, number>();
-  for (const r of direct) seen.set(`${r.width}x${r.height}`, (seen.get(`${r.width}x${r.height}`) ?? 0) + 1);
+  for (const r of direct)
+    seen.set(`${r.width}x${r.height}`, (seen.get(`${r.width}x${r.height}`) ?? 0) + 1);
   for (const o of scan.oversized) {
     const k = `${o.width}x${o.height}`;
     const n = seen.get(k) ?? 0;
@@ -150,7 +162,11 @@ export function planBigImages(
     do code++;
     while (genuine.has(`1x${code}`));
     if (String(code).length > hb - ha) {
-      plan.refused.push({ width: r.width!, height: r.height!, reason: 'no placeholder fits its height' });
+      plan.refused.push({
+        width: r.width!,
+        height: r.height!,
+        reason: 'no placeholder fits its height',
+      });
       continue;
     }
     const put = (at: number, s: string) => {
@@ -161,7 +177,15 @@ export function planBigImages(
     for (const sp of [r.filterSpan, r.parmsSpan]) if (sp) copy.fill(0x20, sp[0], sp[1]);
     const comps = (components(r, iccN) ?? 3) === 1 ? 1 : 3;
     const head = u.slice(r.data[0], Math.min(r.data[1], r.data[0] + code * comps));
-    plan.byDims.set(`1x${code}`, { width: r.width!, height: r.height!, code, source: src, head, comps, bpc: r.bpc ?? 8 });
+    plan.byDims.set(`1x${code}`, {
+      width: r.width!,
+      height: r.height!,
+      code,
+      source: src,
+      head,
+      comps,
+      bpc: r.bpc ?? 8,
+    });
   }
   if (!plan.refused.length) plan.bytes = copy.buffer;
   return plan;

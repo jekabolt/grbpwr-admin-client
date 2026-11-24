@@ -21,7 +21,15 @@ make proto          # buf generate only
 make clean          # remove dist/ and generated src/api/proto-http/*
 ```
 
-There is **no test runner** configured. To verify a change, run `yarn build:check` (types) and exercise the UI in `yarn dev`.
+To verify a change, run `yarn build:check` (types) and exercise the UI in `yarn dev`. Tests:
+
+- `yarn test` — vitest over `scripts/probes.test.ts`: runs every probe listed in
+  `scripts/probes.assert.txt` (`probes.known-red.txt` is a shrink-only ratchet). This is the only
+  test step CI runs (`scripts/ci-check.sh`).
+- Unit tests `src/**/*.test.ts` (vitest; mostly `src/lib/pattern-import`) are **not** in CI — run
+  them by hand, e.g. `npx vitest run src/lib/pattern-import`.
+- `scripts/pattern-import/junk-check.ts` is a `node:test` file:
+  `node --experimental-strip-types --test scripts/pattern-import/junk-check.ts`.
 
 ## Environment
 
@@ -105,3 +113,5 @@ commit marker.
 ## Docs
 
 Deeper architecture notes live in `docs/` (e.g. `docs/analytics-dashboard.md` covers the analytics dashboard's data flow, period/compare semantics, and metric sources).
+
+Pattern upload stops — a dropped pattern is refused, the wizard halts, or cut lines do not meet after the read: `src/lib/pattern-import/CLAUDE.md`.

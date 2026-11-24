@@ -106,6 +106,12 @@ export type Style = {
   fill: boolean;
   /** Clip path in force when the path was drawn, by id. Kept until classification — not dropped. */
   clip: string | null;
+  /** Small four-sided mask on a PDF fill, expressed in the frame of the path. */
+  clipQuad?: PtMm[];
+  /** Straight edges of a local PDF stroke mask, in the same frame as the path. */
+  clipPolygon?: PtMm[];
+  /** Visible stroke or fill under a single small mask, including curved turn sections. */
+  localClipPolygon?: PtMm[];
 };
 
 /**
@@ -119,6 +125,20 @@ export type IRPath = {
   closed: boolean;
   style: StyleId;
   src: PathSource;
+  /** Visible part of an individually filled PDF mark under supported masks; empty when hidden. */
+  visibleFill?: PtMm[];
+  /** Compound clips, uncertain opacity, or a partial tile prevent attribution of this fill. */
+  unknownFill?: true;
+  /** Single opaque stroke or fill entirely inside the page and its rectangular clips. */
+  visibleMotif?: true;
+  /** Visible fractions of numbered PDF outline edges after the page and rectangular clips. */
+  visibleEdges?: true | [number, number][];
+  /** Matching copies registered on other tiles before whole-path deduplication. */
+  /** Identical filled glyphs repeated on overlapping PDF tiles, in original operator order. */
+  /** Whole printed glyph before edge deduplication split it at a tile seam. */
+  printedGlyph?: PtMm[];
+  stampCopies?: PathSource[];
+  paintCopies?: { src: PathSource; edges: true | [number, number][] }[];
   /**
    * A8 (clean stage): the page furniture this path was masked as. Masked, never deleted: assembly
    * still sees it (tile frames and registration marks register tiles); chains, the legend, seeds,
@@ -381,6 +401,8 @@ export type PagePose = {
 };
 
 export type Sheet = {
+  /** Original visible stamps otherwise lost during cross-tile overlap removal. */
+  materialMarks?: IRPath[];
   /** Sheet index inside the session (one source may carry several sheets; one card run = one sheet). */
   id: number;
   poses: PagePose[];
@@ -524,6 +546,8 @@ export type PathRange = { path: PathId; from: number; to: number };
 
 /** A chain is an ordered polyline stitched from path ranges (dashes, beads, zigzag joined). */
 export type Chain = {
+  /** Straight side of a complete, legend-keyed panel proved by paired ring masks. */
+  ringBoundary?: { side: [PtMm, PtMm]; pts: PtMm[]; ranges: PathRange[] };
   id: ChainId;
   pts: PtMm[];
   closed: boolean;
@@ -531,6 +555,8 @@ export type Chain = {
   ranges: PathRange[];
   /** Recovered or declared dash motif, mm (dash, gap, …) quantised to 0.25 mm. null = solid. */
   motif: Mm[] | null;
+  /** Repeating printed shapes in source order (compound mark rows only). */
+  markPeriod?: string;
   style: StyleId;
   lengthMm: Mm;
 };
@@ -658,7 +684,7 @@ export type ChainAmbiguity = {
  * closes ("chain:end"); `chains` = the stub / ramp drawn there.
  */
 export type CornerWall = {
-  rule: 'stub' | 'ramp' | 'extend';
+  rule: 'stub' | 'ramp' | 'extend' | 'arms';
   pts: PtMm[];
   own: ChainId[];
   ends: string[];
@@ -669,6 +695,8 @@ export type ChainSet = {
   chains: Chain[];
   /** MOOD Ф2: derived corner walls (sizes/corners.ts); absent on sets joined from several sheets. */
   cornerWalls?: CornerWall[];
+  /** Shared-pen outlines distinguished by both neighbouring legend-identified sizes. */
+  bracketedOutlines?: { chain: ChainId; label: string }[];
   /**
    * LABELFRAME (sizes/label-frame.ts): the closed lines drawn round a size label, put in the
    * 'ignore' row. Out of every wall and feature; the H1 solver alone still reads them as drawn
@@ -723,6 +751,24 @@ export type ChainOpts = {
   joinLateralMm: Mm;
   /** Expected size count when known (from sizes/ or operator); bundles are cut to it. */
   sizeCount?: number;
+  /**
+   * Join regular trains of separate solid dashes whose gap is wider than joinGapMm (chains/link.ts
+   * pass 2b). Off by default: buildChainsDetailed turns it on only for a file where a size of the
+   * legend has no line without it.
+   */
+  dashTrains?: boolean;
+  /**
+   * Do not throw a long straight dashed line out as a "dashed guide" (chains/classify.ts). A size
+   * whose lines are all straight (a skirt) draws no curve with its pen and is taken for a guide.
+   * Off by default; turned on with `dashTrains` for a file where a size has no line.
+   */
+  keepGuides?: boolean;
+  /**
+   * Do not label straight lines of one length repeated ≥ 3 times "tile frame / cut mark"
+   * (chains/classify.ts). A rectangle drawn in every size repeats like a frame does. Off by
+   * default; turned on with `dashTrains` for a file where a size has no line or too little of one.
+   */
+  keepRepeats?: boolean;
 };
 
 export type BuildChainsFn = (sheet: Sheet, opts: ChainOpts, progress?: Progress) => ChainSet;
@@ -1147,6 +1193,14 @@ export type CountEvidence = {
 
 /** One closed contour for one seed at one size rank, snapped to vector chains. */
 export type PieceCandidate = {
+  /** Separate, labelled material cut, with the shared printed marks and the straight original stroke. */
+  liningCut?: { cut: PtMm[]; path: PathId; label: TextId; segment: [PtMm, PtMm]; side: number };
+  materialMarkPaths?: PathId[];
+  /** Ordered pen operations and the two adjacent, fully printed size outlines. */
+  stampedBand?: { paths: PathId[]; brackets: [PathId, PathId] };
+  /** Printed paths supporting the fold-panel cycle or competing turn sections. */
+  foldPanelPaths?: PathId[];
+  foldPanelAlternatives?: PtMm[];
   seed: SeedId;
   /** Size rank in the SOURCE run (SizeRun.sizes[rank]); 0 for single-size files. */
   rank: number;
@@ -1179,6 +1233,16 @@ export type PieceCandidate = {
   };
   /** Fill gap when outcome = 'leak': where the outside got in. */
   leakAt?: PtMm;
+  /** Source chains and physical gaps of the verified automatic bridges. */
+  gapRecovery?: {
+    from: PtMm;
+    to: PtMm;
+    chains: ChainId[];
+    bridges?: { from: PtMm; to: PtMm }[];
+    sourceAnchors?: [number, number];
+  };
+  /** Distinct full outlines reproduced by isolated, rank-specific wall edits. */
+  gapOptions?: { outer: PtMm[]; bridges: { from: PtMm; to: PtMm }[] }[];
   /** Features already known at segmentation (DXF fast path: notches, drills, grain). */
   features?: Feature[];
   /**
@@ -1189,7 +1253,15 @@ export type PieceCandidate = {
    * the source draws that join this rank's own dangling ends (see `continuity`). Absent on DXF
    * fast-path candidates.
    */
-  rankFrom?: 'class' | 'innerPlug' | 'bundleRank' | 'single' | 'grade' | 'continuity' | 'repair';
+  rankFrom?: 'class' | 'innerPlug' | 'bundleRank' | 'single' | 'grade' | 'continuity' | 'repair' | 'printed-range' | 'legend-polygon' | 'shared-polygon' | 'printed-motif';
+  /** Visible source marks used to recover a masked row. */
+  visibleMarks?: PathId[];
+  /** Printed legend glyphs and visible PDF marks supporting every side of the polygon. */
+  printedMotif?: { key: PathId[]; paths: PathId[] };
+  /** Complete visible PDF outline, its printed legend sample and optional flanking source paths. */
+  sourceOutline?: { path: PathId; key: ChainId; brackets?: [PathId, PathId] };
+  /** Two independently painted, legend-owned source figures confirming the shared cut. */
+  polygonSource?: { reference: string; confirmedBy: string; paths: PathId[]; confirmationPaths: PathId[] };
   /**
    * GRADE P2: this size was REPAIRED from the family's grade (rankFrom 'repair'): the outline runs
    * on the size's own and common lines where the grade model of its two neighbouring anchors puts
@@ -1198,12 +1270,35 @@ export type PieceCandidate = {
    */
   repair?: RepairRecord;
   /**
+   * The nest walk (gfit/nest-walk.ts), per size of a family it found an etalon for (owner, 17 Nov
+   * 2026: the walk is the main build). 'etalon'; 'confirmed' — the own outline lies within
+   * `NEST_WALK.confirmP95Mm` of the walk's; 'disagree' — it does not (kept, flagged: a closure on
+   * another size's line), with the error and the landmark nearest the worst point; 'built' — no
+   * own outline, the walk's is written; 'refused' — left open, `why` = walk:*; 'unchecked' —
+   * closed, the walk did not build it (`why`).
+   */
+  nest?: {
+    etalon: number;
+    state: 'etalon' | 'confirmed' | 'disagree' | 'built' | 'refused' | 'unchecked';
+    p95Mm?: number;
+    maxMm?: number;
+    at?: PtMm;
+    landmark?: string;
+    why?: string;
+  };
+  /**
    * GRADE P2: a size the repair refused (a leak, or a size G26 holds on another size's line) —
    * where the grade model of the anchors `from` puts it (`pred`, sheet mm, simplified; `extrapolated`
    * when both anchors lie on one side) and why the drawing does not prove it there (E1–E4). For the
    * operator's question: where the size should run. Absent = no model.
    */
   gradeHint?: { pred: PtMm[]; from: [number, number]; refusals: string[]; extrapolated?: boolean };
+  /**
+   * GRADE P2, reporting only: why the repair's try ended without a prediction (`gradeHint` absent) —
+   * 'no-model:inconsistent' | 'no-model:ambiguous' | 'no-model:no-pair-match' | 'not-bracketed'…
+   * Not `gradeRefusal` (H1's field, read by the UI) and not shown anywhere; the corpus reports count it.
+   */
+  gradeTryWhy?: string[];
   /**
    * P1 provenance: the continuity walls this closed outline runs along — drawn lines of another
    * class or size that close this rank between its own dangling ends (R0 a chain path, R1 the
@@ -1221,8 +1316,9 @@ export type PieceCandidate = {
   /** pieces/grade (H1): the refusal in words for the operator ("the drawing shows 5 lines …"). */
   gradeDetail?: string;
   /**
-   * Outline stretches the SOURCE does not draw (F4b), shown to the operator: 'bridge' = an
-   * automatic ≤ 3 mm gap close between two of this rank's lines; 'operator-bridge' = one the
+   * Outline stretches the SOURCE does not draw (F4b), shown to the operator: 'bridge' = the fill's
+   * own close — a dangling end to the nearest wall within 3 mm, or two open ends of one stroke
+   * within 12 mm; 'operator-bridge' = one the
    * operator drew; 'band-cut' = this rank's end tick across a band, carried to the band's edges
    * where the source stops it short;
    * 'shared-rank' = this rank is not drawn (the run lists it, no line carries it) and reuses the
@@ -1245,6 +1341,13 @@ export type PieceCandidate = {
    * Recorded (D5): piece note, manifest `kinkStraightened`, passport. Absent = none.
    */
   placeMarks?: { id: ChainId; at: PtMm; mm: number; spanMm: number }[];
+  /**
+   * LADDER_JUDGE: why a cell withdrawn off a rescued rung was kept or opened, and the nest verdict
+   * of the outline it had (`ok` / `trunc` / `over` / `both` / `unjudged`). Written to cells.json.
+   * Absent on a cell the judge did not consider.
+   */
+  ladderReason?: 'refill-identical' | 'refill-differs' | 'judge';
+  ladderNest?: 'ok' | 'trunc' | 'over' | 'both' | 'unjudged';
 };
 
 /**
@@ -1282,7 +1385,17 @@ export type ContinuityVerdict = {
 
 /** F4b outline edges the source does not draw (see `PieceCandidate.derived`); gate G15 audits them. */
 /** 'grade-fill' (GRADE P2): a hole ≤ 15 mm in a repaired size's own line, filled from the grade. */
-export type DerivedEdgeKind = 'bridge' | 'operator-bridge' | 'band-cut' | 'grade-fill';
+/**
+ * 'grade-draw' (GRADE P2, draw mode): a stretch of a bracketed size's line the drawing does not
+ * have, DRAWN from the grade — every hole of a block the strict fill refused and the draw mode
+ * took, ≤ 15 % of the perimeter in all (GFIT_REPAIR.drawMaxShare).
+ */
+export type DerivedEdgeKind =
+  | 'bridge'
+  | 'operator-bridge'
+  | 'band-cut'
+  | 'grade-fill'
+  | 'grade-draw';
 
 /** GRADE P2: how a repaired size was proven (PieceCandidate.repair). */
 export type RepairRecord = {
@@ -1300,8 +1413,34 @@ export type RepairRecord = {
   score: number;
   /** Largest excess of the repaired outline over the corridor, mm. */
   devMm: number;
+  /** Draw mode: mm of the line drawn from the grade (all holes of a drawn block, 'grade-draw'). */
+  drawnMm?: number;
+  /** Draw mode: the size lies past both anchors of `from` (the grade carried one step on). */
+  extrapolated?: true;
+  /**
+   * Draw mode: how differently another pair of trusted anchors draws the same holes, mm (gfit
+   * repair.ts holeSpread). Absent = no other pair to ask. The "check this stretch" cue.
+   */
+  spreadMm?: number;
   /** kind 'neighbour': the outline it had closed to (simplified 0.3 mm) — for the audit picture. */
   was?: PtMm[];
+  /**
+   * Built by the nest walk (gfit/nest-walk.ts) from the etalon rank: its landmarks carried through
+   * the nest onto this size's own / common lines; every stretch off them is a 'grade-draw' edge.
+   */
+  walk?: { etalon: number };
+  /** GFIT_LOCAL: judged by the local pair of an inconsistent family (gfit repair.ts `local`). */
+  local?: {
+    r1: number;
+    r2: number;
+    t1: boolean;
+    t2: boolean;
+    common?: number;
+    /** GFIT_LOCAL_CORRIDOR: median leave-one-out p95 the corridor grew to, mm. */
+    scatterMm?: number;
+    /** Largest rank span of a pair used to measure that scatter. */
+    scatterGap?: number;
+  };
 };
 export type DerivedEdge = {
   kind: DerivedEdgeKind;
@@ -1617,12 +1756,19 @@ export type OffsetReport = {
   /** Max deviation between result and the expected parallel curve, mm. */
   maxDeviationMm: Mm;
   reason?: string;
+  /** OFFSET_HULL_POCKETS: a hull collapse that was only narrow bays, kept as a note. */
+  note?: string;
+  /** Raw-offset remnants dropped before counting loops (every vertex nearer than the allowance). */
+  dropped?: { loops: number; maxAreaMm2: number };
 };
 
 export type PairHand = 'L' | 'R';
 
 /** The final, per-identity description — what the writer turns into blocks. */
 export type PieceSpec = {
+  /** Semantics of the distinct, explicitly labelled lining size cuts, including their features. */
+  liningSizes?: PieceSizeSpec[];
+  liningProblem?: string;
   identity: PieceKey;
   /** Grammar: PREFIX[_mods]. `code` is PREFIX, mods in order (R/L, F/B, number, #). */
   code: string;
@@ -2822,6 +2968,8 @@ export type ManifestGrade = {
   holes: number;
   holesMm: number;
   cover: number;
+  /** Draw mode: mm of the line DRAWN from the grade ('grade-draw' edges); absent = none. */
+  drawnMm?: number;
 };
 
 /**
@@ -2962,6 +3110,8 @@ export type GradeEvidence = {
 export type IdentityGeometry = {
   pen: string | null;
   own: PtMm[][];
+  /** A single fully visible original cut, in a declared pen keyed to this size. */
+  visibleSourceCut?: PtMm[];
   excused: PtMm[][];
   /** Lines of another pen this rank's own lines land on (an edge drawn once): ≤ half excused. */
   shared?: PtMm[][];
@@ -4107,6 +4257,8 @@ export const PATIMPORT = {
   notchMaxMm: 8,
   notchMinAngleDeg: 45,
   defaultAllowanceMm: 10,
+  /** G15 bound on the share of a cut invented by straight bridges and other chords. */
+  derivedMaxShare: 0.05,
   coverageWarn: 0.98,
   coverageBlock: 0.95,
   hausdorffP95VectorMm: 0.3,

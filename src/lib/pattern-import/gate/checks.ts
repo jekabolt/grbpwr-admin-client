@@ -37,6 +37,7 @@ import {
 } from '../write/geom';
 import { num } from '../write/format';
 import { LAYERS, continuityOfBlock } from '../write/manifest-build';
+import { FACING_BRIDGE_MM } from '../pieces/bridges';
 import {
   GRAIN_BARB_BACK_MM,
   GRAIN_BARB_SIDE_MM,
@@ -47,6 +48,7 @@ import {
 import { identityProblem } from '../manifest/identity';
 import { f0Off } from '../pieces/identity';
 import { sameDxfRankOutline, SIZE_RUN, sizeRunProblems } from '../pieces/gfit/silent';
+import { GFIT_REPAIR } from '../pieces/gfit/repair';
 import { foldShapeProblem } from '../semantics/fold';
 import {
   GRAIN_INSIDE_TOL_MM,
@@ -55,8 +57,14 @@ import {
   pointOnRings,
 } from '../semantics/grain-inside';
 import { drillMarkKey, drillMarkKeyOf, drillMarkOf } from './drill-mark';
-import { MITER_LIMIT, parallelDeviation } from '../semantics/offset';
+import {
+  MITER_LIMIT,
+  hullPocketBlocks,
+  hullPocketsOn,
+  parallelDeviation,
+} from '../semantics/offset';
 import { glyphCellKey, undashed } from '../semantics/glyphs';
+import { samePrintedCurve } from '../pieces/printed-cut-curves';
 import { CHROME_GATE, ChromeIndex, hairpins, onChrome } from './chrome';
 import type { RawDxf, RawEntity } from './reader';
 import { contourMm } from './roundtrip';
@@ -454,7 +462,9 @@ export function g3g4(
 /**
  * The most one derived edge may add OFF the drawing (its length farther than `snapMm` from every
  * wall and, for a band cut its tick carries, from that tick), mm, by kind:
- *   bridge          — the fill's own gap close: `FillOpts.autoBridgeMm` default 3 (pieces/bridges.ts);
+ *   bridge          — the fill's own gap close. A dangling end to the nearest wall: `autoBridgeMm`
+ *                     default 3. Two open ends that continue one stroke: `FACING_BRIDGE_MM`
+ *                     (pieces/bridges.ts), and only when both ends land on open wall ends;
  *   operator-bridge — the wizard's "close gap": 30 mm. The tool is for a junction the drawing leaves
  *                     open (a dash phase, a line stopping short: palto 4.7 mm); 30 mm is 10× the
  *                     automatic close and still well under any real piece edge — a longer gap is an
@@ -470,7 +480,16 @@ export const DERIVED_OFF_MAX_MM: Record<DerivedEdgeKind, number> = {
   'operator-bridge': 30,
   'band-cut': 30,
   'grade-fill': 15,
+  // bounded per block by its share of the line (DERIVED_DRAWN_MAX_SHARE), not per edge
+  'grade-draw': Infinity,
 };
+/**
+ * 'grade-draw' edges (GRADE P2 draw mode): together at most this share of the written line — the
+ * repair's own bound (GFIT_REPAIR.drawMaxShare). They are not counted in the per-block count / share
+ * / mm of the other kinds: those bound what the pipeline INVENTS as chords; a drawn stretch follows
+ * the piece's grade model, which E3 checked, and the manifest flags the block as drawn.
+ */
+export const DERIVED_DRAWN_MAX_SHARE = GFIT_REPAIR.drawMaxShare;
 /** An end lands when the edge comes within `snapMm` of one of the piece's walls this close to that
  * end, mm (operator bridges overshoot their landing by 0.6 mm, pieces/operator.ts). */
 export const DERIVED_LAND_REACH_MM = 1;
@@ -491,6 +510,7 @@ export const DERIVED_LEN_MAX_MM: Record<DerivedEdgeKind, number> = {
   'operator-bridge': DERIVED_OFF_MAX_MM['operator-bridge'] + 2 * DERIVED_LAND_REACH_MM,
   'band-cut': DERIVED_OFF_MAX_MM['band-cut'] + 2 * DERIVED_LAND_REACH_MM,
   'grade-fill': DERIVED_OFF_MAX_MM['grade-fill'] + 2 * DERIVED_LAND_REACH_MM,
+  'grade-draw': Infinity,
 };
 export const DERIVED_CARRIED_LEN_MAX_MM = 250 + 2 * DERIVED_LAND_REACH_MM;
 /**
@@ -501,7 +521,7 @@ export const DERIVED_CARRIED_LEN_MAX_MM = 250 + 2 * DERIVED_LAND_REACH_MM;
  * of the line: 2×, ~7× and ~15× headroom, while a piece can never be 1/20 invented.
  */
 export const DERIVED_MAX_PER_BLOCK = 6;
-export const DERIVED_MAX_SHARE = 0.05;
+export const DERIVED_MAX_SHARE = PATIMPORT.derivedMaxShare;
 export const DERIVED_MAX_TOTAL_MM = 60;
 
 const r1 = (v: number) => Math.round(v * 10) / 10;
@@ -552,6 +572,7 @@ export function g15(ctx: GateCtx): DerivedVerdict {
     const wallIdx = new SegmentIndex(open(walls), 5);
     const before = failed.length;
     let invented = 0;
+    let drawnMm = 0;
     const rows: DerivedEdgeAudit[] = [];
     const passed: DerivedEdge[] = [];
     for (const e of list) {
@@ -588,7 +609,24 @@ export function g15(ctx: GateCtx): DerivedVerdict {
         if (arcs[i] <= DERIVED_LAND_REACH_MM) landA = Math.min(landA, dw[i]);
         if (arc - arcs[i] <= DERIVED_LAND_REACH_MM) landB = Math.min(landB, dw[i]);
       }
-      const lenMax = carried ? DERIVED_CARRIED_LEN_MAX_MM : DERIVED_LEN_MAX_MM[e.kind];
+      const a = e.pts[0];
+      const z = e.pts[e.pts.length - 1];
+      // a bridge longer than the 3 mm nearest-wall close is the fill joining two open ends of one
+      // stroke. Both ends sit on a wall's endpoint; a chord that lands mid-wall stays at 3 mm.
+      const onOpenEnd = (p: PtMm) =>
+        walls.some(
+          (w) =>
+            w.length >= 2 &&
+            (dist(p, w[0]) <= snap + DERIVED_LAND_REACH_MM ||
+              dist(p, w[w.length - 1]) <= snap + DERIVED_LAND_REACH_MM),
+        );
+      const endToEnd = e.kind === 'bridge' && onOpenEnd(a) && onOpenEnd(z);
+      const offMax = endToEnd ? FACING_BRIDGE_MM : DERIVED_OFF_MAX_MM[e.kind];
+      const lenMax = carried
+        ? DERIVED_CARRIED_LEN_MAX_MM
+        : endToEnd
+          ? FACING_BRIDGE_MM + 2 * DERIVED_LAND_REACH_MM
+          : DERIVED_LEN_MAX_MM[e.kind];
       const what = `${e.kind} ${len.toFixed(1)} mm`;
       if (!Number.isFinite(len) || !(len > 0) || s.some((p) => !Number.isFinite(p.x + p.y)))
         bad(`${what}: not a finite edge`);
@@ -604,12 +642,11 @@ export function g15(ctx: GateCtx): DerivedVerdict {
               : ' — whatever runs beside it, a bridge is a chord the pipeline drew'
           }`,
         );
-      else if (!(off <= DERIVED_OFF_MAX_MM[e.kind]))
-        bad(`${what}: ${off.toFixed(1)} mm off the drawing (≤ ${DERIVED_OFF_MAX_MM[e.kind]} mm)`);
-      const a = e.pts[0];
-      const z = e.pts[e.pts.length - 1];
+      else if (!(off <= offMax))
+        bad(`${what}: ${off.toFixed(1)} mm off the drawing (≤ ${offMax} mm)`);
       // what the edge invents: a bridge whole (a chord, wherever it runs), a band cut off its support
-      invented += e.kind === 'band-cut' ? off : len;
+      if (e.kind === 'grade-draw') drawnMm += len;
+      else invented += e.kind === 'band-cut' ? off : len;
       rows.push({
         block: b.block,
         kind: e.kind,
@@ -620,10 +657,14 @@ export function g15(ctx: GateCtx): DerivedVerdict {
       });
       passed.push(carried && e.along ? e : { kind: e.kind, pts: e.pts });
     }
-    if (list.length > DERIVED_MAX_PER_BLOCK)
-      bad(`${list.length} derived edges (≤ ${DERIVED_MAX_PER_BLOCK})`);
+    const chords = list.filter((e) => e.kind !== 'grade-draw').length;
+    if (chords > DERIVED_MAX_PER_BLOCK) bad(`${chords} derived edges (≤ ${DERIVED_MAX_PER_BLOCK})`);
     const { line } = linesFor(ctx, b);
     const per = line ? polylineLength(line, true) : NaN;
+    if (drawnMm > 0 && !(drawnMm / per <= DERIVED_DRAWN_MAX_SHARE))
+      bad(
+        `drawn from the grade ${drawnMm.toFixed(1)} mm${line ? ` = ${((drawnMm / per) * 100).toFixed(1)} % of the line` : ' and there is no written line'} (≤ ${DERIVED_DRAWN_MAX_SHARE * 100} %)`,
+      );
     const share = invented / per;
     if (Number.isFinite(share)) worstShare = Math.max(worstShare, share);
     if (!(share <= DERIVED_MAX_SHARE))
@@ -647,7 +688,7 @@ export function g15(ctx: GateCtx): DerivedVerdict {
           ? `${edges} derived edge(s) land on drawn walls and stay short — listed in the manifest`
           : 'no derived edges'),
       `${edges} edge(s) / ${fmt(worstShare * 100, 2)} %`,
-      `ends ≤ ${snap} mm on a wall; length ≤ ${DERIVED_LEN_MAX_MM.bridge} (auto) / ${DERIVED_LEN_MAX_MM['operator-bridge']} (operator, band cut) mm, a band cut its tick carries (≥ ${PATIMPORT.derivedAlongMinShare * 100} % in one stretch) ≤ ${DERIVED_CARRIED_LEN_MAX_MM} mm; off the drawing ≤ ${DERIVED_OFF_MAX_MM.bridge} / ${DERIVED_OFF_MAX_MM['operator-bridge']} mm; ≤ ${DERIVED_MAX_PER_BLOCK} per block inventing ≤ ${DERIVED_MAX_SHARE * 100} % of the line and ≤ ${DERIVED_MAX_TOTAL_MM} mm`,
+      `ends ≤ ${snap} mm on a wall; length ≤ ${DERIVED_LEN_MAX_MM.bridge} mm to a wall, ≤ ${FACING_BRIDGE_MM} mm between two open ends, ≤ ${DERIVED_LEN_MAX_MM['operator-bridge']} mm for an operator bridge or a band cut; a band cut its tick carries (≥ ${PATIMPORT.derivedAlongMinShare * 100} % in one stretch) ≤ ${DERIVED_CARRIED_LEN_MAX_MM} mm; off the drawing ≤ ${DERIVED_OFF_MAX_MM.bridge} / ${FACING_BRIDGE_MM} / ${DERIVED_OFF_MAX_MM['operator-bridge']} mm; ≤ ${DERIVED_MAX_PER_BLOCK} per block inventing ≤ ${DERIVED_MAX_SHARE * 100} % of the line and ≤ ${DERIVED_MAX_TOTAL_MM} mm`,
     ),
     ok,
     audit,
@@ -964,9 +1005,10 @@ export function g6(ctx: GateCtx): GateCheck {
       hrBase < OFFSET_HULL_SOURCE_MAX &&
       (hrDerived >= OFFSET_HULL_RATIO || r.hullRatio >= OFFSET_HULL_RATIO)
     ) {
-      bad(
-        `offset collapsed to the convex hull (hull ratio ${hrDerived.toFixed(4)} vs source ${hrBase.toFixed(4)})`,
-      );
+      const msg = `offset collapsed to the convex hull (hull ratio ${hrDerived.toFixed(4)} vs source ${hrBase.toFixed(4)})`;
+      const d = spec.allowance.allowanceMm;
+      if (!hullPocketsOn() || hullPocketBlocks(baseLine, derivedLine, d)) bad(msg);
+      else notes.push(`${b.block}: ${msg} (narrow bays)`);
     }
     // Independent check on the FILE (W2): the DERIVED line, read back, is the mitred allowance
     // offset of the line it came from — never closer than the allowance anywhere (a bitten bay, a
@@ -1784,6 +1826,7 @@ export function chromeProblems(
   chrome: readonly ChromeLine[] | undefined,
   /** A traced scan: its line wobbles in 2 mm steps (leonie), and a scan has no vector chrome. */
   raster = false,
+  visibleSourceCut?: PtMm[],
 ): { block: string[]; warn: string[] } {
   const out = { block: [] as string[], warn: [] as string[] };
   if (!chrome?.length) return out;
@@ -1801,7 +1844,18 @@ export function chromeProblems(
           out.block.push(
             `the ${word} line goes out and back round a ${h.capMm.toFixed(1)} mm bar ${h.legMm.toFixed(0)} mm long at (${h.at.x.toFixed(0)}, ${h.at.y.toFixed(0)})`,
           );
-      for (const run of onChrome(e.pts, e.closed, marks))
+      let runs = onChrome(e.pts, e.closed, marks);
+      if (
+        runs.length &&
+        word === 'cut' &&
+        e.closed &&
+        visibleSourceCut &&
+        samePrintedCurve(e.pts, visibleSourceCut)
+      ) {
+        const source = new ChromeIndex([[...visibleSourceCut, visibleSourceCut[0]]]);
+        runs = onChrome(e.pts, e.closed, marks, source);
+      }
+      for (const run of runs)
         out.block.push(
           `the ${word} line runs ${run.lengthMm.toFixed(0)} mm on a registration mark from (${run.from.x.toFixed(0)}, ${run.from.y.toFixed(0)})`,
         );
@@ -1839,6 +1893,7 @@ export function g19(ctx: GateCtx): GateCheck {
       rawOf(ctx, block),
       ctx.expect.chromeByBlock?.[block],
       ctx.expect.hausdorffP95Mm > PATIMPORT.hausdorffP95VectorMm,
+      ctx.expect.identityByBlock?.[block]?.visibleSourceCut,
     );
     const all = [...why.block, ...why.warn];
     if (!all.length) continue;

@@ -11,7 +11,18 @@ import type { Chain, PtMm } from 'lib/pattern-import/types';
 
 import { dist, endTangent, PtGrid, SegGrid } from '../chains/geom';
 
-export const LAND = { bridgeMm: 25, bridgeLateralMm: 1.0, bridgeAngleDeg: 20, landMm: 8 };
+export const LAND = {
+  bridgeMm: 25,
+  /** A row of dots of one size may be missing over this much (a curve with no dots drawn on it). */
+  bridgeDottedMm: 40,
+  bridgeLateralMm: 1.0,
+  bridgeDottedLateralMm: 2.5,
+  bridgeAngleDeg: 20,
+  landMm: 8,
+};
+
+/** A chain of dots: its motif's first element (the dash) has no length. */
+const dotted = (c: Chain) => !!c.motif && c.motif.length >= 2 && c.motif[0] === 0;
 
 export type Landing = { chain: number; end: 0 | 1; on: number; at: PtMm; gapMm: number };
 
@@ -21,7 +32,7 @@ export function bridgeSameRank(chains: Chain[], rankOf: Map<number, number>): Ma
   const cosMax = Math.cos((LAND.bridgeAngleDeg * Math.PI) / 180);
   for (let round = 0; round < 6; round++) {
     const ends: { c: number; end: 0 | 1; p: PtMm; t: PtMm }[] = [];
-    const grid = new PtGrid(LAND.bridgeMm);
+    const grid = new PtGrid(LAND.bridgeDottedMm);
     for (const [c] of rankOf) {
       if (joined.has(c)) continue;
       const ch = chains[c];
@@ -36,21 +47,24 @@ export function bridgeSameRank(chains: Chain[], rankOf: Map<number, number>): Ma
     }
     const cands: { i: number; j: number; cost: number }[] = [];
     ends.forEach((A, i) => {
-      grid.near(A.p, LAND.bridgeMm, (j) => {
+      grid.near(A.p, LAND.bridgeDottedMm, (j) => {
         if (j <= i) return;
         const B = ends[j];
         if (B.c === A.c || rankOf.get(B.c) !== rankOf.get(A.c)) return;
         const dx = B.p.x - A.p.x;
         const dy = B.p.y - A.p.y;
         const g = Math.hypot(dx, dy);
-        if (g > LAND.bridgeMm) return;
+        const dots = dotted(chains[A.c]) && dotted(chains[B.c]);
+        if (g > (dots ? LAND.bridgeDottedMm : LAND.bridgeMm)) return;
         if (-(A.t.x * B.t.x + A.t.y * B.t.y) < cosMax) return;
         const latA = Math.abs(dx * A.t.y - dy * A.t.x);
         const latB = Math.abs(dx * B.t.y - dy * B.t.x);
         const alA = dx * A.t.x + dy * A.t.y;
         const alB = -(dx * B.t.x + dy * B.t.y);
-        if (alA < -0.3 || alB < -0.3 || latA > LAND.bridgeLateralMm || latB > LAND.bridgeLateralMm)
-          return;
+        // a dotted pen (dots of no length) wanders a millimetre or two to either side of its line,
+        // and its tangent over 5 mm moves with it: the tolerance grows with the gap
+        const lat = dots ? Math.max(LAND.bridgeDottedLateralMm, 0.3 * g) : LAND.bridgeLateralMm;
+        if (alA < -0.3 || alB < -0.3 || latA > lat || latB > lat) return;
         cands.push({ i, j, cost: g + 3 * (latA + latB) });
       });
     });

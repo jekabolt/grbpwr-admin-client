@@ -7,12 +7,14 @@
 // Pass 2 (tracker): chain ENDS are joined along the line direction (viola: every dash its own path;
 //   tile seams everywhere). A join needs: gap ≤ joinGapMm, the two end tangents within joinAngleDeg,
 //   the lateral offset from the mean direction ≤ joinLateralMm (+ seam slack), the same backbone
-//   style, and no solid↔dashed mix. Candidates are taken cheapest first, one per end per round.
+//   style, and no solid↔dashed mix. A run whose dash and gap have settled does not take a stroke
+//   of another pen (SPLIT_PEN_OFF=1 joins as before). Candidates are taken cheapest first, one
+//   per end per round.
 // Pass 3 (decor): free beads (ticks, rings, dots) within decorMm of a chain become its decoration;
 //   they never extend the geometry but they are part of the line's look (motif).
 import type { ChainOpts, PathRange, PtMm, Sheet, Style } from 'lib/pattern-import/types';
 
-import { dist, PtGrid, SegGrid, segNearest } from './geom';
+import { dist, median, PtGrid, SegGrid, segNearest } from './geom';
 import { itemOf, type Item } from './primitives';
 
 export type Link = { it: Item; rev: boolean };
@@ -20,6 +22,26 @@ export type WChain = {
   items: Link[];
   decor: Item[];
   dead: boolean;
+};
+
+/** Pass 2b: regular trains of separate dashes (see there). */
+export const TRAIN = {
+  minDashMm: 2,
+  maxDashMm: 14,
+  /** The widest gap between two dashes of a train. */
+  maxGapMm: 16,
+  /** Sideways slack of the next dash off the direction of this one. */
+  lateralMm: 0.3,
+  /** Fewer dashes than this are not a train. */
+  minDashes: 3,
+  /** A row (or band) of short strokes is a line from this many strokes (pass 3, `dashTrains`). */
+  rowMin: 8,
+  /** A band: strokes of one ink whose centres are this close are one cloud … */
+  bandGapMm: 4.5,
+  /** … a line when its longest path is this long, mm, … */
+  bandMinMm: 30,
+  /** … and its ends are this share of that length apart (a path that doubles back is no line). */
+  bandStraight: 0.55,
 };
 
 export const LINK = {
@@ -190,6 +212,74 @@ function cornerJump(ch: WChain, next: Link): boolean {
   return dq >= 0.6 && ((q.x - p.x) * ux + (q.y - p.y) * uy) / dq >= cosMax;
 }
 
+/** Off: a settled dash run may be linked to a stroke of another pen. */
+const splitPenOff = () => typeof process !== 'undefined' && !!process.env?.SPLIT_PEN_OFF;
+
+/** Same tolerance classify.ts uses to call two dashes one pen: 6 %, at least 0.3 mm. */
+const nearPen = (a: number, b: number) => Math.abs(a - b) <= Math.max(0.3, 0.06 * Math.max(a, b));
+
+/** Drawn strokes of a chain, in order, and the gap before each one after the first. */
+function penSeq(ch: WChain): { pieces: number[]; gaps: number[] } {
+  const pieces: number[] = [];
+  const gaps: number[] = [];
+  let prev: PtMm | null = null;
+  for (const l of ch.items) {
+    if (l.it.kind === 'bead') continue;
+    const pts = linkPts(l);
+    if (!pts.length) continue;
+    if (prev) gaps.push(dist(prev, pts[0]));
+    prev = pts[pts.length - 1];
+    pieces.push(l.it.len);
+  }
+  return { pieces, gaps };
+}
+
+/**
+ * A pen that has settled: three dashes and two gaps of one length. A dash-dot period does not
+ * settle here (its pieces differ), so this never cuts one pen into its elements.
+ */
+function settledPen(pieces: number[], gaps: number[]): [number, number] | null {
+  if (pieces.length < 3 || gaps.length < 2) return null;
+  const tail = pieces.slice(-3);
+  const gtail = gaps.slice(-2);
+  if (!tail.every((v) => nearPen(v, tail[0])) || !gtail.every((v) => nearPen(v, gtail[0])))
+    return null;
+  return [median(tail), median(gtail)];
+}
+
+const fitsPen = (pen: [number, number], len: number, gap: number) =>
+  nearPen(pen[0], len) && nearPen(pen[1], gap);
+
+/** True when `len` across `gap` is a different pen from the run `ch` already is. */
+function penBreak(ch: WChain, len: number, gap: number): boolean {
+  if (splitPenOff() || gap <= LINK.dashGapMm || len < 1) return false;
+  const { pieces, gaps } = penSeq(ch);
+  // one solid stroke does not grow a dash
+  if (pieces.length === 1 && pieces[0] >= 15 && len < pieces[0] * 0.5) return true;
+  const pen = settledPen(pieces, gaps);
+  return !!pen && !fitsPen(pen, len, gap);
+}
+
+/** True when two chains have each settled into a pen and the pens are not the same. */
+function pensDiffer(a: WChain, b: WChain, gap: number): boolean {
+  if (splitPenOff()) return false;
+  const pa = settledPen(penSeq(a).pieces, penSeq(a).gaps);
+  const pb = settledPen(penSeq(b).pieces, penSeq(b).gaps);
+  if (pa && pb) return !(nearPen(pa[0], pb[0]) && nearPen(pa[1], pb[1]));
+  if (pa) return !runFits(pa, b, gap);
+  if (pb) return !runFits(pb, a, gap);
+  return false;
+}
+
+/** Every stroke of `ch` is an element of `pen`. `gap` is the gap at the join, before its first. */
+function runFits(pen: [number, number], ch: WChain, gap: number): boolean {
+  const { pieces, gaps } = penSeq(ch);
+  if (!pieces.length) return true;
+  if (!fitsPen(pen, pieces[0], gap)) return false;
+  for (let i = 1; i < pieces.length; i++) if (!fitsPen(pen, pieces[i], gaps[i - 1])) return false;
+  return true;
+}
+
 /** Internal gap count above dashGapMm, and total length of drawn items. */
 function dashStats(ch: WChain) {
   let gaps = 0;
@@ -204,7 +294,7 @@ function dashStats(ch: WChain) {
   return { gaps, len };
 }
 
-function reversed(items: Link[]): Link[] {
+export function reversed(items: Link[]): Link[] {
   return items
     .slice()
     .reverse()
@@ -307,7 +397,8 @@ export function linkItems(sheet: Sheet, opts: ChainOpts): LinkResult {
             ].sort((x, y) => x.g - y.g)[0];
             if (
               opts4.g <= LINK.opGapMm &&
-              !markJump({ it: f.it, rev: opts4.frev }, { it, rev: opts4.rev })
+              !markJump({ it: f.it, rev: opts4.frev }, { it, rev: opts4.rev }) &&
+              !penBreak(cur, it.len, opts4.g)
             ) {
               f.rev = opts4.frev;
               cur.items.push({ it, rev: opts4.rev });
@@ -317,7 +408,11 @@ export function linkItems(sheet: Sheet, opts: ChainOpts): LinkResult {
             const e = chainEnd(cur, 1);
             const g0 = dist(e, a);
             const g1 = dist(e, b);
-            if (Math.min(g0, g1) <= LINK.opGapMm && !cornerJump(cur, { it, rev: g1 < g0 })) {
+            if (
+              Math.min(g0, g1) <= LINK.opGapMm &&
+              !cornerJump(cur, { it, rev: g1 < g0 }) &&
+              !penBreak(cur, it.len, Math.min(g0, g1))
+            ) {
               cur.items.push({ it, rev: g1 < g0 });
               continue;
             }
@@ -402,6 +497,7 @@ export function linkItems(sheet: Sheet, opts: ChainOpts): LinkResult {
         if ((A.solidLong && B.dashed) || (B.solidLong && A.dashed)) {
           if (g > 0.05) return;
         }
+        if (pensDiffer(chains[A.ch], chains[B.ch], g)) return;
         const align = -(A.t.x * B.t.x + A.t.y * B.t.y);
         if (align < cosMax) return;
         let mx = A.t.x - B.t.x;
@@ -444,6 +540,137 @@ export function linkItems(sheet: Sheet, opts: ChainOpts): LinkResult {
       merged++;
     }
     if (!merged) break;
+  }
+
+  // ── pass 2b: trains of dashes (only when asked: `ChainOpts.dashTrains`) ───────────────────────────────────────────────────────────────
+  // A size line drawn as separate dashes with a gap wider than the tracker's joinGapMm (Cassandra:
+  // 6.1 mm dashes 7.7 mm apart, 7.3 mm dashes 10 mm apart) stays a heap of "fragments" and the size
+  // has no line. A REGULAR train is joined here: short strokes of one pen, end to end along one
+  // direction, each end's nearest partner being mutual, and at least TRAIN.minDashes of them with
+  // one gap between neighbours. Anything less regular is left as it was.
+  if (opts.dashTrains) {
+    const lenOf = (ch: WChain) => ch.items.reduce((a, l) => a + l.it.len, 0);
+    const short = chains
+      .map((ch, ci) => ({ ch, ci }))
+      .filter(
+        ({ ch }) =>
+          !ch.dead &&
+          // a dash drawn as a stroke of its own with a solid pen: a pen that declares its dash is
+          // linked by passes 1 and 2 already, and its lines stay as they were
+          ch.items.every((l) => {
+            const d = styles.get(l.it.style)?.dash;
+            return l.it.kind !== 'bead' && !(d && d.some((v) => v > 0.01));
+          }) &&
+          lenOf(ch) >= TRAIN.minDashMm &&
+          lenOf(ch) <= TRAIN.maxDashMm,
+      );
+    type TEnd = { ci: number; end: 0 | 1; p: PtMm; t: PtMm; key: string; len: number };
+    const tends: TEnd[] = [];
+    const tgrid = new PtGrid(TRAIN.maxGapMm);
+    for (const { ch, ci } of short)
+      for (const end of [0, 1] as const) {
+        const t = chainTangent(ch, end);
+        if (!t) continue;
+        tgrid.add(tends.length, chainEnd(ch, end));
+        tends.push({ ci, end, p: chainEnd(ch, end), t, key: backbone(ch, end), len: lenOf(ch) });
+      }
+    const best = new Map<number, { j: number; cost: number; gap: number }>();
+    tends.forEach((A, i) => {
+      tgrid.near(A.p, TRAIN.maxGapMm, (j) => {
+        if (j === i) return;
+        const B = tends[j];
+        if (B.ci === A.ci || B.key !== A.key) return;
+        if (Math.abs(A.len - B.len) > Math.max(0.8, 0.15 * Math.max(A.len, B.len))) return;
+        const dx = B.p.x - A.p.x;
+        const dy = B.p.y - A.p.y;
+        const g = Math.hypot(dx, dy);
+        if (g < LINK.dashGapMm || g > TRAIN.maxGapMm) return;
+        // B lies ahead of A and A ahead of B, both on the direction the dashes run in
+        if ((A.t.x * dx + A.t.y * dy) / g < cosMax || (B.t.x * -dx + B.t.y * -dy) / g < cosMax)
+          return;
+        // sideways off the mean direction of the two dashes (as pass 2): an arc of dashes keeps
+        // it small, a parallel row a millimetre aside does not
+        let mx = A.t.x - B.t.x;
+        let my = A.t.y - B.t.y;
+        const mL = Math.hypot(mx, my) || 1;
+        mx /= mL;
+        my /= mL;
+        const lat = Math.abs(dx * my - dy * mx);
+        if (lat > TRAIN.lateralMm + 0.02 * g) return;
+        const cost = g + 10 * lat;
+        const cur = best.get(i);
+        if (!cur || cost < cur.cost) best.set(i, { j, cost, gap: g });
+      });
+    });
+    // mutual partners only: one link per pair of ends
+    type Nb = { ci: number; mine: 0 | 1; theirs: 0 | 1; gap: number };
+    const nbs = new Map<number, Nb[]>();
+    const addNb = (ci: number, nb: Nb) => {
+      const l = nbs.get(ci);
+      if (l) l.push(nb);
+      else nbs.set(ci, [nb]);
+    };
+    for (const [i, b] of best) {
+      if (i > b.j || best.get(b.j)?.j !== i) continue;
+      const A = tends[i];
+      const B = tends[b.j];
+      addNb(A.ci, { ci: B.ci, mine: A.end, theirs: B.end, gap: b.gap });
+      addNb(B.ci, { ci: A.ci, mine: B.end, theirs: A.end, gap: b.gap });
+    }
+    const seen = new Set<number>();
+    for (const [start, nb0] of nbs) {
+      // a train is a path: begin at a dash with one link only
+      if (seen.has(start) || nb0.length !== 1) continue;
+      const order: { ci: number; into: 0 | 1 }[] = [
+        { ci: start, into: (1 - nb0[0].mine) as 0 | 1 },
+      ];
+      const gaps: number[] = [];
+      seen.add(start);
+      let cur = start;
+      let out: 0 | 1 = nb0[0].mine;
+      for (;;) {
+        const nb = nbs.get(cur)?.find((n) => n.mine === out);
+        if (!nb || seen.has(nb.ci)) break;
+        gaps.push(nb.gap);
+        seen.add(nb.ci);
+        order.push({ ci: nb.ci, into: nb.theirs });
+        cur = nb.ci;
+        out = (1 - nb.theirs) as 0 | 1;
+      }
+      // a path may run on past a change of step (a corner, a neighbour's dash): cut it into the
+      // stretches that keep one gap, and join each stretch of at least minDashes dashes
+      const flush = (from: number, to: number) => {
+        if (to - from + 1 < TRAIN.minDashes) return;
+        const head = chains[order[from].ci];
+        const items: Link[] = [];
+        for (let k = from; k <= to; k++) {
+          const c = chains[order[k].ci];
+          const oriented = order[k].into === 0 ? c.items : reversed(c.items);
+          for (const l of oriented) items.push(l);
+          if (c !== head) {
+            head.decor.push(...c.decor);
+            c.dead = true;
+          }
+        }
+        head.items = items;
+      };
+      let from = 0;
+      let sum = 0;
+      let count = 0;
+      for (let k = 0; k < gaps.length; k++) {
+        const mean = count ? sum / count : gaps[k];
+        if (count && Math.abs(gaps[k] - mean) > Math.max(1, 0.25 * mean)) {
+          flush(from, k);
+          from = k + 1;
+          sum = 0;
+          count = 0;
+          continue;
+        }
+        sum += gaps[k];
+        count++;
+      }
+      flush(from, order.length - 1);
+    }
   }
 
   // ── pass 3: lines of marks, then decorations ─────────────────────────────────────────────────
@@ -528,8 +755,14 @@ export function linkItems(sheet: Sheet, opts: ChainOpts): LinkResult {
   // LEAKS: marks drawn one after another (a pattern brush emits its tiles in order along the
   // line) are one row before any proximity linking: in a dense bundle of sizes the nearest mark is
   // often the next size's (Mood 0 / 2 / 6, 1 mm apart), and proximity alone zigzags across them
-  const seq = opRows(pool, styles);
-  const rows = [...seq.rows, ...chainBeads(seq.rest, seq.runOf)].filter((row) => {
+  // The read that joins dashes (`dashTrains`) takes the strokes as bands (see `chainBand`): the
+  // order they were drawn in breaks at every corner of a piece and the rows made of it are bits of
+  // a line. Dots and beads go the way they always did.
+  const strokes = opts.dashTrains ? pool.filter((it) => chainOfMark.has(it)) : [];
+  const seq = opRows(strokes.length ? pool.filter((it) => !chainOfMark.has(it)) : pool, styles);
+  const beadRows = chainBeads(seq.rest, seq.runOf);
+  const bands = strokes.length ? chainBand(strokes, styles) : [];
+  const rows = [...seq.rows, ...beadRows, ...bands].filter((row) => {
     // a row that hugs other lines all along is their decoration (viola's «//////» on size 38)
     let near = 0;
     for (const l of row.items) {
@@ -539,7 +772,8 @@ export function linkItems(sheet: Sheet, opts: ChainOpts): LinkResult {
     }
     const marks = row.items.filter((l) => chainOfMark.has(l.it) && !isTiny(chainOfMark.get(l.it)!));
     // a row of short strokes only is a dashed line the tracker did not join, not marks
-    if (marks.length === row.items.length) return false;
+    if (marks.length === row.items.length && !(opts.dashTrains && row.items.length >= TRAIN.rowMin))
+      return false;
     return near < 0.7 * row.items.length;
   });
   const used = new Set<Item>();
@@ -743,6 +977,138 @@ function opRows(
     rest: pool.filter((it) => !taken.has(it)),
     runOf,
   };
+}
+
+/**
+ * Strokes that are one line but come in no order a row can follow: a zigzag (alternate strokes of
+ * two lengths at an angle to the line) turns the way the next stroke lies back and forth, and at a
+ * corner of a piece the order of drawing turns with it. What stays true is the SHAPE: one ink, the
+ * strokes' centres a few mm apart, the whole cloud a thin band. Strokes of one ink whose centres
+ * are ≤ `bandGapMm` apart form a cloud; the longest path through its minimum spanning tree is the
+ * line, ordered end to end (a bend is no break), and a cloud is a line when that path is at least
+ * `bandMinMm` long and has `rowMin` strokes; it is taken off and the strokes left over are looked at
+ * again (the next size's line lies 3 mm away). Only the read that joins dashes (`dashTrains`) asks.
+ */
+function chainBand(marks: Item[], styles: Map<number, Style>): WChain[] {
+  // two inks of one pen differ in the third digit (Ginger: 32/29/30 and 44/46/53 alternate)
+  const rgbOf = (it: Item) => styles.get(it.style)?.strokeRgb ?? null;
+  const sameInk = (a: Item, b: Item) => {
+    const x = rgbOf(a);
+    const y = rgbOf(b);
+    if (!x || !y) return !x && !y;
+    return Math.max(Math.abs(x[0] - y[0]), Math.abs(x[1] - y[1]), Math.abs(x[2] - y[2])) <= 32;
+  };
+  const items = marks.filter((it) => it.c);
+  const n = items.length;
+  if (n < TRAIN.rowMin) return [];
+  const grid = new PtGrid(TRAIN.bandGapMm);
+  items.forEach((it, i) => grid.add(i, it.c!));
+  const nbs: number[][] = items.map(() => []);
+  items.forEach((it, i) =>
+    grid.near(it.c!, TRAIN.bandGapMm, (j) => {
+      if (j <= i || !sameInk(items[j], it)) return;
+      const d = dist(it.c!, items[j].c!);
+      if (d > 0.05 && d <= TRAIN.bandGapMm) {
+        nbs[i].push(j);
+        nbs[j].push(i);
+      }
+    }),
+  );
+  const out: WChain[] = [];
+  const left = new Uint8Array(n).fill(1);
+  /** The connected clouds of the strokes still `left`, among `from`. */
+  const clouds = (from: number[]) => {
+    const seen = new Set<number>();
+    const res: number[][] = [];
+    for (const s of from) {
+      if (!left[s] || seen.has(s)) continue;
+      const comp: number[] = [];
+      const stack = [s];
+      seen.add(s);
+      while (stack.length) {
+        const u = stack.pop()!;
+        comp.push(u);
+        for (const v of nbs[u])
+          if (left[v] && !seen.has(v)) {
+            seen.add(v);
+            stack.push(v);
+          }
+      }
+      res.push(comp);
+    }
+    return res;
+  };
+  /** The longest path through the minimum spanning tree of one cloud, end to end, and its length. */
+  const longest = (comp: number[]) => {
+    const inTree = new Set<number>([comp[0]]);
+    const adj = new Map<number, { v: number; w: number }[]>(comp.map((u) => [u, []]));
+    const best = new Map<number, { w: number; from: number }>();
+    const push = (u: number) => {
+      for (const v of nbs[u])
+        if (left[v] && !inTree.has(v)) {
+          const w = dist(items[u].c!, items[v].c!);
+          const b = best.get(v);
+          if (!b || w < b.w) best.set(v, { w, from: u });
+        }
+    };
+    push(comp[0]);
+    while (best.size) {
+      let bv = -1;
+      let bw = Infinity;
+      for (const [v, b] of best)
+        if (b.w < bw) {
+          bw = b.w;
+          bv = v;
+        }
+      const b = best.get(bv)!;
+      best.delete(bv);
+      inTree.add(bv);
+      adj.get(bv)!.push({ v: b.from, w: b.w });
+      adj.get(b.from)!.push({ v: bv, w: b.w });
+      push(bv);
+    }
+    const far = (from: number) => {
+      const dd = new Map<number, number>([[from, 0]]);
+      const par = new Map<number, number>();
+      const q = [from];
+      while (q.length) {
+        const u = q.shift()!;
+        for (const { v, w } of adj.get(u) ?? [])
+          if (!dd.has(v)) {
+            dd.set(v, dd.get(u)! + w);
+            par.set(v, u);
+            q.push(v);
+          }
+      }
+      let bf = from;
+      for (const [u, d] of dd) if (d > dd.get(bf)!) bf = u;
+      return { to: bf, dd, par };
+    };
+    const sw = far(far(comp[0]).to);
+    const path: number[] = [];
+    for (let u: number | undefined = sw.to; u !== undefined; u = sw.par.get(u)) path.push(u);
+    return { path, mm: sw.dd.get(sw.to) ?? 0 };
+  };
+  // peel lines off a cloud one at a time: the marks of the next size's line lie 3 mm away
+  const queue = clouds(items.map((_, i) => i));
+  while (queue.length) {
+    const comp = queue.pop()!;
+    if (comp.length < TRAIN.rowMin) continue;
+    const { path, mm } = longest(comp);
+    if (mm < TRAIN.bandMinMm || path.length < TRAIN.rowMin) continue;
+    // a line runs on; a path that hops between two lines 3 mm apart doubles back on itself
+    const a = items[path[0]].c!;
+    const z = items[path[path.length - 1]].c!;
+    if (dist(a, z) < TRAIN.bandStraight * mm) continue;
+    out.push({
+      items: path.map((i) => ({ it: items[i], rev: false })),
+      decor: [],
+      dead: false,
+    });
+    for (const u of path) left[u] = 0;
+    queue.push(...clouds(comp));
+  }
+  return out;
 }
 
 /**

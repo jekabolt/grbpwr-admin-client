@@ -159,10 +159,14 @@ export class AreaResampler {
   /** The image; throws when the source ran out before the window's last row. */
   finish(): { data: Uint8Array; width: number; height: number; channels: 1 | 3 } {
     const need = this.identity ? this.winH : Math.ceil(this.outH * this.ky - 1e-9);
-    if (this.y < need)
-      throw new Error(`raster: the image data ended at row ${this.y} of ${need}`);
+    if (this.y < need) throw new Error(`raster: the image data ended at row ${this.y} of ${need}`);
     if (!this.identity) this.flushTo(this.outH);
-    return { data: this.out, width: this.outW, height: this.outH, channels: this.identity ? (this.ch as 1 | 3) : this.outCh };
+    return {
+      data: this.out,
+      width: this.outW,
+      height: this.outH,
+      channels: this.identity ? (this.ch as 1 | 3) : this.outCh,
+    };
   }
 }
 

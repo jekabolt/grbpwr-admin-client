@@ -364,7 +364,9 @@ export async function extractRasterPdfDetailed(
       const pxToPage = compose(shift, placementOf(p.ctm, w, h));
       // an image read in rows is read only where the page shows it; one pdf.js decoded is traced
       // whole, as before (its pixels are in memory anyway)
-      const win = big ? pageWindow(pxToPage, w, h, widthMm, heightMm) : { x0: 0, y0: 0, x1: w, y1: h };
+      const win = big
+        ? pageWindow(pxToPage, w, h, widthMm, heightMm)
+        : { x0: 0, y0: 0, x1: w, y1: h };
       if (!win) continue; // painted entirely off the page: nothing of it is visible
       entries.push({ p, q, big, w, h, pxToPage, win, outW: 0, outH: 0 });
     }
@@ -415,7 +417,12 @@ export async function extractRasterPdfDetailed(
         window: [win.x0, win.y0, win.x1, win.y1] as [number, number, number, number],
         scale: outW / (win.x1 - win.x0),
       };
-      let img: { data: Uint8Array | Uint8ClampedArray; width: number; height: number; channels: 1 | 3 | 4 };
+      let img: {
+        data: Uint8Array | Uint8ClampedArray;
+        width: number;
+        height: number;
+        channels: 1 | 3 | 4;
+      };
       if (e.big) {
         const src = e.big.source;
         const rs = new AreaResampler(win.x1 - win.x0, win.y1 - win.y0, outW, outH, src.channels);
@@ -424,7 +431,9 @@ export async function extractRasterPdfDetailed(
           img = rs.finish();
         } catch (err) {
           if (err instanceof RowsUnsupported)
-            throw corruptInput(`${where}: an embedded image (${e.w} × ${e.h} px) does not decode: ${err.message}`);
+            throw corruptInput(
+              `${where}: an embedded image (${e.w} × ${e.h} px) does not decode: ${err.message}`,
+            );
           throw err;
         }
       } else {
@@ -442,7 +451,10 @@ export async function extractRasterPdfDetailed(
       }
       images.push({
         ...img,
-        pxToPage: full && outW === e.w && outH === e.h ? e.pxToPage : compose(e.pxToPage, windowAffine(win, outW, outH)),
+        pxToPage:
+          full && outW === e.w && outH === e.h
+            ? e.pxToPage
+            : compose(e.pxToPage, windowAffine(win, outW, outH)),
         op: p.op,
         ...(full && outW === e.w && outH === e.h ? {} : { source }),
       });

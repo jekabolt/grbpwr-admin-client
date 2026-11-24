@@ -32,7 +32,21 @@ import type {
 } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 
-import { bboxOf, dist, pointInPoly, resample, SegGrid, segNearest, signedArea } from './geom';
+import { triangleMarkLoop } from './triangle-mark-loop';
+import { clippedMarkLoop } from './clipped-mark-loop';
+import { ringStrokeLoop } from './ring-stroke-loop';
+import { selfIntersects } from '../semantics/geom';
+import { keyedDashLoop } from './keyed-dash-loop';
+import {
+  bboxOf,
+  dist,
+  pointInPoly,
+  quantile,
+  resample,
+  SegGrid,
+  segNearest,
+  signedArea,
+} from './geom';
 import {
   components,
   drawPolyline,
@@ -40,6 +54,8 @@ import {
   flood,
   Grid,
   openMask,
+  dilateColumns,
+  dilateSquare,
   maskBox,
   regionOf,
   splitByCells,
@@ -49,10 +65,13 @@ import { pageMarginIds } from 'lib/pattern-import/chains/classify';
 import { chainView, partAt, sheetView } from 'lib/pattern-import/assemble/composite';
 import { gradeView } from 'lib/pattern-import/chains/face-role';
 
-import { type Bridge, wallBridges } from './bridges';
+import { type Bridge, facingBridges, wallBridges } from './bridges';
+import { landedBorrowWalls } from './landed-borrow';
+import { unsupportedLanding, type AmbiguousLanding } from './ambiguous-landing';
 import { gradeHook, SOLVER_MODEL, type GradeHook } from './grade/hook';
+import { gradeOrderRun } from './continuity-order';
 import { seedFaces, type SeedFaceDiag } from './seed-face';
-import { seedLabel } from './seeds';
+import { oneLabelBlock, seedLabel } from './seeds';
 import { snapOutline, type WallItem } from './snap';
 import { cutTails, LineIndex, type TailCut } from './tails';
 import { variantKnifeItems } from './variants';
@@ -64,6 +83,7 @@ import {
   itemsOf,
   landingPlugs,
   lonePortions,
+  NOT_EDGE_ROLES,
   overlayLines,
   rescuedIgnored,
   copyRanks,
@@ -75,7 +95,33 @@ import {
   type WallModel,
 } from './walls';
 import { rankLooks } from './identity';
+import { restoreBracketedStamps } from './bracketed-stamps';
+import { readLabelledSourceFamilies } from './labelled-source-family';
+import { restoreTriangleStripContours } from './triangle-strip-contour';
+import { readRepeatedMotifWalk, restorePrintedMotifPolygons } from './printed-motif-polygon';
+import { readPrintedMarkContours } from './printed-mark-contour';
+import { restoreMaskedMarkLoops } from './masked-mark-loop';
+import { restoreSourceOutlineFamilies } from './source-outline-family';
+import { restoreSourceLoops } from './source-loops';
+import { registeredMarkLoop } from './registered-marks';
+import { recoverMaterialPanels } from './material-panels';
+import { restoreFoldPanels } from './fold-panel';
+import { restoreRingPanels } from './ring-panel';
+import { applyPrintedCuts } from './apply-printed-cuts';
+import { looseWallsOn } from './gfit/repair';
 import { gradeP2Off, repairPass, type RepairDiag } from './gfit/repair-hook';
+import {
+  cleanSet,
+  familyFlags,
+  ladderJudgeOn,
+  ladderOn,
+  ladderRungs,
+  ladderVerdict,
+  outlineArea,
+  rungsUsed,
+  type LadderVerdict,
+} from './ladder';
+import { judgeNest, type NestVerdict } from './nest-judge';
 import type { OverlayLines } from '../sizes/overlay';
 
 export type RankFrom = NonNullable<PieceCandidate['rankFrom']>;
@@ -134,6 +180,38 @@ export type FillDiag = {
   };
   /** GRADE P2 (hook A): sizes repaired from their family's grade, and the refusals by reason. */
   repair?: RepairDiag;
+  /**
+   * LADDER_RESCUE (pieces/ladder.ts): every closed cell that runs along a ladder rung, with its
+   * verdict and, for a withdrawal, what the refill without the rung gave — 'refilled' (closed on
+   * the trend), 'opened' (left a leak: allowed only ≥ 2 tolerances off), 'kept' (the rung stays).
+   * `rejected`: per seed, the ranks the clean set dropped as off its own trend.
+   */
+  ladder?: {
+    cells: (LadderVerdict & {
+      seed: number;
+      rank: number;
+      rungs: ChainId[];
+      areaMm2: number;
+      result?: 'refilled' | 'opened' | 'kept';
+      refillAreaMm2?: number;
+      /**
+       * LADDER_JUDGE: why a mayOpen cell was kept or opened. 'refill-identical' = the refill
+       * without the rung closed the same outline (the rung is not the wall) and the nest judge does
+       * not call the old outline trunc / over (`unjudged` counts as not-proven: keep).
+       */
+      reason?: 'refill-identical' | 'refill-differs' | 'judge';
+      /** Nest verdict of the pre-pass outline (`judgeNest`). Absent when the judge did not run. */
+      judge?: NestVerdict['kind'];
+    })[];
+    /** Diag flags too (`familyFlags`: inversions, ratioRun): picture leads, never a verdict. */
+    rejected: {
+      seed: number;
+      ranks: number[];
+      collapsed: boolean;
+      inversions: number;
+      ratioRun: number;
+    }[];
+  };
   ms: number;
 };
 
@@ -248,7 +326,17 @@ function leakMouth(g: Grid, wall: Uint8Array, k: number, ref?: PtMm[]): PtMm | u
     // ref polygon rasterised and grown by 3 mm
     const inRef = new Uint8Array(wall.length);
     const grow = Math.ceil(15 / g.cell);
-    for (let j = 0; j < g.H; j++) {
+    // rows the polygon spans (others hold no crossing), and the box of the pixels it sets
+    let ry0 = Infinity;
+    let ry1 = -Infinity;
+    for (const q of ref) {
+      ry0 = Math.min(ry0, q.y);
+      ry1 = Math.max(ry1, q.y);
+    }
+    const box = { x0: W, y0: g.H, x1: -1, y1: -1 };
+    const j0 = Math.max(0, g.iy(ry1) - 1);
+    const j1 = Math.min(g.H - 1, g.iy(ry0) + 1);
+    for (let j = j0; j <= j1; j++) {
       const y = g.box.maxY - (j - 1 + 0.5) * g.cell;
       const xs: number[] = [];
       for (let i = 0, m = ref.length - 1; i < ref.length; m = i++) {
@@ -261,34 +349,21 @@ function leakMouth(g: Grid, wall: Uint8Array, k: number, ref?: PtMm[]): PtMm | u
         const i0 = Math.max(0, g.ix(xs[i]) - grow);
         const i1 = Math.min(W - 1, g.ix(xs[i + 1]) + grow);
         for (let x = i0; x <= i1; x++) inRef[j * W + x] = 1;
+        if (i0 <= i1) {
+          box.x0 = Math.min(box.x0, i0);
+          box.x1 = Math.max(box.x1, i1);
+          box.y0 = Math.min(box.y0, j);
+          box.y1 = Math.max(box.y1, j);
+        }
       }
     }
     // vertical growth
-    const grown = inRef.slice();
-    for (let j = 0; j < g.H; j++)
-      for (let x = 0; x < W; x++)
-        if (inRef[j * W + x])
-          for (let d = 1; d <= grow; d++) {
-            if (j - d >= 0) grown[(j - d) * W + x] = 1;
-            if (j + d < g.H) grown[(j + d) * W + x] = 1;
-          }
+    const grown = dilateColumns(g, inRef, grow, box);
     const p = bfsOut((c) => grown[c] === 1);
     if (p) return p;
   }
   for (const r of [2, 4, 8]) {
-    const thick = new Uint8Array(wall.length);
-    for (let y = 0; y < g.H; y++)
-      for (let x = 0; x < W; x++) {
-        if (!wall[y * W + x]) continue;
-        for (let dy = -r; dy <= r; dy++) {
-          const yy = y + dy;
-          if (yy < 0 || yy >= g.H) continue;
-          for (let dx = -r; dx <= r; dx++) {
-            const xx = x + dx;
-            if (xx >= 0 && xx < W) thick[yy * W + xx] = 1;
-          }
-        }
-      }
+    const thick = dilateSquare(g, wall, r);
     if (thick[k]) continue;
     const ext2 = exterior(g, thick);
     if (ext2[k]) continue;
@@ -440,9 +515,27 @@ function contOff(): boolean {
   return typeof process !== 'undefined' && !!process.env?.P1_NOCONT;
 }
 
+/**
+ * The continuity order guard: refuses a continuity closure whose outline leaves its neighbours'
+ * grade order for ≥ 50 mm (pieces/continuity-order.ts). ACCEPTED 15 Nov 2026 (set40: 2 wrong
+ * closes refused, 0 correct lost, 0 outlines moved). `CONT_ORDER_OFF=1` = the old rule (bisect).
+ */
+function contOrder(): boolean {
+  return !(typeof process !== 'undefined' && process.env?.CONT_ORDER_OFF);
+}
+
 /** Probe switch (node only): MOOD_F3_OFF turns the Ф3 overlay readings off (the "before" column). */
 function f3Off(): boolean {
   return typeof process !== 'undefined' && !!process.env?.MOOD_F3_OFF;
+}
+
+/**
+ * Probe switch (node only, WIP): MOOD_LOCAL_BAND judges a continuity closure's growth against the
+ * anchor pairs around its own rank, not the min–max of every pair in the family — so a size that
+ * closes far away (a new anchor at the other end of the grade) cannot move this size's verdict.
+ */
+function localBand(): boolean {
+  return typeof process !== 'undefined' && !!process.env?.MOOD_LOCAL_BAND;
 }
 
 /** Probe switch: keep the marking tails (pieces/tails) the fill takes. */
@@ -572,6 +665,17 @@ function fillOneSheet(
   const use = seeds.filter(
     (s) => opts.variant == null || s.variant == null || s.variant === opts.variant,
   );
+  // two labels of one text block: one outline cut as two pieces — each seed fills it alone
+  const coLabelled = new Set<string>();
+  for (let i = 0; i < use.length; i++)
+    for (let j = i + 1; j < use.length; j++) {
+      const a = use[i].text;
+      const b = use[j].text;
+      if (!a || !b || use[i].origin !== 'text' || use[j].origin !== 'text') continue;
+      if (dist(use[i].at, use[j].at) > 8 * Math.max(a.fontSizeMm, b.fontSizeMm)) continue;
+      if (seedLabel(use[i]) === seedLabel(use[j])) continue;
+      if (oneLabelBlock(a, b, sheet.texts)) coLabelled.add(`${i}|${j}`).add(`${j}|${i}`);
+    }
   // H1: sizes drawn alike — the solver's per-rank walls, or refusals (null = F4 as before)
   // (the face pass's unconfirmed strays are lines to the size checks: chains/face-role gradeView)
   const graded =
@@ -839,6 +943,8 @@ function fillOneSheet(
     return mask;
   };
 
+  // another size's line, only the stretch between this size's own landings (BORROW_LANDED_OFF)
+  const borrowed = landedBorrowWalls(set, model);
   /** Pass A walls of one rank: common + own + rescued + the operator's + lone stretches. */
   const baseItems = (r: number, excl: Set<ChainId>) => {
     const ownIds = model.mode === 'single' ? [] : model.byRank[r];
@@ -849,6 +955,7 @@ function fillOneSheet(
             ...itemsOf(set, [...model.common, ...ownIds, ...extraOf(r)]),
             ...rescuedItems(r),
             ...sandwichItems(r),
+            ...(borrowed[r] ?? []),
           ]),
       ...lone,
       ...opBridges(r).map((b) => ({ chain: -2, pts: [b.from, b.to] })),
@@ -871,6 +978,37 @@ function fillOneSheet(
   if (faced?.diag.length) diag.faced = faced.diag;
   const carry = (s: Seed, r: number) => faced?.at.get(key(s.id, r)) ?? shift(s.at, r);
 
+  const measureSourceLoop = (c: PieceCandidate, ink: LineIndex) => {
+    const distances = resample(c.outer, 0.5, true).map((p) => ink.nearest(p, 3).d);
+    c.p95Mm = quantile(distances, 0.95);
+    c.sourceCoverage =
+      distances.filter((d) => d <= (opts.snapMm || PATIMPORT.snapMm)).length / distances.length;
+    c.textsInside = textCentres.filter((t) => pointInPoly(t.at, c.outer)).map((t) => t.id);
+    const walls = new Set(c.walls);
+    c.inside = set.chains
+      .filter(
+        (ch) =>
+          !walls.has(ch.id) &&
+          ch.pts.length > 1 &&
+          ch.pts.every(
+            (p) =>
+              p.x >= c.bbox.minX &&
+              p.x <= c.bbox.maxX &&
+              p.y >= c.bbox.minY &&
+              p.y <= c.bbox.maxY &&
+              pointInPoly(p, c.outer),
+          ),
+      )
+      .map((ch) => ch.id);
+  };
+  const measureSourceCut = (c: PieceCandidate, paths: ReadonlySet<number>) => {
+    const ink = new LineIndex(
+      [...sheet.paths, ...(sheet.materialMarks ?? [])]
+        .filter((p) => paths.has(p.id))
+        .map((p) => ({ chain: p.id, pts: p.pts })),
+    );
+    measureSourceLoop(c, ink);
+  };
   /** One rank, every seed; returns the candidates and the frame chains found around merges. */
   const rankPass = (
     r: number,
@@ -896,6 +1034,7 @@ function fillOneSheet(
     const base = buildRank(box, cell, baseItems(r, excl));
     const pts = use.map((s) => override?.get(s.id) ?? carry(s, r));
     const px = pts.map((p) => seedPixel(base.g, base.wall, base.ext, p));
+    const refusedLandings: AmbiguousLanding[] = [];
     // passes after A, built lazily once per rank
     const later: { from: RankFrom; build: () => RankCtx }[] =
       model.mode === 'single'
@@ -904,7 +1043,9 @@ function fillOneSheet(
             {
               from: 'innerPlug',
               build: () => {
-                const plugs = landingPlugs(set, model, r, lone).filter(keep);
+                const plugs = landingPlugs(set, model, r, lone, {
+                  refused: refusedLandings,
+                }).filter(keep);
                 return plugs.length ? buildRank(box, cell, [...base.items, ...plugs]) : base;
               },
             },
@@ -949,7 +1090,18 @@ function fillOneSheet(
     const bridgedCache = new Map<RankCtx, Bridge[]>();
     const bridgedOf = (c0: RankCtx) => {
       let v = bridgedCache.get(c0);
-      if (!v) bridgedCache.set(c0, (v = wallBridges(c0.items, opts.autoBridgeMm ?? 3)));
+      if (!v) {
+        const near = wallBridges(c0.items, opts.autoBridgeMm ?? 3);
+        const facing = facingBridges(c0.items).filter(
+          (b) =>
+            !near.some(
+              (n) =>
+                (dist(n.from, b.from) < 0.6 && dist(n.to, b.to) < 0.6) ||
+                (dist(n.from, b.to) < 0.6 && dist(n.to, b.from) < 0.6),
+            ),
+        );
+        bridgedCache.set(c0, (v = [...near, ...facing]));
+      }
       return v;
     };
     const out = new Map<number, PieceCandidate>();
@@ -1009,7 +1161,7 @@ function fillOneSheet(
         const others: number[] = [];
         const kOf = new Map<number, number>();
         for (let sj = 0; sj < use.length; sj++) {
-          if (sj === si || dropped.has(use[sj].id)) continue;
+          if (sj === si || dropped.has(use[sj].id) || coLabelled.has(`${si}|${sj}`)) continue;
           const kj = c === base ? px[sj].k : seedPixel(gg, c.wall, c.ext, pts[sj]).k;
           kOf.set(sj, kj);
           if (opened[kj]) others.push(sj);
@@ -1035,12 +1187,16 @@ function fillOneSheet(
       };
       const isMerged = (o: number[]) => o.some((sj) => !dropped.has(use[sj].id));
       let reg = ctx.ext[k] ? null : regionAt(ctx, k);
-      // leak or merge: close the gap the fill escapes through with short derived bridges (≤ 3 mm,
-      // dangling end → nearest wall of this rank). Only bridges crossing the escape path are
-      // added (to the sheet border for a leak, to the other seed for a merge), one round at a
-      // time — never a bridge elsewhere that would cut the piece itself.
+      // leak or merge: close the gap the fill escapes through. A dangling end meets the nearest
+      // wall within 3 mm; two ends that point at each other meet within FACING_BRIDGE_MM. One
+      // size has no sibling area to check against, so that close runs on the first fill. A graded
+      // sheet waits for bridgePass, which keeps the close only when the area still matches the
+      // other sizes. Only bridges crossing the escape path are added (to the sheet border for a
+      // leak, to the other seed for a merge), one round at a time — never a bridge elsewhere that
+      // would cut the piece itself.
       let bridges: Bridge[] = [];
-      if (bridgeFor?.has(seed.id) && (!reg || isMerged(reg.others)))
+      const closeGaps = !!bridgeFor?.has(seed.id) || (!bridgeFor && model.mode === 'single');
+      if (closeGaps && (!reg || isMerged(reg.others)))
         for (const c0 of ctx === base ? [base] : [ctx, base]) {
           const all = bridgedOf(c0);
           if (!all.length) continue;
@@ -1162,12 +1318,81 @@ function fillOneSheet(
           snapMm: opts.snapMm || PATIMPORT.snapMm,
         },
       );
+      // Where the legend and both neighbouring sizes distinguish a single complete
+      // vector loop, keep its corners if raster snapping picked a nearby wall instead.
+      if (
+        !merged &&
+        !opts.variant &&
+        !userExcl.size &&
+        !edits.include?.length &&
+        !edits.bridges?.length
+      ) {
+        // Isolated portions of another size are useful walls in an open drawing.
+        // A closed region can nevertheless take a detour over those walls even
+        // when this rank's own two printed rows already enclose the seed.
+        const native =
+          model.mode === 'graded' &&
+          rankFrom === 'class' &&
+          !sheet.missing.length &&
+          !sheet.holes?.length &&
+          triangleMarkLoop(sheet, set, run, r, seed.at, sn.walls);
+        if (
+          native &&
+          !use.some((other) => other.id !== seed.id && pointInPoly(other.at, native.pts))
+        ) {
+          const ink = new LineIndex(itemsOf(set, native.walls));
+          if (sn.outer.some((p) => !Number.isFinite(ink.nearest(p, 3 * native.pitch).d))) {
+            cand.outer = signedArea(native.pts) < 0 ? native.pts.reverse() : native.pts;
+            cand.walls = native.walls;
+            cand.bbox = bboxOf(cand.outer);
+            cand.areaMm2 = Math.abs(signedArea(cand.outer));
+            cand.outcome = cand.areaMm2 < PATIMPORT.minPieceAreaMm2 ? 'tiny' : 'closed';
+            measureSourceLoop(cand, ink);
+            diag.cand.set(key(seed.id, r), {
+              gaps: [],
+              agreement: alongShare([...raster, raster[0]], cand.outer, 2.5),
+              seedMovedMm: movedMm,
+            });
+            out.set(seed.id, cand);
+            continue;
+          }
+        }
+        const loops = (set.bracketedOutlines ?? []).filter(({ label, chain }) => {
+          const c = set.chains[chain];
+          if (label !== run.sizes[r]?.label || !c?.closed || !sn.walls.includes(chain))
+            return false;
+          return hausdorffMm(c.pts, sn.outer) <= 2.5;
+        });
+        if (loops.length === 1) {
+          const c = set.chains[loops[0].chain];
+          if (hausdorffMm(c.pts, sn.outer) > 0.2) {
+            sn.outer =
+              dist(c.pts[0], c.pts[c.pts.length - 1]) < 0.001 ? c.pts.slice(0, -1) : c.pts.slice();
+            sn.walls = [c.id];
+            sn.coverage = 1;
+            sn.p95Mm = 0;
+            sn.gaps = [];
+          }
+        }
+      }
       const outer = untail(
         signedArea(sn.outer) < 0 ? sn.outer.slice().reverse() : sn.outer,
         seed.id,
         r,
         rankFrom,
       );
+      if (rankFrom === 'innerPlug' && refusedLandings.length) {
+        const at = unsupportedLanding(outer, sn.walls, refusedLandings, r, overlayOf(), set, [
+          ...model.common,
+          ...model.byRank[r],
+        ]);
+        if (at) {
+          cand.outcome = 'leak';
+          cand.leakAt = at;
+          out.set(seed.id, cand);
+          continue;
+        }
+      }
       cand.outer = outer;
       cand.walls = sn.walls.filter((id) => id >= 0);
       // bridges the outline runs along are derived edges the operator must see
@@ -1384,6 +1609,53 @@ function fillOneSheet(
         const ex = expectedArea(sid, r);
         if (!c || c.outcome !== 'closed' || !c.derived?.length) continue;
         if (!ex || Math.abs(c.areaMm2 - ex.area) > ex.tol * ex.area) continue;
+        const cls = set.classes.find((k) => k.id === run.sizes[r]?.classId);
+        const key = cls?.evidence.find((e) => e.kind === 'declared-dash');
+        if (
+          key?.kind === 'declared-dash' &&
+          cls?.evidence.some((e) => e.kind === 'legend-sample') &&
+          !opts.variant &&
+          !userExcl.size &&
+          !edits.include?.length &&
+          !edits.bridges?.length
+        ) {
+          const pen = cls.chains
+            .map((id) => styleMap.get(set.chains[id]?.style))
+            .find((st) => st?.dash?.length === key.dash.length);
+          const seed = use.find((s) => s.id === sid)!;
+          const loop = pen && keyedDashLoop(sheet, key.dash, pen, seed.at);
+          const independent =
+            loop &&
+            !run.sizes.some(
+              (z, other) =>
+                other !== r &&
+                set.classes
+                  .find((k) => k.id === z.classId)
+                  ?.evidence.some(
+                    (e) =>
+                      e.kind === 'declared-dash' &&
+                      e.dash.length === key.dash.length &&
+                      e.dash.every((v, i) => Math.abs(v - key.dash[i]) <= 0.12 * key.dash[i]),
+                  ),
+            );
+          const witnesses =
+            loop &&
+            new Set(
+              cls.chains.flatMap((id) =>
+                set.chains[id].ranges.filter((p) => loop.paths.has(p.path)).map((p) => p.path),
+              ),
+            );
+          if (loop && independent && witnesses && witnesses.size >= 3) {
+            c.outer = signedArea(loop.pts) < 0 ? loop.pts.slice().reverse() : loop.pts;
+            c.bbox = bboxOf(c.outer);
+            c.areaMm2 = Math.abs(signedArea(c.outer));
+            c.walls = set.chains
+              .filter((ch) => ch.ranges.some((p) => loop.paths.has(p.path)))
+              .map((ch) => ch.id);
+            c.derived = [];
+            measureSourceCut(c, loop.paths);
+          }
+        }
         const list = cands.get(sid)!;
         const i = list.findIndex((x) => x.rank === r);
         if (i >= 0) list[i] = c;
@@ -1413,6 +1685,141 @@ function fillOneSheet(
     const slope = sxx ? sxy / sxx : 0;
     const near = Math.min(...ok.map((x) => Math.abs(x.rank - r)));
     return { area: my + slope * (r - mx), tol: 0.05 + 0.02 * near };
+  };
+
+  /**
+   * LADDER_RESCUE (pieces/ladder.ts). Every verdict and every trend comes from the state BEFORE
+   * this pass: a refilled cell never moves another cell's trend here (no cascade). Each withdrawn
+   * cell is filled again on its rank without its rung(s), with no derived bridges — a bridge across
+   * the withdrawn rung would be a back door to the same wrong line, so a refill that only a bridge
+   * would close counts as open. The refill is taken when it closes within the tolerance; a leak (or
+   * a close still off the trend) replaces the old cell only when that sat ≥ 2 tolerances off;
+   * otherwise the rung stays.
+   */
+  /**
+   * LADDER_JUDGE: may a withdrawn mayOpen cell open? Open when the refill differs (it found another
+   * wall), or when the nest judge calls the old outline trunc / over / both. An identical refill
+   * with the judge silent (`ok` or `unjudged`) keeps. The area fallbacks (`area-unjudged`,
+   * `judge-bracket-suspect`) never opened a cell on the 7-file run and are gone.
+   */
+  const judgeOpens = (
+    cell: NonNullable<FillDiag['ladder']>['cells'][number],
+    f: { sid: number; rank: number },
+    refill: number | null,
+    judged: Map<number, Map<number, NestVerdict>>,
+  ): boolean => {
+    const identical = refill !== null && Math.abs(refill - cell.areaMm2) <= 1e-3 * cell.areaMm2;
+    const kind = judged.get(f.sid)?.get(f.rank)?.kind ?? 'unjudged';
+    cell.judge = kind;
+    if (!identical) {
+      cell.reason = 'refill-differs';
+      return true;
+    }
+    if (kind === 'trunc' || kind === 'over' || kind === 'both') {
+      cell.reason = 'judge';
+      return true;
+    }
+    cell.reason = 'refill-identical';
+    return false;
+  };
+
+  const ladderPass = (excl: Set<ChainId>) => {
+    const rungs = ladderRungs(set, model, (r) => rescuedItems(r).map((it) => it.chain));
+    if (!rungs.size) return;
+    const lad: NonNullable<FillDiag['ladder']> = { cells: [], rejected: [] };
+    diag.ladder = lad;
+    const fire: { sid: number; rank: number; rungs: ChainId[]; at: number }[] = [];
+    for (const s of use) {
+      if (dropped.has(s.id)) continue;
+      const closed = (cands.get(s.id) ?? []).filter(
+        (c) => c.outcome === 'closed' && c.outer.length > 2,
+      );
+      const ra = closed.map((c) => ({ rank: c.rank, area: outlineArea(c.outer) }));
+      const fam = cleanSet(ra);
+      const flags = familyFlags(ra);
+      if (fam.rejected.length || fam.collapsed || flags.inversions >= 2 || flags.ratioRun >= 3)
+        lad.rejected.push({ seed: s.id, ranks: fam.rejected, collapsed: fam.collapsed, ...flags });
+      for (const c of closed) {
+        const used = rungsUsed(rungs, c.rank, c.outer);
+        if (!used.length) continue;
+        const areaMm2 = outlineArea(c.outer);
+        const v = ladderVerdict(fam, c.rank, areaMm2);
+        lad.cells.push({ ...v, seed: s.id, rank: c.rank, rungs: used, areaMm2 });
+        if (v.kind === 'withdraw')
+          fire.push({ sid: s.id, rank: c.rank, rungs: used, at: lad.cells.length - 1 });
+      }
+    }
+    const judgeOn = ladderJudgeOn();
+    // the judge reads the PRE-pass state, like the verdicts (no cascade)
+    const judged = new Map<number, Map<number, NestVerdict>>();
+    if (judgeOn)
+      for (const sid of new Set(fire.map((f) => f.sid))) {
+        const closed = (cands.get(sid) ?? []).filter(
+          (c) => c.outcome === 'closed' && c.outer.length > 2,
+        );
+        judged.set(sid, judgeNest(closed.map((c) => ({ rank: c.rank, outer: c.outer }))).verdicts);
+      }
+    for (const f of fire) {
+      const cell = lad.cells[f.at];
+      const t = cell.trend!;
+      const own = key(f.sid, f.rank);
+      // rankPass fills every seed of the rank: only this seed's result is taken, the others' diag
+      // entries are put back
+      const before = new Map(diag.cand);
+      const res = rankPass(f.rank, new Set([...excl, ...f.rungs]));
+      for (const [k, v] of before) if (k !== own) diag.cand.set(k, v);
+      const c = res.out.get(f.sid);
+      const list = cands.get(f.sid)!;
+      const i = list.findIndex((x) => x.rank === f.rank);
+      if (i < 0) continue;
+      const a = c && c.outcome === 'closed' && c.outer.length > 2 ? outlineArea(c.outer) : null;
+      if (c && a !== null) cell.refillAreaMm2 = a;
+      if (c && a !== null && Math.abs(a - t.area) <= t.tol * t.area) {
+        list[i] = c;
+        cell.result = 'refilled';
+      } else if (cell.mayOpen && judgeOn && !judgeOpens(cell, f, a, judged)) {
+        if (before.has(own)) diag.cand.set(own, before.get(own)!);
+        cell.result = 'kept';
+      } else if (cell.mayOpen) {
+        const s = use.find((x) => x.id === f.sid)!;
+        list[i] =
+          c && c.outcome === 'leak'
+            ? c
+            : {
+                seed: f.sid,
+                rank: f.rank,
+                outer: [],
+                walls: [],
+                inside: [],
+                textsInside: [],
+                outcome: 'leak',
+                areaMm2: 0,
+                bbox: { minX: 0, minY: 0, maxX: 0, maxY: 0 },
+                sourceCoverage: 0,
+                p95Mm: 0,
+                rankFrom: 'class',
+                leakAt: shift(s.at, f.rank),
+              };
+        diag.cand.delete(own);
+        cell.result = 'opened';
+      } else {
+        if (before.has(own)) diag.cand.set(own, before.get(own)!);
+        cell.result = 'kept';
+      }
+      // the published cell carries the judge's reason and nest verdict (cells.json)
+      if (cell.reason && i >= 0) {
+        const cur = list[i];
+        list[i] = { ...cur, ladderReason: cell.reason, ladderNest: cell.judge };
+      }
+    }
+    if (typeof process !== 'undefined' && process.env?.LADDER_DEBUG)
+      for (const c of lad.cells)
+        console.log(
+          `LADDER s${c.seed} r${c.rank} ${c.kind}${c.why ? ':' + c.why : ''} area=${Math.round(c.areaMm2 / 100)}` +
+            ` trend=${c.trend ? Math.round(c.trend.area / 100) : '-'} dev=${c.dev?.toFixed(3) ?? '-'}` +
+            ` mayOpen=${!!c.mayOpen} -> ${c.result ?? '-'} refill=${c.refillAreaMm2 ? Math.round(c.refillAreaMm2 / 100) : '-'}` +
+            (c.reason ? ` reason=${c.reason} judge=${c.judge}` : ''),
+        );
   };
 
   const excl = new Set<ChainId>(userExcl);
@@ -1489,6 +1896,7 @@ function fillOneSheet(
   // the semantics block the family. Graded sheets on F4's own walls only (never the H1 solver's)
   if (model.mode === 'graded' && !graded?.walls && !solved && !gradeP2Off()) {
     const live = (ids: readonly ChainId[]) => itemsOf(set, ids).filter((it) => !excl.has(it.chain));
+    const looseOn = looseWallsOn();
     diag.repair = repairPass(
       cands,
       {
@@ -1504,10 +1912,44 @@ function fillOneSheet(
         ],
         wm: model,
         texts: textCentres,
+        // lines no size owns; absent when the flag is off, so the try is the one it was
+        ...(looseOn
+          ? {
+              loose: live(
+                looseWallIds(
+                  set,
+                  new Set([
+                    ...model.byRank.flat(),
+                    ...model.common,
+                    ...rescued,
+                    ...lone.map((it) => it.chain),
+                  ]),
+                  excl,
+                ),
+              ),
+            }
+          : {}),
       },
       new Set([...dropped, ...(graded?.skip ?? [])]),
     );
   }
+  if (
+    model.mode === 'graded' &&
+    !solved &&
+    !graded?.walls &&
+    !opts.variant &&
+    !edits.include?.length &&
+    !edits.bridges?.length &&
+    !sheet.holes?.length &&
+    !set.assigned?.length
+  ) {
+    restoreSourceLoops(sheet, set, run, use, cands, excl, alongShare);
+    applyPrintedCuts(sheet, set, run, use, cands, excl, userExcl);
+  }
+  // LADDER_RESCUE: a cell closed on a rescued ladder rung and off its family's trend is filled again
+  // without the rung — after every closing pass (the state the dry run judged), before the leak
+  // mouths (an opened cell gets one). Graded sheets on F4's own walls only.
+  if (model.mode === 'graded' && !graded?.walls && !solved && ladderOn()) ladderPass(excl);
   // leak mouths: per rank, walk from the seed until it leaves the piece as another rank closed it
   // (or, with no closed rank, the thickened-wall closure)
   for (let r = 0; r < nRanks; r++) {
@@ -1595,6 +2037,30 @@ function fillOneSheet(
     for (const f of sub.families) if (cands.has(f.seed)) cands.set(f.seed, f.candidates);
     (diag.subGrade ??= []).push(sub.diag);
   }
+  if (!solved && !opts.variant && !opts.only && !edits.include?.length && !edits.bridges?.length) {
+    restoreSourceOutlineFamilies(sheet, set, run, use, cands, excl);
+    if (!sheet.holes?.length && !set.assigned?.length && !graded?.walls) {
+      if (model.mode === 'graded')
+        restoreTriangleStripContours(sheet, set, run, use, cands, userExcl, measureSourceCut);
+      if (model.mode === 'graded')
+        restorePrintedMotifPolygons(sheet, set, run, use, cands, userExcl);
+      if (model.mode === 'graded') readPrintedMarkContours(sheet, set, run, use, cands, userExcl);
+      restoreMaskedMarkLoops(sheet, set, run, use, cands, excl);
+    }
+    if (!sheet.missing.length && !sheet.holes?.length && !userExcl.size && !set.assigned?.length) {
+      restoreBracketedStamps(sheet, set, run, use, cands, excl, measureSourceCut);
+      restoreRingPanels(sheet, set, run, use, cands, excl);
+      restoreFoldPanels(sheet, set, run, use, cands, excl, measureSourceCut);
+    }
+    if (
+      model.mode === 'graded' &&
+      !graded?.walls &&
+      !sheet.holes?.length &&
+      !set.assigned?.length
+    ) {
+      readLabelledSourceFamilies(sheet, set, run, use, cands, excl);
+    }
+  }
   const families: PieceFamily[] = [];
   for (const s of use) {
     if (dropped.has(s.id)) continue;
@@ -1615,7 +2081,172 @@ function fillOneSheet(
         (diag.reversed ??= []).push(s.id);
       }
     }
+    // A recovered size can be the first measured neighbour of a closed raster detour.
+    if (
+      !solved &&
+      !opts.variant &&
+      !opts.only &&
+      !edits.include?.length &&
+      !edits.bridges?.length &&
+      !sheet.missing.length &&
+      !sheet.holes?.length &&
+      !userExcl.size &&
+      !set.assigned?.length
+    ) {
+      for (const candidate of c) {
+        if (
+          candidate.outcome !== 'leak' ||
+          !c.some((c) => c.rank < candidate.rank && c.outcome === 'closed')
+        )
+          continue;
+        const loop = registeredMarkLoop(sheet, set, run, candidate.rank, s.at, c);
+        if (
+          !loop ||
+          loop.walls.some((w) => excl.has(w)) ||
+          use.some((other) => other.id !== s.id && pointInPoly(other.at, loop.pts))
+        )
+          continue;
+        const area = signedArea(loop.pts);
+        candidate.outer = area < 0 ? loop.pts.reverse() : loop.pts;
+        candidate.areaMm2 = Math.abs(area);
+        candidate.bbox = bboxOf(candidate.outer);
+        candidate.walls = loop.walls;
+        candidate.outcome = 'closed';
+        candidate.rankFrom = 'class';
+        delete candidate.gradeRefusal;
+        delete candidate.leakAt;
+        measureSourceCut(candidate, loop.paths);
+      }
+    }
+    if (
+      model.mode === 'graded' &&
+      !sheet.missing.length &&
+      !sheet.holes?.length &&
+      !opts.variant &&
+      !userExcl.size &&
+      !edits.include?.length &&
+      !edits.bridges?.length
+    ) {
+      const anchors = c.filter((x) => x.outcome === 'closed' && !x.derived?.length);
+      for (const candidate of c) {
+        // A raster detour can leave a closed size longer than its next graded neighbour.
+        // Check it against a complete cycle of its own pen before replacing the cut.
+        const next = anchors.find((x) => x.rank === candidate.rank + 1);
+        const nextLength = next && perimeterOf(next.outer);
+        const closed =
+          nextLength !== undefined &&
+          perimeterOf(candidate.outer) > nextLength &&
+          candidate.outcome === 'closed' &&
+          candidate.rankFrom === 'class' &&
+          !candidate.derived?.length;
+        if (
+          !closed &&
+          (candidate.outcome !== 'leak' ||
+            !anchors.some((x) => x.rank < candidate.rank) ||
+            !anchors.some((x) => x.rank > candidate.rank))
+        )
+          continue;
+        const cls = set.classes.find((k) => k.id === run.sizes[candidate.rank]?.classId);
+        const key = cls?.evidence.find(
+          (e): e is Extract<typeof e, { kind: 'declared-dash' }> => e.kind === 'declared-dash',
+        );
+        const legend = cls?.evidence.find(
+          (e): e is Extract<typeof e, { kind: 'legend-sample' }> => e.kind === 'legend-sample',
+        );
+        const pen = legend && styleMap.get(set.chains[legend.chain]?.style);
+        let loop = closed
+          ? null
+          : clippedMarkLoop(sheet, set, run, candidate.rank, s.at) ??
+            ringStrokeLoop(sheet, set, run, candidate.rank, s.at);
+        if (
+          !loop &&
+          cls &&
+          key &&
+          pen &&
+          !run.sizes.some(
+            (size, index) =>
+              index !== candidate.rank &&
+              set.classes
+                .find((k) => k.id === size.classId)
+                ?.evidence.some(
+                  (e) =>
+                    e.kind === 'declared-dash' &&
+                    e.dash.length === key.dash.length &&
+                    e.dash.every((v, i) => Math.abs(v - key.dash[i]) <= 0.12 * key.dash[i]),
+                ),
+          )
+        ) {
+          const cycle = keyedDashLoop(sheet, key.dash, pen, s.at);
+          if (cycle) {
+            const walls = set.chains.filter((ch) => ch.ranges.some((p) => cycle.paths.has(p.path)));
+            const pitch = key.dash.reduce((sum, v) => sum + v, 0);
+            if (
+              walls.filter((ch) => cls.chains.includes(ch.id)).length >= 3 &&
+              (!closed ||
+                (perimeterOf(cycle.pts) < nextLength &&
+                  !selfIntersects(cycle.pts) &&
+                  hausdorffMm(candidate.outer, cycle.pts) > 3 * pitch))
+            )
+              loop = { pts: cycle.pts, walls: walls.map((ch) => ch.id) };
+          }
+        }
+        if (!loop || use.some((other) => other.id !== s.id && pointInPoly(other.at, loop.pts)))
+          continue;
+        const area = signedArea(loop.pts);
+        candidate.outer = area < 0 ? loop.pts.reverse() : loop.pts;
+        candidate.areaMm2 = Math.abs(area);
+        candidate.bbox = bboxOf(candidate.outer);
+        candidate.walls = loop.walls;
+        candidate.outcome = 'closed';
+        candidate.rankFrom = 'class';
+        candidate.derived = [];
+        delete candidate.leakAt;
+        measureSourceLoop(candidate, new LineIndex(itemsOf(set, loop.walls)));
+      }
+    }
     families.push({ seed: s.id, candidates: c, monotone: isMonotone(c) || ungraded(c) });
+  }
+  if (
+    !solved &&
+    model.mode === 'graded' &&
+    !opts.only &&
+    !opts.variant &&
+    !sheet.missing.length &&
+    !sheet.holes?.length &&
+    !userExcl.size &&
+    !set.assigned?.length &&
+    !edits.include?.length &&
+    !edits.bridges?.length
+  ) {
+    for (const seed of use) {
+      const family = families.find((f) => f.seed === seed.id);
+      if (!family) continue;
+      for (const c of family.candidates) {
+        const loop = readRepeatedMotifWalk(sheet, set, run, c, seed, use);
+        if (!loop || loop.walls.some((id) => excl.has(id))) continue;
+        const area = Math.abs(signedArea(loop.pts));
+        const smaller = family.candidates.find((x) => x.rank === c.rank - 1);
+        const larger = family.candidates.find((x) => x.rank === c.rank + 1);
+        if (
+          smaller?.outcome !== 'closed' ||
+          larger?.outcome !== 'closed' ||
+          area <= smaller.areaMm2 ||
+          area >= larger.areaMm2
+        )
+          continue;
+        c.outer = loop.pts;
+        c.bbox = bboxOf(loop.pts);
+        c.areaMm2 = area;
+        c.walls = loop.walls;
+        delete c.nest;
+        c.rankFrom = 'class';
+        measureSourceCut(c, loop.paths);
+        family.monotone = isMonotone(family.candidates);
+      }
+    }
+    recoverMaterialPanels(sheet, set, run, use, cands, measureSourceCut);
+    for (const f of families)
+      if (f.candidates.some((c) => c.materialMarkPaths)) f.monotone = isMonotone(f.candidates);
   }
   if (graded) diag.grade = graded;
   diag.ms = Date.now() - t0;
@@ -1813,6 +2444,27 @@ function perimeterOf(o: readonly PtMm[]): number {
   return L;
 }
 
+/**
+ * GRADE_P2_LOOSE: chains no size owns — not in a size row, not common, not rescued, not a lone
+ * stretch, not excluded, and not an interior role (notch, internal, grain, seam). The repair
+ * counts one only where it lies in the size's place.
+ */
+export function looseWallIds(
+  set: Pick<ChainSet, 'chains' | 'classes'>,
+  taken: ReadonlySet<ChainId>,
+  excl: ReadonlySet<ChainId>,
+): ChainId[] {
+  const roleOf = new Map<ChainId, string>();
+  for (const k of set.classes) for (const id of k.chains) roleOf.set(id, k.role);
+  const ids: ChainId[] = [];
+  for (const c of set.chains) {
+    if (c.pts.length < 2 || taken.has(c.id) || excl.has(c.id)) continue;
+    if (NOT_EDGE_ROLES.has(roleOf.get(c.id) ?? '')) continue;
+    ids.push(c.id);
+  }
+  return ids;
+}
+
 /** An ANCHOR: a rank closed on its own class lines alone — no plug, no rerank, no derived edge. */
 export const isAnchor = (c: PieceCandidate) =>
   c.outcome === 'closed' &&
@@ -1934,8 +2586,11 @@ export function continuityVerdicts(
         );
     return { refused, kept };
   }
-  const gs = pairs.map((p) => p.g);
-  const band: [number, number] = [0.5 * Math.min(...gs), 1.5 * Math.max(...gs) + 0.003];
+  const bandOver = (ps: readonly Pair[]): [number, number] => {
+    const gs = ps.map((p) => p.g);
+    return [0.5 * Math.min(...gs), 1.5 * Math.max(...gs) + 0.003];
+  };
+  const wholeBand = bandOver(pairs);
   /** the anchor pair around rank r, else the nearest */
   const localOf = (r: number) =>
     pairs.find((p) => p.lo <= r && r <= p.hi) ??
@@ -1944,6 +2599,18 @@ export function continuityVerdicts(
         Math.min(Math.abs(a.lo - r), Math.abs(a.hi - r)) -
         Math.min(Math.abs(b.lo - r), Math.abs(b.hi - r)),
     )[0];
+  /**
+   * the growth band at rank r: every pair (default), or (MOOD_LOCAL_BAND) the pair around r and the
+   * pairs with an anchor within 2 sizes of r — how the grade grows HERE, not at the far end
+   */
+  const bandAt = (r: number): [number, number] => {
+    if (!localBand()) return wholeBand;
+    const loc = localOf(r);
+    const near = pairs.filter(
+      (p) => p === loc || Math.min(Math.abs(p.lo - r), Math.abs(p.hi - r)) <= 2,
+    );
+    return bandOver(near);
+  };
   const r3 = (v: number) => Math.round(v * 1000) / 1000;
   /** how badly c fails against neighbour n (> 1 fails), why, and the measured check */
   const judge = (
@@ -1955,6 +2622,7 @@ export function continuityVerdicts(
     const ratio = hi.areaMm2 / Math.max(1, lo.areaMm2);
     const g = ratio > 0 ? Math.log(ratio) / steps : -Infinity;
     const loc = localOf(c.rank);
+    const band = bandAt(c.rank);
     const hAllow = Math.min(CONT_CAP.hMm, 1.5 * loc.h + 1) * steps + 2;
     const huAllow = Math.min(CONT_CAP.hu, 1.5 * loc.hu + 0.05) * steps + 0.1;
     const h = H(c, n);
@@ -2012,6 +2680,9 @@ export function continuityVerdicts(
     return [below, above].filter(Boolean) as PieceCandidate[];
   };
   const anchorPool = anchors.filter((x) => clean.has(x.rank));
+  const orderPool = list.filter(
+    (x) => x.outcome === 'closed' && x.rankFrom !== 'continuity' && x.outer.length >= 3,
+  );
   // 1) against the anchors; an ignore / unclassified path needs them on both sides
   for (const c of conts) {
     if (refused.has(c.rank)) continue;
@@ -2029,6 +2700,16 @@ export function continuityVerdicts(
         refused.set(c.rank, why);
         break;
       }
+    }
+    // order guard (CONT_ORDER_OFF=1 bisects): the shape checks above are blind to ORDER — a far ring of the right shape passes
+    // (pieces/continuity-order.ts). Neighbours: cells closed by anything but continuity.
+    if (!refused.has(c.rank) && contOrder()) {
+      const run = gradeOrderRun(c, orderPool);
+      if (run)
+        refused.set(
+          c.rank,
+          `${Math.round(run.mm)} mm of the outline lie outside ranks ${run.vs[0]}–${run.vs[1]} (near ${Math.round(run.at.x)}, ${Math.round(run.at.y)}): a far size's line, not this size's`,
+        );
     }
   }
   // 2) the survivors together, worst first

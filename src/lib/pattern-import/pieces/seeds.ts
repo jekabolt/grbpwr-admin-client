@@ -11,7 +11,7 @@
 // (origin 'click' / 'ai'); fillPieces treats every origin alike.
 import type { ChainSet, IRText, PagePose, PtMm, Seed, Sheet } from 'lib/pattern-import/types';
 
-import { dist } from './geom';
+import { dist, pointInPoly } from './geom';
 
 /**
  * The piece-number grammar ("7", "21", "123", "2a"), shared with the cutting-list reader
@@ -110,6 +110,146 @@ function tileLabelIds(sheet: Sheet, nums: IRText[]): Set<number> {
   return out;
 }
 
+/**
+ * A line of text cut by a tile edge, read back as one line. Each tile prints the part of the line
+ * it shows, so a label reads as two items: "B - SL" + "SLEEVE" (tiles that overlap repeat the
+ * glyphs under the overlap) or "MDF0" + "73", "CUT" + "2" (tiles that abut). Each half alone
+ * passes for something else: "IC : CUT 2" (the tail of "FABRIC : CUT 2") for a piece "IC", "73"
+ * (the tail of "MDF073") for piece 73. Seen: Opal (MDF340), Xeranthemum (MDF073).
+ * Two items join only when all of these hold:
+ *   tiles      they come from different pages,
+ *   type       one font size (within 2 %) and one rotation,
+ *   baseline   the second anchor is on the first's baseline (within 0.1 of the type height),
+ *   seam       the second starts where the first ends: the overlap in mm is the width of the
+ *              k glyphs the first ends with and the second starts with (k ≥ 1, within one glyph),
+ *              or k = 0 and the gap is at most half a type height (a space when over 0.15 of it).
+ * Joins repeat until none is left, so a line cut by two edges reads whole.
+ */
+export function joinTileSplitTexts(texts: readonly IRText[]): IRText[] {
+  if (typeof process !== 'undefined' && process.env?.TILE_TEXT_JOIN_OFF) return [...texts];
+  const live = new Map<number, IRText>(texts.map((t) => [t.id, t]));
+  const pageKey = (t: IRText) => `${t.src.file}|${t.src.page}`;
+  // a joined item spans several pages: it keeps every page it was read from
+  const pages = new Map<number, Set<string>>(texts.map((t) => [t.id, new Set([pageKey(t)])]));
+  for (let changed = true; changed; ) {
+    changed = false;
+    // one type is one rotation and one size (seamJoin allows 2 %: neighbouring buckets too)
+    const buckets = new Map<string, IRText[]>();
+    const keyOf = (rot: number, h: number) => `${rot}|${h}`;
+    for (const t of live.values()) {
+      if (t.background || !t.text.trim()) continue;
+      const k = keyOf(t.rotationDeg, Math.round(t.fontSizeMm * 10));
+      const list = buckets.get(k);
+      if (list) list.push(t);
+      else buckets.set(k, [t]);
+    }
+    for (const a0 of [...live.values()]) {
+      const a = live.get(a0.id);
+      if (!a || a.background || !a.text.trim()) continue;
+      const h10 = Math.round(a.fontSizeMm * 10);
+      const span = Math.max(1, Math.ceil(a.fontSizeMm * 0.2));
+      for (let d = -span; d <= span; d++)
+        for (const b0 of buckets.get(keyOf(a.rotationDeg, h10 + d)) ?? []) {
+          const b = live.get(b0.id);
+          if (!b || b.id === a.id) continue;
+          if ([...pages.get(b.id)!].some((p) => pages.get(a.id)!.has(p))) continue;
+          const join = seamJoin(live.get(a.id)!, b);
+          if (join == null) continue;
+          live.delete(b.id);
+          live.set(a.id, join);
+          pages.set(a.id, new Set([...pages.get(a.id)!, ...pages.get(b.id)!]));
+          changed = true;
+        }
+    }
+  }
+  return [...live.values()];
+}
+
+function seamJoin(a: IRText, b: IRText): IRText | null {
+  const h = a.fontSizeMm;
+  if (!(h > 0) || Math.abs(b.fontSizeMm - h) > 0.02 * h || a.rotationDeg !== b.rotationDeg)
+    return null;
+  const r = (a.rotationDeg * Math.PI) / 180;
+  const u = { x: Math.cos(r), y: Math.sin(r) };
+  const along = (p: PtMm) => p.x * u.x + p.y * u.y;
+  const across = (b.anchor.x - a.anchor.x) * -u.y + (b.anchor.y - a.anchor.y) * u.x;
+  if (Math.abs(across) > 0.1 * h) return null;
+  const sa = a.text.trimEnd();
+  const sb = b.text.trimStart();
+  const corners = [
+    { x: a.bbox.minX, y: a.bbox.minY },
+    { x: a.bbox.maxX, y: a.bbox.minY },
+    { x: a.bbox.minX, y: a.bbox.maxY },
+    { x: a.bbox.maxX, y: a.bbox.maxY },
+  ];
+  const aStart = along(a.anchor);
+  const aEnd = Math.max(...corners.map(along));
+  const bStart = along(b.anchor);
+  if (bStart <= aStart || !sa.length || !sb.length) return null;
+  const glyph = (aEnd - aStart) / sa.length;
+  const overlap = aEnd - bStart;
+  let k = -1;
+  let err = Infinity;
+  for (let j = 1; j <= Math.min(sa.length, sb.length); j++) {
+    if (!sa.endsWith(sb.slice(0, j))) continue;
+    const e = Math.abs(overlap - j * glyph);
+    if (e <= glyph && e < err) [k, err] = [j, e];
+  }
+  if (k < 0 && overlap <= 0.3 * glyph && -overlap <= 0.5 * h) k = 0;
+  if (k < 0) return null;
+  const text = k > 0 ? sa + sb.slice(k) : sa + (-overlap > 0.15 * h ? ' ' : '') + sb;
+  const bbox = {
+    minX: Math.min(a.bbox.minX, b.bbox.minX),
+    minY: Math.min(a.bbox.minY, b.bbox.minY),
+    maxX: Math.max(a.bbox.maxX, b.bbox.maxX),
+    maxY: Math.max(a.bbox.maxY, b.bbox.maxY),
+  };
+  return { ...a, text, bbox };
+}
+
+/**
+ * Two piece labels printed in ONE text block name one drawn outline cut as two pieces. Madison
+ * (MDF450) prints "H - SKIRT SHELL / FABRIC: Cut 2 on fold / I - SKIRT LINING / LINING: Cut 1 on
+ * fold / Reduce one inch in length for the lining" as one centred paragraph inside one outline:
+ * both pieces are that outline (owner, 23 Nov 2026: the note stays text, nothing is redrawn).
+ * One block, all required:
+ *   type     the two labels share a type size (within 2 %) and a rotation,
+ *   column   their lines are centred on one axis or start on one margin (within 0.3 type height),
+ *   lines    from one label to the other every gap between consecutive lines of the block (any
+ *            text of that rotation in that column) is at most 2 type heights.
+ * Two pieces merged by a leak keep their labels apart: each sits in its own piece, not in one
+ * paragraph. `ONE_BLOCK_OFF=1` turns the rule off.
+ */
+export function oneLabelBlock(a: IRText, b: IRText, texts: readonly IRText[]): boolean {
+  if (typeof process !== 'undefined' && process.env?.ONE_BLOCK_OFF) return false;
+  const h = Math.max(a.fontSizeMm, b.fontSizeMm);
+  if (!(h > 0) || Math.abs(a.fontSizeMm - b.fontSizeMm) > 0.02 * h) return false;
+  if (a.rotationDeg !== b.rotationDeg) return false;
+  const r = (a.rotationDeg * Math.PI) / 180;
+  const u = { x: Math.cos(r), y: Math.sin(r) };
+  const along = (p: PtMm) => p.x * u.x + p.y * u.y;
+  const across = (p: PtMm) => -p.x * u.y + p.y * u.x;
+  const mid = (t: IRText) => along(centre(t));
+  const start = (t: IRText) => along(t.anchor);
+  const centred = Math.abs(mid(a) - mid(b)) <= 0.3 * h;
+  const margin = Math.abs(start(a) - start(b)) <= 0.3 * h;
+  if (!centred && !margin) return false;
+  const inColumn = (t: IRText) =>
+    t.rotationDeg === a.rotationDeg &&
+    t.text.trim() !== '' &&
+    (centred ? Math.abs(mid(t) - mid(a)) <= 0.3 * h : Math.abs(start(t) - start(a)) <= 0.3 * h);
+  const lo = Math.min(across(a.anchor), across(b.anchor));
+  const hi = Math.max(across(a.anchor), across(b.anchor));
+  const lines = texts
+    .filter((t) => inColumn(t))
+    .map((t) => across(t.anchor))
+    .filter((y) => y >= lo - 1e-6 && y <= hi + 1e-6)
+    .sort((p, q) => p - q);
+  if (lines.length < 2) return false;
+  for (let i = 1; i < lines.length; i++) if (lines[i] - lines[i - 1] > 2 * h) return false;
+  return true;
+}
+
 /** Single digits printed as separate items ("7" + "1" = "71"): join neighbours of one size. */
 function joinDigits(texts: IRText[]): { joined: IRText[]; parts: Set<number> } {
   const digits = texts.filter((t) => /^\d$/.test(t.text.trim()));
@@ -143,9 +283,47 @@ function joinDigits(texts: IRText[]): { joined: IRText[]; parts: Set<number> } {
   return { joined: out, parts: used };
 }
 
+/** A size, or a range of two sizes ("2XL", "L - 2XL", "S–M"), of the run. */
+function isSizeOrRange(s: string, sizes: ReadonlySet<string>): boolean {
+  const v = s.trim().replace(/\.$/, '').toUpperCase();
+  if (sizes.has(v)) return true;
+  const r = v.match(/^(\S+)\s*[-–—]\s*(\S+)$/);
+  return !!r && sizes.has(r[1]) && sizes.has(r[2]);
+}
+
+/** A small facing title can sit with its two material instructions inside the same cut. */
+function isLabelledFacing(sheet: Sheet, title: IRText): boolean {
+  if (title.background || !/\bfacing\b/i.test(title.text)) return false;
+  const at = centre(title);
+  const nearby = sheet.texts.filter(
+    (t) =>
+      !t.background &&
+      t.src.file === title.src.file &&
+      t.src.page === title.src.page &&
+      t.rotationDeg === title.rotationDeg &&
+      dist(centre(t), at) <= 4 * title.fontSizeMm,
+  );
+  const fabric = nearby.find((t) => /^fabric\s*:\s*cut\s+[1-9]\d*$/i.test(t.text.trim()));
+  const fusing = nearby.find((t) => /^fusing\s*:\s*cut\s+[1-9]\d*$/i.test(t.text.trim()));
+  if (!fabric || !fusing) return false;
+  const points = [at, centre(fabric), centre(fusing)];
+  return sheet.paths.some(
+    (p) =>
+      p.src.file === title.src.file &&
+      !p.background &&
+      p.closed &&
+      points.every((q) => pointInPoly(q, p.pts)),
+  );
+}
+
 export function textSeeds(sheet: Sheet, sizeLabels: ReadonlySet<string> = new Set()): TextSeed[] {
-  const texts = sheet.texts.filter((t) => t.text.trim());
+  const texts = joinTileSplitTexts(sheet.texts).filter((t) => t.text.trim());
   const explicit: TextSeed[] = [];
+  // "L - 2XL" / "XL: 2XL" is a size range, not letter L of a piece named "2XL"
+  const sizesUp =
+    typeof process !== 'undefined' && !!process.env?.SEED_SIZE_RANGE_OFF
+      ? new Set<string>()
+      : new Set([...sizeLabels].map((x) => x.trim().replace(/\.$/, '').toUpperCase()));
   for (const t of texts) {
     const s = t.text.trim();
     for (const re of EXPLICIT) {
@@ -160,14 +338,11 @@ export function textSeeds(sheet: Sheet, sizeLabels: ReadonlySet<string> = new Se
         });
     }
     const m = s.match(LETTER_NAME);
-    if (m && t.fontSizeMm >= 4)
-      explicit.push({
-        label: m[1],
-        name: s.slice(m[0].indexOf(m[1]) + m[1].length).replace(/^\s*[-–—:]\s*/, ''),
-        at: centre(t),
-        text: t,
-        size: t.fontSizeMm,
-      });
+    if (m && (t.fontSizeMm >= 4 || isLabelledFacing(sheet, t))) {
+      const name = s.slice(m[0].indexOf(m[1]) + m[1].length).replace(/^\s*[-–—:]\s*/, '');
+      if (sizesUp.has(m[1].toUpperCase()) && isSizeOrRange(name, sizesUp)) continue;
+      explicit.push({ label: m[1], name, at: centre(t), text: t, size: t.fontSizeMm });
+    }
   }
   if (explicit.length) return dedupe(explicit);
   const jd = joinDigits(texts);

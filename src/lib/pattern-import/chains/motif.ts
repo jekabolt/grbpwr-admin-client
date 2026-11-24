@@ -36,6 +36,12 @@ export type Signature = {
   /** R7: the order of elements in one period, rotation-canonical (= dash · t tick · d dot · o ring,
    * upper case = the larger of two bead sizes): «dtdtt» vs «DDttd»; null = no clear period. */
   period: string | null;
+  /**
+   * MOTIF_DIR_FREE: the same chain's signature walked end → start. The gap reading is asymmetric
+   * (a bead's pitch is measured to its centre from the previous item's end), so one pen walked in
+   * opposite directions gives different rhythm vectors (Taos 18 «▬● ▮»). Only legend-id reads it.
+   */
+  rev?: Signature;
 };
 
 const BEAD_BIN = 0.1;

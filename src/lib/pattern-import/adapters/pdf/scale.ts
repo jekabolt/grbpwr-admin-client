@@ -473,8 +473,19 @@ export const applyScale: ApplyScaleFn = (doc, decision) => {
         widthMm: s.widthMm * f,
         dash: s.dash ? s.dash.map((d) => d * f) : null,
         clip: scaleClip(s.clip, f),
+        ...(s.clipQuad ? { clipQuad: s.clipQuad.map((p) => ({ x: p.x * f, y: p.y * f })) } : {}),
+        ...(s.clipPolygon
+          ? { clipPolygon: s.clipPolygon.map((p) => ({ x: p.x * f, y: p.y * f })) }
+          : {}),
+        ...(s.localClipPolygon
+          ? { localClipPolygon: s.localClipPolygon.map((p) => ({ x: p.x * f, y: p.y * f })) }
+          : {}),
       })),
-      paths: p.paths.map((q) => ({ ...q, pts: q.pts.map((pt) => ({ x: pt.x * f, y: pt.y * f })) })),
+      paths: p.paths.map((q) => ({
+        ...q,
+        ...(q.visibleFill ? { visibleFill: q.visibleFill.map((p) => ({ x: p.x * f, y: p.y * f })) } : {}),
+        pts: q.pts.map((pt) => ({ x: pt.x * f, y: pt.y * f })),
+      })),
       texts: p.texts.map((t) => ({
         ...t,
         anchor: { x: t.anchor.x * f, y: t.anchor.y * f },
