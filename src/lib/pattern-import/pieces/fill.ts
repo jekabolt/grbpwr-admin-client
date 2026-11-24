@@ -108,6 +108,7 @@ import { recoverMaterialPanels } from './material-panels';
 import { restoreFoldPanels } from './fold-panel';
 import { restoreRingPanels } from './ring-panel';
 import { applyPrintedCuts } from './apply-printed-cuts';
+import { applyOneOutline } from './one-outline';
 import { looseWallsOn } from './gfit/repair';
 import { gradeP2Off, repairPass, type RepairDiag } from './gfit/repair-hook';
 import {
@@ -1945,6 +1946,8 @@ function fillOneSheet(
   ) {
     restoreSourceLoops(sheet, set, run, use, cands, excl, alongShare);
     applyPrintedCuts(sheet, set, run, use, cands, excl, userExcl);
+    // a piece drawn once for every size: no size closed, one size-less outline goes round its label
+    applyOneOutline(sheet, set, use, cands, excl);
   }
   // LADDER_RESCUE: a cell closed on a rescued ladder rung and off its family's trend is filled again
   // without the rung — after every closing pass (the state the dry run judged), before the leak

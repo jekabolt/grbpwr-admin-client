@@ -12,6 +12,7 @@ import type {
   ChainAmbiguity,
   ChromeLine,
   CleanPreview,
+  ChainOpts,
   ChainSet,
   DraftRul,
   GradeAsk,
@@ -108,7 +109,16 @@ import type { PlannedBlock } from '../write/plan';
 import { expandRul, looksLikeRul, packRul, parseRul, zipRulPair } from '../adapters/rul';
 import { equalizeForRul } from '../adapters/rul/correspond';
 import { rulSizesMismatch } from '../adapters/rul/settle';
-import { applyLegend, buildChainsDetailed, confirmRows, mergeSameSize, splitRows } from '../chains';
+import {
+  applyLegend,
+  buildChainsDetailed,
+  confirmRows,
+  mergeSameSize,
+  shownOnlyRows,
+  splitRows,
+  type BuildExtras,
+  type ShownRow,
+} from '../chains';
 import { layerLoopAsides } from '../chains/layer-role';
 import { gradeView, sourceClash } from '../chains/face-role';
 import { withClassSigs } from '../chains/legend';
@@ -148,7 +158,7 @@ import {
 import { pointInPoly } from '../pieces/geom';
 import { asidesOf, blobOf, faceMap, faceSeedsOf, type FaceMap } from '../pieces/faces';
 import { dartLegsDrawn, provenDarts } from '../pieces/darts';
-import { codeTextSeeds } from '../pieces/seeds';
+import { byMeasureSeeds, codeTextSeeds } from '../pieces/seeds';
 import { recoverAutomaticGaps } from '../pieces/automatic-gap';
 import { finalizePieces } from '../pieces/finalize';
 import { sheetModule, undrawnRanks } from '../pieces/walls';
@@ -384,6 +394,8 @@ export class Session {
   // chains (legend applied) → sizes → pieces → semantics
   /** The legend's chain set (operator legend applied, same-label size rows merged). */
   private chains: ChainSet | null = null;
+  /** The last one-sheet read of the lines step, for the rows that are only shown (chainsStage). */
+  private shownRead: { one: Sheet; used: ChainOpts; extras: BuildExtras } | null = null;
   /** The set the fill ran on (the operator's wall edits live in `pieceSession.walls`, not here). */
   private wallSet: ChainSet | null = null;
   /**
@@ -403,6 +415,8 @@ export class Session {
   private textSeeds: Seed[] | null = null;
   /** NAP: the text seeds that read as fragments of a printed code (seeds.ts codeTextSeeds). */
   private codeHeld: { seeds: Seed[]; v: Map<SeedId, string> } | null = null;
+  /** The labels of pieces cut by measurements, not drawn (seeds.ts byMeasureSeeds). */
+  private measureHeld: { seeds: Seed[]; v: Map<SeedId, string> } | null = null;
   /** A2: the sheet's closed faces for this chain set and size run (face seeds, click placement). */
   private faces: FacesEntry | null = null;
   /**
@@ -1183,6 +1197,7 @@ export class Session {
           .filter((p) => this.sheetOffered.has(p.id) || this.offeredSrc.has(srcKey(p.src)))
           .map((p) => p.id),
       );
+      let lastRead: { one: Sheet; used: ChainOpts; extras: BuildExtras } | null = null;
       const build = (one: Sheet, sub: Progress) => {
         // gb2: the face pass's size count reads only what feeds this sheet (A6 sheetFeed)
         const feed = sheetFeed(one, this.files, this.docTextSrc, this.pages);
@@ -1194,21 +1209,19 @@ export class Session {
           // graded look against it is asked, never held silently
           sourceOne: this.files.length === 1 ? fileSizeLabel(this.files[0].name) : null,
         };
-        return buildChainsDetailed(
-          one,
-          { ...input.opts },
-          {
-            extraTexts: this.docTexts,
-            fileNames: this.fileNames,
-            offeredPaths,
-            countFeed,
-            aamaLayers: this.aamaLayers,
-          },
-          (d, t, n) => {
-            ctx.checkCancel();
-            sub(d, t, n);
-          },
-        ).set;
+        const extras: BuildExtras = {
+          extraTexts: this.docTexts,
+          fileNames: this.fileNames,
+          offeredPaths,
+          countFeed,
+          aamaLayers: this.aamaLayers,
+        };
+        const built = buildChainsDetailed(one, { ...input.opts }, extras, (d, t, n) => {
+          ctx.checkCancel();
+          sub(d, t, n);
+        });
+        lastRead = { one, used: built.used, extras };
+        return built.set;
       };
       // D6: every tile sheet's lines are read on that sheet alone (its pens, its legend, its size
       // labels — what it was alone), then joined: the same size label is one size row
@@ -1225,6 +1238,9 @@ export class Session {
               sheet.styles,
             )
           : build(sheet, (d, t, n) => ctx.progress(d, t, n));
+      // rows of marks the read drops as decoration, kept only to be SHOWN on the sizes step (one
+      // sheet: on a set of tile sheets the rows would need joining first)
+      this.shownRead = !(parts && parts.length > 1) && lastRead ? lastRead : null;
       // The operator's legend: role / size label per class; two size rows given one label are one
       // size (a size drawn in two looks).
       set = withClassSigs(set, sheet.styles);
@@ -1260,11 +1276,33 @@ export class Session {
       }
     }
     this.chains = set;
+    // SHOWN ONLY: `this.chains` is what every later stage reads and it is not touched. The rows go
+    // out to the screen as extra lines of their size row, with chain ids past the end of the set.
+    const shown: ShownRow[] =
+      this.fast || !this.shownRead
+        ? []
+        : shownOnlyRows(this.shownRead.one, this.shownRead.used, this.shownRead.extras, set);
+    const extraOf = new Map<number, number[]>();
+    shown.forEach((r, k) => {
+      const ids = extraOf.get(r.classId) ?? [];
+      ids.push(set.chains.length + k);
+      extraOf.set(r.classId, ids);
+    });
     return {
-      classes: set.classes,
+      classes: shown.length
+        ? set.classes.map((c) =>
+            extraOf.has(c.id) ? { ...c, chains: [...c.chains, ...extraOf.get(c.id)!] } : c,
+          )
+        : set.classes,
       bundles: set.bundles,
       orphans: set.orphans,
-      chainPreview: chainPreviewOf(set.chains, this.extentOf(sheet)),
+      chainPreview: chainPreviewOf(
+        shown.length
+          ? [...set.chains, ...shown.map((r) => ({ pts: r.pts, closed: false }))]
+          : set.chains,
+        this.extentOf(sheet),
+      ),
+      ...(shown.length ? { shownOnly: shown.length } : {}),
       warnings: set.warnings,
       ambiguities: set.ambiguities ?? [],
       ...(this.fast ? {} : legendSwatches(sheet, set)),
@@ -1400,8 +1438,13 @@ export class Session {
     const text = (this.textSeeds ??= proposeSeeds(sheet, set));
     if (this.codeHeld?.seeds !== text)
       this.codeHeld = { seeds: text, v: codeTextSeeds(sheet, text) };
+    if (this.measureHeld?.seeds !== text)
+      this.measureHeld = { seeds: text, v: byMeasureSeeds(sheet, text) };
     const code = this.codeHeld.v;
-    return code.size ? text.filter((t) => !code.has(t.id)) : text;
+    const measure = this.measureHeld.v;
+    return code.size || measure.size
+      ? text.filter((t) => !code.has(t.id) && !measure.has(t.id))
+      : text;
   }
 
   /**
@@ -1432,6 +1475,21 @@ export class Session {
         box: t.text.bbox,
         areaMm2: 0,
         reason: 'code-text',
+        seed: t,
+        why,
+      });
+    }
+    // a piece the sheet gives as dimensions has no outline to find: its label is held back too
+    for (const t of text) {
+      const why = this.measureHeld?.v.get(t.id);
+      if (why == null || !t.text || held.has(t.id)) continue;
+      held.add(t.id);
+      a0.push({
+        id: -1 - t.id,
+        at: t.at,
+        box: t.text.bbox,
+        areaMm2: 0,
+        reason: 'by-measure',
         seed: t,
         why,
       });

@@ -453,6 +453,60 @@ export const proposeSeedsFrom = (sheet: Sheet, set?: ChainSet): Seed[] => {
  * id; the session holds such a seed back as a set-aside (D3: listed, one click from a piece), and
  * the outline it sits in, if any, is seeded as an outline of its own.
  */
+/** What the sheet prints beside the label of a piece that is cut by measurements, not by an outline. */
+const BY_MEASURE =
+  /cut (a |an |\d+ )?(rectangles?|strips?|squares?|circles?)\b|\bfoll?owing dimensions\b|\bmeasurement\s*[x×]|\byour (waist|hips?|bust|chest)\b|\bcircumference\s*[x×]/i;
+
+/** The lines of text that belong to a label: this far along its line of type and across it, mm. */
+const BY_MEASURE_BOX = { alongMm: 130, acrossMm: 30 };
+
+/**
+ * A label of a piece the sheet does not draw: the text beside it gives it as dimensions ("Cut a
+ * rectangle of fabric with the following dimensions", "Your waist circumference x 2"), one side a
+ * number and the other a measurement of the wearer or of another piece. Selenite MDF515 lists four
+ * such pieces (petticoat skirt, waistband, two ruffles) beside a small cutting diagram; each label
+ * seeded a piece, and every size of each stayed open — 36 cells with no outline to close.
+ *
+ * Read on the label's own page, in its type direction: the lines of text within 30 mm above or
+ * below it and 130 mm along it (the block of instructions set beside the label). The result is the quoted line per seed id; the session holds such a seed back
+ * as a set-aside, as it does a fragment of a printed code.
+ */
+export function byMeasureSeeds(
+  sheet: Pick<Sheet, 'texts'>,
+  seeds: readonly Seed[],
+): Map<number, string> {
+  const out = new Map<number, string>();
+  for (const s of seeds) {
+    const t = s.text;
+    if (s.origin !== 'text' || !t) continue;
+    // along the label's line of type and across it
+    const r = (t.rotationDeg * Math.PI) / 180;
+    const u = { x: Math.cos(r), y: Math.sin(r) };
+    const at = centre(t);
+    const near = sheet.texts
+      .filter(
+        (o) =>
+          o !== t &&
+          o.id !== t.id &&
+          !o.background &&
+          o.src.file === t.src.file &&
+          o.src.page === t.src.page &&
+          Math.abs(o.rotationDeg - t.rotationDeg) <= 2 &&
+          BY_MEASURE.test(o.text),
+      )
+      .map((o) => {
+        const c = centre(o);
+        const dx = c.x - at.x;
+        const dy = c.y - at.y;
+        return { o, along: Math.abs(dx * u.x + dy * u.y), across: Math.abs(dx * u.y - dy * u.x) };
+      })
+      .filter((x) => x.along <= BY_MEASURE_BOX.alongMm && x.across <= BY_MEASURE_BOX.acrossMm)
+      .sort((x, y) => x.across - y.across);
+    if (near.length) out.set(s.id, near[0].o.text.trim());
+  }
+  return out;
+}
+
 /** Probe switches (mutation): drop an evidence, count a number's own digits, any run length. */
 export type CodeTextSwitch = 'type' | 'string' | 'parts' | 'long';
 export function codeTextSeeds(

@@ -22,6 +22,8 @@ export type WChain = {
   items: Link[];
   decor: Item[];
   dead: boolean;
+  /** A row of marks kept by `ChainOpts.keepRows` that the plain read takes for decoration. */
+  kept?: true;
 };
 
 /** Pass 2b: regular trains of separate dashes (see there). */
@@ -762,7 +764,7 @@ export function linkItems(sheet: Sheet, opts: ChainOpts): LinkResult {
   const seq = opRows(strokes.length ? pool.filter((it) => !chainOfMark.has(it)) : pool, styles);
   const beadRows = chainBeads(seq.rest, seq.runOf);
   const bands = strokes.length ? chainBand(strokes, styles) : [];
-  const rows = [...seq.rows, ...beadRows, ...bands].filter((row) => {
+  const isDecorRow = (row: WChain): boolean => {
     // a row that hugs other lines all along is their decoration (viola's «//////» on size 38)
     let near = 0;
     for (const l of row.items) {
@@ -773,8 +775,16 @@ export function linkItems(sheet: Sheet, opts: ChainOpts): LinkResult {
     const marks = row.items.filter((l) => chainOfMark.has(l.it) && !isTiny(chainOfMark.get(l.it)!));
     // a row of short strokes only is a dashed line the tracker did not join, not marks
     if (marks.length === row.items.length && !(opts.dashTrains && row.items.length >= TRAIN.rowMin))
-      return false;
-    return near < 0.7 * row.items.length;
+      return true;
+    return near >= 0.7 * row.items.length;
+  };
+  const rows = [...seq.rows, ...beadRows, ...bands].filter((row) => {
+    const plain = isDecorRow(row);
+    if (plain && opts.keepRows && evenRow(row)) {
+      row.kept = true;
+      return true;
+    }
+    return !plain;
   });
   const used = new Set<Item>();
   for (const row of rows) {
@@ -1173,6 +1183,16 @@ function chainBeads(beads: Item[], runOf?: Map<Item, RunPos>): WChain[] {
       out.push({ items: path.map((k) => ({ it: beads[k], rev: false })), decor: [], dead: false });
   }
   return out;
+}
+
+/** A long even row: ≥ 20 marks over ≥ 40 mm, four steps in five within 20 % of the usual step. */
+function evenRow(row: WChain): boolean {
+  const c = row.items.map((l) => l.it.c).filter((p): p is PtMm => !!p);
+  if (c.length < 20 || c.length < row.items.length) return false;
+  const d = c.slice(1).map((p, i) => dist(p, c[i]));
+  if (d.reduce((a, x) => a + x, 0) < 40) return false;
+  const m = [...d].sort((a, b) => a - b)[d.length >> 1];
+  return d.filter((x) => Math.abs(x - m) <= 0.2 * m).length >= 0.8 * d.length;
 }
 
 /** May two marks be proximity-linked, given the drawn runs they sit in (see chainBeads)? */

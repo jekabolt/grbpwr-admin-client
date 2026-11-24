@@ -78,7 +78,15 @@ export function readSnapshot(buf: Buffer): PiecesSnapshot {
  * Caches the chains step leaves on the session that the pieces step derives again — dropped so a
  * change to seeds or faces takes effect (the recorded size run, map and expected sizes stay).
  */
-const DERIVED = ['textSeeds', 'codeHeld', 'sizeFaces', 'faces', 'pieceSession', 'pieceKey'];
+const DERIVED = [
+  'textSeeds',
+  'codeHeld',
+  'measureHeld',
+  'sizeFaces',
+  'faces',
+  'pieceSession',
+  'pieceKey',
+];
 
 export async function replaySnapshot(s: PiecesSnapshot): Promise<StageIO['pieces']['out']> {
   const session = Object.create(Session.prototype) as Session;
