@@ -20951,6 +20951,16 @@ export type StartStripeConnectResponse = {
   shop: Shop | undefined;
 };
 
+export type FinishStripeConnectRequest = {
+  // token is the #token=… fragment of the address Stripe's callback sent the owner back to
+  // (?stripe=finish); single use, valid for 5 minutes.
+  token: string | undefined;
+};
+
+export type FinishStripeConnectResponse = {
+  shop: Shop | undefined;
+};
+
 export type SetStripeKeysRequest = {
   // publishable_key: pk_live_… or pk_test_….
   publishableKey: string | undefined;
@@ -23340,6 +23350,9 @@ export interface AdminService {
   SetShopMail(request: SetShopMailRequest): Promise<SetShopMailResponse>;
   // StartStripeConnect answers the Stripe onboarding link for Stripe Connect (lane X18-L3).
   StartStripeConnect(request: StartStripeConnectRequest): Promise<StartStripeConnectResponse>;
+  // FinishStripeConnect connects the Stripe account with the token Stripe's callback sent the
+  // owner back with; only the user who started the connect may finish it (lane X18-L3).
+  FinishStripeConnect(request: FinishStripeConnectRequest): Promise<FinishStripeConnectResponse>;
   // SetStripeKeys stores the team's own Stripe keys, sealed at rest (lane X18-L3).
   SetStripeKeys(request: SetStripeKeysRequest): Promise<SetStripeKeysResponse>;
   // DisconnectStripe stops payments through the team's Stripe account or keys (lane X18-L3).
@@ -33123,6 +33136,23 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "StartStripeConnect",
       }) as Promise<StartStripeConnectResponse>;
+    },
+    FinishStripeConnect(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/team/shop/stripe/finish`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "FinishStripeConnect",
+      }) as Promise<FinishStripeConnectResponse>;
     },
     SetStripeKeys(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/team/shop/stripe/keys`; // eslint-disable-line quotes

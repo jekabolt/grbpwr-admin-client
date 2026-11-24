@@ -14,7 +14,15 @@ const onOff = (v: boolean | undefined) => (
 const EMPTY_KEYS = { publishableKey: '', secretKey: '', webhookSecret: '' };
 
 /** The team's own Stripe keys: three boxes and save (method «keys»). */
-function KeysForm({ onDone, onNotReady }: { onDone: () => void; onNotReady: () => void }) {
+function KeysForm({
+  webhookUrl,
+  onDone,
+  onNotReady,
+}: {
+  webhookUrl?: string;
+  onDone: () => void;
+  onNotReady: () => void;
+}) {
   const [v, setV] = useState(EMPTY_KEYS);
   const [refused, setRefused] = useState('');
   const save = useShopWrite(shopApi.keys, { quiet: true });
@@ -65,6 +73,11 @@ function KeysForm({ onDone, onNotReady }: { onDone: () => void; onNotReady: () =
     <form onSubmit={submit} className='flex flex-col'>
       {box('publishableKey', 'publishable key', 'pk_live_…')}
       {box('secretKey', 'secret key', 'sk_live_…')}
+      {webhookUrl && (
+        <Line k='webhook' actions={<Copy v={webhookUrl} />}>
+          <span className='min-w-0 break-all'>{webhookUrl}</span>
+        </Line>
+      )}
       {box('webhookSecret', 'webhook secret', 'whsec_…')}
       <div className='flex items-center justify-end gap-3 pt-1.5'>
         {refused && (
@@ -157,6 +170,7 @@ export function ShopPayment({ shop, editor }: { shop: Shop; editor: boolean }) {
         )}
         {state === 'none' && keysOpen && (
           <KeysForm
+            webhookUrl={p?.webhookUrl}
             onDone={() => setKeysOpen(false)}
             onNotReady={() => {
               setNotReady(true);

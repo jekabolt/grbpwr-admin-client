@@ -112,7 +112,7 @@ function start(): Shop {
             detailsSubmitted: false,
             mode: undefined,
             keyLast4: undefined,
-            webhookUrl: undefined,
+            webhookUrl: 'https://backend-beta.lekalo.studio/api/webhooks/stripe/team/stub',
           },
     mail: { fromName: '', fromAddress: 'noreply@shop.beta.lekalo.studio', replyTo: '' },
     closedByOperator: false,
@@ -176,6 +176,22 @@ function answer(method: string, body: string | null): unknown {
     case 'StartStripeConnect':
       stripeGate();
       return { url: 'https://connect.stripe.com/setup/s/stub', shop: s };
+    case 'FinishStripeConnect':
+      stripeGate();
+      if (!req.token) refuse(400, 'stripe_connect_expired');
+      s.payments = {
+        method: 'connect',
+        status: 'active',
+        accountName: 'golden a studio ou',
+        chargesEnabled: true,
+        payoutsEnabled: true,
+        detailsSubmitted: true,
+        mode: 'test',
+        keyLast4: undefined,
+        webhookUrl: undefined,
+      };
+      s.status = 'open';
+      return { shop: s };
     case 'SetStripeKeys':
       stripeGate();
       s.payments = {

@@ -6,7 +6,7 @@ import { ShopMailer } from './mail-block';
 import { primaryChoices, shopMark } from './model';
 import { Copy, HostWord, Line, StatusMark, OpenLink } from './parts';
 import { ShopPayment } from './payments-block';
-import { shopApi, useShop, useShopWrite } from './use-shop';
+import { shopApi, useShop, useShopWrite, useStripeReturn } from './use-shop';
 
 // `/shop` on a team host (lane X18-L4, mockup x18-shop-mockup.html, states off · on · domain
 // added · live): the team's storefront — on/off and address, own domain, payments, mail. Writes
@@ -83,6 +83,7 @@ function ShopMain({ shop, editor }: { shop: Shop; editor: boolean }) {
 export default function ShopPage() {
   const { role, readOnly, workspace } = useWorkspace();
   const editor = role === 'owner' && !readOnly;
+  useStripeReturn();
   const q = useShop();
   const shop = q.data;
   const on = !!shop?.enabled;

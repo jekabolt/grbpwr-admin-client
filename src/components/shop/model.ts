@@ -99,6 +99,16 @@ const KEYS = [
   'bad_publishable_key',
   'bad_secret_key',
   'bad_webhook_secret',
+  'bad_return_path',
+  'team_not_active',
+  'stripe_unavailable',
+  'stripe_account_taken',
+  'stripe_connected',
+  'stripe_keys_set',
+  'stripe_connect_expired',
+  'stripe_connect_not_yours',
+  'stripe_wrong_mode',
+  'shop_payments_busy',
 ] as const;
 
 export type RefusalKey = (typeof KEYS)[number];
@@ -125,6 +135,16 @@ const WORDS: Record<RefusalKey, string> = {
   bad_publishable_key: 'bad key',
   bad_secret_key: 'bad key',
   bad_webhook_secret: 'bad key',
+  bad_return_path: 'not available',
+  team_not_active: 'team paused',
+  stripe_unavailable: 'stripe down',
+  stripe_account_taken: 'account taken',
+  stripe_connected: 'already connected',
+  stripe_keys_set: 'keys already set',
+  stripe_connect_expired: 'connect again',
+  stripe_connect_not_yours: 'not yours',
+  stripe_wrong_mode: 'wrong mode',
+  shop_payments_busy: 'orders pending',
 };
 
 /** A failed write as the screen says it; `fallback` when the server named nothing known. */
@@ -141,6 +161,21 @@ export function stripeNotReady(e: unknown): boolean {
   if (refusalKey(e) === 'stripe_not_ready') return true;
   const status = (e as { status?: number } | null)?.status;
   return status === 501;
+}
+
+/** `?stripe=finish#token=…` on return from Stripe Connect: the token, or null for any other address. */
+export function stripeFinishToken(search: string, hash: string): string | null {
+  if (new URLSearchParams(search).get('stripe') !== 'finish') return null;
+  const t = new URLSearchParams(hash.replace(/^#/, '')).get('token');
+  return t || null;
+}
+
+/** The address without `?stripe=…` and the fragment (other query params kept). */
+export function withoutStripeReturn(pathname: string, search: string): string {
+  const q = new URLSearchParams(search);
+  q.delete('stripe');
+  const rest = q.toString();
+  return rest ? `${pathname}?${rest}` : pathname;
 }
 
 /** A bare host as typed: scheme, path and spaces dropped, lowercase. */
