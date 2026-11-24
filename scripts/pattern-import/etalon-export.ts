@@ -63,7 +63,7 @@ for (const [root, id, want, group, pid] of picks) {
   byFile.set(k, [...(byFile.get(k) ?? []), { want, group, pid }]);
 }
 
-const pieces: { id: string }[] = [];
+const pieces: ({ id: string } & Record<string, unknown>)[] = [];
 for (const [dir, wants] of byFile) {
   const snap = readdirSync(dir)
     .filter((f) => /^pieces-\d+\.snap\.gz$/.test(f))
