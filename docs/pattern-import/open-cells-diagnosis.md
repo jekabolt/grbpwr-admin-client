@@ -158,6 +158,30 @@ One file closes whole (Spokane, one open cell). Four more are left with two or t
 about one walked outline in five is more than 1 mm off somewhere. `walk-open-kalla.png` shows nine
 of them.
 
+### Pieces with no closed size
+
+175 open cells sit in 13 pieces of 8 files where the fill closes no size at all, so there is no
+neighbour to lean on. `walk-carry.mjs lone` walks every size round the piece label (the label
+position comes from the bench output), draws nothing, and among the walks that go round the label
+takes the one with the largest share of own line.
+
+Checked first on the 82 verified sizes, without any neighbour: 49 within 1 mm, 9 within 1–3 mm,
+4 over 3 mm, 20 not closed. Taking the smallest enclosing walk instead gave 24 within 1 mm: it
+picks an inner line.
+
+| File (snapshots without `ROW_KEEP`) | Pieces | Cells | Closed | Area grows with the size |
+| --- | ---: | ---: | ---: | ---: |
+| Kalla MDF346 | 1 | 18 | 12 | 12 |
+| Memoir B MDF364 | 2 | 36 | 9 | 9 |
+| Georgina MDF354 | 1 | 18 | 8 | 8 |
+| Sedona MDF549 | 1 | 9 | 2 | 0 |
+| Venice, Selenite, Lita, Clark | 8 | 94 | 0 | — |
+| All | 13 | 175 | 31 | 29 |
+
+On the Kalla snapshot taken with `ROW_KEEP` the back yoke closes 16 of 18 sizes, all in order of
+area (`walk-kalla-back-yoke.png`); one of them carries a rectangular mark of the left edge in its
+outline.
+
 ### Completion from a neighbour size (hold-out)
 
 `complete-holdout.mjs`: on 544 ok sizes of 47 pieces a stretch of 30, 60 or 90 mm is hidden at

@@ -9,9 +9,12 @@ import { deserialize } from 'node:v8';
 import { gunzipSync } from 'node:zlib';
 import { Grid } from './grid.mjs';
 const [mode, ...rest] = process.argv.slice(2);
-const dir = mode === 'ref' ? rest[1] : rest[0];
+const dir = mode === 'ref' || mode === 'reflone' ? rest[1] : rest[0];
 const M = 6, JOIN = 120, K = 4, TIGHT = 3;
 const CORNERS = !process.env.NO_CORNERS;
+const REACH = 450;
+// without a neighbour: among the walks round the label take the one with the largest share of own line
+const LONE_PICK = process.env.LONE_PICK ?? 'own';
 const s = deserialize(gunzipSync(readFileSync(dir + '/' + readdirSync(dir).filter((x) => x.endsWith('.snap.gz')).sort().pop())));
 const f = s.fields;
 const rankOfClass = new Map(f.run.sizes.map((z) => [z.classId, z.rank]));
@@ -38,9 +41,10 @@ const sharedEdges = (bb, key) => { if (sharedCache.has(key)) return sharedCache.
   for (const [, list] of chainsOf) for (const ch of list) { let cur = []; const flush = () => { if (cur.length >= 2 && lenOf(cur) >= 10) { out.push(cur); for (let k = 1; k < cur.length; k++) taken.add(cur[k - 1], cur[k], 0); } cur = []; };
     for (let k = 1; k < ch.pts.length; k++) { const a = ch.pts[k - 1], b = ch.pts[k], n = Math.max(1, Math.round(Math.hypot(b.x - a.x, b.y - a.y))); for (let q = 0; q <= n; q++) { const pt = { x: a.x + ((b.x - a.x) * q) / n, y: a.y + ((b.y - a.y) * q) / n }; if (pt.x < bb[0] || pt.x > bb[2] || pt.y < bb[1] || pt.y > bb[3]) { flush(); continue; } const ranks = new Set([...rankGrid.near(pt.x, pt.y, 0.3).keys()].map((i) => rankOfChain.get(i))); if (ranks.size >= M && !taken.near(pt.x, pt.y, 0.3).size) cur.push(pt); else flush(); } } flush(); }
   sharedCache.set(key, out); return out; };
-function walk(size, guidePts, key) {
-  const G = prep(guidePts); const xs = guidePts.map((q) => q.x), ys = guidePts.map((q) => q.y); const bb = [Math.min(...xs) - 20, Math.min(...ys) - 20, Math.max(...xs) + 20, Math.max(...ys) + 20];
-  const seed = { x: (bb[0] + bb[2]) / 2, y: (bb[1] + bb[3]) / 2 };
+function walk(size, guidePts, key, seedOnly) {
+  // seedOnly: no closed size to lean on — the piece is whatever closes round its label; nothing is drawn
+  const G = guidePts ? prep(guidePts) : null; const xs = guidePts ? guidePts.map((q) => q.x) : [seedOnly.x - REACH, seedOnly.x + REACH], ys = guidePts ? guidePts.map((q) => q.y) : [seedOnly.y - REACH, seedOnly.y + REACH]; const bb = [Math.min(...xs) - 20, Math.min(...ys) - 20, Math.max(...xs) + 20, Math.max(...ys) + 20];
+  const seed = seedOnly ?? { x: (bb[0] + bb[2]) / 2, y: (bb[1] + bb[3]) / 2 };
   const edges = [];
   for (const ch of chainsOf.get(size) ?? []) { const pts = ch.closed ? [...ch.pts, ch.pts[0]] : ch.pts; let cur = []; const flush = () => { if (cur.length >= 2 && lenOf(cur) >= 3) edges.push({ pts: cur, i: edges.length, len: lenOf(cur) }); cur = []; }; for (const q of pts) { if (q.x >= bb[0] && q.x <= bb[2] && q.y >= bb[1] && q.y <= bb[3]) cur.push(q); else flush(); } flush(); }
   const nOwn = edges.length; if (!nOwn) return null;
@@ -53,21 +57,51 @@ function walk(size, guidePts, key) {
       const cr = o.out.x * q.out.y - o.out.y * q.out.x;
       if (CORNERS && Math.abs(cr) >= 0.34) { const wx = q.pt.x - o.pt.x, wy = q.pt.y - o.pt.y; const tt = (wx * q.out.y - wy * q.out.x) / cr, rr = (wx * o.out.y - wy * o.out.x) / cr;
         if (tt >= -15 && rr >= -15 && tt <= 30 && rr <= 30 && Math.min(o.e.len, q.e.len) > Math.max(-tt, -rr) + 2) return { q, cost: Math.abs(tt) + Math.abs(rr) + 1, d, corner: { x: o.pt.x + tt * o.out.x, y: o.pt.y + tt * o.out.y, cutPrev: Math.max(0, -tt), cutNext: Math.max(0, -rr), built: Math.max(0, tt) + Math.max(0, rr) } }; }
-      if (d <= TIGHT) return { q, cost: d + 1.5 * turn, d }; const c = carry(G, o.pt, q.pt); if (!c) return null; return { q, cost: 2 * c.mm + 5 + (c.kind === 'corner' ? 30 : 0), d, c }; }).filter(Boolean).sort((a, b) => a.cost - b.cost).slice(0, K); joinCache.set(key2, r); return r; };
-  const found = []; const start = edges.filter((e) => !e.shared).sort((a, b) => b.len - a.len)[0];
+      if (d <= TIGHT) return { q, cost: d + 1.5 * turn, d }; if (!G) return null; const c = carry(G, o.pt, q.pt); if (!c) return null; return { q, cost: 2 * c.mm + 5 + (c.kind === 'corner' ? 30 : 0), d, c }; }).filter(Boolean).sort((a, b) => a.cost - b.cost).slice(0, K); joinCache.set(key2, r); return r; };
+  const found = [];
+  const dSeed = (e) => Math.min(...e.pts.map((q) => Math.hypot(q.x - seed.x, q.y - seed.y)));
+  const starts = G ? [edges.filter((e) => !e.shared).sort((a, b) => b.len - a.len)[0]] : edges.filter((e) => !e.shared && e.len >= 20).sort((a, b) => dSeed(a) - dSeed(b)).slice(0, 6);
+  for (const start of starts) {
   const sEnd = ends.find((o) => o.e === start && o.w === 1), goal = ends.find((o) => o.e === start && o.w === 0);
-  const stack = [{ at: sEnd, path: [{ e: start, rev: false }], joins: [], cost: 0, seen: new Set([start.i]) }]; let steps = 0;
-  while (stack.length && found.length < 12 && steps++ < 60000) { stack.sort((a, b) => b.cost - a.cost); const cur = stack.pop();
+  const stack = [{ at: sEnd, path: [{ e: start, rev: false }], joins: [], cost: 0, seen: new Set([start.i]) }]; let steps = 0; const want = found.length + (G ? 12 : 4);
+  while (stack.length && found.length < want && steps++ < (G ? 60000 : 20000)) { stack.sort((a, b) => b.cost - a.cost); const cur = stack.pop();
     for (const j of joinsOf(cur.at)) { if (j.q === goal) { found.push({ path: cur.path, joins: [...cur.joins, j], cost: cur.cost + j.cost }); continue; } if (cur.seen.has(j.q.e.i)) continue; stack.push({ at: ends.find((o) => o.e === j.q.e && o.w !== j.q.w), path: [...cur.path, { e: j.q.e, rev: j.q.w === 1 }], joins: [...cur.joins, j], cost: cur.cost + j.cost, seen: new Set([...cur.seen, j.q.e.i]) }); } }
+  }
   const inside = (pts) => { let c = false; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) if (pts[i].y > seed.y !== pts[j].y > seed.y && seed.x < ((pts[j].x - pts[i].x) * (seed.y - pts[i].y)) / (pts[j].y - pts[i].y) + pts[i].x) c = !c; return c; };
   const cut = (P, head, tail) => { let a = [...P]; const trim = (arr, mm) => { let acc = 0; for (let k = 1; k < arr.length; k++) { const L = Math.hypot(arr[k].x - arr[k - 1].x, arr[k].y - arr[k - 1].y); if (acc + L >= mm) { const u = (mm - acc) / (L || 1); return [{ x: arr[k - 1].x + (arr[k].x - arr[k - 1].x) * u, y: arr[k - 1].y + (arr[k].y - arr[k - 1].y) * u }, ...arr.slice(k)]; } acc += L; } return arr.slice(-1); }; if (head > 0) a = trim(a, head); if (tail > 0) a = trim(a.reverse(), tail).reverse(); return a; };
-  const cands = found.map((c) => { const pts = []; const drawn = []; let corners = 0; const n = c.path.length; c.path.forEach((x, k) => { const prev = c.joins[(k - 1 + n) % n], j = c.joins[k]; pts.push(...cut(x.rev ? [...x.e.pts].reverse() : x.e.pts, prev?.corner?.cutNext ?? 0, j?.corner?.cutPrev ?? 0)); if (j?.corner) { pts.push({ x: j.corner.x, y: j.corner.y }); corners++; } else if (j?.c) { pts.push(...j.c.pts); drawn.push(j.c); } }); const own = c.path.filter((x) => !x.e.shared).reduce((a, x) => a + x.e.len, 0), sh = c.path.filter((x) => x.e.shared).reduce((a, x) => a + x.e.len, 0); const dm = drawn.reduce((a, d) => a + d.mm, 0); return { pts, drawn, own, sh, dm, corners, cost: c.cost, round: inside(pts) }; }).filter((c) => c.round).sort((a, b) => b.own - a.own || a.dm - b.dm || a.cost - b.cost);
+  const cands = found.map((c) => { const pts = []; const drawn = []; let corners = 0; const n = c.path.length; c.path.forEach((x, k) => { const prev = c.joins[(k - 1 + n) % n], j = c.joins[k]; pts.push(...cut(x.rev ? [...x.e.pts].reverse() : x.e.pts, prev?.corner?.cutNext ?? 0, j?.corner?.cutPrev ?? 0)); if (j?.corner) { pts.push({ x: j.corner.x, y: j.corner.y }); corners++; } else if (j?.c) { pts.push(...j.c.pts); drawn.push(j.c); } }); const own = c.path.filter((x) => !x.e.shared).reduce((a, x) => a + x.e.len, 0), sh = c.path.filter((x) => x.e.shared).reduce((a, x) => a + x.e.len, 0); const dm = drawn.reduce((a, d) => a + d.mm, 0); return { pts, drawn, own, sh, dm, corners, cost: c.cost, round: inside(pts) }; }).filter((c) => c.round).sort((a, b) => (G ? b.own - a.own || a.dm - b.dm || a.cost - b.cost : LONE_PICK === 'area' ? areaOf(a.pts) - areaOf(b.pts) : b.own / lenOf(b.pts) - a.own / lenOf(a.pts) || b.own - a.own));
   return { nOwn, best: cands[0] ?? null };
 }
 const dev = (A, B) => { const g = new Grid(); const b = [...B, B[0]]; for (let k = 1; k < b.length; k++) g.add(b[k - 1], b[k], 0); let mx = 0, in05 = 0, n = 0; const a = [...A, A[0]]; for (let k = 1; k < a.length; k++) { const p = a[k - 1], q = a[k], m = Math.max(1, Math.round(Math.hypot(q.x - p.x, q.y - p.y))); for (let t = 0; t < m; t++) { const r = g.near(p.x + ((q.x - p.x) * (t + 0.5)) / m, p.y + ((q.y - p.y) * (t + 0.5)) / m, 30); const d = r.size ? r.get(0) : 30; n++; mx = Math.max(mx, d); if (d <= 0.5) in05++; } } return { max: mx, in05: in05 / n }; };
 const pct = (v) => `${Math.round(100 * v)}%`;
 const gapsStr = (b) => b.drawn.map((d) => `${d.mm}${d.kind === 'corner' ? 'c' : ''}`).join(' ') || '—';
-if (mode === 'ref') {
+const seedsOf = (benchPath, id) => { const b = JSON.parse(readFileSync(benchPath, 'utf8')).files.find((x) => x.id === id); return new Map((b?.pieces ?? []).filter((q) => q.at).map((q) => [q.seed, q.at])); };
+if (mode === 'lone' || mode === 'lonecheck') {
+  // lone:      pieces with NO closed size — walk every size round the piece label
+  // lonecheck: the same walk on pieces that DO have closed sizes, compared with those closed outlines
+  const id = dir.split('/').filter(Boolean).pop(); const seeds = seedsOf(rest[1], id); const cells = JSON.parse(readFileSync(dir + '/cells.json', 'utf8')); const out = []; const t = { pieces: 0, cells: 0, noSeed: 0, noOwn: 0, noWalk: 0, closed: 0, orderOk: 0, orderBad: 0, same: 0, close: 0, different: 0 };
+  for (const fam of cells) { const closed = fam.cells.filter((c) => c.outcome === 'closed' && c.outer?.length > 3); if (mode === 'lone' ? closed.length : !closed.length) continue; const at = seeds.get(fam.seed); t.pieces++;
+    const got = [];
+    for (const c of fam.cells) { if (!rankOf.has(c.size) || (mode === 'lonecheck' && c.outcome !== 'closed')) continue; t.cells++; const row = { label: (fam.label ?? '').trim(), size: c.size, seed: fam.seed };
+      if (!at) { t.noSeed++; out.push({ ...row, result: 'no label position' }); continue; }
+      const r = walk(c.size, null, fam.seed, at); if (!r) { t.noOwn++; out.push({ ...row, result: 'no own line near the label' }); continue; } if (!r.best) { t.noWalk++; out.push({ ...row, result: 'no closed walk' }); continue; }
+      t.closed++; const b = r.best, per = lenOf([...b.pts, b.pts[0]]); const A = areaOf(b.pts); got.push({ rank: rankOf.get(c.size), A }); const o = { ...row, result: 'closed', own: b.own / per, shared: b.sh / per, corners: b.corners, areaCm2: Math.round(A / 100), pts: rest[2] ? b.pts.map((q) => [+q.x.toFixed(2), +q.y.toFixed(2)]) : undefined };
+      if (mode === 'lonecheck') { const T = c.outer.map(([x, y]) => ({ x, y })); const mx = Math.max(dev(b.pts, T).max, dev(T, b.pts).max); o.maxDev = +mx.toFixed(2); t[mx <= 1 ? 'same' : mx <= 3 ? 'close' : 'different']++; }
+      out.push(o); }
+    // sizes of one piece must grow with the rank: count the closed sizes that agree with their closed neighbours
+    got.sort((a, b) => a.rank - b.rank); got.forEach((g, i) => { const lo = got[i - 1], hi = got[i + 1]; const ok = (!lo || g.A >= lo.A * 0.999) && (!hi || g.A <= hi.A * 1.001); t[ok ? 'orderOk' : 'orderBad']++; }); }
+  console.log(JSON.stringify(t));
+  for (const r of out) console.log(`${r.label.slice(0, 26).padEnd(26)} ${r.size.padEnd(3)} → ${r.result}${r.result === 'closed' ? ` · own ${pct(r.own)} shared ${pct(r.shared)} · corners ${r.corners} · ${r.areaCm2} cm²${r.maxDev !== undefined ? ` · max deviation ${r.maxDev} mm` : ''}` : ''}`);
+  if (rest[2]) writeFileSync(rest[2], JSON.stringify(out));
+} else if (mode === 'reflone') {
+  // the label-seeded walk (no neighbour) against the owner's verified outlines
+  const raw = JSON.parse(readFileSync(rest[0], 'utf8')); const pieces = Array.isArray(raw) ? raw : raw.pieces; const id = dir.split('/').filter(Boolean).pop();
+  const bench = JSON.parse(readFileSync(rest[2], 'utf8')).files.find((x) => x.id === id); const t = { sizes: 0, noWalk: 0, same: 0, close: 0, different: 0 }; const rowsOut = [];
+  for (const pid of rest.slice(3)) { const p = pieces.find((x) => x.id === pid); const at = bench.pieces.find((q) => (q.label ?? '').trim() === (p.label ?? '').trim())?.at; if (!at) { console.log(pid, 'no label position'); continue; }
+    for (const z of p.sizes) { if (z.verdict !== 'ok' || !rankOf.has(z.size)) continue; t.sizes++; const T = []; for (let i = 0; i + 1 < z.outer.length; i += 2) T.push({ x: z.outer[i], y: z.outer[i + 1] });
+      const r = walk(z.size, null, pid, at); if (!r?.best) { t.noWalk++; rowsOut.push(`${pid} ${z.size}: no closed walk`); continue; } const mx = Math.max(dev(r.best.pts, T).max, dev(T, r.best.pts).max); t[mx <= 1 ? 'same' : mx <= 3 ? 'close' : 'different']++; if (mx > 3) rowsOut.push(`${pid} ${z.size}: max deviation ${mx.toFixed(1)} mm, area walk ${Math.round(areaOf(r.best.pts) / 100)} vs verified ${Math.round(areaOf(T) / 100)} cm²`); } }
+  console.log(JSON.stringify(t)); for (const r of rowsOut) console.log('  ', r);
+} else if (mode === 'ref') {
   const raw = JSON.parse(readFileSync(rest[0], 'utf8')); const pieces = Array.isArray(raw) ? raw : raw.pieces; const all = [];
   for (const id of rest.slice(2)) { const p = pieces.find((x) => x.id === id); const mk = (z) => { const a = []; for (let i = 0; i + 1 < z.outer.length; i += 2) a.push({ x: z.outer[i], y: z.outer[i + 1] }); return a; };
     const ok = p.sizes.filter((z) => z.verdict === 'ok' && rankOf.has(z.size)).map((z) => ({ size: z.size, rank: rankOf.get(z.size), pts: mk(z) }));
