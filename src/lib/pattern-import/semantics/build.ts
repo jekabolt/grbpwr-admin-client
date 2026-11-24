@@ -2490,11 +2490,10 @@ function buildForMaterial(
     // operator grain given after a size already borrowed nothing: fine. Monotone growth (G8).
     if (!p.ungraded && sizes.length > 1 && !exactSourceGeometry) {
       // a plateau grows too: one pocket for every size, or one block per size group (Asheville,
-      // Estoril, Verona: 0.03–0.27 % offset noise). Measured against the largest smaller size,
-      // so a slow slide (−0.4 % a step) does not pass step by step: it warns. A step that drops
-      // over areaGrowthTolerance blocks — a size closed on a wrong line (Verona 24: −58 %) or two
-      // sizes swapped (Silverstone 4XL/5XL). (#470 blocked every drop over 0.5 %; beta keeps the
-      // per-step tolerance that let prod sheets build, 5895979a4.)
+      // Estoril, Verona: 0.03–0.27 % offset noise). A drop over 0.5 % stays a block — it is a
+      // size closed on a wrong line (Verona 24: −58 %) or two sizes swapped (Silverstone 4XL/5XL).
+      // Against the largest smaller size, not the previous one: a slow slide (−0.4 % a step)
+      // must not pass step by step. (#470's rule, owner 24 Nov; beta's 1 % per step is gone.)
       let peak = 0;
       const grows = sizes.every((s) => {
         const ok = s.areaMm2 >= peak * (1 - AREA_PLATEAU_TOL);
@@ -2502,10 +2501,7 @@ function buildForMaterial(
         return ok;
       });
       if (!grows) {
-        const gross = sizes.some(
-          (s, i) => i > 0 && s.areaMm2 < sizes[i - 1].areaMm2 * (1 - PATIMPORT.areaGrowthTolerance),
-        );
-        if (sizes.length > 2 && gross) {
+        if (sizes.length > 2) {
           block(
             seed,
             'non-monotone',
@@ -2513,7 +2509,7 @@ function buildForMaterial(
           );
           continue;
         }
-        warnings.push(`${name.code}: area does not strictly grow with size`);
+        warnings.push(`${name.code}: area does not grow between its two sizes`);
       }
     }
     // ── pair / quantity
