@@ -618,6 +618,8 @@ export type common_MediaItem = {
   compressed: common_MediaInfo | undefined;
   // BlurHash
   blurhash: string | undefined;
+  // Tiny color preview, 6px wide, as a data URI; drawn as a pixel mosaic while the image loads
+  pixelPreview: string | undefined;
 };
 
 export type common_MediaInfo = {
