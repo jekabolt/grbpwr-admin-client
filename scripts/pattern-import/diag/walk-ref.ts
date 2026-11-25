@@ -174,7 +174,7 @@ for (const [dir, list] of jobs) {
       const above = oks.filter((o) => o.rank > z.rank).sort((x, y) => x.rank - y.rank)[0];
       const v = two ? outlineVerdict(below?.pts, above?.pts, w.outer, z.pts) : undefined;
       const who = two ? whoseLine(L, z.rank, w.outer, z.pts) : null;
-      const printed = who ? 1 - who.nobodyMm / (who.ownMm + who.foreignMm + who.nobodyMm || 1) : 0;
+      const printed = who ? who.ownAloneMm / (who.ownMm + who.foreignMm + who.nobodyMm || 1) : 0;
       const farTakes =
         far0 &&
         !!two &&

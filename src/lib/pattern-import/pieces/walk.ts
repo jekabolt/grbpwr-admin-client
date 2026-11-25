@@ -75,8 +75,9 @@ export const WALK = {
    *  rides such lines for this many millimetres has leaked across the nest. */
   farSizes: 3,
   farLineMm: 15,
-  /** …and the walk replaces it only when this share of the walk's parting stretch has a size
-   *  line under it: a side stretched 30 mm to its corner over empty paper is no repair. */
+  /** …and the walk replaces it only when this share of the walk's parting stretch runs on a line
+   *  of this size: a side stretched 30 mm to its corner across other sizes' lines is no repair
+   *  (Leah G size 30). */
   leakPrinted: 0.7,
   /** By the neighbouring sizes: this share of the taken outline's parting stretch is between
    *  them or on an edge both share, and this share of the other's is not. */
@@ -915,7 +916,7 @@ export function walkChecks(
       const leak =
         farLineMm(L, c.rank, c.outer) >= WALK.farLineMm &&
         farLineMm(L, c.rank, w.outer) < WALK.farLineMm &&
-        1 - who.nobodyMm / parted >= WALK.leakPrinted;
+        who.ownAloneMm / parted >= WALK.leakPrinted;
       c.walk = {
         outer: w.outer,
         ownShare: per ? w.ownMm / per : 0,
