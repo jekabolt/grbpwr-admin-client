@@ -106,7 +106,8 @@ describe('refusals', () => {
   });
 
   it('google return', () => {
-    for (const v of [null, 'linked', 'cancelled', 'already_linked']) expect(googleReturnWord(v)).toBe('');
+    for (const v of [null, 'linked', 'cancelled', 'already_linked'])
+      expect(googleReturnWord(v)).toBe('');
     expect(googleReturnWord('taken')).toBe('gmail in use');
     expect(googleReturnWord('unverified')).toBe('gmail unverified');
     for (const v of ['expired', 'try_again', 'zzz']) expect(googleReturnWord(v)).toBe('try again');

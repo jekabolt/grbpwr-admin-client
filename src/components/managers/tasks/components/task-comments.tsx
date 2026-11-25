@@ -125,11 +125,7 @@ export function TaskComments({
               <PersonAvatar handle={c.author} />
               <div className='flex min-w-0 flex-1 flex-col gap-0.5'>
                 <div className='flex items-baseline justify-between gap-2'>
-                  <Text
-                    size='micro'
-                    component='span'
-                    className='font-bold tracking-label'
-                  >
+                  <Text size='micro' component='span' className='font-bold tracking-label'>
                     <PersonLabel handle={c.author} />
                   </Text>
                   <span className='flex shrink-0 items-baseline gap-1.5'>

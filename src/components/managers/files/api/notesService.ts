@@ -267,7 +267,10 @@ export async function formatNoteMarkdown(content: string, signal: AbortSignal): 
       }
       // Диагностика, а не текст экрана: панель у `off` пишет свои слова. Строка называет
       // ветку провода, потому что это единственное, что тут известно точно.
-      throw new NoteFormatError('off', 'off: FailedPrecondition (no key, or a backend without details)');
+      throw new NoteFormatError(
+        'off',
+        'off: FailedPrecondition (no key, or a backend without details)',
+      );
     }
     if (code === GRPC_INVALID_ARGUMENT) {
       // InvalidArgument сервер отдаёт не только на превышение потолка (ещё — на пустое

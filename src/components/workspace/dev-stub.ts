@@ -80,7 +80,11 @@ const WHO: Record<string, { name: string; publicUsername: string; avatarUrl: str
     avatarUrl: PHOTO('#d8d2c8', '#8a7f72'),
   },
   teo: { name: 'teo vance', publicUsername: 'teo', avatarUrl: '' },
-  'lena.ruiz': { name: 'lena ruiz', publicUsername: 'lena', avatarUrl: PHOTO('#c9d1d6', '#5d6a73') },
+  'lena.ruiz': {
+    name: 'lena ruiz',
+    publicUsername: 'lena',
+    avatarUrl: PHOTO('#c9d1d6', '#5d6a73'),
+  },
   sam: { name: '', publicUsername: 'sam', avatarUrl: '' },
   ada: { name: 'ada brook', publicUsername: 'ada.b', avatarUrl: '' },
   nika: { name: '', publicUsername: 'nika', avatarUrl: '' },
