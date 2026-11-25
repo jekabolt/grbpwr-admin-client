@@ -34,8 +34,12 @@ export const WALK = {
   minCommonMm: 5,
   /** Lines farther than this outside the piece's box are not walked, mm. */
   padMm: 20,
-  /** Two ends this close are one point, mm. */
+  /** Two ends this close are one point, mm… */
   tightMm: 3,
+  /** …when the second lies no farther than this to the side of the first's line, mm, and the
+   *  line does not turn back by more than this. */
+  tightSideMm: 3,
+  tightTurnRad: (120 * Math.PI) / 180,
   /** A corner is built when the sides, extended by at most this, meet, mm… */
   extendMm: 30,
   /** …or cut back by at most this, mm. */
@@ -387,7 +391,13 @@ function joinsAmong(edges: Edge[]) {
       }
       if (d <= C.tightMm) {
         const turn = Math.acos(Math.max(-1, Math.min(1, -(o.out.x * q.out.x + o.out.y * q.out.y))));
-        out.push({ to: q, cost: d + 1.5 * turn });
+        // two ends that touch are ends of ONE line going on: in a dense nest the end of the next
+        // size's line is as near, a millimetre to the side — joining it is the step sideways the
+        // walk is there to avoid, and joining an end that points back is a spur (the owner,
+        // 26 Nov, on Penelope B 26 and Matrix B 3XL)
+        const side = Math.abs((q.pt.x - o.pt.x) * o.out.y - (q.pt.y - o.pt.y) * o.out.x);
+        if (side <= C.tightSideMm && turn <= C.tightTurnRad)
+          out.push({ to: q, cost: d + 1.5 * turn });
       }
     }
     out.sort((a, b) => a.cost - b.cost);
@@ -619,6 +629,9 @@ export function spanPath(
   a: PtMm,
   b: PtMm,
   maxMm: number,
+  /** The way the outline is going at `a` and at `b` (unit vectors): the path leaves `a` and
+   *  reaches `b` that way, never backwards along the line first. */
+  going?: { a: PtMm; b: PtMm },
 ): { pts: PtMm[]; lenMm: number; joins: number } | null {
   const C = WALK;
   const edges: Edge[] = [
@@ -660,7 +673,23 @@ export function spanPath(
     const cut = trimmed(e.pts, lo, Math.max(0, e.len - hi));
     return rev ? cut.reverse() : cut;
   };
+  /** the direction of an edge at a distance along it */
+  const dirAt = (e: Edge, s0: number): PtMm => {
+    const seg = part(e, Math.max(0, s0 - 2), Math.min(e.len, s0 + 2));
+    const [p, q] = [seg[0], seg[seg.length - 1]];
+    const d = dist(p, q) || 1;
+    return { x: (q.x - p.x) / d, y: (q.y - p.y) / d };
+  };
+  const along = (e: Edge, s0: number, g: PtMm | undefined) => {
+    if (!g) return 0;
+    const d = dirAt(e, s0);
+    return Math.sign(d.x * g.x + d.y * g.y);
+  };
+  const leave = along(from.e, from.s, going?.a); // +1: towards the edge's end, −1: its start
+  const reach = along(to.e, to.s, going?.b);
   if (from.e === to.e) {
+    const way = Math.sign(to.s - from.s);
+    if ((leave && way !== leave) || (reach && way !== reach)) return null;
     const pts = part(from.e, from.s, to.s);
     return { pts, lenMm: Math.abs(to.s - from.s), joins: 0 };
   }
@@ -668,8 +697,15 @@ export function spanPath(
   type Node = { at: End; cost: number; len: number; via: Node | null; join: Join | null };
   const open: Node[] = [];
   const [f0, f1] = endOf.get(from.e)!;
-  open.push({ at: f0, cost: from.s, len: from.s, via: null, join: null });
-  open.push({ at: f1, cost: from.e.len - from.s, len: from.e.len - from.s, via: null, join: null });
+  if (leave <= 0) open.push({ at: f0, cost: from.s, len: from.s, via: null, join: null });
+  if (leave >= 0)
+    open.push({
+      at: f1,
+      cost: from.e.len - from.s,
+      len: from.e.len - from.s,
+      via: null,
+      join: null,
+    });
   const done = new Map<End, number>();
   let goal: (Node & { last: Join }) | null = null;
   while (open.length) {
@@ -682,10 +718,12 @@ export function spanPath(
       const e = j.to.e;
       if (e === from.e) continue;
       if (e === to.e) {
-        const along = j.to.w === 0 ? to.s : e.len - to.s;
-        const cost = cur.cost + 3 * j.cost + along;
-        if (cur.len + along <= maxMm && (!goal || cost < goal.cost))
-          goal = { at: j.to, cost, len: cur.len + along, via: cur, join: null, last: j };
+        // entered by its start it is travelled forwards, by its end backwards
+        if (reach && reach !== (j.to.w === 0 ? 1 : -1)) continue;
+        const rest = j.to.w === 0 ? to.s : e.len - to.s;
+        const cost = cur.cost + 3 * j.cost + rest;
+        if (cur.len + rest <= maxMm && (!goal || cost < goal.cost))
+          goal = { at: j.to, cost, len: cur.len + rest, via: cur, join: null, last: j };
         continue;
       }
       const [e0, e1] = endOf.get(e)!;

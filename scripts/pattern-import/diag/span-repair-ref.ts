@@ -47,6 +47,14 @@ const toPoly = (q: PtMm, poly: PtMm[]) => {
     d = Math.min(d, segNearest(q, poly[i], poly[(i + 1) % poly.length]).d);
   return d;
 };
+/** Jogs counted with half the usual turn: 15°. */
+const fine = (pts: PtMm[]) => {
+  const was = WALK.jogTurnRad;
+  WALK.jogTurnRad = Math.PI / 12;
+  const n = jogsOf(pts).length;
+  WALK.jogTurnRad = was;
+  return n;
+};
 const t: Record<string, Record<string, number>> = {};
 const bump = (k: string, f: string) => {
   t[k] ??= {};
@@ -144,7 +152,16 @@ for (const [dir, list] of jobs) {
           continue;
         }
         const arc = (((ib - ia) % N) + N) % N;
-        const path = spanPath(own, shared, box, S[ia], S[ib], 2 * arc + 40);
+        const unit = (k: number): PtMm => {
+          const p0 = S[(((k - 2) % N) + N) % N];
+          const p1 = S[(k + 2) % N];
+          const d = Math.hypot(p1.x - p0.x, p1.y - p0.y) || 1;
+          return { x: (p1.x - p0.x) / d, y: (p1.y - p0.y) / d };
+        };
+        const path = spanPath(own, shared, box, S[ia], S[ib], 2 * arc + 40, {
+          a: unit(ia),
+          b: unit(ib),
+        });
         if (!path) {
           bump(key, 'noPath');
           continue;
@@ -153,7 +170,9 @@ for (const [dir, list] of jobs) {
         const rest: PtMm[] = [];
         for (let k = ib; k !== ia; k = (k + 1) % N) rest.push(S[k]);
         const next = [...path.pts, ...rest];
-        if (jogsOf(next).length >= jogsOf(mended).length && jogsOf(next).length >= jogs.length) {
+        // judged by a finer measure than the one that found the jog: a step of half the turn
+        // left in the mended outline is still a step
+        if (fine(next) >= fine(mended)) {
           bump(key, 'stillJog');
           continue;
         }
