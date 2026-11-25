@@ -219,7 +219,21 @@ export const applyPieceEdits: ApplyPieceEditsFn = (families, edits, ctx) => {
             (c) => !c || c.outer.length < 3 || c.outcome === 'leak' || c.rankFrom === 'repair',
           )
         ) {
-          cands.push({ ...base, seed: head.seed, outcome: 'leak', outer: [] });
+          // where it is open: the gap of the part that leaks, else the middle of the stretch a
+          // repaired part had drawn in — `base` may be a closed part, which knows neither, and
+          // the operator was told "open outline" with no place shown (owner, 25 Nov)
+          const gap = cs.find((c) => c?.outcome === 'leak' && c.leakAt)?.leakAt;
+          const drawn = cs
+            .find((c) => c?.rankFrom === 'repair' && c.derived?.some((d) => d.pts.length))
+            ?.derived?.find((d) => d.pts.length)?.pts;
+          const leakAt = gap ?? (drawn ? drawn[drawn.length >> 1] : base.leakAt);
+          cands.push({
+            ...base,
+            seed: head.seed,
+            outcome: 'leak',
+            outer: [],
+            ...(leakAt ? { leakAt } : {}),
+          });
           continue;
         }
         const walls = [...new Set(cs.flatMap((c) => c!.walls))];
