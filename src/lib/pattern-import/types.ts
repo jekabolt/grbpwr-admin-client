@@ -3365,6 +3365,12 @@ export type StageIO = {
       countAsk: SizeCountAsk | null;
       /** D6: the size lines each tile sheet draws (null = one sheet). */
       sheetLegend?: SheetLegend | null;
+      /**
+       * The outlines each size row closes when its own lines are walked round the piece labels
+       * (pieces/walk.ts `walkedSizes`), as x,y pairs in mm: what the step shows for a lit row.
+       * Display only. `partial` = the time budget ran out: some pieces are not in it.
+       */
+      walked?: { partial: boolean; rows: { classId: ClassId; outlines: Float32Array[] }[] };
     };
   };
   pieces: {
@@ -3910,6 +3916,11 @@ export const PATIMPORT = {
   joinLateralMm: 0.15,
   motifQuantMm: 0.25,
   fillCellMm: 0.5,
+  /**
+   * The sizes step's walk of every size round every piece label (pieces/walk.ts `walkedSizes`): the
+   * time it may take. Display only, so a sheet too big for it shows fewer pieces, not a wait.
+   */
+  sizesWalkBudgetMs: 8000,
   snapMm: 0.3,
   minPieceAreaMm2: 400, // = MIN_PIECE_AREA_CM2
   notchMinMm: 2,

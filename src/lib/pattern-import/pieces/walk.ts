@@ -60,6 +60,8 @@ export const WALK = {
   /** Closed paths collected before the best is taken, and the search's step limit. */
   paths: 12,
   maxSteps: 60000,
+  /** `walkedSizes`: the first, short try at one size round one label, ms. */
+  sizesSliceMs: 120,
   /** The check: the two outlines differ when they are farther apart than this, mm… */
   differMm: 1,
   /** …over at least this length, mm. */
@@ -408,7 +410,7 @@ function joinsAmong(edges: Edge[]) {
   return { ends, endOf, joinsOf };
 }
 
-function search(edges: Edge[], seed: PtMm, lone: boolean): Walked | null {
+function search(edges: Edge[], seed: PtMm, lone: boolean, stop?: () => boolean): Walked | null {
   const C = WALK;
   const { endOf, joinsOf } = joinsAmong(edges);
   /** A side as the outline takes it: the edge, its direction, what is cut off its ends. */
@@ -532,6 +534,8 @@ function search(edges: Edge[], seed: PtMm, lone: boolean): Walked | null {
     let best: (Walked & { cost: number }) | null = null;
     let found = 0;
     for (let steps = 0; heap.length && found < C.paths && steps < C.maxSteps; steps++) {
+      // out of time (a display-only caller): what was found so far stands
+      if (stop && (steps & 127) === 0 && stop()) break;
       const cur = pop();
       for (const j of joinsOf(cur.at)) {
         if (j.to === goal) {
@@ -798,6 +802,8 @@ export function walkOutline(
   seed: PtMm,
   /** The piece has no closed size: start near the label, take the path most on the own line. */
   lone = false,
+  /** Asked now and then during the search: true = give up (the sizes step's time budget). */
+  stop?: () => boolean,
 ): Walked | null {
   const edges = (): Edge[] =>
     [
@@ -809,7 +815,7 @@ export function walkOutline(
   const cut = edges();
   if (!cut.some((e) => !e.shared)) return null;
   cutWhereSidesEnd(cut);
-  return search(cut, seed, lone) ?? search(edges(), seed, lone);
+  return search(cut, seed, lone, stop) ?? (stop?.() ? null : search(edges(), seed, lone, stop));
 }
 
 /** Where two closed outlines are farther apart than `WALK.differMm`: the longest such stretch of `a`. */
@@ -1218,6 +1224,100 @@ export function walkChecks(
       };
     }
   }
+}
+
+/**
+ * The outlines of every size before any fill: round each piece label the size's own lines are
+ * walked, and of a piece's sizes the longest run whose areas grow with the size stands (one size
+ * alone proves nothing). For the sizes step, which shows the row it lights as the outlines it
+ * closes; nothing is decided by it.
+ *
+ * `budgetMs` bounds the work, since most of the time goes to the labels nothing closes round: every
+ * walk first gets a short slice (`WALK.sizesSliceMs`), and those it cut short are walked again in
+ * full, the labels that closed most first, while time is left. `partial` = some were not. A big
+ * sheet does not fit: Kalla (19 labels × 18 sizes) needs about two minutes and gets 15 of its 180
+ * outlines in 8 s — to show those the walk has to run after the step is on the screen, row by row.
+ */
+export function walkedSizes(
+  set: ChainSet,
+  run: SizeRun,
+  seeds: readonly Seed[],
+  budgetMs = Infinity,
+  now: () => number = Date.now,
+): { byRank: Map<number, PtMm[][]>; partial: boolean } {
+  const byRank = new Map<number, PtMm[][]>();
+  if (run.sizes.length < 2 || !seeds.length) return { byRank, partial: false };
+  const L = walkLines(set, run);
+  if (!L.lines.length) return { byRank, partial: false };
+  const ranks = [...L.bySize.keys()].sort((a, b) => a - b);
+  const t0 = now();
+  const out = () => now() - t0 > budgetMs;
+  type Label = {
+    seed: Seed;
+    box: Box;
+    shared: PtMm[][];
+    found: Map<number, PtMm[]>;
+    cut: number[];
+  };
+  const labels: Label[] = [];
+  let partial = false;
+  const walk = (l: Label, rank: number, sliceMs: number): boolean => {
+    const own = L.bySize.get(rank);
+    if (!own?.length) return true;
+    const t = now();
+    let stopped = false;
+    const w = walkOutline(own, l.shared, l.box, l.seed.at, true, () => {
+      stopped ||= now() - t > sliceMs || out();
+      return stopped;
+    });
+    if (w) l.found.set(rank, w.outer);
+    return !!w || !stopped;
+  };
+  for (const seed of seeds) {
+    if (out()) {
+      partial = true;
+      break;
+    }
+    const box: Box = {
+      minX: seed.at.x - WALK.loneReachMm,
+      minY: seed.at.y - WALK.loneReachMm,
+      maxX: seed.at.x + WALK.loneReachMm,
+      maxY: seed.at.y + WALK.loneReachMm,
+    };
+    const l: Label = { seed, box, shared: sharedStretches(L, box), found: new Map(), cut: [] };
+    labels.push(l);
+    for (const rank of ranks) if (!walk(l, rank, WALK.sizesSliceMs)) l.cut.push(rank);
+  }
+  for (const l of [...labels].sort((a, b) => b.found.size - a.found.size))
+    for (const rank of l.cut) {
+      if (out()) {
+        partial = true;
+        break;
+      }
+      if (!walk(l, rank, Infinity) && out()) partial = true;
+    }
+  for (const l of labels) {
+    const found = [...l.found]
+      .sort((a, b) => a[0] - b[0])
+      .map(([rank, outer]) => ({ rank, outer, area: Math.abs(signedArea(outer)) }));
+    if (found.length < 2) continue;
+    const best = found.map(() => 1);
+    const prev = found.map(() => -1);
+    for (let i = 0; i < found.length; i++)
+      for (let j = 0; j < i; j++)
+        if (found[j].area <= found[i].area * (1 + WALK.areaSlack) && best[j] + 1 > best[i]) {
+          best[i] = best[j] + 1;
+          prev[i] = j;
+        }
+    let k = best.indexOf(Math.max(...best));
+    if (best[k] < 2) continue;
+    for (; k >= 0; k = prev[k]) {
+      const list = byRank.get(found[k].rank) ?? [];
+      list.push(found[k].outer);
+      byRank.set(found[k].rank, list);
+    }
+  }
+  return { byRank, partial };
 }
 
 /**

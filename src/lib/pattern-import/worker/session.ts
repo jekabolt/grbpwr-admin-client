@@ -162,7 +162,7 @@ import { byMeasureSeeds, codeTextSeeds } from '../pieces/seeds';
 import { recoverAutomaticGaps } from '../pieces/automatic-gap';
 import { finalizePieces } from '../pieces/finalize';
 import { sheetModule, undrawnRanks } from '../pieces/walls';
-import { applyLeakRepairs, applyOutlineChoices, walkChecks } from '../pieces/walk';
+import { applyLeakRepairs, applyOutlineChoices, walkChecks, walkedSizes } from '../pieces/walk';
 import { sheetCoverOf, sheetLegend, sheetPieces } from '../pieces/sheets';
 import { tileSheetIds } from '../assemble';
 import { chainView, joinSheetChains, partAt, sheetView } from '../assemble/composite';
@@ -1359,7 +1359,61 @@ export class Session {
     const sheetLeg = this.fast
       ? null
       : sheetLegend(this.sheet.parts, this.chains.classes, this.chains.chains);
-    return { run, map, expected, countAsk, ...(sheetLeg ? { sheetLegend: sheetLeg } : {}) };
+    const walked = this.fast ? null : this.walkedRows(this.sheet, this.chains, run);
+    return {
+      run,
+      map,
+      expected,
+      countAsk,
+      ...(sheetLeg ? { sheetLegend: sheetLeg } : {}),
+      ...(walked ? { walked } : {}),
+    };
+  }
+
+  /**
+   * The outlines every size row closes by the walk, for the sizes step to show (once per chain set
+   * and size run: the stage is run again on every answer of the step).
+   */
+  private walkedHeld: {
+    set: ChainSet;
+    key: string;
+    v: NonNullable<StageIO['sizes']['out']['walked']>;
+  } | null = null;
+  private walkedRows(
+    sheet: Sheet,
+    set: ChainSet,
+    run: SizeRun,
+  ): StageIO['sizes']['out']['walked'] | null {
+    if (run.sizes.length < 2) return null;
+    const key = run.sizes.map((z) => `${z.rank}/${z.classId}`).join(',');
+    if (this.walkedHeld?.set === set && this.walkedHeld.key === key) return this.walkedHeld.v;
+    const { byRank, partial } = walkedSizes(
+      set,
+      run,
+      this.labelSeeds(sheet, set),
+      PATIMPORT.sizesWalkBudgetMs,
+    );
+    const rows: NonNullable<StageIO['sizes']['out']['walked']>['rows'] = [];
+    for (const z of run.sizes) {
+      const outs = z.classId == null ? undefined : byRank.get(z.rank);
+      if (!outs?.length || z.classId == null) continue;
+      rows.push({
+        classId: z.classId,
+        outlines: outs.map((o) => {
+          const a = new Float32Array(o.length * 2 + 2);
+          o.forEach((q, i) => {
+            a[2 * i] = q.x;
+            a[2 * i + 1] = q.y;
+          });
+          a[o.length * 2] = o[0].x;
+          a[o.length * 2 + 1] = o[0].y;
+          return a;
+        }),
+      });
+    }
+    const v = { partial, rows };
+    this.walkedHeld = { set, key, v };
+    return v;
   }
 
   /**

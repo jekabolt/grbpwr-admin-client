@@ -718,8 +718,15 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
   // sits in another row, and two ends stop a fraction of a millimetre short. The row is shown
   // closed — the same way the pieces step will close it (borrowed-edges.ts).
   const hotClass = hotRow != null && !quizLit ? chains.classes.find((c) => c.id === hotRow) : null;
+  // Where the walk closes the row's outlines (pieces/walk.ts: the size's own lines round each
+  // piece label, corners built where two lines meet) those are shown — they are what the pieces
+  // step will propose. A row the walk closes nothing of keeps the tracing of borrowed-edges.ts.
+  const walked =
+    hotClass?.role === 'size'
+      ? sizes?.walked?.rows.find((r) => r.classId === hotClass.id)?.outlines ?? null
+      : null;
   const outline =
-    hotClass?.role === 'size' && chains.chainPreview
+    !walked && hotClass?.role === 'size' && chains.chainPreview
       ? litOutline(chains, chains.chainPreview, hotClass)
       : null;
   // the row question open by the operator's click; the row the footer asks about opens by itself
@@ -1083,6 +1090,16 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
                           />
                         ),
                       )}
+                    {walked?.map((l, i) => (
+                      <polyline
+                        key={`walk-${i}`}
+                        data-testid='size-walked-outline'
+                        points={f32Attr(l)}
+                        stroke={SHEET_INK.blue}
+                        strokeWidth={unit * 2.4}
+                        strokeLinejoin='round'
+                      />
+                    ))}
                     {outline?.lines.map((l, i) => (
                       <polyline
                         key={`way-${i}`}
