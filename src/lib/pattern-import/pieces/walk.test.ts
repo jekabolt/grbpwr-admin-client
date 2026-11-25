@@ -8,6 +8,7 @@ import {
   applyOutlineChoices,
   differs,
   sharedStretches,
+  spanPath,
   walkChecks,
   walkLines,
   walkOutline,
@@ -353,5 +354,39 @@ describe('a fill that leaked across the nest', () => {
     expect(family.candidates[1].walk).toMatchObject({ jog: true, verdict: 'walk' });
     const [fixed] = applyLeakRepairs([family]);
     expect(area(fixed.candidates[1].outer)).toBeCloseTo(125 * 85, 0);
+  });
+});
+
+describe('a path over the printed lines between two points of an outline', () => {
+  // a 120 × 80 rectangle of four sides that stop 2 mm short of their corners
+  const own = sides(100, 100, 120, 80, 2);
+  const len = (pts: PtMm[]) =>
+    pts.slice(1).reduce((a, p, i) => a + Math.hypot(p.x - pts[i].x, p.y - pts[i].y), 0);
+
+  it('runs straight along one line between two points on it', () => {
+    const r = spanPath(own, [], box, P(200, 180), P(130, 180), 500);
+    expect(r).not.toBeNull();
+    expect(r!.joins).toBe(0);
+    expect(len(r!.pts)).toBeCloseTo(70, 3);
+    expect(r!.pts.every((p) => Math.abs(p.y - 180) < 1e-6)).toBe(true);
+  });
+
+  it('turns at the corner two lines build, and nowhere else', () => {
+    // from the bottom side to the right side: through the corner (220, 180) the sides stop short of
+    const r = spanPath(own, [], box, P(160, 180), P(220, 130), 500);
+    expect(r).not.toBeNull();
+    expect(r!.joins).toBe(1);
+    expect(r!.pts.some((p) => Math.abs(p.x - 220) < 1e-6 && Math.abs(p.y - 180) < 1e-6)).toBe(true);
+    expect(len(r!.pts)).toBeCloseTo(60 + 50, 1);
+  });
+
+  it('has no path from a line to one that only runs beside it', () => {
+    // a second line 3 mm below the bottom side, its ends too far from any side to build a corner
+    const beside: PtMm[] = [P(145, 183), P(175, 183)];
+    expect(spanPath([...own, beside], [], box, P(160, 180), P(160, 183), 500)).toBeNull();
+  });
+
+  it('is nothing for a point that lies on no line', () => {
+    expect(spanPath(own, [], box, P(160, 150), P(130, 180), 500)).toBeNull();
   });
 });

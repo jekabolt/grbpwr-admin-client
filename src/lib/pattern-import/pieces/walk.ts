@@ -604,6 +604,152 @@ export function cornerWalls(
 }
 
 /**
+ * A path over the size's printed lines from `a` to `b`, two points of one outline that lie on
+ * those lines — for mending a stretch of the fill's outline between them without building the
+ * whole outline again (the fill gives the route, the lines the geometry; `docs/pattern-import/
+ * research-25nov.md`, Round 2 §1). The path leaves a line for another only at a join: a corner
+ * the two build, or two ends that touch. Two lines that merely run side by side do not exchange
+ * paths, so a step from one onto the next cannot be in it.
+ * null = a or b is on no line, or no path within `maxMm`.
+ */
+export function spanPath(
+  own: readonly PtMm[][],
+  shared: readonly PtMm[][],
+  box: Box,
+  a: PtMm,
+  b: PtMm,
+  maxMm: number,
+): { pts: PtMm[]; lenMm: number; joins: number } | null {
+  const C = WALK;
+  const edges: Edge[] = [
+    ...own
+      .flatMap((pts) => clipped(pts, box, 3))
+      .map((pts) => ({ pts, len: lenOf(pts), shared: false, src: 0, part: 0 })),
+    ...shared.map((pts) => ({ pts, len: lenOf(pts), shared: true, src: 0, part: 0 })),
+  ].map((e, src) => ({ ...e, src }));
+  cutWhereSidesEnd(edges);
+  const { endOf, joinsOf } = joinsAmong(edges);
+  /** where a point sits on the lines: the edge, the distance along it, how far off it is */
+  const locate = (p: PtMm) => {
+    let best: { e: Edge; s: number; d: number } | null = null;
+    for (const e of edges) {
+      let acc = 0;
+      for (let k = 1; k < e.pts.length; k++) {
+        const near = segNearest(p, e.pts[k - 1], e.pts[k]);
+        const seg = dist(e.pts[k - 1], e.pts[k]);
+        // of two lines equally near, the size's own
+        if (
+          near.d <= C.onOwnMm &&
+          (!best ||
+            near.d < best.d - 1e-6 ||
+            (best.e.shared && !e.shared && near.d <= best.d + 0.1))
+        )
+          best = { e, s: acc + near.u * seg, d: near.d };
+        acc += seg;
+      }
+    }
+    return best;
+  };
+  const from = locate(a);
+  const to = locate(b);
+  if (!from || !to) return null;
+  /** the part of an edge between two distances along it, in that order */
+  const part = (e: Edge, s0: number, s1: number): PtMm[] => {
+    const rev = s1 < s0;
+    const [lo, hi] = rev ? [s1, s0] : [s0, s1];
+    const cut = trimmed(e.pts, lo, Math.max(0, e.len - hi));
+    return rev ? cut.reverse() : cut;
+  };
+  if (from.e === to.e) {
+    const pts = part(from.e, from.s, to.s);
+    return { pts, lenMm: Math.abs(to.s - from.s), joins: 0 };
+  }
+  // cheapest first: the length travelled, and three times the cost of each join
+  type Node = { at: End; cost: number; len: number; via: Node | null; join: Join | null };
+  const open: Node[] = [];
+  const [f0, f1] = endOf.get(from.e)!;
+  open.push({ at: f0, cost: from.s, len: from.s, via: null, join: null });
+  open.push({ at: f1, cost: from.e.len - from.s, len: from.e.len - from.s, via: null, join: null });
+  const done = new Map<End, number>();
+  let goal: (Node & { last: Join }) | null = null;
+  while (open.length) {
+    open.sort((x, y) => y.cost - x.cost);
+    const cur = open.pop()!;
+    if (goal && cur.cost >= goal.cost) break;
+    if ((done.get(cur.at) ?? Infinity) <= cur.cost) continue;
+    done.set(cur.at, cur.cost);
+    for (const j of joinsOf(cur.at)) {
+      const e = j.to.e;
+      if (e === from.e) continue;
+      if (e === to.e) {
+        const along = j.to.w === 0 ? to.s : e.len - to.s;
+        const cost = cur.cost + 3 * j.cost + along;
+        if (cur.len + along <= maxMm && (!goal || cost < goal.cost))
+          goal = { at: j.to, cost, len: cur.len + along, via: cur, join: null, last: j };
+        continue;
+      }
+      const [e0, e1] = endOf.get(e)!;
+      const len = cur.len + e.len;
+      if (len > maxMm) continue;
+      open.push({
+        at: j.to.w === 0 ? e1 : e0,
+        cost: cur.cost + 3 * j.cost + e.len,
+        len,
+        via: cur,
+        join: j,
+      });
+    }
+  }
+  if (!goal) return null;
+  // back from the goal: the edges crossed whole, each with the join that led into it
+  const legs: { e: Edge; rev: boolean; into: Join }[] = [];
+  for (let n: Node | null = goal.via; n && n.join; n = n.via)
+    legs.unshift({ e: n.join.to.e, rev: n.join.to.w === 1, into: n.join });
+  const startEnd = (() => {
+    let n: Node = goal.via!;
+    while (n.via) n = n.via;
+    return n.at;
+  })();
+  const pts: PtMm[] = [];
+  const joinsInOrder: Join[] = [...legs.map((l) => l.into), goal.last];
+  const headCut = (j: Join) => j.corner?.cutNext ?? 0;
+  const tailCut = (j: Join) => j.corner?.cutPrev ?? 0;
+  // first line
+  {
+    const e = from.e;
+    const endS = startEnd.w === 0 ? 0 : e.len;
+    const cut = tailCut(joinsInOrder[0]);
+    pts.push(
+      ...part(
+        e,
+        from.s,
+        startEnd.w === 0 ? Math.min(from.s, endS + cut) : Math.max(from.s, endS - cut),
+      ),
+    );
+    if (joinsInOrder[0].corner) pts.push(joinsInOrder[0].corner.at);
+  }
+  legs.forEach((l, k) => {
+    const next = joinsInOrder[k + 1];
+    pts.push(...trimmed(l.rev ? [...l.e.pts].reverse() : l.e.pts, headCut(l.into), tailCut(next)));
+    if (next.corner) pts.push(next.corner.at);
+  });
+  // last line, from the end the path came in by to b
+  {
+    const e = to.e;
+    const inS = goal.last.to.w === 0 ? 0 : e.len;
+    const cut = headCut(goal.last);
+    pts.push(
+      ...part(
+        e,
+        goal.last.to.w === 0 ? Math.min(to.s, inS + cut) : Math.max(to.s, inS - cut),
+        to.s,
+      ),
+    );
+  }
+  return { pts, lenMm: goal.len, joins: joinsInOrder.length };
+}
+
+/**
  * The closed walk round `seed` over the size's `own` lines and the `shared` stretches, inside
  * `box`. null = the size has no line there, or no closed path goes round the point.
  */
