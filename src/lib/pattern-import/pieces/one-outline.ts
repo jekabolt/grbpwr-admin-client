@@ -10,6 +10,15 @@
 // sides meet at an angle the vertex is the intersection of the two sides. Nothing is drawn across a
 // gap. A walk the size of a page is the tile frame, not a piece.
 //
+// Some sheets print that one outline once per size, every copy on the same place (Clark MDF271
+// «H - POCKET LINING»: 32 copies). The reader joins the copies end to end into one closed line
+// that goes round 32 times; a point inside it counts as outside and its length is 32 outlines.
+// Such a line is read as one lap, and copies of one line count once.
+//
+// The fill may have set the outline aside as a frame: a pocket bag with straight sides looks like
+// one once the fill leaks through it. Only the lines the operator excluded are kept out here; a
+// frame is told by what it holds — a page, or the label of another piece.
+//
 // It is applied only to a piece none of whose sizes closed, and gives every one of them the same
 // outline (`rankFrom: 'one-outline'`).
 import type {
@@ -21,7 +30,7 @@ import type {
   Sheet,
 } from 'lib/pattern-import/types';
 
-import { bboxOf, dist, pointInPoly, signedArea } from './geom';
+import { bboxOf, dist, pointInPoly, segNearest, signedArea } from './geom';
 
 export const ONE_OUTLINE = {
   /** Lines farther than this from the label are not the piece's, mm. */
@@ -38,6 +47,12 @@ export const ONE_OUTLINE = {
   minPerimeterMm: 150,
   /** A page-sized box within this of a page's own size is the tile frame, mm. */
   frameTolMm: 3,
+  /** A copy of a line lies within this of the line it repeats, mm. */
+  copyMm: 0.5,
+  /** The walk starts from this many lines nearest the label… */
+  nearStarts: 6,
+  /** …and from this many first lines met on each of the four straight ways out of the label. */
+  wayStarts: 3,
 };
 
 type Edge = { chain: number; pts: PtMm[]; len: number };
@@ -82,6 +97,29 @@ function trimmed(pts: PtMm[], head: number, tail: number): PtMm[] {
   return a;
 }
 
+/**
+ * One lap of a closed line that goes round the same path several times; `pts` (first point
+ * repeated at the end) when it goes round once or its further laps leave the first.
+ */
+export function oneLap(pts: PtMm[]): PtMm[] {
+  const tol = ONE_OUTLINE.copyMm;
+  const a = pts[0];
+  let acc = 0;
+  let lap: PtMm[] | null = null;
+  for (let k = 1; k < pts.length - 1 && !lap; k++) {
+    const near = segNearest(a, pts[k - 1], pts[k]);
+    if (near.d <= tol && acc + dist(pts[k - 1], near.q) > 20) lap = [...pts.slice(0, k), a];
+    acc += dist(pts[k], pts[k - 1]);
+  }
+  if (!lap) return pts;
+  const total = polyLen(pts);
+  const one = polyLen(lap);
+  const laps = Math.round(total / one);
+  if (laps < 2 || Math.abs(total - laps * one) > laps * tol * 4) return pts;
+  const onLap = (p: PtMm) => lap.some((q, i) => i > 0 && segNearest(p, lap[i - 1], q).d <= tol);
+  return pts.every(onLap) ? lap : pts;
+}
+
 export type OneOutline = { outer: PtMm[]; chains: number[] };
 
 /**
@@ -105,14 +143,24 @@ export function oneOutlineAt(
     p.x >= box.minX && p.x <= box.maxX && p.y >= box.minY && p.y <= box.maxY;
   // edges: the chains, each cut to its parts inside the reach
   const edges: Edge[] = [];
+  const copies = new Set<string>();
+  const g = (v: number) => Math.round(v / C.copyMm);
   for (const id of plain) {
     const ch = chains[id];
     if (!ch || ch.pts.length < 2) continue;
-    const pts = ch.closed ? [...ch.pts, ch.pts[0]] : ch.pts;
+    const pts = ch.closed ? oneLap([...ch.pts, ch.pts[0]]) : ch.pts;
     let cur: PtMm[] = [];
     const flush = () => {
-      if (cur.length >= 2 && polyLen(cur) >= 3)
-        edges.push({ chain: id, pts: cur, len: polyLen(cur) });
+      const len = cur.length >= 2 ? polyLen(cur) : 0;
+      if (len >= 3) {
+        // a copy of a line already taken: same ends, same middle, same length
+        const mid = cur[cur.length >> 1];
+        const z = cur[cur.length - 1];
+        const [p, q] = [`${g(cur[0].x)},${g(cur[0].y)}`, `${g(z.x)},${g(z.y)}`].sort();
+        const key = `${p} ${q} ${g(mid.x)},${g(mid.y)} ${g(len)}`;
+        if (!copies.has(key)) edges.push({ chain: id, pts: cur, len });
+        copies.add(key);
+      }
       cur = [];
     };
     for (const p of pts) {
@@ -175,12 +223,34 @@ export function oneOutlineAt(
     cache.set(o, top);
     return top;
   };
-  // closed walks from the lines nearest the label
+  // closed walks from the lines nearest the label, and from the first lines met going straight
+  // out of it: an outline round the label crosses each of the four ways
   const nearLabel = (e: Edge) => Math.min(...e.pts.map((p) => dist(p, at)));
-  const starts = edges
-    .filter((e) => e.len >= 20)
-    .sort((a, b) => nearLabel(a) - nearLabel(b))
-    .slice(0, 6);
+  const long = edges.filter((e) => e.len >= 20);
+  const startSet = new Set(
+    [...long].sort((a, b) => nearLabel(a) - nearLabel(b)).slice(0, C.nearStarts),
+  );
+  const ways: { e: Edge; d: number }[][] = [[], [], [], []];
+  for (const e of long) {
+    const hit = [Infinity, Infinity, Infinity, Infinity];
+    for (let k = 1; k < e.pts.length; k++) {
+      const [p, q] = [e.pts[k - 1], e.pts[k]];
+      if (p.y !== q.y && (p.y - at.y) * (q.y - at.y) <= 0) {
+        const dx = p.x + ((at.y - p.y) / (q.y - p.y)) * (q.x - p.x) - at.x;
+        const w = dx >= 0 ? 0 : 1;
+        hit[w] = Math.min(hit[w], Math.abs(dx));
+      }
+      if (p.x !== q.x && (p.x - at.x) * (q.x - at.x) <= 0) {
+        const dy = p.y + ((at.x - p.x) / (q.x - p.x)) * (q.y - p.y) - at.y;
+        const w = dy >= 0 ? 2 : 3;
+        hit[w] = Math.min(hit[w], Math.abs(dy));
+      }
+    }
+    hit.forEach((d, w) => d < Infinity && ways[w].push({ e, d }));
+  }
+  for (const way of ways)
+    for (const h of way.sort((a, b) => a.d - b.d).slice(0, C.wayStarts)) startSet.add(h.e);
+  const starts = [...startSet];
   let best: (OneOutline & { area: number }) | null = null;
   for (const start of starts) {
     const from = ends.find((o) => o.e === start && o.w === 1)!;
@@ -262,7 +332,7 @@ export function sizelessChains(set: ChainSet): number[] {
 
 /**
  * Pieces none of whose sizes closed: where one outline of size-less lines goes round the label,
- * every size of the piece gets it.
+ * every size of the piece gets it. `excluded`: the lines the operator took out.
  */
 export function applyOneOutline(
   sheet: Pick<Sheet, 'poses' | 'texts'>,
@@ -280,6 +350,8 @@ export function applyOneOutline(
     const found = oneOutlineAt(set.chains, plain, seed.at, sheet.poses);
     if (!found) continue;
     const outer = found.outer;
+    // an outline round two labels is a border round several pieces, not a piece
+    if (seeds.some((o) => o !== seed && o.origin === 'text' && pointInPoly(o.at, outer))) continue;
     const bbox = bboxOf(outer);
     const wallIds = new Set(found.chains);
     const inside = set.chains

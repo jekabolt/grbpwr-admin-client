@@ -1947,7 +1947,8 @@ function fillOneSheet(
     restoreSourceLoops(sheet, set, run, use, cands, excl, alongShare);
     applyPrintedCuts(sheet, set, run, use, cands, excl, userExcl);
     // a piece drawn once for every size: no size closed, one size-less outline goes round its label
-    applyOneOutline(sheet, set, use, cands, excl);
+    // the frames the fill dropped stay open to it: a straight-sided pocket bag is dropped as one
+    applyOneOutline(sheet, set, use, cands, userExcl);
   }
   // LADDER_RESCUE: a cell closed on a rescued ladder rung and off its family's trend is filled again
   // without the rung — after every closing pass (the state the dry run judged), before the leak
