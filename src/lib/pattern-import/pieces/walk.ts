@@ -79,6 +79,11 @@ export const WALK = {
    *  of this size: a side stretched 30 mm to its corner across other sizes' lines is no repair
    *  (Leah G size 30). */
   leakPrinted: 0.7,
+  /** A jog: two turns sharper than this, of opposite sense, no farther apart than the step,
+   *  with runs this long before and after. */
+  jogTurnRad: Math.PI / 6,
+  jogStepMm: 8,
+  jogLegMm: 10,
   /** By the neighbouring sizes: this share of the taken outline's parting stretch is between
    *  them or on an edge both share, and this share of the other's is not. */
   nestToWin: 0.9,
@@ -752,6 +757,52 @@ export function farLineMm(L: WalkLines, rank: number, outer: readonly PtMm[]): n
 }
 
 /**
+ * The jogs of an outline: a short step sideways — two sharp turns of opposite sense a few
+ * millimetres apart, with a long run before and after. The outline leaves one printed line for
+ * the next and goes on beside it: the fill's jump onto another stroke, at the scale of 1–3 mm.
+ * No cut has one (the owner, 26 Nov, on 16 of them: "there must be no step"). Found by the shape
+ * of the outline alone — the reader's sizes are not asked.
+ */
+export function jogsOf(outer: readonly PtMm[]): { at: PtMm; stepMm: number }[] {
+  const C = WALK;
+  const s = simplify([...outer, outer[0]], 0.3).slice(0, -1);
+  const n = s.length;
+  if (n < 5) return [];
+  const turn: number[] = [];
+  const leg: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const a = s[(i - 1 + n) % n];
+    const b = s[i];
+    const c = s[(i + 1) % n];
+    let d = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(b.y - a.y, b.x - a.x);
+    while (d > Math.PI) d -= 2 * Math.PI;
+    while (d <= -Math.PI) d += 2 * Math.PI;
+    turn.push(d);
+    leg.push(dist(b, c));
+  }
+  const out: { at: PtMm; stepMm: number }[] = [];
+  for (let i = 0; i < n; i++) {
+    if (Math.abs(turn[i]) < C.jogTurnRad || leg[(i - 1 + n) % n] < C.jogLegMm) continue;
+    let acc = 0;
+    for (let k = 1; k < n; k++) {
+      const j = (i + k) % n;
+      acc += leg[(j - 1 + n) % n];
+      if (acc > C.jogStepMm) break;
+      if (Math.abs(turn[j]) < C.jogTurnRad) continue;
+      // the opposite sense, back to about the direction it came in, and a long run after
+      if (
+        Math.sign(turn[j]) !== Math.sign(turn[i]) &&
+        Math.abs(turn[i] + turn[j]) < Math.PI / 6 &&
+        leg[j] >= C.jogLegMm
+      )
+        out.push({ at: s[i], stepMm: acc });
+      break;
+    }
+  }
+  return out;
+}
+
+/**
  * How an outline sits against the closed outlines of the sizes next to it, where it parts from
  * the other outline (the stretch of `a` farther than `WALK.differMm` from `b`):
  * - between: outside the smaller size and inside the larger — where a size's own line is;
@@ -917,14 +968,25 @@ export function walkChecks(
         farLineMm(L, c.rank, c.outer) >= WALK.farLineMm &&
         farLineMm(L, c.rank, w.outer) < WALK.farLineMm &&
         who.ownAloneMm / parted >= WALK.leakPrinted;
+      // …and its small form: the fill's outline steps from one line onto the next, the walk's
+      // runs on without a step, on this size's line (12 on the reference set, none the owner
+      // called wrong; where the walk has a jog of its own neither outline is taken)
+      const jog =
+        jogsOf(c.outer).length > 0 &&
+        !jogsOf(w.outer).length &&
+        who.ownAloneMm / parted >= WALK.leakPrinted;
       c.walk = {
         outer: w.outer,
         ownShare: per ? w.ownMm / per : 0,
         maxMm: d.maxMm,
         overMm: d.overMm,
         at: d.at,
-        ...(leak
-          ? { verdict: 'walk' as const, leak: true as const }
+        ...(leak || jog
+          ? {
+              verdict: 'walk' as const,
+              ...(leak ? { leak: true as const } : {}),
+              ...(jog ? { jog: true as const } : {}),
+            }
           : verdict
             ? { verdict: verdict.take }
             : {}),
@@ -1012,17 +1074,18 @@ export function applyOutlineChoices<F extends { seed: number; candidates: PieceC
 
 /**
  * The repairs the program makes itself: a closed size whose fill outline leaked onto the line of
- * a distant size takes the walk's outline (`walk.leak`). New candidates are returned; the fill's
+ * a distant size (`walk.leak`) or steps from one line onto the next (`walk.jog`) takes the walk's
+ * outline. New candidates are returned; the fill's
  * outline stays on the candidate as `walk.fillOuter`.
  */
 export function applyLeakRepairs<F extends { seed: number; candidates: PieceCandidate[] }>(
   families: F[],
 ): F[] {
-  if (!families.some((f) => f.candidates.some((c) => c.walk?.leak))) return families;
+  if (!families.some((f) => f.candidates.some((c) => c.walk?.leak || c.walk?.jog))) return families;
   return families.map((f) => ({
     ...f,
     candidates: f.candidates.map((c) =>
-      c.walk?.leak && !c.walk.answer
+      (c.walk?.leak || c.walk?.jog) && !c.walk.answer
         ? {
             ...c,
             outer: c.walk.outer,

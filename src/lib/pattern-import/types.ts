@@ -1276,6 +1276,8 @@ export type PieceCandidate = {
      * walk's outline itself (`applyLeakRepairs`, `auto`); `fillOuter` keeps the fill's.
      */
     leak?: true;
+    /** The fill's outline has a jog (`jogsOf`) and the walk's has none: repaired the same way. */
+    jog?: true;
     auto?: true;
     /**
      * The fill left this size OPEN and the walk closes it on printed lines and built corners:

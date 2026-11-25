@@ -325,4 +325,33 @@ describe('a fill that leaked across the nest', () => {
     expect(family.candidates[1].walk?.leak).toBeUndefined();
     expect(applyLeakRepairs([family])[0].candidates[1].outer).toEqual(outline(1, 2));
   });
+
+  it("repairs an outline that steps onto the next size's line for a stretch", () => {
+    // sizes 5 mm apart; the fill of size 1 runs along its own bottom side and, for 60 mm in the
+    // middle, steps down onto size 2's
+    const fine = sheet(5, (r) => sides(100, 100, 120 + 5 * r, 80 + 5 * r, 1));
+    const own = (r: number): PtMm[] => [
+      P(100, 100),
+      P(220 + 5 * r, 100),
+      P(220 + 5 * r, 180 + 5 * r),
+      P(100, 180 + 5 * r),
+    ];
+    const stepped: PtMm[] = [
+      P(100, 100),
+      P(225, 100),
+      P(225, 185),
+      P(190, 185),
+      P(188, 190),
+      P(130, 190),
+      P(128, 185),
+      P(100, 185),
+    ];
+    const c = (r: number, outer = own(r)) =>
+      ({ seed: 0, rank: r, outer, outcome: 'closed' }) as PieceCandidate;
+    const family = { seed: 0, candidates: [c(0), c(1, stepped), c(2), c(3), c(4)] };
+    walkChecks(fine.set, fine.run, seeds, [family]);
+    expect(family.candidates[1].walk).toMatchObject({ jog: true, verdict: 'walk' });
+    const [fixed] = applyLeakRepairs([family]);
+    expect(area(fixed.candidates[1].outer)).toBeCloseTo(125 * 85, 0);
+  });
 });

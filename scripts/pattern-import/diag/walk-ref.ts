@@ -16,6 +16,7 @@ import { bboxOf } from 'lib/pattern-import/pieces/geom';
 import {
   differs,
   farLineMm,
+  jogsOf,
   outlineVerdict,
   sharedStretches,
   WALK,
@@ -114,6 +115,13 @@ const tally = () => ({
   badFarTakesWalk: 0,
   badFarNoWalk: 0,
   badFarSameWalk: 0,
+  // a jog in the outline; the walk has none, differs, and runs on this size's line there
+  okJog: 0,
+  okJogTakesWalk: 0,
+  okJogNoWalk: 0,
+  badJog: 0,
+  badJogTakesWalk: 0,
+  badJogNoWalk: 0,
 });
 const bySet = new Map<string, ReturnType<typeof tally>>();
 const t0 = Date.now();
@@ -155,6 +163,8 @@ for (const [dir, list] of jobs) {
     console.log(`== ${p.id} [${p.set}] (${p.label})`);
     for (const z of sizes) {
       t[z.ok ? 'ok' : 'bad']++;
+      const jog0 = jogsOf(z.pts).length > 0;
+      if (jog0) t[z.ok ? 'okJog' : 'badJog']++;
       const far0 = L.lines.length ? farLineMm(L, z.rank, z.pts) >= WALK.farLineMm : false;
       if (far0) t[z.ok ? 'okFar' : 'badFar']++;
       const own = L.bySize.get(z.rank);
@@ -165,6 +175,7 @@ for (const [dir, list] of jobs) {
       if (!w) {
         t[z.ok ? 'okNoWalk' : 'badNoWalk']++;
         if (far0 && !z.ok) t.badFarNoWalk++;
+        if (jog0) t[z.ok ? 'okJogNoWalk' : 'badJogNoWalk']++;
         continue;
       }
       const mx = Math.max(far(w.outer, z.pts), far(z.pts, w.outer));
@@ -181,6 +192,13 @@ for (const [dir, list] of jobs) {
         farLineMm(L, z.rank, w.outer) < WALK.farLineMm &&
         printed >= WALK.leakPrinted;
       if (farTakes) t[z.ok ? 'okFarTakesWalk' : 'badFarTakesWalk']++;
+      const jogTakes = jog0 && !!two && !jogsOf(w.outer).length && printed >= WALK.leakPrinted;
+      if (jogTakes) {
+        t[z.ok ? 'okJogTakesWalk' : 'badJogTakesWalk']++;
+        console.log(
+          `${z.size.padEnd(5)} ${z.ok ? 'ok ' : 'bad'} · a jog, the walk has none · ${two!.maxMm.toFixed(1)} mm over ${Math.round(two!.overMm)} mm   (jog)`,
+        );
+      }
       if (far0 && !two && !z.ok) t.badFarSameWalk++;
       if (farTakes)
         console.log(
