@@ -86,7 +86,8 @@ When none of a piece's sizes closed and one closed walk of size-less lines goes 
 every size gets that outline (`pieces/one-outline.ts`, called after `applyPrintedCuts` in
 `pieces/fill.ts`, `rankFrom: 'one-outline'`). A page-sized walk is the tile frame.
 Venice J POCKETS: 18 cells closed. Clark, Spokane, Alassio, Valentina and Leah are unchanged.
-Clark H POCKET LINING and I POCKET WELT (branch `open-lines-lapped`, 25 Nov): 92 → 124 of 128
+Clark H POCKET LINING and I POCKET WELT (branch `open-lines-lapped`, merged 25 Nov on the owner's
+word, who saw both outlines): 92 → 124 of 128
 closed. The sheet prints the outline once per size on the same place; the reader joined the 32
 copies into one closed line that goes round 32 times (`oneLap`), and the fill had dropped that
 line as a frame, so the pass now keeps out only the lines the operator excluded and refuses an
