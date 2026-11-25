@@ -40,11 +40,14 @@ export function RegionCrop({
   leakAt,
   bridges,
   marks,
+  rival,
   className,
   style,
 }: {
   box: BoxMm;
   outer: readonly PtMm[];
+  /** The other outline of the same size, drawn thin and dashed so the difference is seen. */
+  rival?: readonly PtMm[];
   previews: readonly Float32Array[];
   stroke: string;
   leakAt?: PtMm | null;
@@ -78,6 +81,15 @@ export function RegionCrop({
             fillOpacity={0.12}
             stroke={stroke}
             strokeWidth={unit * 1.6}
+          />
+        )}
+        {rival && rival.length > 2 && (
+          <polygon
+            points={ptsAttr(rival as PtMm[])}
+            fill='none'
+            stroke={SHEET_INK.red}
+            strokeWidth={unit * 0.9}
+            strokeDasharray={`${unit * 3} ${unit * 2}`}
           />
         )}
         {bridges?.map(({ from, to }, i) => (

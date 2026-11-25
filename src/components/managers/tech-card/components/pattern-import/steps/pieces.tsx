@@ -1209,7 +1209,8 @@ export function PiecesStep({
     const c = asked.find((x) => x.walk?.open) ?? asked[0];
     if (!f || !c?.walk) return null;
     const { at } = c.walk;
-    const r = Math.max(30, Math.min(120, c.walk.overMm));
+    // close enough to see the difference: a 1.4 mm difference in a 130 mm window looks like none
+    const r = Math.max(12, Math.min(60, c.walk.maxMm * 5));
     return {
       f,
       c,
@@ -3345,6 +3346,13 @@ export function PiecesStep({
                           <RegionCrop
                             box={outlineNow.box}
                             outer={take === 'fill' ? outlineNow.c.outer : outlineNow.walk.outer}
+                            rival={
+                              outlineNow.walk.open
+                                ? undefined
+                                : take === 'fill'
+                                  ? outlineNow.walk.outer
+                                  : outlineNow.c.outer
+                            }
                             previews={previews}
                             stroke={take === 'fill' ? SHEET_INK.ink : SHEET_INK.blue}
                             className='w-full border border-hairline bg-bgColor'
@@ -3401,7 +3409,7 @@ export function PiecesStep({
                   <Text size='micro' variant='label' component='p'>
                     {outlineNow.walk.open
                       ? `found on printed lines only · ${Math.round(100 * outlineNow.walk.ownShare)}% on this size’s own line`
-                      : `they are ${outlineNow.walk.maxMm.toFixed(1)} mm apart over ${Math.round(outlineNow.walk.overMm)} mm`}
+                      : `they are ${outlineNow.walk.maxMm.toFixed(1)} mm apart over ${Math.round(outlineNow.walk.overMm)} mm · the thin red line is the other outline`}
                     {outlineNow.left > 1
                       ? ` · ${outlineNow.left} sizes of this piece to answer`
                       : ''}
