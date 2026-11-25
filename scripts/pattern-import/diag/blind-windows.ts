@@ -61,13 +61,17 @@ for (const root of ['.runs/snap-set40', '.runs/snap-holdout40']) {
       label: string | null;
       cells: { size: string; outcome: string; outer?: [number, number][] }[];
     }[] = JSON.parse(readFileSync(`${dir}/cells.json`, 'utf8'));
+    // every stroke that passes within the window, whether or not it has a vertex there: a long
+    // straight line has none, and leaving it out shows the outline over blank paper
     const near = (at: PtMm) =>
       snap.fields.sheet.paths
-        .filter(
-          (p) =>
-            p.pts.length &&
-            p.pts.some((q) => Math.abs(q.x - at.x) < 16 && Math.abs(q.y - at.y) < 16),
-        )
+        .filter((p) => {
+          const q = p.pts;
+          if (q.length === 1) return Math.abs(q[0].x - at.x) < 16 && Math.abs(q[0].y - at.y) < 16;
+          for (let i = 0; i + 1 < q.length; i++)
+            if (segNearest(at, q[i], q[i + 1]).d < 16) return true;
+          return false;
+        })
         .map((p) => p.pts);
     for (const fam of cells)
       for (const c of fam.cells) {
