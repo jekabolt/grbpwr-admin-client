@@ -152,17 +152,21 @@ Kalla D, F: 82 verified sizes). State on 25 Nov, after two changes in `diag/walk
   minutes: a hundred dashes with a gap after each is not a job for the walk's search. It is a
   job for the reader (the pen of size 26 is not recognised as a size) or for stage 5B.
 
-Choosing between the two outlines without the operator (owner, 25 Nov: "why does the operator
-answer questions you know the answer to"). Only on the stretch where they part. A line is the
-size's own (its chain, or a line its neighbours share within 0.5 mm), nobody's (`norow`, `ignore`,
-`common`) or another size's. The rule decides only own against another size's, and drops an
-outline that turns onto a line inside the piece (a dart, a notch, a pocket); anything else stays a
-question. It goes in as a mark first ("would pick walk / fill"), with no replacement and no
-question, and is switched on only when `reference-check.ts`, with the choice applied before it
-collects the outlines, gives 0 MOVED/LOST on all 50 pieces (`tune` and `confirm`) and fewer
-RETURNED than without it. Count silent choices and questions apart. Never leave both outlines as
-closed candidates: the check takes the nearer and hides the error. A wrong silent choice goes to
-the DXF unseen; a needless question costs one click.
+Choosing between the two outlines without the operator: tried 25 Nov on all 50 reference pieces
+(d8, branch `open-lines-walk`), not switched on. The walk alone: 328 of 548 ok sizes within 1 mm,
+102 at 1–3 mm, 40 farther, 78 with no walk; weaker than the fill as a source of the outline. By
+whose line the reader says it is (own / nobody's / another size's): 1 of 4 decided on six pieces,
+wrongly (Leah F 20: the reader gave the size a neighbour's end line). By the closed neighbours
+(`outlineVerdict`): of 39 ok sizes with two outlines, 3 wrong replacements, 24 undecided; of 18
+bad, 3 mended; with stricter shares 1 wrong, 0 mended. It stays a mark in the data
+(`walk.verdict`); the "two outlines" question goes. On 22 of 52 bad sizes the walk over the size's
+own lines gives the same bad outline: the error is which line the reader gave to which size, above
+both the fill and the walk. Corners are not the cause (`diag/corner-walls-ref.ts`: where an ok
+outline follows both sides of a corner, the wall matches it within 1 mm on 359 of 363).
+Next: a map of the reader's owner under every side of the reference outlines, ok and bad (d8).
+A wrong silent choice goes to the DXF unseen; a needless question costs one click: any later
+silent choice needs 0 MOVED/LOST on all 50 pieces with the choice applied before
+`reference-check.ts` collects the outlines.
 
 ### 4. The walk closes what the fill leaves open — open
 
