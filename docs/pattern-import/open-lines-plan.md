@@ -116,7 +116,25 @@ has the bench changes), find the rule, then let the rows into the fill.
 Accepted when no cell opens, no cell's share of outline on its own line falls
 (`diag/own-share.mjs`), and no verified outline moves.
 
-### 3. The walk as a check beside the fill — open
+### 3. The walk as a check beside the fill — in the product on branch `open-lines-walk`, the owner has not seen the screen
+
+`pieces/walk.ts` (25 Nov, the owner: "port it now"): the walk of `diag/walk-carry.mjs` without the
+carried stretches — it draws nothing. After the fill every closed size is walked
+(`walkChecks`, called in `worker/session.ts`); where the two outlines are more than 1 mm apart
+over 12 mm or more and the walk's area sits between the closed neighbour sizes', the candidate
+carries the walk's outline (`PieceCandidate.walk`). The fill's outline is not changed. The
+operator's answer is the piece edit `outline` (`applyOutlineChoices`).
+On the pieces step it is an optional question, one row per piece, its sizes one after another:
+two pictures of the place where the outlines part, a button under each.
+
+- Against the reference (`diag/walk-ref.ts`): Kalla D, F 22 of 26 within 1 mm, 4 with no walk;
+  Leah C, D, F, G 38 of 56, 6 with no walk; 4 of the 82 verified sizes would be shown.
+- What it shows (`diag/walk-check-viz.ts`, pieces bench field `walk`): Leah 15 of 110 closed
+  sizes, Kalla 32 of 267. On Kalla these are real: E TOP FRONT closed by the fill on an inner
+  vertical, P SKIRT WAISTBAND closed on half the rectangle. The check takes 16 s on Kalla.
+- Not done: no run in a browser; the other 73 files; one answer for several sizes of a piece;
+  the rows of marks as a fallback (they need the second read at the pieces step).
+
 
 Walk a size's own lines, the common lines and the stretches where four or more sizes coincide;
 build each corner as the intersection of its two sides; draw nothing. Port

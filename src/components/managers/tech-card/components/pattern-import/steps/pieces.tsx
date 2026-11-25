@@ -257,6 +257,12 @@ type Problem =
   /** Several regions where pieces touch, all with the same likely answer: one question for all. */
   | { key: 'touch'; kind: 'touch'; groups: TouchGroup[] }
   | { key: 'sheet'; kind: 'sheet' }
+  /**
+   * Optional: a closed size of this piece has two outlines — the fill's and the walk's
+   * (`PieceCandidate.walk`). The operator picks one; nothing is drawn. One row per piece, its
+   * sizes asked one after another.
+   */
+  | { key: string; kind: 'outline'; seed: number; ranks: number[] }
   /** Optional, after the required ones: were the outlines left out on a guess left out right? */
   | { key: 'aside'; kind: 'aside' };
 
@@ -1159,16 +1165,36 @@ export function PiecesStep({
       ];
     }),
     ...(sheetQ ? [{ key: 'sheet', kind: 'sheet' } as const] : []),
+    ...families.flatMap((f): Problem[] => {
+      const ranks = f.candidates.filter((c) => c.walk && !c.walk.answer).map((c) => c.rank);
+      return ranks.length ? [{ key: `o${f.seed}`, kind: 'outline', seed: f.seed, ranks }] : [];
+    }),
     ...((weakList.length || seen.promoted.size) && !seen.asideOk
       ? [{ key: 'aside', kind: 'aside' } as const]
       : []),
   ];
-  /** The questions that must be answered (the set-aside check is optional). */
-  const required = openProblems.filter((p) => p.kind !== 'aside');
+  /** The questions that must be answered (the set-aside check and the two outlines are optional). */
+  const required = openProblems.filter((p) => p.kind !== 'aside' && p.kind !== 'outline');
   /** The question the operator picked (a checklist row, a region on the sheet); else the first. */
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const active = openProblems.find((p) => p.key === activeKey) ?? openProblems[0] ?? null;
   const cardNow = active?.kind === 'aside' ? cardsLeft[0] ?? null : null;
+  /** The size the two-outlines question shows now: the piece's first one not yet answered. */
+  const outlineNow = (() => {
+    if (active?.kind !== 'outline') return null;
+    const f = families.find((x) => x.seed === active.seed);
+    const c = f?.candidates.find((x) => x.walk && !x.walk.answer);
+    if (!f || !c?.walk) return null;
+    const { at } = c.walk;
+    const r = Math.max(30, Math.min(120, c.walk.overMm));
+    return {
+      f,
+      c,
+      walk: c.walk,
+      left: active.ranks.length,
+      box: { minX: at.x - r, minY: at.y - r, maxX: at.x + r, maxY: at.y + r },
+    };
+  })();
   const quizNow = cardNow?.kind === 'one' ? cardNow.it : null;
   const groupNow = cardNow?.kind === 'group' ? cardNow : null;
   const quizJoins = quizNow && canJoin(quizNow) ? joinsOf(quizNow).slice(0, 2) : [];
@@ -1579,6 +1605,12 @@ export function PiecesStep({
       });
     } else if (p.kind === 'sheet')
       seen.rows.set(p.key, { order: 1e6, label: 'pieces across sheets' });
+    else if (p.kind === 'outline')
+      seen.rows.set(p.key, {
+        order: 1.5e6 + (markOf.get(p.seed) ?? 0),
+        label: 'two outlines · optional',
+        seed: p.seed,
+      });
     else if (p.kind === 'aside')
       seen.rows.set(p.key, { order: 2e6, label: 'outlines left out · optional' });
   }
@@ -1963,6 +1995,7 @@ export function PiecesStep({
       }));
     }
     if (active?.kind === 'aside') return []; // the one-outline quiz has its own answers
+    if (active?.kind === 'outline') return []; // its two pictures are the answers
     if (active?.kind === 'sheet' && sheetQ) {
       return (
         sheetQ.kind === 'alternative'
@@ -2078,15 +2111,19 @@ export function PiecesStep({
           ? 'which garment is this card?'
           : active.kind === 'aside'
             ? asideQ
-            : active.kind === 'sheet'
-              ? sheetQ?.text ?? 'how do these sheets relate?'
-              : activeCand?.outcome === 'leak'
-                ? `${gapLabel} · size ${labelOf(activeCand.rank)} · ${gapOptions.length ? 'which outline follows the cut?' : 'open outline'}`
-                : activeCand?.outcome === 'merged'
-                  ? 'one piece or two parts?'
-                  : activeCand?.outcome === 'tiny'
-                    ? 'is this a piece?'
-                    : 'sizes unclear — try elsewhere?';
+            : active.kind === 'outline'
+              ? outlineNow
+                ? `${nameOf(active.seed)} · size ${labelOf(outlineNow.c.rank)} · two outlines: which follows the cut?`
+                : 'two outlines: which follows the cut?'
+              : active.kind === 'sheet'
+                ? sheetQ?.text ?? 'how do these sheets relate?'
+                : activeCand?.outcome === 'leak'
+                  ? `${gapLabel} · size ${labelOf(activeCand.rank)} · ${gapOptions.length ? 'which outline follows the cut?' : 'open outline'}`
+                  : activeCand?.outcome === 'merged'
+                    ? 'one piece or two parts?'
+                    : activeCand?.outcome === 'tiny'
+                      ? 'is this a piece?'
+                      : 'sizes unclear — try elsewhere?';
   const qIndex = active ? checklist.findIndex(([k]) => k === active.key) : -1;
   /** A quiet «2 of 4» beside the question, only when there are several. */
   const counter = listed && qIndex >= 0 ? `${qIndex + 1} of ${checklist.length}` : null;
@@ -2357,6 +2394,7 @@ export function PiecesStep({
     region: 'pieces-region',
     touch: 'pieces-touch',
     sheet: 'pieces-sheet',
+    outline: 'pieces-outline',
     aside: 'pieces-aside',
   };
   /** The quiet line of the last answer that covered several edits (or was given for you). */
@@ -2842,6 +2880,23 @@ export function PiecesStep({
                       ))}
                     </g>
                   )}
+                  {outlineNow && (
+                    <g pointerEvents='none' fill='none' data-outline-rival>
+                      <polygon
+                        points={ptsAttr(outlineNow.walk.outer)}
+                        stroke={SHEET_INK.blue}
+                        strokeWidth={unit * 2}
+                        strokeDasharray={`${unit * 6} ${unit * 4}`}
+                      />
+                      <circle
+                        cx={outlineNow.walk.at.x}
+                        cy={vy(outlineNow.walk.at.y)}
+                        r={unit * 12}
+                        stroke={SHEET_INK.red}
+                        strokeWidth={unit * 1.6}
+                      />
+                    </g>
+                  )}
                   {families.map((f) => {
                     const c = cand(f);
                     if (!c.leakAt) return null;
@@ -3247,6 +3302,55 @@ export function PiecesStep({
                   className='w-full border border-hairline bg-bgColor'
                   style={{ height: 160 }}
                 />
+              )}
+              {/* two outlines of one size: each picture IS an answer; nothing is drawn by hand */}
+              {active.kind === 'outline' && outlineNow && (
+                <div
+                  className='flex flex-col gap-2'
+                  data-outline-quiz
+                  data-outline-left={outlineNow.left}
+                >
+                  <div className='grid grid-cols-2 gap-2'>
+                    {(['fill', 'walk'] as const).map((take, i) => (
+                      <div key={take} className='flex flex-col gap-2'>
+                        <RegionCrop
+                          box={outlineNow.box}
+                          outer={take === 'fill' ? outlineNow.c.outer : outlineNow.walk.outer}
+                          previews={previews}
+                          stroke={take === 'fill' ? SHEET_INK.ink : SHEET_INK.blue}
+                          className='w-full border border-hairline bg-bgColor'
+                          style={{ height: 160 }}
+                        />
+                        <Button
+                          {...ask(ASK_KEY.outline, i === 0)}
+                          data-ask-hint={
+                            i === 0 ? 'pick the outline that follows the cut' : undefined
+                          }
+                          data-outline-take={take}
+                          variant='secondary'
+                          size='sm'
+                          disabled={!!session.busy}
+                          onClick={() =>
+                            void api.editPieces({
+                              kind: 'outline',
+                              seed: outlineNow.f.seed,
+                              rank: outlineNow.c.rank,
+                              take,
+                            })
+                          }
+                        >
+                          {take === 'fill' ? 'this one' : 'this one · own line'}
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                  <Text size='micro' variant='label' component='p'>
+                    {`they are ${outlineNow.walk.maxMm.toFixed(1)} mm apart over ${Math.round(outlineNow.walk.overMm)} mm`}
+                    {outlineNow.left > 1
+                      ? ` · ${outlineNow.left} sizes of this piece to answer`
+                      : ''}
+                  </Text>
+                </div>
               )}
               {/* a garment: its picture IS the answer (hover lights its pieces on the sheet) */}
               {active.kind === 'model' && (
