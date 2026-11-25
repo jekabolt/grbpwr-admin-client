@@ -5,9 +5,17 @@ Approved by the owner on 24 Nov 2026. The findings it rests on are in
 
 ## Goal
 
-To reach a DXF the lines must be drawn right: closed, and drawn in where they are missing, with the
-operator called as rarely as possible. A count of closed cells alone is not progress. Judge by
-outlines that are right on the owner's reference set and by files that get through.
+Draw every size's outline on its own printed lines: no jump onto another size's stroke, corners
+built where the two sides meet, missing lines drawn in from evidence. The graph walk is the main
+means; the fill stays where a feature of the piece says it is the better tool. A count of closed
+cells alone is not progress. Judge by outlines that are right on the owner's reference set, by the
+share of each outline on its own line, and by files that get through.
+
+The operator is called on disputed cases only and chooses between finished variants; the operator
+does not draw. The manual "close the gap" (the `bridge` tool on the pieces step) and the automatic
+gap close are to be retired once the walk closes gaps inside line drawing (stages 3–5) and the
+variant choice covers what is left. The first definition of a disputed case and the retirement
+order are in `src/lib/pattern-import/CLAUDE.md` (owner, 25 Nov).
 
 ## Rules
 
@@ -76,7 +84,8 @@ Open: Clark H POCKET LINING and I POCKET WELT (32 cells) look drawn once too and
   the owner's decision; every acceptance number of this plan depends on it.
 - The switches `PDF_LAYERS_OFF` and `SNAPSHOT_STAGE` (read a layered PDF with its layers hidden,
   snapshot at the sizes step) exist only in the `reference-set` worktree, uncommitted.
-- Replace the stale "Where it stands" section of `src/lib/pattern-import/CLAUDE.md` (dated 18 Nov).
+- Done 25 Nov: the stale "Where it stands" section of `src/lib/pattern-import/CLAUDE.md` is replaced,
+  and the docs written before this plan are deleted.
 - Re-capture the 75 files with snapshots once the rows are in. Every corpus number so far is a
   lower bound, because the saved snapshots were taken without them.
 
