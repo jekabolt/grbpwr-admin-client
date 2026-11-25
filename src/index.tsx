@@ -243,6 +243,14 @@ const FileNote = lazyRoute(() => import('components/managers/files/note/note-pag
 const Tasks = lazyRoute(() =>
   import('components/managers/tasks').then((m) => ({ default: m.Tasks })),
 );
+const Whiteboards = lazyRoute(() =>
+  import('components/managers/whiteboards/page').then((m) => ({ default: m.Whiteboards })),
+);
+const WhiteboardEditor = lazyRoute(() =>
+  import('components/managers/whiteboards/whiteboard/page').then((m) => ({
+    default: m.WhiteboardEditor,
+  })),
+);
 const Opex = lazyRoute(() =>
   import('components/managers/opex/page').then((m) => ({ default: m.OpexPage })),
 );
@@ -540,6 +548,7 @@ const app = (
                   <Route path={ROUTES.productionRun} element={<ProductionRunDetail />} />
                   <Route path={ROUTES.productionRuns} element={<ProductionRuns />} />
                   <Route path={ROUTES.tasks} element={<Tasks />} />
+                  <Route path={ROUTES.whiteboards} element={<Whiteboards />} />
                   {/* Один компонент на оба адреса: /files/:id — это тот же экран с открытой
                       карточкой поверх сетки, а не отдельная страница. */}
                   <Route path={ROUTES.files} element={<FilesLibrary />} />
@@ -607,6 +616,9 @@ const app = (
                     no app chrome to isolate via fragile print CSS. */}
                 <Route path='/' element={<ProtectedBare />}>
                   <Route path={ROUTES.welcome} element={<Welcome />} />
+                  {/* The canvas fills the window: the Layout's padding and header would steal from it
+                      and scroll with it, so the editor is a bare route with its own top strip. */}
+                  <Route path={ROUTES.whiteboard} element={<WhiteboardEditor />} />
                   <Route path={ROUTES.techCardPrint} element={<TechCardPrint />} />
                   <Route path={ROUTES.techCardMarkerViewer} element={<TechCardMarkerViewer />} />
                   {/* Схема сборки на одном листе (420 / 841 мм): лист сам объявляет @page,
