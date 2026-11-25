@@ -69,13 +69,18 @@ dimensions", "Your waist circumference x 2") seeds no piece; it is a set-aside w
 40 open become 72 with 4. One line of wording was added on the pieces step.
 Open: how the tech card should show a piece given as a formula is the owner's decision.
 
-### 2B. A piece drawn once gets one outline — done, one case open
+### 2B. A piece drawn once gets one outline — done
 
 When none of a piece's sizes closed and one closed walk of size-less lines goes round its label,
 every size gets that outline (`pieces/one-outline.ts`, called after `applyPrintedCuts` in
 `pieces/fill.ts`, `rankFrom: 'one-outline'`). A page-sized walk is the tile frame.
 Venice J POCKETS: 18 cells closed. Clark, Spokane, Alassio, Valentina and Leah are unchanged.
-Open: Clark H POCKET LINING and I POCKET WELT (32 cells) look drawn once too and do not close.
+Clark H POCKET LINING and I POCKET WELT (branch `open-lines-lapped`, 25 Nov): 92 → 124 of 128
+closed. The sheet prints the outline once per size on the same place; the reader joined the 32
+copies into one closed line that goes round 32 times (`oneLap`), and the fill had dropped that
+line as a frame, so the pass now keeps out only the lines the operator excluded and refuses an
+outline that holds another piece's label. Venice J keeps the same outline; Selenite is unchanged.
+No other file of the 75 has a piece with no closed size.
 
 ### Housekeeping — open
 
