@@ -63,7 +63,7 @@ const polyLen = (pts: readonly PtMm[]) =>
   pts.reduce((a, p, i) => (i ? a + dist(p, pts[i - 1]) : 0), 0);
 
 /** The point `mm` back along the edge from its end `w`. */
-function backPt(pts: readonly PtMm[], w: 0 | 1, mm: number): PtMm {
+export function backPt(pts: readonly PtMm[], w: 0 | 1, mm: number): PtMm {
   const p = w ? [...pts].reverse() : pts;
   let acc = 0;
   for (let k = 1; k < p.length; k++) {
@@ -74,7 +74,7 @@ function backPt(pts: readonly PtMm[], w: 0 | 1, mm: number): PtMm {
 }
 
 /** `pts` without `head` mm at its start and `tail` mm at its end. */
-function trimmed(pts: PtMm[], head: number, tail: number): PtMm[] {
+export function trimmed(pts: PtMm[], head: number, tail: number): PtMm[] {
   const cut = (arr: PtMm[], mm: number): PtMm[] => {
     let acc = 0;
     for (let k = 1; k < arr.length; k++) {

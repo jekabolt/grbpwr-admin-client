@@ -162,6 +162,7 @@ import { byMeasureSeeds, codeTextSeeds } from '../pieces/seeds';
 import { recoverAutomaticGaps } from '../pieces/automatic-gap';
 import { finalizePieces } from '../pieces/finalize';
 import { sheetModule, undrawnRanks } from '../pieces/walls';
+import { walkChecks } from '../pieces/walk';
 import { sheetCoverOf, sheetLegend, sheetPieces } from '../pieces/sheets';
 import { tileSheetIds } from '../assemble';
 import { chainView, joinSheetChains, partAt, sheetView } from '../assemble/composite';
@@ -1685,6 +1686,9 @@ export class Session {
         return !c || modelKey(c.label) === v;
       });
     }
+    // the walk as a check beside the fill: where the two outlines of a closed size differ, the
+    // candidate carries the walk's for the operator to choose (pieces/walk.ts)
+    walkChecks(set, run, seeds, families);
     this.pieceVariant = opts.variant ?? null;
     // the claim reaches the wizard as the seed's model (the garment it belongs to), marked as
     // the claim's so a seed passed back is read afresh

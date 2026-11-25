@@ -1249,6 +1249,12 @@ export type PieceCandidate = {
    * the source draws that join this rank's own dangling ends (see `continuity`). Absent on DXF
    * fast-path candidates.
    */
+  /**
+   * The walk's outline of this size (`pieces/walk.ts`), set only where it differs from `outer` by
+   * more than 1 mm over 12 mm or more: the two are shown to the operator, who picks one. `at` is
+   * the place they are farthest apart, `ownShare` the part of the walk on the size's own line.
+   */
+  walk?: { outer: PtMm[]; ownShare: number; maxMm: number; overMm: number; at: PtMm };
   rankFrom?:
     | 'class'
     | 'innerPlug'

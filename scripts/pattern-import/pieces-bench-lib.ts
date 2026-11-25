@@ -144,6 +144,9 @@ export function cellsOf(out: StageIO['pieces']['out'], ranks: RankInfo[] | null)
             (c.derived ?? []).reduce((a, d) => a + len(d.pts as { x: number; y: number }[]), 0),
           ),
           gapRecovery: !!c.gapRecovery,
+          walk: c.walk
+            ? { maxMm: +c.walk.maxMm.toFixed(1), overMm: Math.round(c.walk.overMm) }
+            : null,
           geo: createHash('md5')
             .update(
               JSON.stringify([
