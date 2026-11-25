@@ -145,7 +145,11 @@ export function cellsOf(out: StageIO['pieces']['out'], ranks: RankInfo[] | null)
           ),
           gapRecovery: !!c.gapRecovery,
           walk: c.walk
-            ? { maxMm: +c.walk.maxMm.toFixed(1), overMm: Math.round(c.walk.overMm) }
+            ? {
+                maxMm: +c.walk.maxMm.toFixed(1),
+                overMm: Math.round(c.walk.overMm),
+                ...(c.walk.open ? { open: true } : {}),
+              }
             : null,
           geo: createHash('md5')
             .update(
