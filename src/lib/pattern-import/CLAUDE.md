@@ -130,6 +130,9 @@ new behaviour to it meanwhile.
   noise on unchanged code ≤ 0.4 mm. Pieces of set `confirm` (holdout40) never tune a rule. To grow
   it: `reference-export.ts` → review page → `reference-build.ts`. One piece:
   `single-reference-check.ts`.
+  A size with a `note` was re-judged: on 25 Nov the owner took the walk's outline for penelope-B 16
+  and matrix-B XS, L, 2XL (the fill stepped onto the neighbouring row of circles). Code without
+  the leak repair (`applyLeakRepairs`, branch `open-lines-walk`) shows exactly these four as MOVED.
 - Unit: `npx vitest run src/lib/pattern-import`. Do not run `yarn lint` / `yarn fix` (they rewrite
   all of `src/`). `yarn build:check` — xlsx / `tasks/sheet.ts` errors predate this branch.
 
