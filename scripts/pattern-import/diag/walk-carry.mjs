@@ -4,6 +4,8 @@
 // bridge. A carried stretch is `smooth` when the neighbour turns < 45° on it, else `corner`.
 //   node walk-carry.mjs ref  <reference.json> <snapshot dir> <piece id> […]   accuracy on verified outlines
 //   node walk-carry.mjs open <snapshot dir> [dump.json]                       the cells the fill leaves open
+// ref mode: WITH_BAD=1 walks the sizes judged bad too (guide = nearest ok size); WALK_DUMP=<json>
+// writes reference and walk outlines for walk-viz.mjs.
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { deserialize } from 'node:v8';
 import { gunzipSync } from 'node:zlib';
@@ -115,16 +117,20 @@ if (mode === 'lone' || mode === 'lonecheck') {
       const r = walk(z.size, null, pid, at); if (!r?.best) { t.noWalk++; rowsOut.push(`${pid} ${z.size}: no closed walk`); continue; } const mx = Math.max(dev(r.best.pts, T).max, dev(T, r.best.pts).max); t[mx <= 1 ? 'same' : mx <= 3 ? 'close' : 'different']++; if (mx > 3) rowsOut.push(`${pid} ${z.size}: max deviation ${mx.toFixed(1)} mm, area walk ${Math.round(areaOf(r.best.pts) / 100)} vs verified ${Math.round(areaOf(T) / 100)} cm²`); } }
   console.log(JSON.stringify(t)); for (const r of rowsOut) console.log('  ', r);
 } else if (mode === 'ref') {
-  const raw = JSON.parse(readFileSync(rest[0], 'utf8')); const pieces = Array.isArray(raw) ? raw : raw.pieces; const all = [];
+  const raw = JSON.parse(readFileSync(rest[0], 'utf8')); const pieces = Array.isArray(raw) ? raw : raw.pieces; const all = []; const walkDump = [];
   for (const id of rest.slice(2)) { const p = pieces.find((x) => x.id === id); const mk = (z) => { const a = []; for (let i = 0; i + 1 < z.outer.length; i += 2) a.push({ x: z.outer[i], y: z.outer[i + 1] }); return a; };
     const ok = p.sizes.filter((z) => z.verdict === 'ok' && rankOf.has(z.size)).map((z) => ({ size: z.size, rank: rankOf.get(z.size), pts: mk(z) }));
     console.log(`== ${id} (${p.label})`); console.log('size   own  shared  drawn     stretches drawn (mm, c = corner)   corners built   max deviation from verified   within 0.5 mm');
-    for (const T of ok) { const guide = ok.filter((z) => z !== T).sort((a, b) => Math.abs(a.rank - T.rank) - Math.abs(b.rank - T.rank))[0]; if (!guide) continue; const r = walk(T.size, guide.pts, id);
+    const bad = process.env.WITH_BAD ? p.sizes.filter((z) => z.verdict === 'bad' && rankOf.has(z.size)).map((z) => ({ size: z.size, rank: rankOf.get(z.size), pts: mk(z), bad: true })) : [];
+    for (const T of [...ok, ...bad]) { const guide = ok.filter((z) => z !== T).sort((a, b) => Math.abs(a.rank - T.rank) - Math.abs(b.rank - T.rank))[0]; if (!guide) continue; const r = walk(T.size, guide.pts, id);
       if (!r?.best) { console.log(T.size.padEnd(5), r ? 'no closed walk' : 'no own line'); all.push({ id, size: T.size, none: true }); continue; }
       const b = r.best, per = lenOf([...b.pts, b.pts[0]]); const a1 = dev(b.pts, T.pts), a2 = dev(T.pts, b.pts); const mx = Math.max(a1.max, a2.max);
+      walkDump.push({ id, size: T.size, verdict: T.bad ? 'bad' : 'ok', ref: T.pts.map((q) => [q.x, q.y]), walk: b.pts.map((q) => [q.x, q.y]) });
+      if (T.bad) { console.log(`${T.size.padEnd(5)} ${pct(b.own / per).padStart(4)} ${pct(b.sh / per).padStart(6)} ${String(b.dm).padStart(5)} mm   ${gapsStr(b).padEnd(34)} ${String(b.corners).padStart(6)}        ${mx.toFixed(2).padStart(8)} mm   (judged bad)`); continue; }
       all.push({ id, size: T.size, max: mx, dm: b.dm, corner: b.drawn.some((d) => d.kind === 'corner'), smooth: b.drawn.some((d) => d.kind === 'smooth') });
       console.log(`${T.size.padEnd(5)} ${pct(b.own / per).padStart(4)} ${pct(b.sh / per).padStart(6)} ${String(b.dm).padStart(5)} mm   ${gapsStr(b).padEnd(34)} ${String(b.corners).padStart(6)}        ${mx.toFixed(2).padStart(8)} mm               ${pct(Math.min(a1.in05, a2.in05)).padStart(5)}`); } }
   const v = all.filter((r) => !r.none); const cnt = (g) => `${g.length} sizes: ≤ 1 mm ${g.filter((r) => r.max <= 1).length}, 1–3 mm ${g.filter((r) => r.max > 1 && r.max <= 3).length}, > 3 mm ${g.filter((r) => r.max > 3).length}`;
+  if (process.env.WALK_DUMP) writeFileSync(process.env.WALK_DUMP, JSON.stringify(walkDump));
   console.log(`\nALL verified sizes ${all.length} · no closed walk ${all.length - v.length}`);
   console.log('nothing drawn        ', cnt(v.filter((r) => r.dm === 0)));
   console.log('smooth stretches only', cnt(v.filter((r) => r.dm > 0 && !r.corner)));
