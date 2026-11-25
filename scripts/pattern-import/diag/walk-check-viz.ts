@@ -87,9 +87,14 @@ for (const fam of families) {
       `  ${fam.label.padEnd(30)} ${w.map((c) => (c.walk!.open ? `${labOf.get(c.rank)}: OPEN → closed, own ${Math.round(100 * c.walk!.ownShare)}%` : `${labOf.get(c.rank)}: ${c.walk!.maxMm.toFixed(1)} mm over ${Math.round(c.walk!.overMm)} → ${c.walk!.verdict ? `takes the ${c.walk!.verdict}` : 'cannot tell'}`)).join(' · ')}`,
     );
 }
-// OPEN_ONLY=1: only the proposals for open sizes
+// OPEN_ONLY=1: only the proposals for open sizes · AUTO_ONLY=1: only the repairs the program
+// makes itself (leak, jog) · ZOOM=<mm>: a panel of that half-width round the place they part,
+// over every printed stroke · CAPTION_RU=1: Russian captions (a picture for the owner)
+const ru = !!process.env.CAPTION_RU;
+const zoom = +(process.env.ZOOM ?? 0);
 const items = shown
   .filter((x) => !process.env.OPEN_ONLY || x.c.walk!.open)
+  .filter((x) => !process.env.AUTO_ONLY || x.c.walk!.leak || x.c.walk!.jog)
   .slice(0, +(maxArg ?? 12));
 if (!items.length) process.exit(0);
 const P = 600;
@@ -102,7 +107,9 @@ g.fillRect(0, 0, cv.width, cv.height);
 g.fillStyle = '#000';
 g.font = '15px sans-serif';
 g.fillText(
-  'RED = the fill · BLUE = the walk · black = lines of this size · grey = other size lines · circle = where they are farthest apart',
+  ru
+    ? 'КРАСНЫЙ = контур заливки (был) · СИНИЙ = контур обхода (стал) · чёрный = линии этого размера · зелёный = все напечатанные штрихи · кружок = место наибольшего расхождения'
+    : 'RED = the fill · BLUE = the walk · black = lines of this size · grey = other size lines · circle = where they are farthest apart',
   8,
   18,
 );
@@ -116,10 +123,11 @@ items.forEach(({ fam, c }, n) => {
   const ox = (n % cols) * P;
   const oy = 30 + Math.floor(n / cols) * (P + 26);
   const all = [...c.outer, ...c.walk!.outer];
-  const x0 = Math.min(...all.map((p) => p.x)) - 8;
-  const x1 = Math.max(...all.map((p) => p.x)) + 8;
-  const y0 = Math.min(...all.map((p) => p.y)) - 8;
-  const y1 = Math.max(...all.map((p) => p.y)) + 8;
+  const at = c.walk!.at;
+  const x0 = zoom ? at.x - zoom : Math.min(...all.map((p) => p.x)) - 8;
+  const x1 = zoom ? at.x + zoom : Math.max(...all.map((p) => p.x)) + 8;
+  const y0 = zoom ? at.y - zoom : Math.min(...all.map((p) => p.y)) - 8;
+  const y1 = zoom ? at.y + zoom : Math.max(...all.map((p) => p.y)) + 8;
   const k = Math.min((P - 8) / (x1 - x0), (P - 8) / (y1 - y0));
   const X = (x: number) => ox + 4 + (x - x0) * k;
   const Y = (y: number) => oy + 24 + (y - y0) * k;
@@ -136,10 +144,18 @@ items.forEach(({ fam, c }, n) => {
     if (close) g.closePath();
     g.stroke();
   };
+  if (zoom)
+    for (const pa of (f as unknown as { sheet: { paths: { pts: PtMm[] }[] } }).sheet.paths)
+      if (
+        pa.pts.length &&
+        pa.pts.some((q) => q.x > x0 - 4 && q.x < x1 + 4 && q.y > y0 - 4 && q.y < y1 + 4)
+      )
+        line(pa.pts.length > 1 ? pa.pts : [pa.pts[0], pa.pts[0]], '#7c7', 1.1);
   for (const ch of f.chains.chains) {
     const r = sizeOfChain.get(ch.id);
     if (r === undefined || !ch.pts.some((q) => q.x > x0 && q.x < x1 && q.y > y0 && q.y < y1))
       continue;
+    if (zoom && r !== c.rank) continue;
     line(ch.pts, r === c.rank ? '#000' : '#ccc', r === c.rank ? 1.6 : 0.8);
   }
   if (c.outer.length > 2) line(c.outer, '#e11', 2.5, [9, 6], true);
@@ -155,10 +171,21 @@ items.forEach(({ fam, c }, n) => {
   g.lineWidth = 1;
   g.strokeRect(ox + 2, oy + 22, P - 4, P - 2);
   g.fillStyle = '#000';
+  const why = c.walk!.leak
+    ? ru
+      ? 'протечка на далёкую линию'
+      : 'leak'
+    : c.walk!.jog
+      ? ru
+        ? 'ступенька'
+        : 'jog'
+      : '';
   g.fillText(
-    c.walk!.open
-      ? `${fam.label.slice(0, 26)} · size ${labOf.get(c.rank)} · left open by the fill · walk on own line ${Math.round(100 * c.walk!.ownShare)}%`
-      : `${fam.label.slice(0, 26)} · size ${labOf.get(c.rank)} · ${c.walk!.maxMm.toFixed(1)} mm apart over ${Math.round(c.walk!.overMm)} mm · walk on own line ${Math.round(100 * c.walk!.ownShare)}%`,
+    ru
+      ? `${fam.label.slice(0, 24)} · размер ${labOf.get(c.rank)} · ${why} · расхождение ${c.walk!.maxMm.toFixed(1)} мм на ${Math.round(c.walk!.overMm)} мм`
+      : c.walk!.open
+        ? `${fam.label.slice(0, 26)} · size ${labOf.get(c.rank)} · left open by the fill · walk on own line ${Math.round(100 * c.walk!.ownShare)}%`
+        : `${fam.label.slice(0, 26)} · size ${labOf.get(c.rank)} · ${why ? `${why} · ` : ''}${c.walk!.maxMm.toFixed(1)} mm apart over ${Math.round(c.walk!.overMm)} mm · walk on own line ${Math.round(100 * c.walk!.ownShare)}%`,
     ox + 8,
     oy + 16,
   );
