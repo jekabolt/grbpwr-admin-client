@@ -219,6 +219,8 @@ const MAX_UNIT_FACES = 200;
 /** A piece drawn inside another is outlined in lines at least this long (not glyph strokes). */
 const NESTED_LINE_MM = 40;
 const FRAME_TOL_MM = 2;
+/** A shell is "the sheet" only when its box reaches this share of the sheet both ways. */
+const SHEET_SPAN = 0.95;
 /** The face pass keeps its raster under this many pixels (a coarser cell on a huge sheet). */
 const MAX_PX = 4e6;
 const EXT = -2;
@@ -648,7 +650,14 @@ export function judgeBlobs(
     const box = boxOf(a);
     if (!off.has('small') && area < PATIMPORT.minPieceAreaMm2)
       return { junk: 'small', shell: false };
-    if (!peeled && !off.has('sheet') && area > 0.6 * sheetArea)
+    // The sheet's own shell — a frame drawn round everything, the ground between the page
+    // frames — reaches across the sheet both ways. A piece nearly the size of the paper does
+    // not (Cassandra's dress: 67 % of the sheet's area, 83 % of its height): by area alone it
+    // was set aside with its label, and the step had no way to bring it back.
+    const acrossSheet =
+      box.maxX - box.minX >= SHEET_SPAN * (sb.maxX - sb.minX) &&
+      box.maxY - box.minY >= SHEET_SPAN * (sb.maxY - sb.minY);
+    if (!peeled && !off.has('sheet') && area > 0.6 * sheetArea && acrossSheet)
       return { junk: 'sheet', shell: true };
     if (!peeled && !off.has('tile-frame') && pages.some((p) => sameBox(p, box, FRAME_TOL_MM)))
       return { junk: 'tile-frame', shell: true };
