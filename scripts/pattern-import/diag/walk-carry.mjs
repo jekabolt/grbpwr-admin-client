@@ -23,6 +23,8 @@ const rankOfClass = new Map(f.run.sizes.map((z) => [z.classId, z.rank]));
 const labOf = new Map(s.ranks.map((r) => [r.rank, r.label])); const rankOf = new Map(s.ranks.map((r) => [r.label, r.rank]));
 const chainsOf = new Map();
 for (const c of f.chains.classes) if (c.role === 'size') chainsOf.set(labOf.get(rankOfClass.get(c.id)), c.chains.map((i) => f.chains.chains[i]).filter(Boolean));
+// ROWS=<json from rows-dump.ts>: the rows of marks the plain read drops, tried as the size's own lines
+if (process.env.ROWS) { let n = -1; for (const [lab, list] of Object.entries(JSON.parse(readFileSync(process.env.ROWS, 'utf8')))) { if (!chainsOf.has(lab)) chainsOf.set(lab, []); for (const pts of list) chainsOf.get(lab).push({ id: n--, pts: pts.map(([x, y]) => ({ x, y })), closed: false }); } }
 const commonChains = f.chains.classes.filter((c) => c.role === 'common').flatMap((c) => c.chains.map((i) => f.chains.chains[i]).filter(Boolean));
 const inClass = new Set(f.chains.classes.flatMap((c) => c.chains));
 const plainChains = [...f.chains.classes.filter((c) => ['common', 'internal', 'seam'].includes(c.role)).flatMap((c) => c.chains.map((i) => f.chains.chains[i]).filter(Boolean)), ...f.chains.chains.filter((ch) => !inClass.has(ch.id) && ch.lengthMm >= 20)];
