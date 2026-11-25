@@ -14,6 +14,7 @@ import type {
   LineClass,
   PathId,
   Progress,
+  PtMm,
   Sheet,
   Style,
 } from 'lib/pattern-import/types';
@@ -142,15 +143,102 @@ export function buildChainsDetailed(
   opts: ChainOpts,
   extras: BuildExtras = {},
   progress?: Progress,
-): { set: ChainSet; recover: RecoverOut } {
+): { set: ChainSet; recover: RecoverOut; used: ChainOpts } {
   const first = buildOnce(sheet, opts, extras, progress);
-  if (opts.dashTrains || lackOf(first) === 0) return first;
-  const again = buildOnce(
-    sheet,
-    { ...opts, dashTrains: true, keepGuides: true, keepRepeats: true },
-    extras,
-  );
-  return lackOf(again) < lackOf(first) ? again : first;
+  if (opts.dashTrains || lackOf(first) === 0) return { ...first, used: opts };
+  const wide = { ...opts, dashTrains: true, keepGuides: true, keepRepeats: true };
+  const again = buildOnce(sheet, wide, extras);
+  return lackOf(again) < lackOf(first) ? { ...again, used: wide } : { ...first, used: opts };
+}
+
+/** A row of marks the plain read drops, to be SHOWN in a size's row of the legend. */
+export type ShownRow = { classId: number; pts: PtMm[] };
+
+const SHOWN = {
+  /** A shown row is a line: at least this many marks… */
+  minMarks: 20,
+  /** …over at least this length, mm. */
+  minLenMm: 40,
+  /** The row is cut where two of its marks are farther apart than this many usual steps (≥ 6 mm). */
+  gapSteps: 3,
+};
+
+/**
+ * The marks that are in NO line of `base` and that a second read with `ChainOpts.keepRows` puts in
+ * a size's line — as polylines through the marks' centres, each under the size row of `base` with
+ * that label. They are for the sizes step to light: nothing of `base` changes, and no later stage
+ * is given them. `used` = the options `base` was built with.
+ *
+ * Why by marks and not by chains: after the rows are kept the size recovery joins them with the
+ * size's other lines, so the chains of the two reads do not correspond one to one. A printed mark
+ * does: it is either in a line of `base` or it is not.
+ */
+export function shownOnlyRows(
+  sheet: Sheet,
+  used: ChainOpts,
+  extras: BuildExtras,
+  base: ChainSet,
+): ShownRow[] {
+  const again = buildOnce(sheet, { ...used, keepRows: true }, extras).set;
+  const inBase = new Set<PathId>();
+  for (const c of base.chains) for (const r of c.ranges) inBase.add(r.path);
+  const centre = new Map<PathId, PtMm>();
+  for (const p of sheet.paths) {
+    if (inBase.has(p.id) || !p.pts.length) continue;
+    let x = 0;
+    let y = 0;
+    for (const q of p.pts) {
+      x += q.x;
+      y += q.y;
+    }
+    centre.set(p.id, { x: x / p.pts.length, y: y / p.pts.length });
+  }
+  const out: ShownRow[] = [];
+  for (const cls of again.classes) {
+    if (cls.role !== 'size' || !cls.sizeLabel) continue;
+    const to = base.classes.find((c) => c.role === 'size' && c.sizeLabel === cls.sizeLabel);
+    if (!to) continue;
+    for (const id of cls.chains) {
+      const ch = again.chains[id];
+      if (!ch) continue;
+      // runs of consecutive marks of this line that no line of the plain read holds
+      let run: PtMm[] = [];
+      const flush = () => {
+        if (run.length >= SHOWN.minMarks) {
+          const steps = run.slice(1).map((p, i) => Math.hypot(p.x - run[i].x, p.y - run[i].y));
+          const usual = [...steps].sort((a, b) => a - b)[steps.length >> 1] ?? 0;
+          const cut = Math.max(6, SHOWN.gapSteps * usual);
+          let part: PtMm[] = [run[0]];
+          const emit = () => {
+            const len = part
+              .slice(1)
+              .reduce((a, p, i) => a + Math.hypot(p.x - part[i].x, p.y - part[i].y), 0);
+            if (part.length >= SHOWN.minMarks && len >= SHOWN.minLenMm)
+              out.push({ classId: to.id, pts: part });
+          };
+          for (let k = 1; k < run.length; k++) {
+            if (steps[k - 1] > cut) {
+              emit();
+              part = [];
+            }
+            part.push(run[k]);
+          }
+          emit();
+        }
+        run = [];
+      };
+      let last: PathId | null = null;
+      for (const r of ch.ranges) {
+        if (r.path === last) continue;
+        last = r.path;
+        const c = centre.get(r.path);
+        if (c) run.push(c);
+        else flush();
+      }
+      flush();
+    }
+  }
+  return out;
 }
 
 export const buildChains: BuildChainsFn = (sheet, opts, progress) =>
@@ -303,7 +391,9 @@ function toChainSet(
     orphans: rec.orphans,
     ambiguities: noSizes ? rec.ambiguities.filter((a) => !sizeQs.has(a.kind)) : rec.ambiguities,
     warnings,
-    ...(rec.bracketedOutlines?.length && !noSizes ? { bracketedOutlines: rec.bracketedOutlines } : {}),
+    ...(rec.bracketedOutlines?.length && !noSizes
+      ? { bracketedOutlines: rec.bracketedOutlines }
+      : {}),
     ...(rec.cornerWalls?.length && !noSizes ? { cornerWalls: rec.cornerWalls } : {}),
     ...(byWhy.get(LABEL_FRAME_WHY)?.length ? { labelFrames: byWhy.get(LABEL_FRAME_WHY) } : {}),
   };

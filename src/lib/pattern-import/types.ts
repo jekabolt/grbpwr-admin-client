@@ -752,6 +752,14 @@ export type ChainOpts = {
    * default; turned on with `dashTrains` for a file where a size has no line or too little of one.
    */
   keepRepeats?: boolean;
+  /**
+   * A long even row of marks is kept as a line also where it runs on other lines. On an edge every
+   * size shares, a size's row lies on the lines of all the others by construction, and the pass
+   * that takes "a row hugging other lines" for their decoration dropped it (Leah A, left edge: the
+   * 118 triangles of size 0). Off by default: the chains step reads the sheet a second time with
+   * it only to SHOW those rows on the sizes step (`shownOnlyRows`); the pieces step never sees them.
+   */
+  keepRows?: boolean;
 };
 
 export type BuildChainsFn = (sheet: Sheet, opts: ChainOpts, progress?: Progress) => ChainSet;
@@ -996,7 +1004,12 @@ export type SetAside = {
    * sheet's piece numbers, another run of digits beside it on one line — pieces/seeds.ts
    * codeTextSeeds); no outline of its own (area 0), `why` says what was measured.
    */
-  reason: Exclude<FaceJunk, 'small'> | 'code-text';
+  /**
+   * 'by-measure': a label of a piece the sheet gives as dimensions, not as an outline ("Cut a
+   * rectangle of fabric with the following dimensions" — pieces/seeds.ts byMeasureSeeds); no outline
+   * of its own (area 0), `why` quotes the line.
+   */
+  reason: Exclude<FaceJunk, 'small'> | 'code-text' | 'by-measure';
   /** The text seed held back. */
   seed?: Seed;
   /** NAP: the measured evidence, in words (a 'code-text' hold). */
@@ -1236,7 +1249,20 @@ export type PieceCandidate = {
    * the source draws that join this rank's own dangling ends (see `continuity`). Absent on DXF
    * fast-path candidates.
    */
-  rankFrom?: 'class' | 'innerPlug' | 'bundleRank' | 'single' | 'grade' | 'continuity' | 'repair' | 'printed-range' | 'legend-polygon' | 'shared-polygon' | 'printed-motif';
+  rankFrom?:
+    | 'class'
+    | 'innerPlug'
+    | 'bundleRank'
+    | 'single'
+    | 'grade'
+    | 'continuity'
+    | 'repair'
+    | 'printed-range'
+    | 'legend-polygon'
+    | 'shared-polygon'
+    | 'printed-motif'
+    /** One outline drawn once for every size, in lines that carry no size (pieces/one-outline). */
+    | 'one-outline';
   /** Visible source marks used to recover a masked row. */
   visibleMarks?: PathId[];
   /** Printed legend glyphs and visible PDF marks supporting every side of the polygon. */
@@ -1244,7 +1270,12 @@ export type PieceCandidate = {
   /** Complete visible PDF outline, its printed legend sample and optional flanking source paths. */
   sourceOutline?: { path: PathId; key: ChainId; brackets?: [PathId, PathId] };
   /** Two independently painted, legend-owned source figures confirming the shared cut. */
-  polygonSource?: { reference: string; confirmedBy: string; paths: PathId[]; confirmationPaths: PathId[] };
+  polygonSource?: {
+    reference: string;
+    confirmedBy: string;
+    paths: PathId[];
+    confirmationPaths: PathId[];
+  };
   /**
    * GRADE P2: this size was REPAIRED from the family's grade (rankFrom 'repair'): the outline runs
    * on the size's own and common lines where the grade model of its two neighbouring anchors puts
@@ -3238,6 +3269,11 @@ export type StageIO = {
       orphans: ChainId[];
       /** One polyline per chain, index = ChainId (an empty array for a chain not drawn). */
       chainPreview: Float32Array[];
+      /**
+       * How many of the last chains of `chainPreview` (and of the size rows' `chains`) are rows of
+       * marks shown only on the sizes step: they are not in the session's chain set.
+       */
+      shownOnly?: number;
       warnings: string[];
       /** What the legend could not decide alone (F3 `ChainSet.ambiguities`), shown as flags. */
       ambiguities?: ChainAmbiguity[];

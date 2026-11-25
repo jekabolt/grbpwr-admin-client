@@ -176,6 +176,7 @@ const ASIDE_WORD: Record<SetAside['reason'], string> = {
   'inner-line': 'cut off a piece by an inner line',
   'other-pen': 'a mark inside a piece (a label box, a mark)',
   'code-text': 'part of a printed code',
+  'by-measure': 'a piece cut by measurements, not drawn on the sheet',
 };
 
 /** H1: why the sizes of a piece were held back (the candidate's `gradeRefusal`). */
@@ -449,6 +450,7 @@ const ASIDE_JUNK = new Set<string>([
   'logo',
   'background',
   'code-text',
+  'by-measure',
 ]);
 
 /** An answer of the set-aside quiz, kept until the quiz is sent. */
@@ -1038,7 +1040,7 @@ export function PiecesStep({
       // the engine's own word first
       if (a.reason === 'legend') return auto('legend');
       if (a.reason === 'table') return auto('table');
-      if (a.reason === 'code-text') return auto('text block');
+      if (a.reason === 'code-text' || a.reason === 'by-measure') return auto('text block');
       if (a.reason === 'logo') return auto('logo');
       if (a.reason === 'test-square') return auto('test square');
       if (a.reason === 'sheet' || a.reason === 'tile-frame' || a.reason === 'background')
@@ -1431,9 +1433,11 @@ export function PiecesStep({
       ? 'between the sizes of a piece, but not another size of one'
       : a.reason === 'code-text'
         ? 'a number read as part of a printed code (smaller than the piece numbers, digits beside it)'
-        : a.seed
-          ? `a piece number in ${ASIDE_WORD[a.reason]}`
-          : ASIDE_WORD[a.reason];
+        : a.reason === 'by-measure'
+          ? `a piece the sheet gives as dimensions, not as an outline${a.why ? ` («${a.why}»)` : ''}`
+          : a.seed
+            ? `a piece number in ${ASIDE_WORD[a.reason]}`
+            : ASIDE_WORD[a.reason];
   const closedFams = families.filter((f) => !needsFix(f));
   const selClosed = !!selected && !needsFix(selected);
   /** What is wrong with a region: a short word on the row, the whole instruction as its title. */
