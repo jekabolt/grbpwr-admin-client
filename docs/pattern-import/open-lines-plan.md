@@ -35,7 +35,7 @@ order are in `src/lib/pattern-import/CLAUDE.md` (owner, 25 Nov).
 | What | Branch | State |
 | --- | --- | --- |
 | Diagnosis, scripts, pictures, this plan | `fix-pattern-pdf-open-lines` (PR #470) | pushed |
-| Stages 1A and 2 | `open-lines-rows`, commit `aacf5976f` | pushed, **to be merged into the PR head** |
+| Stages 1A and 2 | `open-lines-rows`, commit `aacf5976f` | merged into the PR head 25 Nov on the owner's word |
 | Measurement switches for the bench (`LONE_OFF`, `INNER_PLUG_OFF`, outlines in the bench output) | `open-lines-bench-switches`, commit `deb6b2824` | pushed, not for merging |
 | The owner's reference set (`scripts/pattern-import/reference.json`, 50 pieces, 548 ok and 63 bad sizes), `family-fit.md`, `family-research/` | `reference-set`, commit `c2aa54469` | pushed, **not merged into the PR head: the owner decides** |
 
@@ -79,7 +79,8 @@ Open: Clark H POCKET LINING and I POCKET WELT (32 cells) look drawn once too and
 
 ### Housekeeping — open
 
-- Merge `open-lines-rows` into `fix-pattern-pdf-open-lines`.
+- Done 25 Nov: `open-lines-rows` merged into `fix-pattern-pdf-open-lines` on the owner's word.
+  The Venice J picture was looked at by the agent, not yet by the owner.
 - The reference set is pushed on branch `reference-set` (24 Nov). Merging it into the PR head is
   the owner's decision; every acceptance number of this plan depends on it.
 - The switches `PDF_LAYERS_OFF` and `SNAPSHOT_STAGE` (read a layered PDF with its layers hidden,
@@ -132,7 +133,24 @@ or the last, when the piece has no closed size, or when the neighbours were them
 Measured first: hide a whole side and a whole outline in `diag/complete-holdout.mjs`; accepted at
 95 % of the bracketed sizes under half the distance to the nearest size.
 
-### 6. Decide — open
+### 6. The variant choice on the pieces step — open
+
+The operator's screen for the disputed cases in `src/lib/pattern-import/CLAUDE.md` ("The
+operator"): the variants drawn over the sheet, the operator picks one; nothing is drawn by hand.
+One format for "variants to choose from" in the pieces output, shared by every case. Wired in the
+order the data exists: case 3 (what kind of piece: one outline, by measurements, missing) from
+stages 2A and 2B first; case 1 (two whole outlines) after stage 3; case 2 (a drawn-in stretch)
+after stage 5. The layout is the owner's decision; no new `ui` primitive without the owner's OK.
+Accepted when the owner answers each case on Leah, Kalla and Venice by choosing only.
+
+### 7. Retire "close the gap" — open
+
+The manual `bridge` tool on the pieces step and `recoverAutomaticGaps` (`worker/session.ts`). In
+this order: the walk closes gaps inside the step (stages 3 to 5) → count the cells still open on
+the 75 files → the variant choice (stage 6) covers them → remove both. Until then no new behaviour
+is added to either.
+
+### 8. Decide — open
 
 With the files that reach DXF, the bad outlines caught and the operator calls counted: the fill
 stays the main way with the walk as its check, or the other way round.
