@@ -170,7 +170,22 @@ Kalla D, F: 82 verified sizes). State on 25 Nov, after two changes in `diag/walk
   minutes: a hundred dashes with a gap after each is not a job for the walk's search. It is a
   job for the reader (the pen of size 26 is not recognised as a size) or for stage 5B.
 
-### 4. The walk closes what the fill leaves open — open
+### 4. The walk closes what the fill leaves open — in the product on branch `open-lines-walk`, as a proposal
+
+`walkChecks` (`pieces/walk.ts`, 25 Nov, the owner: "port stage 4") also walks every size the fill
+left open or refused. A closed path of printed lines and built corners round the label is a
+proposal (`PieceCandidate.walk.open`) when its area sits between the nearest closed sizes of the
+piece; where the piece has no closed size, the label-seeded walk is used and the proposals that
+grow with the size stand (one alone does not). Nothing is closed without the operator: on the
+pieces step the proposal is asked before the open regions — one picture, "yes, take it" or "no,
+leave it open" (the piece edit `outline`).
+
+- Kalla (snapshot): 21 of 74 open sizes get a proposal — A BACK YOKE 15 of 18, Q BELT 3,
+  O SKIRT FRONT POCKET 2, E TOP FRONT 1. Leah: 4 of 16. The walk takes 24 s on Kalla, 7 s on Leah.
+- Fewer than `diag/walk-carry.mjs` closes: the product walk carries no stretch from a neighbour
+  (stage 5) and has no rows of marks (they need the second read at the pieces step).
+- Not done: no run in a browser; the other 73 files; the count of what stays open (stage 7).
+
 
 An open cell takes the walk's outline when it is made of printed lines and built corners only and
 its area sits between its closed neighbours. As a proposal to the operator first. A piece with no

@@ -68,15 +68,25 @@ const closed = families.reduce(
   (a, x) => a + x.candidates.filter((c) => c.outcome === 'closed').length,
   0,
 );
-console.log(`${shown.length} of ${closed} closed sizes would be shown · the check took ${ms} ms`);
+const openAll = families.reduce(
+  (a, x) => a + x.candidates.filter((c) => c.outcome === 'leak' || c.outcome === 'refused').length,
+  0,
+);
+const proposed = shown.filter((x) => x.c.walk!.open).length;
+console.log(
+  `${shown.length - proposed} of ${closed} closed sizes would be shown · ${proposed} of ${openAll} open sizes get a proposal · the walk took ${ms} ms`,
+);
 for (const fam of families) {
   const w = fam.candidates.filter((c) => c.walk);
   if (w.length)
     console.log(
-      `  ${fam.label.padEnd(30)} ${w.map((c) => `${labOf.get(c.rank)}: ${c.walk!.maxMm.toFixed(1)} mm over ${Math.round(c.walk!.overMm)}, own ${Math.round(100 * c.walk!.ownShare)}%`).join(' · ')}`,
+      `  ${fam.label.padEnd(30)} ${w.map((c) => (c.walk!.open ? `${labOf.get(c.rank)}: OPEN → closed, own ${Math.round(100 * c.walk!.ownShare)}%` : `${labOf.get(c.rank)}: ${c.walk!.maxMm.toFixed(1)} mm over ${Math.round(c.walk!.overMm)}, own ${Math.round(100 * c.walk!.ownShare)}%`)).join(' · ')}`,
     );
 }
-const items = shown.slice(0, +(maxArg ?? 12));
+// OPEN_ONLY=1: only the proposals for open sizes
+const items = shown
+  .filter((x) => !process.env.OPEN_ONLY || x.c.walk!.open)
+  .slice(0, +(maxArg ?? 12));
 if (!items.length) process.exit(0);
 const P = 600;
 const cols = Math.min(4, items.length);
@@ -128,7 +138,7 @@ items.forEach(({ fam, c }, n) => {
       continue;
     line(ch.pts, r === c.rank ? '#000' : '#ccc', r === c.rank ? 1.6 : 0.8);
   }
-  line(c.outer, '#e11', 2.5, [9, 6], true);
+  if (c.outer.length > 2) line(c.outer, '#e11', 2.5, [9, 6], true);
   line(c.walk!.outer, '#12f', 2.5, [3, 4], true);
   g.setLineDash([]);
   g.strokeStyle = '#f80';
@@ -142,7 +152,9 @@ items.forEach(({ fam, c }, n) => {
   g.strokeRect(ox + 2, oy + 22, P - 4, P - 2);
   g.fillStyle = '#000';
   g.fillText(
-    `${fam.label.slice(0, 26)} · size ${labOf.get(c.rank)} · ${c.walk!.maxMm.toFixed(1)} mm apart over ${Math.round(c.walk!.overMm)} mm · walk on own line ${Math.round(100 * c.walk!.ownShare)}%`,
+    c.walk!.open
+      ? `${fam.label.slice(0, 26)} · size ${labOf.get(c.rank)} · left open by the fill · walk on own line ${Math.round(100 * c.walk!.ownShare)}%`
+      : `${fam.label.slice(0, 26)} · size ${labOf.get(c.rank)} · ${c.walk!.maxMm.toFixed(1)} mm apart over ${Math.round(c.walk!.overMm)} mm · walk on own line ${Math.round(100 * c.walk!.ownShare)}%`,
     ox + 8,
     oy + 16,
   );

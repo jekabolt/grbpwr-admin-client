@@ -50,6 +50,9 @@ export const WALK = {
   joins: 4,
   /** The walk starts from the longest own line, then from this many next longest. */
   starts: 3,
+  /** With no closed size of the piece: this many own lines nearest the label, within this reach. */
+  loneStarts: 6,
+  loneReachMm: 450,
   /** Closed paths collected before the best is taken, and the search's step limit. */
   paths: 12,
   maxSteps: 60000,
@@ -249,7 +252,7 @@ export type Walked = {
   corners: number;
 };
 
-function search(edges: Edge[], seed: PtMm): Walked | null {
+function search(edges: Edge[], seed: PtMm, lone: boolean): Walked | null {
   const C = WALK;
   const ends: End[] = [];
   for (const e of edges)
@@ -307,14 +310,33 @@ function search(edges: Edge[], seed: PtMm): Walked | null {
   };
   // from the longest of the size's own lines; a line that runs past the piece on both ends is in
   // no closed path, so the next longest are tried after it
-  for (const start of edges
-    .filter((e) => !e.shared)
-    .sort((a, b) => b.len - a.len)
-    .slice(0, C.starts)) {
-    const got = from(start);
-    if (got) return got;
+  if (!lone) {
+    for (const start of edges
+      .filter((e) => !e.shared)
+      .sort((a, b) => b.len - a.len)
+      .slice(0, C.starts)) {
+      const got = from(start);
+      if (got) return got;
+    }
+    return null;
   }
-  return null;
+  // a piece with no closed size: there is no box of its own, so the lines nearest the label
+  // start the walk, and of the closed paths the one with the largest SHARE of own line stands
+  // (the longest own length would take the path round a larger neighbour piece)
+  const nearSeed = (e: Edge) => Math.min(...e.pts.map((p) => dist(p, seed)));
+  let pick: (Walked & { share: number }) | null = null;
+  for (const start of edges
+    .filter((e) => !e.shared && e.len >= 20)
+    .sort((a, b) => nearSeed(a) - nearSeed(b))
+    .slice(0, C.loneStarts)) {
+    const got = from(start);
+    if (!got) continue;
+    const share = got.ownMm / (lenOf([...got.outer, got.outer[0]]) || 1);
+    if (!pick || share > pick.share) pick = { ...got, share };
+  }
+  return (
+    pick && { outer: pick.outer, ownMm: pick.ownMm, sharedMm: pick.sharedMm, corners: pick.corners }
+  );
 
   function from(start: Edge): Walked | null {
     const [goal, first] = endOf.get(start)!;
@@ -417,6 +439,8 @@ export function walkOutline(
   shared: readonly PtMm[][],
   box: Box,
   seed: PtMm,
+  /** The piece has no closed size: start near the label, take the path most on the own line. */
+  lone = false,
 ): Walked | null {
   const edges = (): Edge[] => [
     ...own
@@ -427,7 +451,7 @@ export function walkOutline(
   const cut = edges();
   if (!cut.some((e) => !e.shared)) return null;
   cutWhereSidesEnd(cut);
-  return search(cut, seed) ?? search(edges(), seed);
+  return search(cut, seed, lone) ?? search(edges(), seed, lone);
 }
 
 /** Where two closed outlines are farther apart than `WALK.differMm`: the longest such stretch of `a`. */
@@ -478,9 +502,15 @@ export function differs(
 }
 
 /**
- * The walk as a check beside the fill: every closed size is walked, and where the walk's outline
- * and the fill's differ the candidate carries the walk's (`walk`) for the operator to choose.
- * The fill's outline is not changed.
+ * The walk beside the fill.
+ *
+ * A closed size is walked as a check: where the walk's outline and the fill's differ the candidate
+ * carries the walk's (`walk`) for the operator to choose; the fill's outline is not changed.
+ *
+ * An open size is walked as a proposal (`walk.open`): a closed path of printed lines and built
+ * corners round the piece label. It stands only when its area sits between the nearest closed
+ * sizes of the piece — or, where the piece has no closed size, when the proposals of its sizes
+ * grow with the size. Nothing is closed without the operator's word.
  */
 export function walkChecks(
   set: ChainSet,
@@ -492,20 +522,40 @@ export function walkChecks(
   if (run.sizes.length < 2) return;
   const L = walkLines(set, run);
   if (!L.lines.length) return;
+  const areaOf = (pts: readonly PtMm[]) => Math.abs(signedArea(pts));
+  const grown = (b: Box, by: number): Box => ({
+    minX: b.minX - by,
+    minY: b.minY - by,
+    maxX: b.maxX + by,
+    maxY: b.maxY + by,
+  });
   for (const f of families) {
     const seed = seeds.find((x) => x.id === f.seed);
+    if (!seed) continue;
     const closed = f.candidates.filter(
       (c) => c.outcome === 'closed' && c.outer.length > 3 && c.rankFrom !== 'one-outline',
     );
-    if (!seed || !closed.length) continue;
-    const all = bboxOf(closed.flatMap((c) => c.outer));
-    const box = {
-      minX: all.minX - WALK.padMm,
-      minY: all.minY - WALK.padMm,
-      maxX: all.maxX + WALK.padMm,
-      maxY: all.maxY + WALK.padMm,
-    };
+    // open, or refused (the fill could not tell which line is which size: the walk takes each
+    // size's own lines and does not have to)
+    const open = f.candidates.filter((c) => c.outcome === 'leak' || c.outcome === 'refused');
+    if (!closed.length && !open.length) continue;
+    const lone = !closed.length;
+    const box = lone
+      ? grown(
+          { minX: seed.at.x, minY: seed.at.y, maxX: seed.at.x, maxY: seed.at.y },
+          WALK.loneReachMm,
+        )
+      : grown(bboxOf(closed.flatMap((c) => c.outer)), WALK.padMm);
     let shared: PtMm[][] | null = null;
+    const between = (rank: number, area: number, among: { rank: number; area: number }[]) => {
+      const below = among.filter((o) => o.rank < rank).sort((x, y) => y.rank - x.rank)[0];
+      const above = among.filter((o) => o.rank > rank).sort((x, y) => x.rank - y.rank)[0];
+      const lo = below?.area ?? 0;
+      const hi = above?.area ?? Infinity;
+      const [a0, a1] = [Math.min(lo, hi), Math.max(lo, hi)];
+      return area >= a0 * (1 - WALK.areaSlack) && area <= a1 * (1 + WALK.areaSlack);
+    };
+    const anchors = closed.map((c) => ({ rank: c.rank, area: areaOf(c.outer) }));
     for (const c of closed) {
       const own = L.bySize.get(c.rank);
       if (!own?.length) continue;
@@ -518,15 +568,15 @@ export function walkChecks(
       if (!w) continue;
       const d = differs(w.outer, c.outer) ?? differs(c.outer, w.outer);
       if (!d) continue;
-      // a walk that went round something else is no rival: sizes of one piece nest, so its area
-      // sits between the nearest closed size below and the nearest above
-      const area = Math.abs(signedArea(w.outer));
-      const below = closed.filter((o) => o.rank < c.rank).sort((x, y) => y.rank - x.rank)[0];
-      const above = closed.filter((o) => o.rank > c.rank).sort((x, y) => x.rank - y.rank)[0];
-      const lo = below ? Math.abs(signedArea(below.outer)) : 0;
-      const hi = above ? Math.abs(signedArea(above.outer)) : Infinity;
-      const [a0, a1] = [Math.min(lo, hi), Math.max(lo, hi)];
-      if (area < a0 * (1 - WALK.areaSlack) || area > a1 * (1 + WALK.areaSlack)) continue;
+      // a walk that went round something else is no rival: sizes of one piece nest
+      if (
+        !between(
+          c.rank,
+          areaOf(w.outer),
+          anchors.filter((o) => o.rank !== c.rank),
+        )
+      )
+        continue;
       const per = lenOf([...w.outer, w.outer[0]]);
       c.walk = {
         outer: w.outer,
@@ -534,6 +584,47 @@ export function walkChecks(
         maxMm: d.maxMm,
         overMm: d.overMm,
         at: d.at,
+      };
+    }
+    // the open sizes
+    const found: { c: PieceCandidate; w: Walked; area: number }[] = [];
+    for (const c of open) {
+      const own = L.bySize.get(c.rank);
+      if (!own?.length) continue;
+      shared ??= sharedStretches(L, box);
+      const w = walkOutline(own, shared, box, seed.at, lone);
+      if (!w) continue;
+      const area = areaOf(w.outer);
+      if (!lone && !between(c.rank, area, anchors)) continue;
+      found.push({ c, w, area });
+    }
+    // with no closed size to measure against: the longest run of proposals that grow with the size
+    let keep = found;
+    if (lone && found.length) {
+      const byRank = [...found].sort((x, y) => x.c.rank - y.c.rank);
+      const best: number[] = byRank.map(() => 1);
+      const prev: number[] = byRank.map(() => -1);
+      for (let i = 0; i < byRank.length; i++)
+        for (let j = 0; j < i; j++)
+          if (byRank[j].area <= byRank[i].area * (1 + WALK.areaSlack) && best[j] + 1 > best[i]) {
+            best[i] = best[j] + 1;
+            prev[i] = j;
+          }
+      let k = best.indexOf(Math.max(...best));
+      keep = [];
+      for (; k >= 0; k = prev[k]) keep.push(byRank[k]);
+      // one size alone proves nothing about the others
+      if (keep.length < 2 && open.length > 1) keep = [];
+    }
+    for (const { c, w } of keep) {
+      const per = lenOf([...w.outer, w.outer[0]]);
+      c.walk = {
+        outer: w.outer,
+        ownShare: per ? w.ownMm / per : 0,
+        maxMm: 0,
+        overMm: 0,
+        at: c.leakAt ?? seed.at,
+        open: true,
       };
     }
   }
@@ -557,8 +648,14 @@ export function applyOutlineChoices<F extends { seed: number; candidates: PieceC
       const take = picks.get(`${f.seed}:${c.rank}`);
       if (!take || !c.walk) return c;
       if (take === 'fill') return { ...c, walk: { ...c.walk, answer: 'fill' as const } };
+      // an open size the walk closed: it is a closed size now, with no gap
+      const from: PieceCandidate = { ...c };
+      if (c.walk.open) {
+        from.outcome = 'closed';
+        delete from.leakAt;
+      }
       return {
-        ...c,
+        ...from,
         outer: c.walk.outer,
         areaMm2: Math.abs(signedArea(c.walk.outer)),
         bbox: bboxOf(c.walk.outer),

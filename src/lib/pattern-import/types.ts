@@ -1264,6 +1264,11 @@ export type PieceCandidate = {
     at: PtMm;
     answer?: 'walk' | 'fill';
     fillOuter?: PtMm[];
+    /**
+     * The fill left this size OPEN and the walk closes it on printed lines and built corners:
+     * a proposal, shown alone ('walk' takes it — the size is closed; 'fill' leaves it open).
+     */
+    open?: true;
   };
   rankFrom?:
     | 'class'

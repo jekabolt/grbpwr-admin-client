@@ -189,3 +189,64 @@ describe('the walk as a check beside the fill', () => {
     expect(again[0].candidates[2].walk?.answer).toBe('fill');
   });
 });
+
+describe('the walk for a size the fill left open', () => {
+  const s = sheet(5, (r) => sides(100, 100, 120 + 10 * r, 80 + 10 * r, 2));
+  const outline = (r: number): PtMm[] => [
+    P(100, 100),
+    P(220 + 10 * r, 100),
+    P(220 + 10 * r, 180 + 10 * r),
+    P(100, 180 + 10 * r),
+  ];
+  const closed = (r: number) =>
+    ({ seed: 0, rank: r, outer: outline(r), outcome: 'closed' }) as PieceCandidate;
+  const open = (r: number) =>
+    ({ seed: 0, rank: r, outer: [], outcome: 'leak', leakAt: P(230, 150) }) as PieceCandidate;
+  const seeds = [{ id: 0, at: P(150, 140) } as Seed];
+
+  it("proposes the outline on the size's lines, between its closed neighbours", () => {
+    const family = { seed: 0, candidates: [closed(0), closed(1), open(2), closed(3), closed(4)] };
+    walkChecks(s.set, s.run, seeds, [family]);
+    const w = family.candidates[2].walk!;
+    expect(w.open).toBe(true);
+    expect(area(w.outer)).toBeCloseTo(140 * 100, 0);
+    // nothing is closed without the operator's word
+    expect(family.candidates[2].outcome).toBe('leak');
+    const [taken] = applyOutlineChoices(
+      [family],
+      [{ kind: 'outline', seed: 0, rank: 2, take: 'walk' }],
+    );
+    expect(taken.candidates[2]).toMatchObject({ outcome: 'closed', rankFrom: 'walk' });
+    expect(taken.candidates[2].leakAt).toBeUndefined();
+    const [left] = applyOutlineChoices(
+      [family],
+      [{ kind: 'outline', seed: 0, rank: 2, take: 'fill' }],
+    );
+    expect(left.candidates[2]).toMatchObject({ outcome: 'leak', walk: { answer: 'fill' } });
+  });
+
+  it('proposes nothing when the walk is not between the closed neighbours', () => {
+    // the lines of size 2 are those of size 4
+    const wrong = sheet(5, (r) => {
+      const q = r === 2 ? 4 : r;
+      return sides(100, 100, 120 + 10 * q, 80 + 10 * q, 2);
+    });
+    const family = { seed: 0, candidates: [closed(0), closed(1), open(2), closed(3)] };
+    walkChecks(wrong.set, wrong.run, seeds, [family]);
+    expect(family.candidates[2].walk).toBeUndefined();
+  });
+
+  it('with no closed size keeps the proposals that grow with the size', () => {
+    // size 3 walks the lines of size 0: smaller than size 2 before it
+    const odd = sheet(5, (r) => {
+      const q = r === 3 ? 0 : r;
+      return sides(100, 100, 120 + 10 * q, 80 + 10 * q, 2).map((side) =>
+        // size 3's copy of size 0's lines, a hair off so the two do not coincide
+        r === 3 ? side.map((p) => P(p.x + 0.7, p.y + 0.7)) : side,
+      );
+    });
+    const family = { seed: 0, candidates: [0, 1, 2, 3, 4].map(open) };
+    walkChecks(odd.set, odd.run, seeds, [family]);
+    expect(family.candidates.map((c) => !!c.walk?.open)).toEqual([true, true, true, false, true]);
+  });
+});
