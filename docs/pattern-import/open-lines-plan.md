@@ -133,10 +133,17 @@ Kalla D, F: 82 verified sizes). State on 25 Nov, after two changes in `diag/walk
   outline by several mm, critical"). Where the cut sides give no closed walk, the sides as printed.
 - A stretch is shared from four coinciding sizes, not six (`SHARED_M`): in a file where half the
   sizes are rows of dots the reader did not assemble, six never coincide.
-- Not mended: a size whose own line at the junction is a row of dots (Kalla F size 6 rides size
-  8's line there). The rows of stage 1A as the walk's own lines (`diag/rows-dump.ts`, `ROWS`)
-  raise the own share from 18 % to 95 %, but a row runs through mark centres and is about 1 mm
-  off at a junction; the ends of a row must be tied to the printed marks first.
+- The sheet prints a size as a thin line with a row of marks on it. The thin line is the outline;
+  a line built through the marks (the second read with `keepRows`) cuts each corner by the chord
+  between two marks, about 1 mm (`walk-viz.mjs` with `RAW_PATHS=1` shows every printed stroke).
+  So the walk goes over the thin lines, and takes the second read's lines only for a size that
+  closes on no walk over them (`ROWS_FALLBACK`, from `diag/rows-dump.ts --chains`; such a walk is
+  marked `rows`). Kalla A BACK YOKE, no size closed by the fill: 17 of 18 closed (12 before the
+  two changes above, 16 with them, 14 and 18 through rows; 26 has no line the reader gave it).
+  Kalla D and F: unchanged. A `rows` outline is a candidate for the operator's case 2.
+- Kalla F size 6: the walk's corner where the size's thin line meets the vertical is on the
+  printed line; the reference outline is smooth there because it rides size 8's line. Shown to
+  the owner with the printed strokes drawn; his word is awaited.
 
 ### 4. The walk closes what the fill leaves open — open
 

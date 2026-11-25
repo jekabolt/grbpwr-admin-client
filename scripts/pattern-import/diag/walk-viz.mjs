@@ -27,6 +27,8 @@ items.forEach((it, n) => {
   g.save(); g.beginPath(); g.rect(ox + 2, oy + 22, P - 4, P - 2); g.clip();
   const line = (pts, col, wd, dash = []) => { g.strokeStyle = col; g.lineWidth = wd; g.setLineDash(dash); g.beginPath(); pts.forEach((q, i) => { const x = q.x ?? q[0], y = q.y ?? q[1]; i ? g.lineTo(X(x), Y(y)) : g.moveTo(X(x), Y(y)); }); g.stroke(); };
   for (const ch of f.chains.chains) { if (!ch.pts.some((q) => Math.abs(q.x - worst.x) < HALF + 5 && Math.abs(q.y - worst.y) < HALF + 5)) continue; const nm = nameOf.get(ch.id); line(ch.pts, nm === it.size ? '#000' : '#bbb', nm === it.size ? 2.2 : 1); }
+  // RAW_PATHS=1: every printed stroke as the sheet has it (a row of dots is in no chain), in green
+  if (process.env.RAW_PATHS) for (const pa of f.sheet.paths) { if (!pa.pts.length || !pa.pts.some((q) => Math.abs(q.x - worst.x) < HALF + 5 && Math.abs(q.y - worst.y) < HALF + 5)) continue; line(pa.pts.length > 1 ? pa.pts : [pa.pts[0], pa.pts[0]], '#3b3', 1.2); }
   line(it.ref, '#e11', 2.5, [9, 6]); line(w, '#12f', 2.5, [3, 4]);
   g.restore(); g.setLineDash([]); g.strokeStyle = '#888'; g.lineWidth = 1; g.strokeRect(ox + 2, oy + 22, P - 4, P - 2);
   g.fillStyle = '#000'; g.fillText(`${it.id} · size ${it.size} · reference: ${it.verdict} · largest difference ${worst.d.toFixed(1)} mm`, ox + 8, oy + 16);

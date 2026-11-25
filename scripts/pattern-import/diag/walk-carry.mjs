@@ -22,15 +22,22 @@ const s = deserialize(gunzipSync(readFileSync(dir + '/' + readdirSync(dir).filte
 const f = s.fields;
 const rankOfClass = new Map(f.run.sizes.map((z) => [z.classId, z.rank]));
 const labOf = new Map(s.ranks.map((r) => [r.rank, r.label])); const rankOf = new Map(s.ranks.map((r) => [r.label, r.rank]));
-const chainsOf = new Map();
+let chainsOf = new Map();
 for (const c of f.chains.classes) if (c.role === 'size') chainsOf.set(labOf.get(rankOfClass.get(c.id)), c.chains.map((i) => f.chains.chains[i]).filter(Boolean));
-// ROWS=<json from rows-dump.ts>: the rows of marks the plain read drops, tried as the size's own lines
-if (process.env.ROWS) { let n = -1; for (const [lab, list] of Object.entries(JSON.parse(readFileSync(process.env.ROWS, 'utf8')))) { if (!chainsOf.has(lab)) chainsOf.set(lab, []); for (const pts of list) chainsOf.get(lab).push({ id: n--, pts: pts.map(([x, y]) => ({ x, y })), closed: false }); } }
+// ROWS=<json from rows-dump.ts>: the rows of marks the plain read drops, tried as the size's own lines;
+// ROWS_REPLACE=1 with a --chains dump: the second read's lines INSTEAD of the snapshot's, per size
+if (process.env.ROWS) { let n = -1; for (const [lab, list] of Object.entries(JSON.parse(readFileSync(process.env.ROWS, 'utf8')))) { if (!chainsOf.has(lab) || process.env.ROWS_REPLACE) chainsOf.set(lab, []); for (const pts of list) chainsOf.get(lab).push({ id: n--, pts: pts.map(([x, y]) => ({ x, y })), closed: false }); } }
 const commonChains = f.chains.classes.filter((c) => c.role === 'common').flatMap((c) => c.chains.map((i) => f.chains.chains[i]).filter(Boolean));
 const inClass = new Set(f.chains.classes.flatMap((c) => c.chains));
 const plainChains = [...f.chains.classes.filter((c) => ['common', 'internal', 'seam'].includes(c.role)).flatMap((c) => c.chains.map((i) => f.chains.chains[i]).filter(Boolean)), ...f.chains.chains.filter((ch) => !inClass.has(ch.id) && ch.lengthMm >= 20)];
-const rankGrid = new Grid(); const rankOfChain = new Map();
+let rankGrid = new Grid(); let rankOfChain = new Map();
 for (const [lab, list] of chainsOf) for (const ch of list) { rankOfChain.set(ch.id, lab); for (let k = 1; k < ch.pts.length; k++) rankGrid.add(ch.pts[k - 1], ch.pts[k], ch.id); }
+// ROWS_FALLBACK=<--chains dump>: a second table of size lines, with the rows of marks kept. A row
+// runs from mark to mark and cuts a corner by the chord between two marks, so it is tried only for
+// a size that closes on no walk over the thin lines; such a walk is marked `viaRows`.
+const baseLines = { chainsOf, rankGrid, rankOfChain, sharedCache: new Map() }; let altLines = null;
+if (process.env.ROWS_FALLBACK) { const co = new Map(), rg = new Grid(), rc = new Map(); let n = -1e6; const dump = JSON.parse(readFileSync(process.env.ROWS_FALLBACK, 'utf8')); /* in the order of the sizes: a shared stretch is taken from the first size that runs on it */ for (const [lab, list] of [...chainsOf.keys()].filter((k) => dump[k]).map((k) => [k, dump[k]])) co.set(lab, list.map((pts) => ({ id: n--, pts: pts.map(([x, y]) => ({ x, y })), closed: false })));
+  for (const [lab, list] of co) for (const ch of list) { rc.set(ch.id, lab); for (let k = 1; k < ch.pts.length; k++) rg.add(ch.pts[k - 1], ch.pts[k], ch.id); } altLines = { chainsOf: co, rankGrid: rg, rankOfChain: rc, sharedCache: new Map() }; }
 const lenOf = (pts) => pts.reduce((a, q, i) => (i ? a + Math.hypot(q.x - pts[i - 1].x, q.y - pts[i - 1].y) : 0), 0);
 const areaOf = (pts) => { let a = 0; for (let i = 0; i < pts.length; i++) { const p = pts[i], q = pts[(i + 1) % pts.length]; a += p.x * q.y - q.x * p.y; } return Math.abs(a) / 2; };
 const dir2 = (a, b) => { const L = Math.hypot(b.x - a.x, b.y - a.y) || 1; return { x: (b.x - a.x) / L, y: (b.y - a.y) / L }; };
@@ -42,14 +49,16 @@ const carry = (G, e0, e1) => { const a = project(G, e0), b = project(G, e1); con
   if (L > 1.8 * chord + 15 || a.d > 25 || b.d > 25) return null; const n = Math.max(2, Math.round(L)); const g0 = at(G, a.s), g1 = at(G, a.s + len); const d0 = { x: e0.x - g0.x, y: e0.y - g0.y }, d1 = { x: e1.x - g1.x, y: e1.y - g1.y };
   const pts = []; let turn = 0, prev = null; for (let q = 1; q < n; q++) { const g = at(G, a.s + (len * q) / n), t = q / n; pts.push({ x: g.x + d0.x + (d1.x - d0.x) * t, y: g.y + d0.y + (d1.y - d0.y) * t }); if (prev !== null) { let dd = Math.abs(g.a - prev); if (dd > Math.PI) dd = 2 * Math.PI - dd; if (dd > turn) turn = dd; } prev = g.a; }
   let net = Math.abs(g1.a - g0.a); if (net > Math.PI) net = 2 * Math.PI - net; return { pts, mm: Math.round(L), kind: (Math.max(net, turn) * 180) / Math.PI >= 45 ? 'corner' : 'smooth' }; };
-const sharedCache = new Map();
+let sharedCache = baseLines.sharedCache;
+const useLines = (t) => { ({ chainsOf, rankGrid, rankOfChain, sharedCache } = t); };
 const sharedEdges = (bb, key) => { if (sharedCache.has(key)) return sharedCache.get(key); const out = []; const taken = new Grid();
   for (const ch of commonChains) { let cur = []; const flush = () => { if (cur.length >= 2 && lenOf(cur) >= 5) { out.push(cur); for (let k = 1; k < cur.length; k++) taken.add(cur[k - 1], cur[k], 0); } cur = []; }; for (const q of ch.closed ? [...ch.pts, ch.pts[0]] : ch.pts) { if (q.x >= bb[0] && q.x <= bb[2] && q.y >= bb[1] && q.y <= bb[3]) cur.push(q); else flush(); } flush(); }
   for (const [, list] of chainsOf) for (const ch of list) { let cur = []; const flush = () => { if (cur.length >= 2 && lenOf(cur) >= 10) { out.push(cur); for (let k = 1; k < cur.length; k++) taken.add(cur[k - 1], cur[k], 0); } cur = []; };
     for (let k = 1; k < ch.pts.length; k++) { const a = ch.pts[k - 1], b = ch.pts[k], n = Math.max(1, Math.round(Math.hypot(b.x - a.x, b.y - a.y))); for (let q = 0; q <= n; q++) { const pt = { x: a.x + ((b.x - a.x) * q) / n, y: a.y + ((b.y - a.y) * q) / n }; if (pt.x < bb[0] || pt.x > bb[2] || pt.y < bb[1] || pt.y > bb[3]) { flush(); continue; } const ranks = new Set([...rankGrid.near(pt.x, pt.y, 0.3).keys()].map((i) => rankOfChain.get(i))); if (ranks.size >= M && !taken.near(pt.x, pt.y, 0.3).size) cur.push(pt); else flush(); } } flush(); }
   sharedCache.set(key, out); return out; };
 // the cut sides first; where they leave no closed walk, the sides as printed
-function walk(...a) { TJ = TJOIN; const r = walk1(...a); if (!TJOIN || !r || r.best) return r; TJ = 0; const r0 = walk1(...a); TJ = TJOIN; return r0; }
+function walkT(...a) { TJ = TJOIN; const r = walk1(...a); if (!TJOIN || !r || r.best) return r; TJ = 0; const r0 = walk1(...a); TJ = TJOIN; return r0; }
+function walk(...a) { const r = walkT(...a); if (!altLines || r?.best || a[4]) return r; useLines(altLines); const r2 = walkT(...a); useLines(baseLines); if (r2?.best) { r2.best.viaRows = true; return r2; } return r; }
 function walk1(size, guidePts, key, seedOnly, nonSize) {
   // seedOnly: no closed size to lean on — the piece is whatever closes round its label; nothing is drawn
   const G = guidePts ? prep(guidePts) : null; const xs = guidePts ? guidePts.map((q) => q.x) : [seedOnly.x - REACH, seedOnly.x + REACH], ys = guidePts ? guidePts.map((q) => q.y) : [seedOnly.y - REACH, seedOnly.y + REACH]; const bb = [Math.min(...xs) - 20, Math.min(...ys) - 20, Math.max(...xs) + 20, Math.max(...ys) + 20];
@@ -100,14 +109,14 @@ if (mode === 'lone' || mode === 'lonecheck') {
     for (const c of fam.cells) { if (!rankOf.has(c.size) || (mode === 'lonecheck' && c.outcome !== 'closed')) continue; t.cells++; const row = { label: (fam.label ?? '').trim(), size: c.size, seed: fam.seed };
       if (!at) { t.noSeed++; out.push({ ...row, result: 'no label position' }); continue; }
       const r = walk(c.size, null, fam.seed, at); if (!r) { t.noOwn++; out.push({ ...row, result: 'no own line near the label' }); continue; } if (!r.best) { t.noWalk++; out.push({ ...row, result: 'no closed walk' }); continue; }
-      t.closed++; const b = r.best, per = lenOf([...b.pts, b.pts[0]]); const A = areaOf(b.pts); got.push({ rank: rankOf.get(c.size), A }); const o = { ...row, result: 'closed', own: b.own / per, shared: b.sh / per, corners: b.corners, areaCm2: Math.round(A / 100), pts: rest[2] ? b.pts.map((q) => [+q.x.toFixed(2), +q.y.toFixed(2)]) : undefined };
+      t.closed++; if (r.best.viaRows) t.viaRows = (t.viaRows ?? 0) + 1; const b = r.best, per = lenOf([...b.pts, b.pts[0]]); const A = areaOf(b.pts); got.push({ rank: rankOf.get(c.size), A }); const o = { ...row, result: 'closed', ...(b.viaRows ? { viaRows: true } : {}), own: b.own / per, shared: b.sh / per, corners: b.corners, areaCm2: Math.round(A / 100), pts: rest[2] ? b.pts.map((q) => [+q.x.toFixed(2), +q.y.toFixed(2)]) : undefined };
       if (mode === 'lonecheck') { const T = c.outer.map(([x, y]) => ({ x, y })); const mx = Math.max(dev(b.pts, T).max, dev(T, b.pts).max); o.maxDev = +mx.toFixed(2); t[mx <= 1 ? 'same' : mx <= 3 ? 'close' : 'different']++; }
       out.push(o); }
     if (mode === 'lone' && at && got.length < fam.cells.length / 2) { const r1 = walk(null, null, fam.seed + ':plain', at, true); if (r1?.best) { const b = r1.best; t.oneSizePieces = (t.oneSizePieces ?? 0) + 1; t.oneSizeCells = (t.oneSizeCells ?? 0) + fam.cells.length; out.push({ label: (fam.label ?? '').trim(), size: 'ALL', seed: fam.seed, result: 'one outline for every size', own: 1, shared: 0, corners: b.corners, areaCm2: Math.round(areaOf(b.pts) / 100), perMm: Math.round(lenOf([...b.pts, b.pts[0]])), pts: rest[2] ? b.pts.map((q) => [+q.x.toFixed(2), +q.y.toFixed(2)]) : undefined }); } }
     // sizes of one piece must grow with the rank: count the closed sizes that agree with their closed neighbours
     got.sort((a, b) => a.rank - b.rank); got.forEach((g, i) => { const lo = got[i - 1], hi = got[i + 1]; const ok = (!lo || g.A >= lo.A * 0.999) && (!hi || g.A <= hi.A * 1.001); t[ok ? 'orderOk' : 'orderBad']++; }); }
   console.log(JSON.stringify(t));
-  for (const r of out) console.log(`${r.label.slice(0, 26).padEnd(26)} ${r.size.padEnd(3)} → ${r.result}${r.result === 'closed' ? ` · own ${pct(r.own)} shared ${pct(r.shared)} · corners ${r.corners} · ${r.areaCm2} cm²${r.maxDev !== undefined ? ` · max deviation ${r.maxDev} mm` : ''}` : r.perMm ? ` · perimeter ${r.perMm} mm · ${r.areaCm2} cm² · corners ${r.corners}` : ''}`);
+  for (const r of out) console.log(`${r.label.slice(0, 26).padEnd(26)} ${r.size.padEnd(3)} → ${r.result}${r.viaRows ? ' (rows)' : ''}${r.result === 'closed' ? ` · own ${pct(r.own)} shared ${pct(r.shared)} · corners ${r.corners} · ${r.areaCm2} cm²${r.maxDev !== undefined ? ` · max deviation ${r.maxDev} mm` : ''}` : r.perMm ? ` · perimeter ${r.perMm} mm · ${r.areaCm2} cm² · corners ${r.corners}` : ''}`);
   if (rest[2]) writeFileSync(rest[2], JSON.stringify(out));
 } else if (mode === 'plainscan') {
   // every piece with open cells: is there a closed outline round its label made of lines that carry no size?
