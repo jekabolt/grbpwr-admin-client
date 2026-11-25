@@ -22,7 +22,9 @@ run_step 'Install dependencies' yarn install --frozen-lockfile
 if [[ ${GITHUB_ACTIONS:-} == true ]]; then
   run_step 'Install Playwright Chromium' yarn playwright install --with-deps chromium
 fi
-run_step 'TypeScript' yarn tsc --noEmit
+# The program outgrew node's default ~4 GB heap: tsc died in mark-compact (exit 134) on every
+# branch. ubuntu-latest on a public repo has 16 GB, so 8 GB leaves room for the rest of the job.
+run_step 'TypeScript' env NODE_OPTIONS=--max-old-space-size=8192 yarn tsc --noEmit
 run_step 'ESLint' yarn lint
 run_step 'Design lint' yarn lint:design
 run_step 'Assert probes' yarn test
