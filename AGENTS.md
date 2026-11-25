@@ -115,3 +115,5 @@ commit marker.
 Deeper architecture notes live in `docs/` (e.g. `docs/analytics-dashboard.md` covers the analytics dashboard's data flow, period/compare semantics, and metric sources).
 
 Pattern upload stops — a dropped pattern is refused, the wizard halts, or cut lines do not meet after the read: `src/lib/pattern-import/CLAUDE.md`.
+
+Whiteboards (the FigJam-like canvas, its sync service and the backend spec): `src/components/managers/whiteboards/CLAUDE.md`.
