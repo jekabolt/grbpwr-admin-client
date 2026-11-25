@@ -109,10 +109,14 @@ No other file of the 75 has a piece with no closed size.
 
 ### 1B. The rows as walls of the fill — open
 
-With the rows kept as real chains Kalla got 40 cells better, 14 worse and 10 opened: six sizes
-stick to the rebuilt row of size 6. The rule that does it is not `lonePortions`. Next step: replay
-the saved snapshot with each candidate's `walls` written out (branch `open-lines-bench-switches`
-has the bench changes), find the rule, then let the rows into the fill.
+With the rows kept as real chains Kalla got 40 cells better, 14 worse and 10 opened. The rule
+behind most of the 14 (Codex, 25 Nov, `kalla-25nov.md`): a copy of the size-6 row that lies
+whole on the lines of two sizes (6 and 8 within 0.3 mm) is let back into the fill by
+`pieces/walls.ts:rescuedIgnored`; `copyRanks` records an owner only when there is one, so
+`copyWallsOf` gives the whole copy as a wall to every size. Off (`AMBIG_COPY_WALL_OFF=1`,
+research branch): 10 of 14 worse return, 1 of 10 opened closes (C 30), Q 18 opens, 39 of 40
+gains stay. Not accepted. Seven of the ten opened are leaks whose wall list the bench does not
+write (no closed boundary), so their cause is not traced yet.
 Accepted when no cell opens, no cell's share of outline on its own line falls
 (`diag/own-share.mjs`), and no verified outline moves.
 
@@ -164,11 +168,28 @@ Kalla D, F: 82 verified sizes). State on 25 Nov, after two changes in `diag/walk
 - Kalla F size 6: the walk's corner where the size's thin line meets the vertical is on the
   printed line; the reference outline is smooth there because it rides size 8's line. The owner
   saw it with the printed strokes drawn (25 Nov): correct.
-- Kalla A size 26 stays open: its line is a row of dashes the reader put in `ignore` (316 mm of
-  it between the outlines of 24 and 28; only the top and the fold edge are the size's). Giving the
-  walk the unassigned lines between the two closed neighbours (`BAND=1`) found no walk in 8
-  minutes: a hundred dashes with a gap after each is not a job for the walk's search. It is a
-  job for the reader (the pen of size 26 is not recognised as a size) or for stage 5B.
+- Kalla A size 26 stays open. The 316 mm "in `ignore`" between the outlines of 24 and 28 is not
+  a lost row: all 142 of its PDF ranges are already in chain 6718 of size 26 (`sizes/land.ts:
+  bridgeSameRank` joined them, `recoverSizes` files the joined copy under `ignore`). The pen of
+  26 is read and matched to its legend sample (Codex, 25 Nov, branch `codex/25nov-research`,
+  `docs/pattern-import/kalla-25nov.md`). Why the cell stays open is not known. `BAND=1` found no
+  walk in 8 minutes.
+
+Choosing between the two outlines without the operator: tried 25 Nov on all 50 reference pieces
+(d8, branch `open-lines-walk`), not switched on. The walk alone: 328 of 548 ok sizes within 1 mm,
+102 at 1–3 mm, 40 farther, 78 with no walk; weaker than the fill as a source of the outline. By
+whose line the reader says it is (own / nobody's / another size's): 1 of 4 decided on six pieces,
+wrongly (Leah F 20: the reader gave the size a neighbour's end line). By the closed neighbours
+(`outlineVerdict`): of 39 ok sizes with two outlines, 3 wrong replacements, 24 undecided; of 18
+bad, 3 mended; with stricter shares 1 wrong, 0 mended. It stays a mark in the data
+(`walk.verdict`); the "two outlines" question goes. On 22 of 52 bad sizes the walk over the size's
+own lines gives the same bad outline: the error is which line the reader gave to which size, above
+both the fill and the walk. Corners are not the cause (`diag/corner-walls-ref.ts`: where an ok
+outline follows both sides of a corner, the wall matches it within 1 mm on 359 of 363).
+Next: a map of the reader's owner under every side of the reference outlines, ok and bad (d8).
+A wrong silent choice goes to the DXF unseen; a needless question costs one click: any later
+silent choice needs 0 MOVED/LOST on all 50 pieces with the choice applied before
+`reference-check.ts` collects the outlines.
 
 ### 3A. The program chooses between the two outlines itself — measured 25 Nov, NOT enabled
 
