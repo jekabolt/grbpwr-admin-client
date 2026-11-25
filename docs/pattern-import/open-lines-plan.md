@@ -41,13 +41,24 @@ order are in `src/lib/pattern-import/CLAUDE.md` (owner, 25 Nov).
 
 ## Stages
 
-### 0. The owner checks the walk's outlines by eye — open, blocks 3 to 5
+### 0. The owner checks the walk's outlines by eye — done 25 Nov: the walk stays, with three faults
 
 Pictures in this folder: `walk-open-kalla.png` (nine open cells the walk closed),
 `walk-kalla-back-yoke.png` (a piece with no closed size, 16 of 18 sizes), `walk-leah-g.png` and
 `walk-kalla-f.png` (bad outlines against the walk), `one-outline-venice-pockets.png`,
 `walk-selenite-diagram.png`, `walk-clark-pocket-lining.png` (what kind of piece it is).
 If the owner rejects the walk's outlines, stages 3 to 5 are dropped and 1 and 2 stay.
+
+The owner's answer (25 Nov), per picture:
+
+- `walk-open-kalla.png`: the outlines look right.
+- `walk-leah-g.png`, `walk-kalla-f.png`: the walk mends what the fill got wrong (it leaked onto
+  other lines), but the fill's corners are the right ones and the walk's are not. To mend before
+  the walk is ported (stage 3). First look at Kalla F: sizes 2, 6, 10, 14, 18 have no size chain at
+  the corner at all — their corner strokes sit in chains of no row; not yet followed to the cause.
+- `walk-kalla-back-yoke.png`: two sizes (0 and 26) are not drawn, and on the shared top line the
+  sizes are one solid line with nothing to tell them apart. Both to be checked against the sheet.
+- `walk-selenite-diagram.png`: nothing of the piece is on the sheet — holding it back is right.
 
 ### 1A. The sizes step shows the rows of marks — done
 
