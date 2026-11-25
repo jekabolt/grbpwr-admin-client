@@ -140,10 +140,17 @@ Kalla D, F: 82 verified sizes). State on 25 Nov, after two changes in `diag/walk
   closes on no walk over them (`ROWS_FALLBACK`, from `diag/rows-dump.ts --chains`; such a walk is
   marked `rows`). Kalla A BACK YOKE, no size closed by the fill: 17 of 18 closed (12 before the
   two changes above, 16 with them, 14 and 18 through rows; 26 has no line the reader gave it).
-  Kalla D and F: unchanged. A `rows` outline is a candidate for the operator's case 2.
+  Kalla D and F: unchanged. Leah C, D, F, G: three sizes that had no walk close (0.05, 1.14 and
+  0.57 mm off the reference), none moved — 56 of the 82 within 1 mm. A `rows` outline is a
+  candidate for the operator's case 2.
 - Kalla F size 6: the walk's corner where the size's thin line meets the vertical is on the
-  printed line; the reference outline is smooth there because it rides size 8's line. Shown to
-  the owner with the printed strokes drawn; his word is awaited.
+  printed line; the reference outline is smooth there because it rides size 8's line. The owner
+  saw it with the printed strokes drawn (25 Nov): correct.
+- Kalla A size 26 stays open: its line is a row of dashes the reader put in `ignore` (316 mm of
+  it between the outlines of 24 and 28; only the top and the fold edge are the size's). Giving the
+  walk the unassigned lines between the two closed neighbours (`BAND=1`) found no walk in 8
+  minutes: a hundred dashes with a gap after each is not a job for the walk's search. It is a
+  job for the reader (the pen of size 26 is not recognised as a size) or for stage 5B.
 
 ### 4. The walk closes what the fill leaves open — open
 
