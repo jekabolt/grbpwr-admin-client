@@ -133,6 +133,10 @@ new behaviour to it meanwhile.
   A size with a `note` was re-judged: on 25 Nov the owner took the walk's outline for penelope-B 16
   and matrix-B XS, L, 2XL (the fill stepped onto the neighbouring row of circles). Code without
   the leak repair (`applyLeakRepairs`, branch `open-lines-walk`) shows exactly these four as MOVED.
+  On 26 Nov the owner judged the ok sizes whose outline makes a step from one printed line onto
+  the next (`diag/ref-jogs.ts`, branch `open-lines-walk`): a step is an error. memoirA-O 12,
+  emma-A 14, taos-B 14 took the walk's outline (MOVED on code that keeps the step); 25 sizes went
+  to bad (12 seen, 13 not seen and judged by the same rule). Now 523 ok / 88 bad.
 - Unit: `npx vitest run src/lib/pattern-import`. Do not run `yarn lint` / `yarn fix` (they rewrite
   all of `src/`). `yarn build:check` — xlsx / `tasks/sheet.ts` errors predate this branch.
 

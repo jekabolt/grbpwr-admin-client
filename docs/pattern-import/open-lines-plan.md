@@ -37,7 +37,7 @@ order are in `src/lib/pattern-import/CLAUDE.md` (owner, 25 Nov).
 | Diagnosis, scripts, pictures, this plan | `fix-pattern-pdf-open-lines` (PR #470) | pushed |
 | Stages 1A and 2 | `open-lines-rows`, commit `aacf5976f` | merged into the PR head 25 Nov on the owner's word |
 | Measurement switches for the bench (`LONE_OFF`, `INNER_PLUG_OFF`, outlines in the bench output) | `open-lines-bench-switches`, commit `deb6b2824` | pushed, not for merging |
-| The owner's reference set (`scripts/pattern-import/reference.json`, 50 pieces, 548 ok and 63 bad sizes), `family-fit.md`, `family-research/` | `reference-set`, commit `c2aa54469` | merged into the PR head 25 Nov on the owner's word |
+| The owner's reference set (`scripts/pattern-import/reference.json`, 50 pieces, 548 ok and 63 bad sizes; 523 / 88 after the owner's re-judging of 25–26 Nov, see `src/lib/pattern-import/CLAUDE.md`), `family-fit.md`, `family-research/` | `reference-set`, commit `c2aa54469` | merged into the PR head 25 Nov on the owner's word |
 
 ## Stages
 
