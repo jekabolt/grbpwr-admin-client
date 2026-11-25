@@ -80,7 +80,7 @@ Open: Clark H POCKET LINING and I POCKET WELT (32 cells) look drawn once too and
 ### Housekeeping — open
 
 - Done 25 Nov: `open-lines-rows` merged into `fix-pattern-pdf-open-lines` on the owner's word.
-  The Venice J picture was looked at by the agent, not yet by the owner.
+  The owner checked the Venice J picture the same day: correct.
 - The reference set is pushed on branch `reference-set` (24 Nov). Merging it into the PR head is
   the owner's decision; every acceptance number of this plan depends on it.
 - The switches `PDF_LAYERS_OFF` and `SNAPSHOT_STAGE` (read a layered PDF with its layers hidden,
