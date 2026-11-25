@@ -53,7 +53,7 @@ import {
 import { plural, useWizardPrimary } from '../stages';
 import type { PieceFocus } from '../piece-focus';
 import { modelFromCard } from '../autopilot/card-match';
-import { provenCopy, weakAsides } from '../auto-advance';
+import { askableAside as askable, provenCopy, weakAsides } from '../auto-advance';
 import type { CardContext } from '../client';
 import { DroppedLabels } from './not-in-file';
 import {
@@ -443,15 +443,6 @@ const ASIDE_SHORT: Partial<Record<SetAside['reason'] | 'size-copy?', string>> = 
   joined: 'touches a piece',
   'inner-line': 'cut by a line',
   'other-pen': 'mark inside',
-};
-/**
- * A thin band between two drawn lines (a size copy the engine calls a sliver, or an outline that
- * fills under a tenth of its own box): never a piece, so never asked — it stays left out.
- */
-const askable = (a: SetAside) => {
-  if (a.copy?.how === 'sliver') return false;
-  const boxArea = (a.box.maxX - a.box.minX) * (a.box.maxY - a.box.minY);
-  return !(a.areaMm2 > 0 && boxArea > 0 && a.areaMm2 / boxArea < 0.1);
 };
 /** Proven no-piece reasons: asked last, after the outlines that could be a piece. */
 const ASIDE_JUNK = new Set<string>([

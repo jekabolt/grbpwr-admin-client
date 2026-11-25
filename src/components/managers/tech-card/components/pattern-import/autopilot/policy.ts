@@ -67,6 +67,7 @@ import {
 } from '../use-import-session';
 import {
   PAGE_SURE,
+  askableAside,
   dartOf,
   defaultedFabrics,
   openAsides,
@@ -1441,7 +1442,7 @@ function piecesStep(snap: Snap): AutopilotDecision {
   // the offer: piece-sized outlines set aside on a guess — kept aside only on positive evidence
   // UXHOOKS: a set the operator reviewed (inputs.asideReviewed, never set here) is answered
   const weak = openAsides(
-    weakAsides(s.pieces?.setAside, fams, s.pieces?.seeds),
+    weakAsides(s.pieces?.setAside, fams, s.pieces?.seeds).filter(askableAside),
     s.sheet?.sheet.parts,
     i.asideReviewed,
   );

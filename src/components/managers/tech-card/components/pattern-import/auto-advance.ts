@@ -227,6 +227,18 @@ export function asideDigests(
 }
 
 /**
+ * A thin band between two drawn lines (a size copy the engine calls a sliver, or an outline that
+ * fills under a tenth of its own box): never a piece, so never asked — it stays left out. One rule
+ * for the step, its footer and the autopilot: asked by one and not shown by the other, the
+ * question had no answer on the screen (Cassandra: the ring left of a dress as big as the sheet).
+ */
+export const askableAside = (a: SetAside): boolean => {
+  if (a.copy?.how === 'sliver') return false;
+  const boxArea = (a.box.maxX - a.box.minX) * (a.box.maxY - a.box.minY);
+  return !(a.areaMm2 > 0 && boxArea > 0 && a.areaMm2 / boxArea < 0.1);
+};
+
+/**
  * The offered outlines still open: those on a sheet whose set the operator has not reviewed AS IT
  * IS NOW (`asideReviewed[sheet]` equal to its digest). The autopilot never sets the answer (D3:
  * "I looked" is the operator's); a replay gives it back only on the same digest.
@@ -333,7 +345,7 @@ export function stepOffer(s: OfferCtx): string | null {
     }
     case 'pieces': {
       const n = openAsides(
-        weakAsides(s.pieces?.setAside, s.pieces?.families, s.pieces?.seeds),
+        weakAsides(s.pieces?.setAside, s.pieces?.families, s.pieces?.seeds).filter(askableAside),
         s.sheet?.sheet.parts,
         s.asideReviewed,
       ).length;
