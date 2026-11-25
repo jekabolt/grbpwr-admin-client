@@ -170,6 +170,33 @@ Kalla D, F: 82 verified sizes). State on 25 Nov, after two changes in `diag/walk
   minutes: a hundred dashes with a gap after each is not a job for the walk's search. It is a
   job for the reader (the pen of size 26 is not recognised as a size) or for stage 5B.
 
+### 3A. The program chooses between the two outlines itself — measured 25 Nov, NOT enabled
+
+The owner (25 Nov): the operator answers only what the program cannot close or understand. The
+neighbour session (bb) was consulted first, on the owner's word: its answer is that a rule made on
+Kalla and Leah (6 of the 29 `tune` pieces) must pass the 21 `confirm` pieces before anything is
+replaced silently, and that "the outline on the size's own line wins" is refuted by its own
+finding (a correct outline on another size's line is normal).
+
+Tried (`outlineVerdict`, `whoseLine` in `pieces/walk.ts`; the verdict is carried as a mark,
+`PieceCandidate.walk.verdict`, and replaces nothing): where the two outlines part, each is own
+(a line of this size, or the lines of both neighbouring sizes), foreign (only other sizes') or
+nobody's; one is taken when ≥ 90 % of its parting stretch is own and ≥ 50 % of the other's is
+foreign. `diag/walk-ref.ts` on the six reference pieces: of 4 verified sizes with two outlines the
+rule decides 1 and decides it WRONG — Leah F size 20, the walk 100 % on "its own" line, 7.4 mm
+off the verified outline over 67 mm. The short end of the facing has one end line per size 7 mm
+apart, and the reader gave size 20 the line of its neighbour. So the reader's size of a line is
+not evidence enough to overrule the fill. Leah: 9 of 17 two-outline sizes decided, Kalla 7 of 40.
+
+Next evidence to try, not the reader's label: the outlines of the neighbouring closed sizes at
+the parting stretch (the walk of Leah F 20 lies ON its neighbour's outline there; sizes of one
+piece do not share an end line they have one each of). Until a rule gives 0 moved verified
+outlines on all 50 pieces, the two outlines stay a question to the operator.
+
+Also 25 Nov: the walk keeps to a printed line past a turn into the piece and back (a dart, a
+notch: `straightened`), goes round a turn out of it (a tab), and has no outline where the only
+closed path runs into a dart and back (`turnsOnce`) — the owner's Leah B TOP FRONT size 6.
+
 ### 4. The walk closes what the fill leaves open — in the product on branch `open-lines-walk`, as a proposal
 
 `walkChecks` (`pieces/walk.ts`, 25 Nov, the owner: "port stage 4") also walks every size the fill

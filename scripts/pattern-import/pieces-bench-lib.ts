@@ -149,6 +149,8 @@ export function cellsOf(out: StageIO['pieces']['out'], ranks: RankInfo[] | null)
                 maxMm: +c.walk.maxMm.toFixed(1),
                 overMm: Math.round(c.walk.overMm),
                 ...(c.walk.open ? { open: true } : {}),
+                ...(c.walk.verdict ? { verdict: c.walk.verdict } : {}),
+                ...(c.walk.viaBlock ? { viaBlock: true } : {}),
               }
             : null,
           geo: createHash('md5')

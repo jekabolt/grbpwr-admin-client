@@ -9,6 +9,7 @@ import { gunzipSync } from 'node:zlib';
 import { bboxOf } from 'lib/pattern-import/pieces/geom';
 import {
   differs,
+  outlineVerdict,
   sharedStretches,
   WALK,
   walkLines,
@@ -59,7 +60,18 @@ const far = (a: PtMm[], b: PtMm[]) => {
   }
   return mx;
 };
-const t = { sizes: 0, noLine: 0, noWalk: 0, le1: 0, le3: 0, gt3: 0, flagged: 0 };
+const t = {
+  sizes: 0,
+  noLine: 0,
+  noWalk: 0,
+  le1: 0,
+  le3: 0,
+  gt3: 0,
+  flagged: 0,
+  takesWalk: 0,
+  takesFill: 0,
+  cannotTell: 0,
+};
 const t0 = Date.now();
 for (const id of ids) {
   const p = pieces.find((x) => x.id === id);
@@ -100,10 +112,15 @@ for (const id of ids) {
     const mx = Math.max(far(w.outer, z.pts), far(z.pts, w.outer));
     t[mx <= 1 ? 'le1' : mx <= 3 ? 'le3' : 'gt3']++;
     const flag = differs(w.outer, z.pts) ?? differs(z.pts, w.outer);
-    if (flag) t.flagged++;
+    // the verified outline stands for the fill's: a verdict for the walk here is a FALSE replacement
+    const v = flag ? outlineVerdict(L, z.rank, w.outer, z.pts) : undefined;
+    if (flag) {
+      t.flagged++;
+      t[v?.take === 'walk' ? 'takesWalk' : v?.take === 'fill' ? 'takesFill' : 'cannotTell']++;
+    }
     const per = w.ownMm + w.sharedMm || 1;
     console.log(
-      `${z.size.padEnd(5)} own ${String(Math.round((100 * w.ownMm) / per)).padStart(3)}% · corners ${w.corners} · max ${mx.toFixed(2).padStart(6)} mm${flag ? ` · WOULD BE SHOWN (${flag.maxMm.toFixed(1)} mm over ${Math.round(flag.overMm)} mm)` : ''}`,
+      `${z.size.padEnd(5)} own ${String(Math.round((100 * w.ownMm) / per)).padStart(3)}% · corners ${w.corners} · max ${mx.toFixed(2).padStart(6)} mm${flag ? ` · WOULD BE SHOWN (${flag.maxMm.toFixed(1)} mm over ${Math.round(flag.overMm)} mm) → ${v ? `TAKES THE ${v.take.toUpperCase()}${v.viaBlock ? ' (block)' : ''}` : 'cannot tell'}` : ''}`,
     );
   }
 }

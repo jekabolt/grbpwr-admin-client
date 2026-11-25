@@ -65,6 +65,12 @@ export const WALK = {
   spikeLegMm: 10,
   /** …the tip of the dart being no longer than this, mm. */
   spikeTipMm: 20,
+  /** An outline is ON a size's line within this, mm. */
+  onOwnMm: 0.5,
+  /** One outline is taken over the other when this share of its parting stretch is on the size's
+   *  own line and this share of the other's is on another size's line. */
+  ownToWin: 0.9,
+  foreignToLose: 0.5,
   /** A walk is shown only when its area sits between its closed neighbour sizes', within this. */
   areaSlack: 0.002,
 };
@@ -605,6 +611,81 @@ export function differs(
 }
 
 /**
+ * Whose printed line an outline runs on where it parts from the other outline: the stretch of
+ * `a` farther than `WALK.differMm` from `b`, split into
+ * - own: a line of this size is under it — or the lines of the sizes next to it on both sides
+ *   are (`block`: the sheet draws one line for a block of sizes and the reader gives it to one);
+ * - foreign: only lines of other sizes are under it;
+ * - nobody's: no size line at all (a common line, a line of no row, nothing).
+ * `ownAloneMm` counts the own length without the block rule.
+ */
+export function whoseLine(
+  L: WalkLines,
+  rank: number,
+  a: readonly PtMm[],
+  b: readonly PtMm[],
+): { ownMm: number; ownAloneMm: number; foreignMm: number; nobodyMm: number } {
+  const C = WALK;
+  const g = new SegGrid(3);
+  g.addPolyline(0, b, true);
+  const out = { ownMm: 0, ownAloneMm: 0, foreignMm: 0, nobodyMm: 0 };
+  const ranksAll = [...L.bySize.keys()];
+  const below = Math.max(...ranksAll.filter((r) => r < rank), -Infinity);
+  const above = Math.min(...ranksAll.filter((r) => r > rank), Infinity);
+  const next = [below, above].filter(Number.isFinite);
+  for (let k = 0; k < a.length; k++) {
+    const p = a[k];
+    const q = a[(k + 1) % a.length];
+    const n = Math.max(1, Math.round(dist(p, q)));
+    const step = dist(p, q) / n;
+    for (let t = 0; t < n; t++) {
+      const m = { x: p.x + ((q.x - p.x) * (t + 0.5)) / n, y: p.y + ((q.y - p.y) * (t + 0.5)) / n };
+      let d = 40;
+      g.near(m, 40, (_o, i) => {
+        d = Math.min(d, segNearest(m, b[i], b[(i + 1) % b.length]).d);
+      });
+      if (d <= C.differMm) continue;
+      const ranks = new Set<number>();
+      L.grid.near(m, C.onOwnMm, (o, i) => {
+        if (ranks.has(L.rankOf[o])) return;
+        if (segNearest(m, L.lines[o][i], L.lines[o][i + 1]).d <= C.onOwnMm) ranks.add(L.rankOf[o]);
+      });
+      const alone = ranks.has(rank);
+      const block = next.length > 0 && next.every((r) => ranks.has(r));
+      if (alone) out.ownAloneMm += step;
+      if (alone || block) out.ownMm += step;
+      else if (ranks.size) out.foreignMm += step;
+      else out.nobodyMm += step;
+    }
+  }
+  return out;
+}
+
+/**
+ * Which of the two outlines of a closed size the program would take itself — only where one runs
+ * on the size's own line and the other on another size's (the owner, 25 Nov: the operator answers
+ * what the program cannot close or understand, nothing else). "Nobody's line" decides nothing:
+ * half the sizes of a file can have their thin line unassembled (Kalla), and then it would always
+ * lose. undefined = the program cannot tell.
+ */
+export function outlineVerdict(
+  L: WalkLines,
+  rank: number,
+  walk: readonly PtMm[],
+  fill: readonly PtMm[],
+): { take: 'walk' | 'fill'; viaBlock: boolean } | undefined {
+  const C = WALK;
+  const w = whoseLine(L, rank, walk, fill);
+  const f = whoseLine(L, rank, fill, walk);
+  const share = (x: number, o: typeof w) => x / (o.ownMm + o.foreignMm + o.nobodyMm || 1);
+  const wins = (mine: typeof w, other: typeof w) =>
+    share(mine.ownMm, mine) >= C.ownToWin && share(other.foreignMm, other) >= C.foreignToLose;
+  if (wins(w, f)) return { take: 'walk', viaBlock: share(w.ownAloneMm, w) < C.ownToWin };
+  if (wins(f, w)) return { take: 'fill', viaBlock: share(f.ownAloneMm, f) < C.ownToWin };
+  return undefined;
+}
+
+/**
  * The walk beside the fill.
  *
  * A closed size is walked as a check: where the walk's outline and the fill's differ the candidate
@@ -681,12 +762,16 @@ export function walkChecks(
       )
         continue;
       const per = lenOf([...w.outer, w.outer[0]]);
+      const verdict = outlineVerdict(L, c.rank, w.outer, c.outer);
       c.walk = {
         outer: w.outer,
         ownShare: per ? w.ownMm / per : 0,
         maxMm: d.maxMm,
         overMm: d.overMm,
         at: d.at,
+        ...(verdict
+          ? { verdict: verdict.take, ...(verdict.viaBlock ? { viaBlock: true } : {}) }
+          : {}),
       };
     }
     // the open sizes

@@ -73,6 +73,10 @@ const openAll = families.reduce(
   0,
 );
 const proposed = shown.filter((x) => x.c.walk!.open).length;
+const two = shown.filter((x) => !x.c.walk!.open);
+console.log(
+  `two outlines: ${two.length} · the program takes the walk ${two.filter((x) => x.c.walk!.verdict === 'walk').length}, the fill ${two.filter((x) => x.c.walk!.verdict === 'fill').length}, cannot tell ${two.filter((x) => !x.c.walk!.verdict).length} · through the block rule ${two.filter((x) => x.c.walk!.viaBlock).length}`,
+);
 console.log(
   `${shown.length - proposed} of ${closed} closed sizes would be shown · ${proposed} of ${openAll} open sizes get a proposal · the walk took ${ms} ms`,
 );
@@ -80,7 +84,7 @@ for (const fam of families) {
   const w = fam.candidates.filter((c) => c.walk);
   if (w.length)
     console.log(
-      `  ${fam.label.padEnd(30)} ${w.map((c) => (c.walk!.open ? `${labOf.get(c.rank)}: OPEN → closed, own ${Math.round(100 * c.walk!.ownShare)}%` : `${labOf.get(c.rank)}: ${c.walk!.maxMm.toFixed(1)} mm over ${Math.round(c.walk!.overMm)}, own ${Math.round(100 * c.walk!.ownShare)}%`)).join(' · ')}`,
+      `  ${fam.label.padEnd(30)} ${w.map((c) => (c.walk!.open ? `${labOf.get(c.rank)}: OPEN → closed, own ${Math.round(100 * c.walk!.ownShare)}%` : `${labOf.get(c.rank)}: ${c.walk!.maxMm.toFixed(1)} mm over ${Math.round(c.walk!.overMm)} → ${c.walk!.verdict ? `takes the ${c.walk!.verdict}${c.walk!.viaBlock ? ' (block)' : ''}` : 'cannot tell'}`)).join(' · ')}`,
     );
 }
 // OPEN_ONLY=1: only the proposals for open sizes
