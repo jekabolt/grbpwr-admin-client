@@ -115,7 +115,9 @@ describe('paperSource', () => {
     expect(paperSource('team', { brand: null }, false)).toMatchObject({ status: 'error' });
   });
   it('unavailable is an error dep; a brand is ready', () => {
-    expect(paperSource('team', { brand: { ...EMPTY, unavailable: true } }, false).status).toBe('error');
+    expect(paperSource('team', { brand: { ...EMPTY, unavailable: true } }, false).status).toBe(
+      'error',
+    );
     expect(paperSource('team', { brand: FULL, logoUrl: 'u' }, false)).toEqual({
       brand: FULL,
       logoUrl: 'u',

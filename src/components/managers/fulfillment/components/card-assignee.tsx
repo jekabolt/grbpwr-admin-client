@@ -30,9 +30,7 @@ export function CardAssignee({
   const [open, setOpen] = useState(false);
   const setAssignee = useSetFulfillmentAssignee(orderUuid);
   const { data } = useAdmins(canWrite);
-  const candidates = (data?.admins ?? [])
-    .map((a) => a.username)
-    .filter((u): u is string => !!u);
+  const candidates = (data?.admins ?? []).map((a) => a.username).filter((u): u is string => !!u);
   const usernames =
     assignee && !candidates.includes(assignee) ? [assignee, ...candidates] : candidates;
 

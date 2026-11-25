@@ -127,9 +127,11 @@ export default [
     files: ['src/api/proto-http/**'],
     rules: { '@typescript-eslint/no-empty-object-type': 'off' },
   },
-  // the TS-aware rule understands overloads and type+value merging
+  // the TS-aware rule understands overloads and type+value merging. no-undef is off for TS, as
+  // typescript-eslint advises: tsc already rejects an undefined name, and the core rule cannot see
+  // type-only globals — it flagged every `React.ChangeEvent` and DOM lib type (BufferSource …).
   {
     files: ['**/*.{ts,tsx}'],
-    rules: { 'no-redeclare': 'off', '@typescript-eslint/no-redeclare': 'warn' },
+    rules: { 'no-redeclare': 'off', '@typescript-eslint/no-redeclare': 'warn', 'no-undef': 'off' },
   },
 ];

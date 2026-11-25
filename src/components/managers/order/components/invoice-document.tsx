@@ -290,7 +290,9 @@ export function InvoiceDocument({
                 return (
                   <tr key={r.item.id ?? i} className='break-inside-avoid'>
                     <td className={`${TD} text-center font-semibold`}>{i + 1}</td>
-                    <td className={`${TD} whitespace-nowrap`}>{r.item.variantSkuSnapshot || '—'}</td>
+                    <td className={`${TD} whitespace-nowrap`}>
+                      {r.item.variantSkuSnapshot || '—'}
+                    </td>
                     <td className={TD}>
                       <div className='font-medium'>{pickName(r.item.translations) || '—'}</div>
                       <div className='text-labelColor'>

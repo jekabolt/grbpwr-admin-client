@@ -61,7 +61,7 @@ const MUTANTS = {
   },
   // (4) SVG снова идёт в дверь картинок
   svgToImageDoor: {
-    edits: [[`${M}/useUploadMedia.ts`, '  if (isSvgInput(input)) return uploadVector(input);\n', '']],
+    edits: [[`${M}/useUploadMedia.ts`, '  if (isSvgInput(input)) return uploadVector(input, fileName);\n', '']],
     breaks: '4',
   },
   // (5) проверка процента волокна снята
