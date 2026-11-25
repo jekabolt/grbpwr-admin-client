@@ -71,6 +71,10 @@ export const WALK = {
    *  own line and this share of the other's is on another size's line. */
   ownToWin: 0.9,
   foreignToLose: 0.5,
+  /** By the neighbouring sizes: this share of the taken outline's parting stretch is between
+   *  them or on an edge both share, and this share of the other's is not. */
+  nestToWin: 0.9,
+  nestToLose: 0.5,
   /** A walk is shown only when its area sits between its closed neighbour sizes', within this. */
   areaSlack: 0.002,
 };
@@ -662,26 +666,79 @@ export function whoseLine(
 }
 
 /**
- * Which of the two outlines of a closed size the program would take itself — only where one runs
- * on the size's own line and the other on another size's (the owner, 25 Nov: the operator answers
- * what the program cannot close or understand, nothing else). "Nobody's line" decides nothing:
- * half the sizes of a file can have their thin line unassembled (Kalla), and then it would always
- * lose. undefined = the program cannot tell.
+ * How an outline sits against the closed outlines of the sizes next to it, where it parts from
+ * the other outline (the stretch of `a` farther than `WALK.differMm` from `b`):
+ * - between: outside the smaller size and inside the larger — where a size's own line is;
+ * - shared: on the outlines of BOTH — an edge every size shares (a fold, a grain edge);
+ * - oneSided: on the outline of one neighbour only — a line that is that neighbour's;
+ * - against: inside the smaller size or outside the larger — sizes of one piece nest.
+ */
+export function nestOf(
+  below: readonly PtMm[],
+  above: readonly PtMm[],
+  a: readonly PtMm[],
+  b: readonly PtMm[],
+): { betweenMm: number; sharedMm: number; oneSidedMm: number; againstMm: number } {
+  const C = WALK;
+  const grid = (poly: readonly PtMm[]) => {
+    const g = new SegGrid(3);
+    g.addPolyline(0, poly, true);
+    return (p: PtMm) => {
+      let d = 40;
+      g.near(p, 40, (_o, i) => {
+        d = Math.min(d, segNearest(p, poly[i], poly[(i + 1) % poly.length]).d);
+      });
+      return d;
+    };
+  };
+  const [toB, toLo, toHi] = [grid(b), grid(below), grid(above)];
+  const out = { betweenMm: 0, sharedMm: 0, oneSidedMm: 0, againstMm: 0 };
+  for (let k = 0; k < a.length; k++) {
+    const p = a[k];
+    const q = a[(k + 1) % a.length];
+    const n = Math.max(1, Math.round(dist(p, q)));
+    const step = dist(p, q) / n;
+    for (let t = 0; t < n; t++) {
+      const m = { x: p.x + ((q.x - p.x) * (t + 0.5)) / n, y: p.y + ((q.y - p.y) * (t + 0.5)) / n };
+      if (toB(m) <= C.differMm) continue;
+      const onLo = toLo(m) <= C.onOwnMm;
+      const onHi = toHi(m) <= C.onOwnMm;
+      if (onLo && onHi) out.sharedMm += step;
+      else if (onLo || onHi) out.oneSidedMm += step;
+      else if (pointInPoly(m, below) || !pointInPoly(m, above)) out.againstMm += step;
+      else out.betweenMm += step;
+    }
+  }
+  return out;
+}
+
+/**
+ * Which of the two outlines of a closed size the program would take itself (the owner, 25 Nov:
+ * the operator answers what the program cannot close or understand, nothing else).
+ *
+ * Not by whose line the reader says it is: Leah F size 20 — the walk ran 100 % on "its own"
+ * line, the neighbour's end line the reader had given it, 7.4 mm off the verified outline
+ * (`whoseLine` measures that and decides nothing). By the sizes next to it: one outline is
+ * taken when it lies between its neighbours or on an edge both share, and the other lies on one
+ * neighbour's line or against the nesting. undefined = no closed neighbour on both sides, or the
+ * program cannot tell.
  */
 export function outlineVerdict(
-  L: WalkLines,
-  rank: number,
+  below: readonly PtMm[] | undefined,
+  above: readonly PtMm[] | undefined,
   walk: readonly PtMm[],
   fill: readonly PtMm[],
-): { take: 'walk' | 'fill'; viaBlock: boolean } | undefined {
+): { take: 'walk' | 'fill' } | undefined {
+  if (!below || !above || below.length < 3 || above.length < 3) return undefined;
   const C = WALK;
-  const w = whoseLine(L, rank, walk, fill);
-  const f = whoseLine(L, rank, fill, walk);
-  const share = (x: number, o: typeof w) => x / (o.ownMm + o.foreignMm + o.nobodyMm || 1);
-  const wins = (mine: typeof w, other: typeof w) =>
-    share(mine.ownMm, mine) >= C.ownToWin && share(other.foreignMm, other) >= C.foreignToLose;
-  if (wins(w, f)) return { take: 'walk', viaBlock: share(w.ownAloneMm, w) < C.ownToWin };
-  if (wins(f, w)) return { take: 'fill', viaBlock: share(f.ownAloneMm, f) < C.ownToWin };
+  const w = nestOf(below, above, walk, fill);
+  const f = nestOf(below, above, fill, walk);
+  type N = typeof w;
+  const all = (o: N) => o.betweenMm + o.sharedMm + o.oneSidedMm + o.againstMm || 1;
+  const good = (o: N) => (o.betweenMm + o.sharedMm) / all(o) >= C.nestToWin;
+  const bad = (o: N) => (o.oneSidedMm + o.againstMm) / all(o) >= C.nestToLose;
+  if (good(w) && bad(f)) return { take: 'walk' };
+  if (good(f) && bad(w)) return { take: 'fill' };
   return undefined;
 }
 
@@ -762,16 +819,16 @@ export function walkChecks(
       )
         continue;
       const per = lenOf([...w.outer, w.outer[0]]);
-      const verdict = outlineVerdict(L, c.rank, w.outer, c.outer);
+      const lower = closed.filter((o) => o.rank < c.rank).sort((x, y) => y.rank - x.rank)[0];
+      const upper = closed.filter((o) => o.rank > c.rank).sort((x, y) => x.rank - y.rank)[0];
+      const verdict = outlineVerdict(lower?.outer, upper?.outer, w.outer, c.outer);
       c.walk = {
         outer: w.outer,
         ownShare: per ? w.ownMm / per : 0,
         maxMm: d.maxMm,
         overMm: d.overMm,
         at: d.at,
-        ...(verdict
-          ? { verdict: verdict.take, ...(verdict.viaBlock ? { viaBlock: true } : {}) }
-          : {}),
+        ...(verdict ? { verdict: verdict.take } : {}),
       };
     }
     // the open sizes

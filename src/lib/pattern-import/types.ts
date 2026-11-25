@@ -1265,13 +1265,11 @@ export type PieceCandidate = {
     answer?: 'walk' | 'fill';
     fillOuter?: PtMm[];
     /**
-     * Which outline the program would take itself: one runs on the size's own line where they
-     * part, the other on another size's (`outlineVerdict`). Absent = it cannot tell. A mark only:
-     * nothing is replaced until the rule is proven on the whole reference set. `viaBlock`: "own"
-     * rested on the lines of the neighbouring sizes, not on a line of this size.
+     * Which outline the program would take itself, judged by the closed sizes next to this one
+     * (`outlineVerdict`). Absent = it cannot tell. A mark only: nothing is replaced until the
+     * rule is proven on the whole reference set.
      */
     verdict?: 'walk' | 'fill';
-    viaBlock?: true;
     /**
      * The fill left this size OPEN and the walk closes it on printed lines and built corners:
      * a proposal, shown alone ('walk' takes it — the size is closed; 'fill' leaves it open).
