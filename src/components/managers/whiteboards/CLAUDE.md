@@ -111,7 +111,8 @@ managers/whiteboards/
 ## Backend (outside this repo)
 
 Contract: `grbpwr-proto`, mirrored into `proto/` by its owner. Backend: Go service `grbpwr-manager`.
-This repo carries the spec; whoever implements the backend works from it.
+The owner writes the Go and proto part, from this spec. Agents here keep the spec exact and
+build the frontend against the adapter; they do not guess the backend's internals.
 
 - **Tables**
   - `whiteboards`: uuid, workspace, title, created_by, timestamps, archived_at, thumbnail_media_id.
@@ -180,7 +181,8 @@ session replays pattern-import on the main checkout's code.
 - **Before every PR**: `yarn build:check`, `yarn lint:design`, `yarn test`, `yarn fix`.
 - **Performance budget**: 2,000 objects pan and zoom at 60 fps on a mid-range laptop. Render only what intersects the viewport, and never re-render all objects on a camera move.
 
-## Open questions (owner)
+## Open questions (owner) — decided at PR 04
 
-- Who implements the Go and proto part: the backend owner from this spec, or an agent with access to `grbpwr-manager`?
 - Where does the Hocuspocus service run? Next to the Go backend, or on its own host?
+- Anything else in the backend spec the owner changes while writing the Go part. This file is
+  updated in the PR 04 branch to match what was actually built.
