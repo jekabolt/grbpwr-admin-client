@@ -112,13 +112,25 @@ Accepted when no cell opens, no cell's share of outline on its own line falls
 
 ### 3. The walk as a check beside the fill — open
 
-Walk a size's own lines, the common lines and the stretches where six or more sizes coincide;
+Walk a size's own lines, the common lines and the stretches where four or more sizes coincide;
 build each corner as the intersection of its two sides; draw nothing. Port
 `diag/walk-carry.mjs` into `src/lib/pattern-import/pieces/` as a pure function with tests from the
 reference set. After the fill, where its outline and the walk's differ by more than 1 mm over
 12 mm or more and the walk lies on the size's own line, show both outlines to the operator.
-Before porting: 12 of 82 verified sizes are still more than 3 mm off, and the walk has been
-checked on six reference pieces of fifty.
+Before porting: the walk has been checked on six reference pieces of fifty (Leah C, D, F, G,
+Kalla D, F: 82 verified sizes). State on 25 Nov, after two changes in `diag/walk-carry.mjs`:
+54 within 1 mm (was 46), none of the 46 moved.
+
+- A side that ends ON another side meets it there (`TJOIN`): the other side is cut at that point,
+  so the corner stands where the printed line stops. Before, the corner was the crossing of the
+  two tangents, millimetres away when the angle is sharp (owner, 25 Nov: "the walk leaves the
+  outline by several mm, critical"). Where the cut sides give no closed walk, the sides as printed.
+- A stretch is shared from four coinciding sizes, not six (`SHARED_M`): in a file where half the
+  sizes are rows of dots the reader did not assemble, six never coincide.
+- Not mended: a size whose own line at the junction is a row of dots (Kalla F size 6 rides size
+  8's line there). The rows of stage 1A as the walk's own lines (`diag/rows-dump.ts`, `ROWS`)
+  raise the own share from 18 % to 95 %, but a row runs through mark centres and is about 1 mm
+  off at a junction; the ends of a row must be tied to the printed marks first.
 
 ### 4. The walk closes what the fill leaves open — open
 

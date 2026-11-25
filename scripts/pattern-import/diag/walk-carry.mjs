@@ -1,5 +1,5 @@
 // Walk + completion. The walk keeps whole printed edges (own chains, common chains, stretches where
-// ≥ 6 size classes coincide). Where two consecutive edges do not meet, the missing stretch is the
+// ≥ 4 size classes coincide; SHARED_M). Where two consecutive edges do not meet, the missing stretch is the
 // same stretch of a closed NEIGHBOUR size carried over between the two printed ends, not a straight
 // bridge. A carried stretch is `smooth` when the neighbour turns < 45° on it, else `corner`.
 //   node walk-carry.mjs ref  <reference.json> <snapshot dir> <piece id> […]   accuracy on verified outlines
@@ -12,7 +12,7 @@ import { gunzipSync } from 'node:zlib';
 import { Grid } from './grid.mjs';
 const [mode, ...rest] = process.argv.slice(2);
 const dir = mode === 'ref' || mode === 'reflone' ? rest[1] : rest[0];
-const M = 6, JOIN = 120, K = 4, TIGHT = +(process.env.TIGHT ?? 3);
+const M = +(process.env.SHARED_M ?? 4), JOIN = 120, K = 4, TIGHT = +(process.env.TIGHT ?? 3);
 const CORNERS = !process.env.NO_CORNERS;
 const TJOIN = +(process.env.TJOIN ?? 1); let TJ = TJOIN;
 const REACH = 450;

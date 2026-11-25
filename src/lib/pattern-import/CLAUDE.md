@@ -71,7 +71,7 @@ The program draws each size's outline on that size's own printed lines:
 - **Missing lines are drawn in** from evidence (the same stretch of a closed neighbour size, the
   walk), never from the grade prediction alone, and on their own DXF layer (owner, 11 Nov).
 - **Means:** the graph walk over the size's own lines, the common lines and the stretches where
-  six or more sizes coincide (`scripts/pattern-import/diag/walk-carry.mjs`, plan stages 3–5); the
+  four or more sizes coincide (`scripts/pattern-import/diag/walk-carry.mjs`, plan stages 3–5); the
   fill where it is the better tool. Which tool applies is chosen by a feature the program can see
   on the piece (two nested closed paths of one pen, a size drawn as a row of marks, a piece with
   no closed size), never by the file or piece name.
