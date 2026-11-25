@@ -1,8 +1,8 @@
 import { currentHost, rootUrl } from 'lib/host';
 import { cn } from 'lib/utility';
-import { type ReactNode, useState } from 'react';
+import { type ChangeEvent, type ReactNode, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, CheckboxCommon, HeaderNote, Input, Row, Section, Text, ViewSwitch } from 'ui';
+import { Button, CheckboxCommon, HeaderNote, Input, Row, Section, Text } from 'ui';
 
 // The approved «sheet» (V3): a narrow side block (wordmark + mode switch, or the team) beside
 // one form block of label|value rows and a foot with the one action. Phone: one column.
@@ -12,8 +12,8 @@ export const SIDE = 'self-start lg:self-stretch';
 
 export function AuthSheet({ side, children }: { side: ReactNode; children: ReactNode }) {
   return (
-    <main className='min-h-screen bg-pageBg px-2.5 pt-4 sm:pt-[12vh]'>
-      <div className='mx-auto grid max-w-[48.75rem] grid-cols-1 gap-stack sm:grid-cols-[12.5rem_minmax(0,1fr)] sm:gap-gutter'>
+    <main className='lk-auth-page min-h-screen bg-pageBg px-2.5 pt-4 sm:pt-[12vh]'>
+      <div className='lk-auth-grid mx-auto grid max-w-[48.75rem] grid-cols-1 gap-stack sm:grid-cols-[12.5rem_minmax(0,1fr)] sm:gap-gutter'>
         {side}
         {children}
       </div>
@@ -61,10 +61,12 @@ export function SheetForm({
 /** `top` — a value taller than one line (chips): the label stays on its first line. */
 export function SheetRow({
   label,
+  htmlFor,
   top,
   children,
 }: {
   label: string;
+  htmlFor?: string;
   top?: boolean;
   children: ReactNode;
 }) {
@@ -75,7 +77,13 @@ export function SheetRow({
         top ? 'items-start sm:[&>span:first-child]:pt-1' : 'items-center',
       )}
       label={
-        <Text size='micro' variant='label' tracking='label' component='span'>
+        <Text
+          size='micro'
+          variant='label'
+          tracking='label'
+          component={htmlFor ? 'label' : 'span'}
+          htmlFor={htmlFor}
+        >
           {label}
         </Text>
       }
@@ -175,7 +183,7 @@ export function PasswordInput({
         placeholder={placeholder}
         autoFocus={autoFocus}
         className='pr-12'
-        onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
+        onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
       />
       <Button
         variant='simpleReverse'
@@ -206,23 +214,29 @@ export function Wordmark({ children }: { children: string }) {
   );
 }
 
-/** Root side: the wordmark and the `sign up | log in` switch. */
+/** Root auth shares the visual language of the public site. */
 export function RootSide({ mode }: { mode: 'signup' | 'login' }) {
   const navigate = useNavigate();
+  const signingUp = mode === 'signup';
   return (
-    <Section className={SIDE}>
-      <Wordmark>lekalo</Wordmark>
-      <ViewSwitch
-        className='[&_*]:normal-case'
-        label='mode'
-        columns={2}
-        value={mode}
-        onChange={(next) => navigate(next === 'signup' ? '/' : '/login')}
-        options={[
-          { value: 'signup', label: 'sign up' },
-          { value: 'login', label: 'log in' },
-        ]}
-      />
+    <Section className={cn(SIDE, 'lk-auth-side')}>
+      <div>
+        <h1>{signingUp ? 'Create a workspace.' : 'Your workspace.'}</h1>
+        <p>
+          {signingUp
+            ? 'Set up a place for your team to develop styles and run production.'
+            : 'Sign in to open your apparel workspace.'}
+        </p>
+      </div>
+      <div className='lk-auth-actions'>
+        <Button
+          variant='simpleReverseWithBorder'
+          size='lg'
+          onClick={() => navigate(signingUp ? '/login' : '/signup')}
+        >
+          {signingUp ? 'Log in instead' : 'Create workspace'}
+        </Button>
+      </div>
     </Section>
   );
 }
@@ -314,25 +328,27 @@ export function AgreeRow({
   );
 }
 
-/** The signed-in root side: `lekalo`, the person's email, and `log out` where the page has it. */
-export function AccountSide({ email, onLogOut }: { email: string; onLogOut?: () => void }) {
+export function AccountSide({
+  title,
+  email,
+  onLogOut,
+}: {
+  title: string;
+  email: string;
+  onLogOut?: () => void;
+}) {
   return (
-    <Section className={SIDE}>
-      <Wordmark>lekalo</Wordmark>
-      <Text
-        size='micro'
-        variant='label'
-        tracking='label'
-        component='span'
-        className='block min-w-0 truncate'
-        title={email}
-      >
-        {email}
-      </Text>
+    <Section className={cn(SIDE, 'lk-auth-side')}>
+      <div>
+        <h1>{title}</h1>
+        {email && <p className='break-all'>{email}</p>}
+      </div>
       {onLogOut && (
-        <span className='block'>
-          <SheetLink onClick={onLogOut}>log out</SheetLink>
-        </span>
+        <div className='lk-auth-actions'>
+          <Button variant='simpleReverseWithBorder' size='lg' onClick={onLogOut}>
+            Log out
+          </Button>
+        </div>
       )}
     </Section>
   );
@@ -341,8 +357,8 @@ export function AccountSide({ email, onLogOut }: { email: string; onLogOut?: () 
 /** A server without the root token: the team waits for an operator — its address, nothing to open. */
 export function AwaitingApproval({ slug, email }: { slug: string; email: string }) {
   return (
-    <AuthSheet side={<AccountSide email={email} />}>
-      <SheetForm title='awaiting approval'>
+    <AuthSheet side={<AccountSide title='Awaiting approval' email={email} />}>
+      <SheetForm title='Workspace address'>
         <SheetRow label='address'>
           <Text component='span' className='break-all'>
             {slug}

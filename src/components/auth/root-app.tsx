@@ -1,7 +1,10 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { clearAuthToken, readAuthToken } from 'api/auth-headers';
+import { HelpCenter, Landing, OurStory } from 'components/public-site/pages';
+import { Pricing } from 'components/public-site/pricing';
+import { PublicSite } from 'components/public-site/site-shell';
 import { SnackBar } from 'components/shell/snackbar';
-import { useCallback, useMemo, useState } from 'react';
+import { type ReactNode, useCallback, useMemo, useState } from 'react';
 import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 
 import { LegalPage } from './legal-page';
@@ -12,8 +15,8 @@ import { MY_TEAMS_KEY, MyTeams, NewTeam, OAuthReturn, type RootSession } from '.
 
 /**
  * Everything the root host (beta.lekalo.studio) shows. Signed in (a root token in this origin's
- * storage, 30 days): `your teams` at `/` and `/login`, `new team` at `/new`. Signed out: sign up,
- * log in, the letter links. A 401 from any root call clears the token and shows `log in`.
+ * storage, 30 days): workspace selection at `/` and workspace creation at `/new`.
+ * Signed out: the landing at `/`, workspace signup at `/signup`, and log in at `/login`.
  */
 export default function RootApp() {
   const navigate = useNavigate();
@@ -38,26 +41,52 @@ export default function RootApp() {
     [navigate, queryClient],
   );
 
+  const publicPage = (children: ReactNode) => (
+    <PublicSite signedIn={signedIn}>{children}</PublicSite>
+  );
+
   return (
     <>
       <Routes>
         <Route
           path='/'
-          element={signedIn ? <MyTeams session={session} /> : <SignUp onSignedIn={onSignedIn} />}
+          element={publicPage(signedIn ? <MyTeams session={session} /> : <Landing />)}
+        />
+        <Route path='/overview' element={publicPage(<Landing />)} />
+        <Route path='/pricing' element={publicPage(<Pricing />)} />
+        <Route path='/help' element={publicPage(<HelpCenter signedIn={signedIn} />)} />
+        <Route path='/our-story' element={publicPage(<OurStory signedIn={signedIn} />)} />
+        <Route
+          path='/signup'
+          element={
+            signedIn ? (
+              <Navigate to='/new' replace />
+            ) : (
+              publicPage(<SignUp onSignedIn={onSignedIn} />)
+            )
+          }
         />
         <Route
           path='/login'
-          element={signedIn ? <Navigate to='/' replace /> : <RootLogin onSignedIn={onSignedIn} />}
+          element={
+            signedIn ? (
+              <Navigate to='/' replace />
+            ) : (
+              publicPage(<RootLogin onSignedIn={onSignedIn} />)
+            )
+          }
         />
         <Route
           path='/new'
-          element={signedIn ? <NewTeam session={session} /> : <Navigate to='/login' replace />}
+          element={
+            signedIn ? publicPage(<NewTeam session={session} />) : <Navigate to='/login' replace />
+          }
         />
-        <Route path='/auth/oauth' element={<OAuthReturn onSignedIn={onSignedIn} />} />
-        <Route path='/confirm' element={<ConfirmLink onSignedIn={onSignedIn} />} />
-        <Route path='/reset' element={<ResetPassword />} />
-        <Route path='/terms' element={<LegalPage doc='terms' />} />
-        <Route path='/privacy' element={<LegalPage doc='privacy' />} />
+        <Route path='/auth/oauth' element={publicPage(<OAuthReturn onSignedIn={onSignedIn} />)} />
+        <Route path='/confirm' element={publicPage(<ConfirmLink onSignedIn={onSignedIn} />)} />
+        <Route path='/reset' element={publicPage(<ResetPassword />)} />
+        <Route path='/terms' element={publicPage(<LegalPage doc='terms' />)} />
+        <Route path='/privacy' element={publicPage(<LegalPage doc='privacy' />)} />
         <Route path='*' element={<Navigate to='/' replace />} />
       </Routes>
       <SnackBar />

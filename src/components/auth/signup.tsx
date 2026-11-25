@@ -1,7 +1,7 @@
 import { authService, authServiceWith } from 'api/api';
 import { writeAuthToken } from 'api/auth-headers';
 import { goToUrl } from 'lib/host';
-import { useEffect, useState } from 'react';
+import { type ChangeEvent, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { AddressField, useSlugCheck } from './address';
@@ -148,7 +148,7 @@ export function SignUp({ onSignedIn }: { onSignedIn: () => void }) {
     return (
       <AuthSheet side={<RootSide mode='signup' />}>
         <LogoStep
-          title='sign up'
+          title='Workspace details'
           logo={logo}
           onLogo={setLogo}
           bad={bad}
@@ -205,9 +205,9 @@ function SignUpForm({
 
   return (
     <AuthSheet side={<RootSide mode='signup' />}>
-      <SheetForm title='sign up' note={note} onSubmit={() => ready && onNext(slug)}>
+      <SheetForm title='Workspace details' note={note} onSubmit={() => ready && onNext(slug)}>
         <ProviderButtons fields={() => ({ target: 'signin' })} />
-        <SheetRow label='team name'>
+        <SheetRow label='Workspace name' htmlFor='team'>
           <SheetInput
             name='team'
             value={team}
@@ -215,23 +215,23 @@ function SignUpForm({
             autoComplete='organization'
             autoFocus
             invalid={!draft.edited && check.status === 'bad'}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => set({ team: e.target.value })}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => set({ team: e.target.value })}
           />
         </SheetRow>
-        <SheetRow label='address'>
+        <SheetRow label='Workspace address' htmlFor='address'>
           <AddressField check={check} onChange={(v) => set({ address: v, edited: true })} />
         </SheetRow>
-        <SheetRow label='email'>
+        <SheetRow label='Email address' htmlFor='email'>
           <SheetInput
             type='email'
             name='email'
             value={email}
             placeholder='you@studio.com'
             autoComplete='email'
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => set({ email: e.target.value })}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => set({ email: e.target.value })}
           />
         </SheetRow>
-        <SheetRow label='password'>
+        <SheetRow label='Password' htmlFor='password'>
           <PasswordInput
             value={password}
             onChange={(v) => set({ password: v })}
@@ -280,7 +280,7 @@ function ConfirmCode({
 
   if (awaiting !== null) return <AwaitingApproval slug={awaiting} email={email} />;
   return (
-    <AuthSheet side={<AccountSide email={email.trim()} />}>
+    <AuthSheet side={<AccountSide title='Confirm your email' email={email.trim()} />}>
       <SheetForm title='confirm email' note={wrong ? 'wrong code' : undefined}>
         <SheetRow label='sent to'>
           <SheetValue onChange={onChangeEmail}>{email}</SheetValue>
@@ -335,7 +335,7 @@ export function ConfirmLink({ onSignedIn }: { onSignedIn: () => void }) {
       <ConfirmCode
         email={email}
         onSignedIn={onSignedIn}
-        onChangeEmail={() => navigate('/', { replace: true })}
+        onChangeEmail={() => navigate('/signup', { replace: true })}
       />
     );
 
@@ -359,7 +359,7 @@ export function ConfirmLink({ onSignedIn }: { onSignedIn: () => void }) {
         note={state === 'expired' ? 'link expired' : undefined}
         onSubmit={resend}
       >
-        <SheetRow label='email'>
+        <SheetRow label='Email address'>
           {known ? (
             <SheetValue>{known}</SheetValue>
           ) : (
@@ -370,7 +370,7 @@ export function ConfirmLink({ onSignedIn }: { onSignedIn: () => void }) {
               placeholder='you@studio.com'
               autoComplete='email'
               disabled={state === 'checking'}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmail(e.target.value)}
+              onChange={(e: ChangeEvent<HTMLInputElement>) => setEmail(e.target.value)}
             />
           )}
         </SheetRow>

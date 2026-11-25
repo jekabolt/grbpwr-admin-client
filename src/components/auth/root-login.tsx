@@ -1,6 +1,6 @@
 import { authService } from 'api/api';
 import { writeAuthToken } from 'api/auth-headers';
-import { useState } from 'react';
+import { type ChangeEvent, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import { isRefusal } from './api-error';
@@ -52,9 +52,9 @@ export function RootLogin({ onSignedIn }: { onSignedIn: () => void }) {
 
   return (
     <AuthSheet side={<RootSide mode='login' />}>
-      <SheetForm title='log in' note={note} onSubmit={signIn}>
+      <SheetForm title='Log in' note={note} onSubmit={signIn}>
         <ProviderButtons fields={() => ({ target: 'signin' })} />
-        <SheetRow label='email'>
+        <SheetRow label='Email or username' htmlFor='email'>
           <SheetInput
             type='text'
             name='email'
@@ -63,10 +63,10 @@ export function RootLogin({ onSignedIn }: { onSignedIn: () => void }) {
             autoComplete='username'
             autoCapitalize='none'
             autoFocus
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmail(e.target.value)}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => setEmail(e.target.value)}
           />
         </SheetRow>
-        <SheetRow label='password'>
+        <SheetRow label='Password' htmlFor='password'>
           <PasswordInput
             value={password}
             onChange={(v) => {
@@ -79,12 +79,12 @@ export function RootLogin({ onSignedIn }: { onSignedIn: () => void }) {
         <SheetFoot
           left={
             <SheetLink onClick={() => navigate('/reset', { state: { email } })}>
-              forgot password
+              Forgot password
             </SheetLink>
           }
         >
           <SheetSubmit disabled={!login || !password} loading={busy}>
-            log in
+            Log in
           </SheetSubmit>
         </SheetFoot>
       </SheetForm>

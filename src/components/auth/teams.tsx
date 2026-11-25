@@ -3,7 +3,7 @@ import { authService } from 'api/api';
 import { writeAuthToken } from 'api/auth-headers';
 import type { ListMyTeamsResponse, TeamRef } from 'api/proto-http/auth';
 import { goToUrl, teamUrl } from 'lib/host';
-import { useEffect, useState } from 'react';
+import { type ChangeEvent, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AddDoor, Loader, Text, Tile, Tiles } from 'ui';
 
@@ -133,15 +133,23 @@ export function MyTeams({ session }: { session: RootSession }) {
   };
 
   return (
-    <AuthSheet side={<AccountSide email={data?.email ?? ''} onLogOut={() => void logOut()} />}>
-      <SheetForm title='teams' note={note}>
+    <AuthSheet
+      side={
+        <AccountSide
+          title='Your workspaces'
+          email={data?.email ?? ''}
+          onLogOut={() => void logOut()}
+        />
+      }
+    >
+      <SheetForm title='Choose a workspace' note={note}>
         {isPending ? (
           <div className='flex justify-center py-6'>
             <Loader />
           </div>
         ) : teams.length === 0 ? (
           <SheetFoot>
-            <SheetSubmit onClick={() => navigate('/new')}>new team</SheetSubmit>
+            <SheetSubmit onClick={() => navigate('/new')}>Create workspace</SheetSubmit>
           </SheetFoot>
         ) : (
           <Tiles min={100} className='auto-rows-fr'>
@@ -154,7 +162,7 @@ export function MyTeams({ session }: { session: RootSession }) {
               />
             ))}
             <AddDoor shape='tile' lowercase className='h-full' onClick={() => navigate('/new')}>
-              new team
+              Create workspace
             </AddDoor>
           </Tiles>
         )}
@@ -244,13 +252,14 @@ export function NewTeam({ session }: { session: RootSession }) {
       <AuthSheet
         side={
           <AccountSide
+            title='Create a workspace'
             email={data?.email ?? ''}
             onLogOut={first ? () => void logOut() : undefined}
           />
         }
       >
         <LogoStep
-          title='new team'
+          title='Create workspace'
           logo={logo}
           onLogo={setLogo}
           bad={bad}
@@ -270,9 +279,9 @@ export function NewTeam({ session }: { session: RootSession }) {
     );
 
   return (
-    <AuthSheet side={<AccountSide email={data?.email ?? ''} />}>
+    <AuthSheet side={<AccountSide title='Create a workspace' email={data?.email ?? ''} />}>
       <SheetForm
-        title='new team'
+        title='Workspace details'
         note={error}
         onSubmit={() => {
           if (!ready) return;
@@ -281,7 +290,7 @@ export function NewTeam({ session }: { session: RootSession }) {
           setStep('logo');
         }}
       >
-        <SheetRow label='team name'>
+        <SheetRow label='Workspace name' htmlFor='team'>
           <SheetInput
             name='team'
             value={draft.team}
@@ -289,10 +298,10 @@ export function NewTeam({ session }: { session: RootSession }) {
             autoComplete='organization'
             autoFocus
             invalid={!draft.edited && check.status === 'bad'}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => set({ team: e.target.value })}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => set({ team: e.target.value })}
           />
         </SheetRow>
-        <SheetRow label='address'>
+        <SheetRow label='Workspace address' htmlFor='address'>
           <AddressField check={check} onChange={(v) => set({ address: v, edited: true })} />
         </SheetRow>
         <SheetFoot

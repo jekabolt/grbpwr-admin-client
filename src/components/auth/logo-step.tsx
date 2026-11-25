@@ -1,6 +1,6 @@
 import { type BrandDraft, type BrandKey, BRAND_FIELDS } from 'lib/workspace/brand-fields';
 import { cn } from 'lib/utility';
-import { useEffect, useRef, useState } from 'react';
+import { type ChangeEvent, type DragEvent, useEffect, useRef, useState } from 'react';
 import { AddDoor } from 'ui';
 
 import { type PickedLogo, readLogo } from './logo';
@@ -117,8 +117,8 @@ export function LogoStep({
   );
 
   const drop = {
-    onDragOver: (e: React.DragEvent) => e.preventDefault(),
-    onDrop: (e: React.DragEvent) => {
+    onDragOver: (e: DragEvent) => e.preventDefault(),
+    onDrop: (e: DragEvent) => {
       e.preventDefault();
       void pick(e.dataTransfer.files?.[0]);
     },
@@ -170,16 +170,14 @@ export function LogoStep({
                 autoComplete={f.autoComplete}
                 aria-label={f.label}
                 invalid={invalid.includes(f.key)}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                  onBrand(f.key, e.target.value)
-                }
+                onChange={(e: ChangeEvent<HTMLInputElement>) => onBrand(f.key, e.target.value)}
               />
             </SheetRow>
           ))}
         </div>
       </div>
       <SheetFoot left={<SheetLink onClick={onBack}>back</SheetLink>}>
-        <SheetSubmit loading={busy}>create team</SheetSubmit>
+        <SheetSubmit loading={busy}>Create workspace</SheetSubmit>
       </SheetFoot>
     </SheetForm>
   );
