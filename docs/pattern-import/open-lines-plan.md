@@ -197,6 +197,34 @@ Also 25 Nov: the walk keeps to a printed line past a turn into the piece and bac
 notch: `straightened`), goes round a turn out of it (a tab), and has no outline where the only
 closed path runs into a dart and back (`turnsOnce`) — the owner's Leah B TOP FRONT size 6.
 
+### 3B. Close each size's corners before the fill — measured 25 Nov, not the answer
+
+The owner: the fill closes more but leaks and then jumps onto another size's stroke; join the two,
+or close the lines rightly before the fill. Measured on all 50 reference pieces without touching
+the fill (`diag/walk-ref.ts --all`, `diag/corner-walls-ref.ts`):
+
+- The product walk against the verified outlines: 548 ok sizes — 328 within 1 mm, 102 within
+  1–3 mm, 40 farther, 78 with no closed walk. As a source of the right outline by itself the walk
+  is weaker than the fill.
+- Choosing between the two outlines by the neighbouring closed sizes (`outlineVerdict`): of the
+  39 ok sizes with two outlines it keeps the fill 12 times and replaces a verified outline 3
+  times (Reims C 24, Taos B 14, Biarritz C S); of the 18 bad sizes with two outlines it repairs
+  3. With stricter shares: 1 false replacement, 0 repairs. Not enabled.
+- `cornerWalls` (the corners a size's lines build one by one, no closed path asked): where an
+  outline runs along both sides of such a corner the wall agrees with it within 1 mm — 359 of
+  363 on ok sizes, 45 of 45 on bad ones. So the corner construction is right, and the bad
+  outlines are NOT wrong at those corners. A wall with one end on the outline and the other off
+  it (the outline leaves a side before its corner): 13 of 548 ok sizes, 6 of 63 bad ones.
+- The fill already closes corners before flooding (MOOD Ф2, `sizes/corners.ts` →
+  `pieces/walls.ts`), the wall the ablation found the fill rests on. More corner walls are a
+  second copy of it and could touch at most 6 of the 63 bad sizes.
+
+What the bad sizes are instead: of the 52 with an outline, on 22 the walk gives the SAME bad
+outline (the lines the reader calls this size's lead there), on 16 of the 18 with two outlines the
+difference is a long stretch (over 40 mm) or far (over 6 mm), not a corner. The error is which
+printed line belongs to which size along a side — upstream of both the fill and the walk
+(`family-fit.md` §4 on the same finding).
+
 ### 4. The walk closes what the fill leaves open — in the product on branch `open-lines-walk`, as a proposal
 
 `walkChecks` (`pieces/walk.ts`, 25 Nov, the owner: "port stage 4") also walks every size the fill

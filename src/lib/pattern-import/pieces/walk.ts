@@ -75,6 +75,8 @@ export const WALK = {
    *  them or on an edge both share, and this share of the other's is not. */
   nestToWin: 0.9,
   nestToLose: 0.5,
+  /** A corner is a wall for the fill when its sides stop at least this short of it, mm. */
+  wallMinGapMm: 0.5,
   /** A walk is shown only when its area sits between its closed neighbour sizes', within this. */
   areaSlack: 0.002,
 };
@@ -323,7 +325,8 @@ export type Walked = {
   corners: number;
 };
 
-function search(edges: Edge[], seed: PtMm, lone: boolean): Walked | null {
+/** The ends of the edges and how each may join another: a corner, or two ends that touch. */
+function joinsAmong(edges: Edge[]) {
   const C = WALK;
   const ends: End[] = [];
   for (const e of edges)
@@ -379,6 +382,12 @@ function search(edges: Edge[], seed: PtMm, lone: boolean): Walked | null {
     cache.set(o, top);
     return top;
   };
+  return { ends, endOf, joinsOf };
+}
+
+function search(edges: Edge[], seed: PtMm, lone: boolean): Walked | null {
+  const C = WALK;
+  const { endOf, joinsOf } = joinsAmong(edges);
   /** A side as the outline takes it: the edge, its direction, what is cut off its ends. */
   type Laid = { e: Edge; rev: boolean; head: number; tail: number; corner?: PtMm };
   const outlineOf = (laid: Laid[]): PtMm[] =>
@@ -540,6 +549,45 @@ function search(edges: Edge[], seed: PtMm, lone: boolean): Walked | null {
     if (!best) return null;
     return { outer: best.outer, ownMm: best.ownMm, sharedMm: best.sharedMm, corners: best.corners };
   }
+}
+
+/** A corner of a size its printed sides stop short of: the two ends and the point they meet in. */
+export type CornerWall = { a: PtMm; at: PtMm; b: PtMm; gapMm: number };
+
+/**
+ * The corners the lines of one size build inside `box`, each taken alone — no closed path is
+ * asked for. Two ends make a corner when each is the other's best join and at least one side
+ * must be extended to reach the point (sides that already cross need no wall). These are the
+ * places the fill leaks through: the wall a, at, b closes one on the size's own lines.
+ */
+export function cornerWalls(
+  own: readonly PtMm[][],
+  shared: readonly PtMm[][],
+  box: Box,
+): CornerWall[] {
+  const edges: Edge[] = [
+    ...own
+      .flatMap((pts) => clipped(pts, box, 3))
+      .map((pts) => ({ pts, len: lenOf(pts), shared: false, src: 0, part: 0 })),
+    ...shared.map((pts) => ({ pts, len: lenOf(pts), shared: true, src: 0, part: 0 })),
+  ].map((e, src) => ({ ...e, src }));
+  cutWhereSidesEnd(edges);
+  const { ends, joinsOf } = joinsAmong(edges);
+  const out: CornerWall[] = [];
+  const done = new Set<End>();
+  for (const o of ends) {
+    if (done.has(o)) continue;
+    const j = joinsOf(o)[0];
+    if (!j?.corner || joinsOf(j.to)[0]?.to !== o) continue;
+    // a corner between two shared stretches is no size's own
+    if (o.e.shared && j.to.e.shared) continue;
+    const gapMm = dist(o.pt, j.corner.at) + dist(j.corner.at, j.to.pt);
+    if (j.corner.cutPrev > 0 || j.corner.cutNext > 0 || gapMm < WALK.wallMinGapMm) continue;
+    done.add(o);
+    done.add(j.to);
+    out.push({ a: o.pt, at: j.corner.at, b: j.to.pt, gapMm });
+  }
+  return out;
 }
 
 /**
