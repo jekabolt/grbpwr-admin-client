@@ -48,9 +48,12 @@ const toPoly = (q: PtMm, poly: PtMm[]) => {
   return d;
 };
 /** Jogs counted with half the usual turn: 15°. */
+// measurement switches (this script only): NO_GOING, COARSE, TURN_DEG — which of the three
+// changes of 25 Nov costs the mended jogs
+if (process.env.TURN_DEG) WALK.tightTurnRad = (+process.env.TURN_DEG * Math.PI) / 180;
 const fine = (pts: PtMm[]) => {
   const was = WALK.jogTurnRad;
-  WALK.jogTurnRad = Math.PI / 12;
+  WALK.jogTurnRad = process.env.COARSE ? was : Math.PI / 12;
   const n = jogsOf(pts).length;
   WALK.jogTurnRad = was;
   return n;
@@ -158,10 +161,15 @@ for (const [dir, list] of jobs) {
           const d = Math.hypot(p1.x - p0.x, p1.y - p0.y) || 1;
           return { x: (p1.x - p0.x) / d, y: (p1.y - p0.y) / d };
         };
-        const path = spanPath(own, shared, box, S[ia], S[ib], 2 * arc + 40, {
-          a: unit(ia),
-          b: unit(ib),
-        });
+        const path = spanPath(
+          own,
+          shared,
+          box,
+          S[ia],
+          S[ib],
+          2 * arc + 40,
+          process.env.NO_GOING ? undefined : { a: unit(ia), b: unit(ib) },
+        );
         if (!path) {
           bump(key, 'noPath');
           continue;
