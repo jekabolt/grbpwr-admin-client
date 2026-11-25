@@ -1,6 +1,7 @@
 // A reference outline against the product walk, zoomed where they are farthest apart, over every
 // printed stroke of the sheet — for the owner to say which of the two is right.
-//   npx vite-node scripts/pattern-import/diag/walk-ref-viz.ts <reference.json> <clone with .runs> <out.png> <piece>:<size> […]
+//   npx vite-node scripts/pattern-import/diag/walk-ref-viz.ts <reference.json> <clone with .runs> <out.png> <piece>:<size>[:<x>:<y>] […]
+//   with x and y the panel is centred there (a jog from ref-jogs.ts) instead of at the largest difference
 //   CAPTION_RU=1 for Russian captions (a picture for the owner; the repo's own pictures stay English)
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -40,7 +41,7 @@ g.fillText(
   18,
 );
 specs.forEach((spec, n) => {
-  const [pid, size] = spec.split(':');
+  const [pid, size, cxArg, cyArg] = spec.split(':');
   const p = pieces.find((x: { id: string }) => x.id === pid);
   const root = `${base}/${p.root}`;
   const dir = `${root}/${readdirSync(root).find((d) => d.includes(p.file))}`;
@@ -84,7 +85,9 @@ specs.forEach((spec, n) => {
     y: (b.minY + b.maxY) / 2,
   });
   const d = w ? differs(w.outer, ref) ?? differs(ref, w.outer) : null;
-  const c = d?.at ?? { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 };
+  const c = cxArg
+    ? { x: +cxArg, y: +cyArg }
+    : d?.at ?? { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 };
   const ox = (n % cols) * P;
   const oy = 30 + Math.floor(n / cols) * (P + 26);
   const H = 10;
