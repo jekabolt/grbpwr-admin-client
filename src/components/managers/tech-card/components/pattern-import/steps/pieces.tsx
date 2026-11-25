@@ -1147,9 +1147,15 @@ export function PiecesStep({
   const quiz = quizCards.flatMap(cardItems);
   const quizLeft = quiz.filter((it) => !seen.asideDone.includes(it.a.id));
 
-  /** Per piece: its sizes with an outline of the walk the operator has not answered yet. */
+  /**
+   * Per piece: its OPEN sizes the walk found an outline for, not answered yet. A closed size
+   * whose walk differs from the fill's outline is not asked about: on the reference set the
+   * program cannot tell which is right, and of the cases it could the fill was right in 12 of 15
+   * — the operator would be confirming what already stands (25 Nov). The candidate still carries
+   * the walk's outline (`walk`, `walk.verdict`) for the bench.
+   */
   const outlineProblems = families.flatMap((f) => {
-    const asked = f.candidates.filter((c) => c.walk && !c.walk.answer);
+    const asked = f.candidates.filter((c) => c.walk?.open && !c.walk.answer);
     return asked.length
       ? [
           {
@@ -1204,7 +1210,7 @@ export function PiecesStep({
   const outlineNow = (() => {
     if (active?.kind !== 'outline') return null;
     const f = families.find((x) => x.seed === active.seed);
-    const asked = f?.candidates.filter((x) => x.walk && !x.walk.answer) ?? [];
+    const asked = f?.candidates.filter((x) => x.walk?.open && !x.walk.answer) ?? [];
     // the open sizes first: taking their outline is what lets the piece through
     const c = asked.find((x) => x.walk?.open) ?? asked[0];
     if (!f || !c?.walk) return null;
