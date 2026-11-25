@@ -14,6 +14,7 @@ const [mode, ...rest] = process.argv.slice(2);
 const dir = mode === 'ref' || mode === 'reflone' ? rest[1] : rest[0];
 const M = 6, JOIN = 120, K = 4, TIGHT = +(process.env.TIGHT ?? 3);
 const CORNERS = !process.env.NO_CORNERS;
+const TJOIN = +(process.env.TJOIN ?? 1); let TJ = TJOIN;
 const REACH = 450;
 // without a neighbour: among the walks round the label take the one with the largest share of own line
 const LONE_PICK = process.env.LONE_PICK ?? 'own';
@@ -47,7 +48,9 @@ const sharedEdges = (bb, key) => { if (sharedCache.has(key)) return sharedCache.
   for (const [, list] of chainsOf) for (const ch of list) { let cur = []; const flush = () => { if (cur.length >= 2 && lenOf(cur) >= 10) { out.push(cur); for (let k = 1; k < cur.length; k++) taken.add(cur[k - 1], cur[k], 0); } cur = []; };
     for (let k = 1; k < ch.pts.length; k++) { const a = ch.pts[k - 1], b = ch.pts[k], n = Math.max(1, Math.round(Math.hypot(b.x - a.x, b.y - a.y))); for (let q = 0; q <= n; q++) { const pt = { x: a.x + ((b.x - a.x) * q) / n, y: a.y + ((b.y - a.y) * q) / n }; if (pt.x < bb[0] || pt.x > bb[2] || pt.y < bb[1] || pt.y > bb[3]) { flush(); continue; } const ranks = new Set([...rankGrid.near(pt.x, pt.y, 0.3).keys()].map((i) => rankOfChain.get(i))); if (ranks.size >= M && !taken.near(pt.x, pt.y, 0.3).size) cur.push(pt); else flush(); } } flush(); }
   sharedCache.set(key, out); return out; };
-function walk(size, guidePts, key, seedOnly, nonSize) {
+// the cut sides first; where they leave no closed walk, the sides as printed
+function walk(...a) { TJ = TJOIN; const r = walk1(...a); if (!TJOIN || !r || r.best) return r; TJ = 0; const r0 = walk1(...a); TJ = TJOIN; return r0; }
+function walk1(size, guidePts, key, seedOnly, nonSize) {
   // seedOnly: no closed size to lean on — the piece is whatever closes round its label; nothing is drawn
   const G = guidePts ? prep(guidePts) : null; const xs = guidePts ? guidePts.map((q) => q.x) : [seedOnly.x - REACH, seedOnly.x + REACH], ys = guidePts ? guidePts.map((q) => q.y) : [seedOnly.y - REACH, seedOnly.y + REACH]; const bb = [Math.min(...xs) - 20, Math.min(...ys) - 20, Math.max(...xs) + 20, Math.max(...ys) + 20];
   const seed = seedOnly ?? { x: (bb[0] + bb[2]) / 2, y: (bb[1] + bb[3]) / 2 };
@@ -56,6 +59,11 @@ function walk(size, guidePts, key, seedOnly, nonSize) {
   for (const ch of nonSize ? plainChains : chainsOf.get(size) ?? []) { const pts = ch.closed ? [...ch.pts, ch.pts[0]] : ch.pts; let cur = []; const flush = () => { if (cur.length >= 2 && lenOf(cur) >= 3) edges.push({ pts: cur, i: edges.length, len: lenOf(cur) }); cur = []; }; for (const q of pts) { if (q.x >= bb[0] && q.x <= bb[2] && q.y >= bb[1] && q.y <= bb[3]) cur.push(q); else flush(); } flush(); }
   const nOwn = edges.length; if (!nOwn) return null;
   if (!nonSize) for (const pts of sharedEdges(bb, key)) edges.push({ pts, i: edges.length, len: lenOf(pts), shared: true });
+  // a side that ends ON another side meets it there: the other side is cut at that point, so the two
+  // meet end to end and the corner stands where the line stops, not where its tangent lands (TJOIN=0 off)
+  if (TJ) { const cuts = new Map(); for (const e of edges) for (const pt of [e.pts[0], e.pts[e.pts.length - 1]]) for (const o of edges) { if (o === e) continue; let acc = 0, best = null; for (let k = 1; k < o.pts.length; k++) { const a = o.pts[k - 1], b = o.pts[k], dx = b.x - a.x, dy = b.y - a.y, LL = dx * dx + dy * dy, L = Math.sqrt(LL); const u = LL ? Math.max(0, Math.min(1, ((pt.x - a.x) * dx + (pt.y - a.y) * dy) / LL)) : 0; const d = Math.hypot(pt.x - a.x - u * dx, pt.y - a.y - u * dy); if (d <= TJ && (!best || d < best.d)) best = { d, s: acc + u * L, k, u }; acc += L; } if (best && best.s > 3 && best.s < o.len - 3) { if (!cuts.has(o)) cuts.set(o, []); cuts.get(o).push(best); } }
+    for (const [o, list] of cuts) { list.sort((x, y) => x.s - y.s); const parts = []; let cur = [o.pts[0]], kPrev = 1, last = 0; for (const c of list) { if (c.s - last < 3) continue; for (let k = kPrev; k < c.k; k++) cur.push(o.pts[k]); const a = o.pts[c.k - 1], b = o.pts[c.k]; const q = { x: a.x + (b.x - a.x) * c.u, y: a.y + (b.y - a.y) * c.u }; cur.push(q); parts.push(cur); cur = [q]; kPrev = c.k; last = c.s; } for (let k = kPrev; k < o.pts.length; k++) cur.push(o.pts[k]); parts.push(cur); edges.splice(edges.indexOf(o), 1, ...parts.filter((x) => lenOf(x) >= 1).map((pts) => ({ pts, len: lenOf(pts), ...(o.shared ? { shared: true } : {}) }))); }
+    edges.forEach((e, i) => { e.i = i; }); }
   const backPt = (pts, w, mm) => { const P = w ? [...pts].reverse() : pts; let acc = 0; for (let k = 1; k < P.length; k++) { acc += Math.hypot(P[k].x - P[k - 1].x, P[k].y - P[k - 1].y); if (acc >= mm) return P[k]; } return P[P.length - 1]; };
   const ends = []; for (const e of edges) for (const w of [0, 1]) { const pt = w ? e.pts[e.pts.length - 1] : e.pts[0]; ends.push({ e, w, pt, out: dir2(backPt(e.pts, w, 5), pt) }); }
   // a join longer than TIGHT must be drawable from the neighbour; its cost grows with its length
