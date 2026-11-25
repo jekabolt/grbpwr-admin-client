@@ -1,3 +1,4 @@
+import type { PointerEvent, RefObject } from 'react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   Camera,
@@ -24,7 +25,7 @@ function typing(target: EventTarget | null): boolean {
  * draws nothing but the grid; once objects exist they are memoised on their own data and read the
  * camera only through the world layer's single transform, so a pan never re-renders them.
  */
-export function useCamera(viewport: React.RefObject<HTMLDivElement | null>) {
+export function useCamera(viewport: RefObject<HTMLDivElement | null>) {
   const [size, setSize] = useState<Size>({ width: 0, height: 0 });
   const [camera, setCamera] = useState<Camera>({ x: 0, y: 0, zoom: 1 });
   const [tool, setTool] = useState<Tool>('select');
@@ -129,7 +130,7 @@ export function useCamera(viewport: React.RefObject<HTMLDivElement | null>) {
 
   const panning = tool === 'hand' || spaceHeld;
 
-  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+  const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
     // The middle button pans with any tool, as in every canvas editor.
     if (!(panning && e.button === 0) && e.button !== 1) return;
     e.preventDefault();
@@ -137,7 +138,7 @@ export function useCamera(viewport: React.RefObject<HTMLDivElement | null>) {
     drag.current = { id: e.pointerId, last: { x: e.clientX, y: e.clientY } };
     setDragging(true);
   };
-  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+  const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
     setCursor(local(e.clientX, e.clientY));
     const d = drag.current;
     if (!d || d.id !== e.pointerId) return;
@@ -146,7 +147,7 @@ export function useCamera(viewport: React.RefObject<HTMLDivElement | null>) {
     d.last = { x: e.clientX, y: e.clientY };
     setCamera((c) => panBy(c, dx, dy));
   };
-  const endDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+  const endDrag = (e: PointerEvent<HTMLDivElement>) => {
     if (drag.current?.id !== e.pointerId) return;
     drag.current = null;
     setDragging(false);

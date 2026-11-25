@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { type ChangeEvent, type KeyboardEvent, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
@@ -67,9 +67,9 @@ function TitleField({ whiteboard, writable }: { whiteboard: Whiteboard; writable
         placeholder={UNTITLED}
         readOnly={!writable}
         maxLength={120}
-        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDraft(e.target.value)}
+        onChange={(e: ChangeEvent<HTMLInputElement>) => setDraft(e.target.value)}
         onBlur={commit}
-        onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+        onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
           if (e.key === 'Enter') e.currentTarget.blur();
           if (e.key === 'Escape') {
             setDraft(whiteboard.title);

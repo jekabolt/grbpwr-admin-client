@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { cn } from 'lib/utility';
 import { Button } from 'ui';
 import type { Tool } from './use-camera';
@@ -8,7 +9,7 @@ type DockTool = {
   key: string;
   /** Not built yet: drawn disabled, and the label says which PR brings it. */
   arrives?: string;
-  icon: React.ReactNode;
+  icon: ReactNode;
 };
 
 const TOOLS: DockTool[] = [

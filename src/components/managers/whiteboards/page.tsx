@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { type ChangeEvent, useState } from 'react';
 import { generatePath, useNavigate } from 'react-router-dom';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
@@ -94,7 +94,7 @@ export function Whiteboards() {
                 name='whiteboard-search'
                 placeholder='title'
                 value={search}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearch(e.target.value)}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => setSearch(e.target.value)}
                 className='w-56'
               />
             </label>
