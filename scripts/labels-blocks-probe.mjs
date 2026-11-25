@@ -74,8 +74,8 @@ const MUTANTS = {
   // the tile ignores the pick's picture
   noPicture: {
     file: `${C}/packaging-shelf.tsx`,
-    from: 'mediaUrl(item.pickedThumbnail) ||',
-    to: '',
+    from: 'const media = mediaUrl(item.pickedThumbnail) ? item.pickedThumbnail : resolved;',
+    to: 'const media = resolved;',
     breaks: '5',
   },
   // the details patch without keepBare: clearing the last field drops the row

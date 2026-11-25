@@ -42,8 +42,8 @@ const probes = [
 ];
 
 // A hang guard, not a speed budget: the slowest probe (operation-work-apply, 99 page loads) takes
-// ~2 min on a laptop core, and a CI core is slower.
-const PROBE_TIMEOUT_MS = Number(process.env.PROBE_TIMEOUT_MS) || 300_000;
+// ~3.5 min alone on a laptop core and ran past 5 min on a CI core sharing the pool, so 10 min.
+const PROBE_TIMEOUT_MS = Number(process.env.PROBE_TIMEOUT_MS) || 600_000;
 const CONCURRENCY = Math.max(
   1,
   Number(process.env.PROBE_CONCURRENCY) || Math.min(4, availableParallelism()),
