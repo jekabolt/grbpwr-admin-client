@@ -18,7 +18,12 @@ const f = deserialize(
         .pop()}`,
     ),
   ),
-).fields as { sheet: Sheet; docTexts: string[]; fileNames: Map<string, string>; aamaLayers: boolean };
+).fields as {
+  sheet: Sheet;
+  docTexts: string[];
+  fileNames: Map<string, string>;
+  aamaLayers: boolean;
+};
 const extras = { extraTexts: f.docTexts, fileNames: f.fileNames, aamaLayers: f.aamaLayers };
 const built = buildChainsDetailed(f.sheet, { ...DEFAULT_CHAIN_OPTS }, extras);
 const rows = shownOnlyRows(f.sheet, built.used, extras, built.set);
