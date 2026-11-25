@@ -51,6 +51,7 @@ export const SECTION = {
   files: 'files',
   production: 'production',
   tasks: 'tasks',
+  whiteboards: 'whiteboards',
   accounts: 'accounts',
   accounting: 'accounting',
   // Field-shaping section (NOT a screen gate): when an account lacks costing:read
@@ -152,6 +153,8 @@ export enum ROUTES {
   productionRunPrint = '/production-runs/:id/print',
   tasks = '/tasks',
   taskDetails = '/tasks/:id',
+  whiteboards = '/whiteboards',
+  whiteboard = '/whiteboards/:id',
   // Библиотека файлов. Карточка файла — отдельный адрес, а не состояние экрана: ссылку на
   // файл кидают в чат вместо самого файла, и именно этим команда узнаёт, что библиотека есть.
   files = '/files',
@@ -254,6 +257,12 @@ export const NAV_GROUPS: NavGroup[] = [
         feature: FEATURE.fulfillment,
       },
       { label: 'tasks', route: ROUTES.tasks, section: SECTION.tasks, feature: FEATURE.tasks },
+      {
+        label: 'whiteboards',
+        route: ROUTES.whiteboards,
+        section: SECTION.whiteboards,
+        feature: FEATURE.whiteboards,
+      },
       {
         label: 'library',
         route: ROUTES.files,

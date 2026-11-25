@@ -5,6 +5,7 @@ import type { TeamBrand } from 'api/proto-http/admin';
 export const FEATURE = {
   core: 'core', // not a switch: accounts, profile, people
   tasks: 'tasks',
+  whiteboards: 'whiteboards',
   files: 'files',
   media: 'media',
   models: 'models',

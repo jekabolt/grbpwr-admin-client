@@ -75,5 +75,6 @@ scripts/tile-anatomy-probe.mjs
 scripts/tile-menu-probe.mjs
 scripts/unnamed-count-probe.mjs
 scripts/version-skew-probe.mjs
+scripts/whiteboard-camera-probe.mjs
 scripts/words-brief-probe.mjs
 scripts/work-picker-probe.mjs
