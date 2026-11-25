@@ -1253,8 +1253,18 @@ export type PieceCandidate = {
    * The walk's outline of this size (`pieces/walk.ts`), set only where it differs from `outer` by
    * more than 1 mm over 12 mm or more: the two are shown to the operator, who picks one. `at` is
    * the place they are farthest apart, `ownShare` the part of the walk on the size's own line.
+   * `answer`: the operator has chosen (`PieceEdit` 'outline'); with 'walk' the candidate's `outer`
+   * IS the walk's outline (`rankFrom: 'walk'`) and `fillOuter` keeps the fill's.
    */
-  walk?: { outer: PtMm[]; ownShare: number; maxMm: number; overMm: number; at: PtMm };
+  walk?: {
+    outer: PtMm[];
+    ownShare: number;
+    maxMm: number;
+    overMm: number;
+    at: PtMm;
+    answer?: 'walk' | 'fill';
+    fillOuter?: PtMm[];
+  };
   rankFrom?:
     | 'class'
     | 'innerPlug'
@@ -1268,7 +1278,9 @@ export type PieceCandidate = {
     | 'shared-polygon'
     | 'printed-motif'
     /** One outline drawn once for every size, in lines that carry no size (pieces/one-outline). */
-    | 'one-outline';
+    | 'one-outline'
+    /** The walk's outline, chosen by the operator over the fill's (pieces/walk). */
+    | 'walk';
   /** Visible source marks used to recover a masked row. */
   visibleMarks?: PathId[];
   /** Printed legend glyphs and visible PDF marks supporting every side of the polygon. */
@@ -1578,7 +1590,13 @@ export type PieceEdit =
    * The operator's "use line" (F4b `setWall`): the chain becomes a wall of one size rank, or —
    * `rank: null` — of every size (a facing line inside a hood that bounds the facing piece).
    */
-  | { kind: 'set-wall'; chain: ChainId; rank: number | null };
+  | { kind: 'set-wall'; chain: ChainId; rank: number | null }
+  /**
+   * The operator's choice between the two outlines of one size (the fill's and the walk's,
+   * `PieceCandidate.walk`). Nothing is drawn: 'walk' takes the walk's outline, 'fill' keeps the
+   * fill's and the question is not asked again.
+   */
+  | { kind: 'outline'; seed: SeedId; rank: number; take: 'walk' | 'fill' };
 
 export type ApplyPieceEditsFn = (
   families: PieceFamily[],

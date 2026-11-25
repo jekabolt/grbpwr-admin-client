@@ -12,7 +12,14 @@
 // walked as printed.
 //
 // Checked on the owner's reference set (`scripts/pattern-import/diag/walk-carry.mjs ref`).
-import type { ChainSet, PieceCandidate, PtMm, Seed, SizeRun } from 'lib/pattern-import/types';
+import type {
+  ChainSet,
+  PieceCandidate,
+  PieceEdit,
+  PtMm,
+  Seed,
+  SizeRun,
+} from 'lib/pattern-import/types';
 
 import { bboxOf, dist, pointInPoly, SegGrid, segNearest, signedArea } from './geom';
 import { backPt, trimmed } from './one-outline';
@@ -530,4 +537,34 @@ export function walkChecks(
       };
     }
   }
+}
+
+/**
+ * The operator's choices between the two outlines (`PieceEdit` 'outline'; the last one for a size
+ * stands). New candidates are returned for the chosen sizes — the fill's own are not changed, so
+ * taking an answer back gives the question again.
+ */
+export function applyOutlineChoices<F extends { seed: number; candidates: PieceCandidate[] }>(
+  families: F[],
+  edits: readonly PieceEdit[],
+): F[] {
+  const picks = new Map<string, 'walk' | 'fill'>();
+  for (const e of edits) if (e.kind === 'outline') picks.set(`${e.seed}:${e.rank}`, e.take);
+  if (!picks.size) return families;
+  return families.map((f) => ({
+    ...f,
+    candidates: f.candidates.map((c) => {
+      const take = picks.get(`${f.seed}:${c.rank}`);
+      if (!take || !c.walk) return c;
+      if (take === 'fill') return { ...c, walk: { ...c.walk, answer: 'fill' as const } };
+      return {
+        ...c,
+        outer: c.walk.outer,
+        areaMm2: Math.abs(signedArea(c.walk.outer)),
+        bbox: bboxOf(c.walk.outer),
+        rankFrom: 'walk' as const,
+        walk: { ...c.walk, answer: 'walk' as const, fillOuter: c.outer },
+      };
+    }),
+  }));
 }

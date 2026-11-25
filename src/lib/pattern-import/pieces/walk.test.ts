@@ -3,7 +3,14 @@ import { describe, expect, it } from 'vitest';
 import type { ChainSet, PieceCandidate, PtMm, Seed, SizeRun } from 'lib/pattern-import/types';
 
 import { signedArea } from './geom';
-import { differs, sharedStretches, walkChecks, walkLines, walkOutline } from './walk';
+import {
+  applyOutlineChoices,
+  differs,
+  sharedStretches,
+  walkChecks,
+  walkLines,
+  walkOutline,
+} from './walk';
 
 const box = { minX: -50, minY: -50, maxX: 400, maxY: 400 };
 const area = (pts: PtMm[]) => Math.abs(signedArea(pts));
@@ -151,5 +158,34 @@ describe('the walk as a check beside the fill', () => {
     const family = { seed: 0, candidates: [cand(0), cand(1), cand(2), cand(3)] };
     walkChecks(wrong.set, wrong.run, seeds, [family]);
     expect(family.candidates.some((c) => c.walk)).toBe(false);
+  });
+
+  it("takes the outline the operator chose and leaves the fill's own candidate as it was", () => {
+    const family = { seed: 0, candidates: [cand(0), cand(1), cand(2, 6), cand(3), cand(4)] };
+    walkChecks(s.set, s.run, seeds, [family]);
+    const walked = applyOutlineChoices(
+      [family],
+      [{ kind: 'outline', seed: 0, rank: 2, take: 'walk' }],
+    );
+    const c = walked[0].candidates[2];
+    expect(area(c.outer)).toBeCloseTo(140 * 100, 0);
+    expect(c.rankFrom).toBe('walk');
+    expect(c.walk).toMatchObject({ answer: 'walk', fillOuter: outline(2, 6) });
+    expect(family.candidates[2].outer).toEqual(outline(2, 6));
+    const kept = applyOutlineChoices(
+      [family],
+      [{ kind: 'outline', seed: 0, rank: 2, take: 'fill' }],
+    );
+    expect(kept[0].candidates[2].outer).toEqual(outline(2, 6));
+    expect(kept[0].candidates[2].walk?.answer).toBe('fill');
+    // a later answer for the same size stands
+    const again = applyOutlineChoices(
+      [family],
+      [
+        { kind: 'outline', seed: 0, rank: 2, take: 'walk' },
+        { kind: 'outline', seed: 0, rank: 2, take: 'fill' },
+      ],
+    );
+    expect(again[0].candidates[2].walk?.answer).toBe('fill');
   });
 });
