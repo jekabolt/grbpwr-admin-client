@@ -152,6 +152,18 @@ Kalla D, F: 82 verified sizes). State on 25 Nov, after two changes in `diag/walk
   minutes: a hundred dashes with a gap after each is not a job for the walk's search. It is a
   job for the reader (the pen of size 26 is not recognised as a size) or for stage 5B.
 
+Choosing between the two outlines without the operator (owner, 25 Nov: "why does the operator
+answer questions you know the answer to"). Only on the stretch where they part. A line is the
+size's own (its chain, or a line its neighbours share within 0.5 mm), nobody's (`norow`, `ignore`,
+`common`) or another size's. The rule decides only own against another size's, and drops an
+outline that turns onto a line inside the piece (a dart, a notch, a pocket); anything else stays a
+question. It goes in as a mark first ("would pick walk / fill"), with no replacement and no
+question, and is switched on only when `reference-check.ts`, with the choice applied before it
+collects the outlines, gives 0 MOVED/LOST on all 50 pieces (`tune` and `confirm`) and fewer
+RETURNED than without it. Count silent choices and questions apart. Never leave both outlines as
+closed candidates: the check takes the nearer and hides the error. A wrong silent choice goes to
+the DXF unseen; a needless question costs one click.
+
 ### 4. The walk closes what the fill leaves open — open
 
 An open cell takes the walk's outline when it is made of printed lines and built corners only and

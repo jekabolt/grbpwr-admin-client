@@ -135,8 +135,15 @@ new behaviour to it meanwhile.
 
 ### Env
 
-Research switches, all `=1` to turn a rule off unless noted. The product has none (plan rule 3);
-an ablation of 25 Nov is measuring which of them change nothing.
+Research switches, all `=1` to turn a rule off unless noted. The product has none (plan rule 3).
+The ablation of 25 Nov (each switch alone, 10–20 most-changed files, log `.runs/ablate/queue.log`)
+found `MOOD_F2_OFF` the main wall of the fill (1245 cells opened) and 14 switches that change
+nothing or almost nothing there: `P3_NOFACE` `F4_NOLABEL` `F4_NOBANDS` `ONE_BLOCK_OFF`
+`LADDER_JUDGE_OFF` `LADDER_RESCUE_OFF` `SILENT_OFF` `KINKS_LOOPS_OFF` `M_TAIL_OFF` `CONT_ORDER_OFF`
+`GFIT_NEST_WALK=0` `NEST_CROSS_OFF` `GRADE_P2_LOOSE_OFF` `AMBIGUOUS_DROP_OFF`. A sample is not
+proof, and it ran on code before the rows merge. Removal waits for plan stage 8 (fill or walk):
+then one full-set run with all 14 off together, diff 0 → delete them in one commit, else halve.
+"Active" means "changes something", not "good".
 
 - `DASH_TRAIN_OFF` `ALIKE_NESTS_OFF` `MOOD_MARKS_OFF` `MOOD_WIDE_OFF` `TICK_KNIFE_SPREAD_OFF`
   `GRADE_DRAW_OFF` `NEST_CROSS_OFF` `CONT_ORDER_OFF` `TICK_THROUGH_OFF` `TICK_ORDER_OFF`
