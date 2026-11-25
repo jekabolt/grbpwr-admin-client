@@ -150,6 +150,7 @@ export function cellsOf(out: StageIO['pieces']['out'], ranks: RankInfo[] | null)
                 overMm: Math.round(c.walk.overMm),
                 ...(c.walk.open ? { open: true } : {}),
                 ...(c.walk.verdict ? { verdict: c.walk.verdict } : {}),
+                ...(c.walk.auto ? { auto: true } : {}),
               }
             : null,
           geo: createHash('md5')

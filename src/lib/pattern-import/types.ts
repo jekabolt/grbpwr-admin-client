@@ -1271,6 +1271,13 @@ export type PieceCandidate = {
      */
     verdict?: 'walk' | 'fill';
     /**
+     * The fill's outline rides the line of a size three or more away for 15 mm or more and the
+     * walk's does not (`farLineMm`): the fill leaked across the nest. The program takes the
+     * walk's outline itself (`applyLeakRepairs`, `auto`); `fillOuter` keeps the fill's.
+     */
+    leak?: true;
+    auto?: true;
+    /**
      * The fill left this size OPEN and the walk closes it on printed lines and built corners:
      * a proposal, shown alone ('walk' takes it — the size is closed; 'fill' leaves it open).
      */

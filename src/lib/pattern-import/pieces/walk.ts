@@ -75,6 +75,9 @@ export const WALK = {
    *  rides such lines for this many millimetres has leaked across the nest. */
   farSizes: 3,
   farLineMm: 15,
+  /** …and the walk replaces it only when this share of the walk's parting stretch has a size
+   *  line under it: a side stretched 30 mm to its corner over empty paper is no repair. */
+  leakPrinted: 0.7,
   /** By the neighbouring sizes: this share of the taken outline's parting stretch is between
    *  them or on an edge both share, and this share of the other's is not. */
   nestToWin: 0.9,
@@ -904,13 +907,26 @@ export function walkChecks(
       const lower = closed.filter((o) => o.rank < c.rank).sort((x, y) => y.rank - x.rank)[0];
       const upper = closed.filter((o) => o.rank > c.rank).sort((x, y) => x.rank - y.rank)[0];
       const verdict = outlineVerdict(lower?.outer, upper?.outer, w.outer, c.outer);
+      // the fill leaked across the nest: its outline rides the line of a distant size and the
+      // walk's does not. The one case the program repairs itself — on the reference set 16
+      // repairs and no verified outline spoilt (the 4 it moved the owner called nearer the truth)
+      const who = whoseLine(L, c.rank, w.outer, c.outer);
+      const parted = who.ownMm + who.foreignMm + who.nobodyMm || 1;
+      const leak =
+        farLineMm(L, c.rank, c.outer) >= WALK.farLineMm &&
+        farLineMm(L, c.rank, w.outer) < WALK.farLineMm &&
+        1 - who.nobodyMm / parted >= WALK.leakPrinted;
       c.walk = {
         outer: w.outer,
         ownShare: per ? w.ownMm / per : 0,
         maxMm: d.maxMm,
         overMm: d.overMm,
         at: d.at,
-        ...(verdict ? { verdict: verdict.take } : {}),
+        ...(leak
+          ? { verdict: 'walk' as const, leak: true as const }
+          : verdict
+            ? { verdict: verdict.take }
+            : {}),
       };
     }
     // the open sizes
@@ -990,5 +1006,31 @@ export function applyOutlineChoices<F extends { seed: number; candidates: PieceC
         walk: { ...c.walk, answer: 'walk' as const, fillOuter: c.outer },
       };
     }),
+  }));
+}
+
+/**
+ * The repairs the program makes itself: a closed size whose fill outline leaked onto the line of
+ * a distant size takes the walk's outline (`walk.leak`). New candidates are returned; the fill's
+ * outline stays on the candidate as `walk.fillOuter`.
+ */
+export function applyLeakRepairs<F extends { seed: number; candidates: PieceCandidate[] }>(
+  families: F[],
+): F[] {
+  if (!families.some((f) => f.candidates.some((c) => c.walk?.leak))) return families;
+  return families.map((f) => ({
+    ...f,
+    candidates: f.candidates.map((c) =>
+      c.walk?.leak && !c.walk.answer
+        ? {
+            ...c,
+            outer: c.walk.outer,
+            areaMm2: Math.abs(signedArea(c.walk.outer)),
+            bbox: bboxOf(c.walk.outer),
+            rankFrom: 'walk' as const,
+            walk: { ...c.walk, answer: 'walk' as const, auto: true as const, fillOuter: c.outer },
+          }
+        : c,
+    ),
   }));
 }

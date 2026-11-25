@@ -21,6 +21,7 @@ import {
   WALK,
   walkLines,
   walkOutline,
+  whoseLine,
 } from 'lib/pattern-import/pieces/walk';
 import type { ChainSet, PtMm, SizeRun } from 'lib/pattern-import/types';
 
@@ -172,7 +173,13 @@ for (const [dir, list] of jobs) {
       const below = oks.filter((o) => o.rank < z.rank).sort((x, y) => y.rank - x.rank)[0];
       const above = oks.filter((o) => o.rank > z.rank).sort((x, y) => x.rank - y.rank)[0];
       const v = two ? outlineVerdict(below?.pts, above?.pts, w.outer, z.pts) : undefined;
-      const farTakes = far0 && !!two && farLineMm(L, z.rank, w.outer) < WALK.farLineMm;
+      const who = two ? whoseLine(L, z.rank, w.outer, z.pts) : null;
+      const printed = who ? 1 - who.nobodyMm / (who.ownMm + who.foreignMm + who.nobodyMm || 1) : 0;
+      const farTakes =
+        far0 &&
+        !!two &&
+        farLineMm(L, z.rank, w.outer) < WALK.farLineMm &&
+        printed >= WALK.leakPrinted;
       if (farTakes) t[z.ok ? 'okFarTakesWalk' : 'badFarTakesWalk']++;
       if (far0 && !two && !z.ok) t.badFarSameWalk++;
       if (farTakes)

@@ -4,6 +4,7 @@ import type { ChainSet, PieceCandidate, PtMm, Seed, SizeRun } from 'lib/pattern-
 
 import { signedArea } from './geom';
 import {
+  applyLeakRepairs,
   applyOutlineChoices,
   differs,
   sharedStretches,
@@ -288,5 +289,40 @@ describe('the walk for a size the fill left open', () => {
     const family = { seed: 0, candidates: [0, 1, 2, 3, 4].map(open) };
     walkChecks(odd.set, odd.run, seeds, [family]);
     expect(family.candidates.map((c) => !!c.walk?.open)).toEqual([true, true, true, false, true]);
+  });
+});
+
+describe('a fill that leaked across the nest', () => {
+  // seven nested rectangles 10 mm apart, each with its own right and bottom side
+  const s = sheet(7, (r) => sides(100, 100, 120 + 10 * r, 80 + 10 * r, 2));
+  const outline = (r: number, right = r): PtMm[] => [
+    P(100, 100),
+    P(220 + 10 * right, 100),
+    P(220 + 10 * right, 180 + 10 * r),
+    P(100, 180 + 10 * r),
+  ];
+  const cand = (r: number, right = r) =>
+    ({ seed: 0, rank: r, outer: outline(r, right), outcome: 'closed' }) as PieceCandidate;
+  const seeds = [{ id: 0, at: P(150, 140) } as Seed];
+
+  it('is repaired by the program: the outline on the line of a size four away gives way to the walk', () => {
+    // the fill of size 1 took the right side of size 5
+    const family = { seed: 0, candidates: [cand(0), cand(1, 5), cand(2), cand(3), cand(4)] };
+    walkChecks(s.set, s.run, seeds, [family]);
+    expect(family.candidates[1].walk).toMatchObject({ leak: true, verdict: 'walk' });
+    const [fixed] = applyLeakRepairs([family]);
+    const c = fixed.candidates[1];
+    expect(area(c.outer)).toBeCloseTo(130 * 90, 0);
+    expect(c.rankFrom).toBe('walk');
+    expect(c.walk).toMatchObject({ auto: true, answer: 'walk', fillOuter: outline(1, 5) });
+    // the fill's own candidate is not changed
+    expect(family.candidates[1].outer).toEqual(outline(1, 5));
+  });
+
+  it("is not seen in an outline on its NEIGHBOUR's line: a block of sizes can share one", () => {
+    const family = { seed: 0, candidates: [cand(0), cand(1, 2), cand(2), cand(3), cand(4)] };
+    walkChecks(s.set, s.run, seeds, [family]);
+    expect(family.candidates[1].walk?.leak).toBeUndefined();
+    expect(applyLeakRepairs([family])[0].candidates[1].outer).toEqual(outline(1, 2));
   });
 });
