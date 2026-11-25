@@ -15,6 +15,7 @@ import { gunzipSync } from 'node:zlib';
 import { bboxOf } from 'lib/pattern-import/pieces/geom';
 import {
   differs,
+  farLineMm,
   outlineVerdict,
   sharedStretches,
   WALK,
@@ -105,6 +106,13 @@ const tally = () => ({
   badTakesWalk: 0,
   badTakesFill: 0,
   badCannot: 0,
+  // by the line of a distant size (`farLineMm`): the outline rides one, the walk does not
+  okFar: 0,
+  okFarTakesWalk: 0,
+  badFar: 0,
+  badFarTakesWalk: 0,
+  badFarNoWalk: 0,
+  badFarSameWalk: 0,
 });
 const bySet = new Map<string, ReturnType<typeof tally>>();
 const t0 = Date.now();
@@ -146,6 +154,8 @@ for (const [dir, list] of jobs) {
     console.log(`== ${p.id} [${p.set}] (${p.label})`);
     for (const z of sizes) {
       t[z.ok ? 'ok' : 'bad']++;
+      const far0 = L.lines.length ? farLineMm(L, z.rank, z.pts) >= WALK.farLineMm : false;
+      if (far0) t[z.ok ? 'okFar' : 'badFar']++;
       const own = L.bySize.get(z.rank);
       const b = bboxOf(z.pts);
       const w = own?.length
@@ -153,6 +163,7 @@ for (const [dir, list] of jobs) {
         : null;
       if (!w) {
         t[z.ok ? 'okNoWalk' : 'badNoWalk']++;
+        if (far0 && !z.ok) t.badFarNoWalk++;
         continue;
       }
       const mx = Math.max(far(w.outer, z.pts), far(z.pts, w.outer));
@@ -161,6 +172,13 @@ for (const [dir, list] of jobs) {
       const below = oks.filter((o) => o.rank < z.rank).sort((x, y) => y.rank - x.rank)[0];
       const above = oks.filter((o) => o.rank > z.rank).sort((x, y) => x.rank - y.rank)[0];
       const v = two ? outlineVerdict(below?.pts, above?.pts, w.outer, z.pts) : undefined;
+      const farTakes = far0 && !!two && farLineMm(L, z.rank, w.outer) < WALK.farLineMm;
+      if (farTakes) t[z.ok ? 'okFarTakesWalk' : 'badFarTakesWalk']++;
+      if (far0 && !two && !z.ok) t.badFarSameWalk++;
+      if (farTakes)
+        console.log(
+          `${z.size.padEnd(5)} ${z.ok ? 'ok ' : 'bad'} · rides a distant size's line, the walk does not · ${two!.maxMm.toFixed(1)} mm over ${Math.round(two!.overMm)} mm${z.ok ? '   <<< FALSE REPLACEMENT (far)' : '   repair (far)'}`,
+        );
       if (z.ok) {
         t[mx <= 1 ? 'okLe1' : mx <= 3 ? 'okLe3' : 'okGt3']++;
         if (two) {

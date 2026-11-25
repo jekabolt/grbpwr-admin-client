@@ -71,6 +71,10 @@ export const WALK = {
    *  own line and this share of the other's is on another size's line. */
   ownToWin: 0.9,
   foreignToLose: 0.5,
+  /** A line is a DISTANT size's when its nearest owner is this many sizes away; an outline that
+   *  rides such lines for this many millimetres has leaked across the nest. */
+  farSizes: 3,
+  farLineMm: 15,
   /** By the neighbouring sizes: this share of the taken outline's parting stretch is between
    *  them or on an edge both share, and this share of the other's is not. */
   nestToWin: 0.9,
@@ -711,6 +715,36 @@ export function whoseLine(
     }
   }
   return out;
+}
+
+/**
+ * How much of an outline lies on the line of a DISTANT size: no line of its own size under it,
+ * the lines of one to three other sizes are, and the nearest of them is `WALK.farSizes` or more
+ * sizes away. On the reference set a verified outline rides its neighbour's line now and then
+ * (the reader gives a line a block shares to one of them), and almost never the line of a size
+ * three away; an outline judged bad does — the fill leaked across the nest
+ * (`diag/ref-owner-map.ts`: caught 21 of 63 bad sizes, flagged 15 of 548 verified).
+ */
+export function farLineMm(L: WalkLines, rank: number, outer: readonly PtMm[]): number {
+  const C = WALK;
+  let mm = 0;
+  for (let k = 0; k < outer.length; k++) {
+    const p = outer[k];
+    const q = outer[(k + 1) % outer.length];
+    const n = Math.max(1, Math.round(dist(p, q)));
+    const step = dist(p, q) / n;
+    for (let t = 0; t < n; t++) {
+      const m = { x: p.x + ((q.x - p.x) * (t + 0.5)) / n, y: p.y + ((q.y - p.y) * (t + 0.5)) / n };
+      const ranks = new Set<number>();
+      L.grid.near(m, C.onOwnMm, (o, i) => {
+        if (ranks.has(L.rankOf[o])) return;
+        if (segNearest(m, L.lines[o][i], L.lines[o][i + 1]).d <= C.onOwnMm) ranks.add(L.rankOf[o]);
+      });
+      if (!ranks.size || ranks.size > 3 || ranks.has(rank)) continue;
+      if (Math.min(...[...ranks].map((r) => Math.abs(r - rank))) >= C.farSizes) mm += step;
+    }
+  }
+  return mm;
 }
 
 /**
