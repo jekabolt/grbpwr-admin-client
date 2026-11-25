@@ -21,7 +21,7 @@ import type {
   SizeRun,
 } from 'lib/pattern-import/types';
 
-import { bboxOf, dist, pointInPoly, SegGrid, segNearest, signedArea } from './geom';
+import { bboxOf, dist, pointInPoly, SegGrid, segNearest, signedArea, simplify } from './geom';
 import { backPt, trimmed } from './one-outline';
 
 export const WALK = {
@@ -60,12 +60,18 @@ export const WALK = {
   differMm: 1,
   /** …over at least this length, mm. */
   differOverMm: 12,
+  /** A path that turns back on itself by more than this, with legs this long, is round a dart… */
+  spikeTurnRad: (140 * Math.PI) / 180,
+  spikeLegMm: 10,
+  /** …the tip of the dart being no longer than this, mm. */
+  spikeTipMm: 20,
   /** A walk is shown only when its area sits between its closed neighbour sizes', within this. */
   areaSlack: 0.002,
 };
 
 type Box = { minX: number; minY: number; maxX: number; maxY: number };
-type Edge = { pts: PtMm[]; len: number; shared: boolean };
+/** `src`/`part`: the printed line this edge is a piece of, and its place along that line. */
+type Edge = { pts: PtMm[]; len: number; shared: boolean; src: number; part: number };
 type End = { e: Edge; w: 0 | 1; pt: PtMm; out: PtMm };
 type Join = { to: End; cost: number; corner?: { at: PtMm; cutPrev: number; cutNext: number } };
 
@@ -190,6 +196,61 @@ export function sharedStretches(L: WalkLines, box: Box): PtMm[][] {
   return out;
 }
 
+/**
+ * An outline goes round once: its turns add up to one full turn, and none of them is a dart. A path that runs along a side,
+ * loops through a dart and comes back over the same stretch (a side may be extended 30 mm to
+ * meet another, so it can) turns twice or not at all — it is not an outline.
+ */
+function turnsOnce(outer: readonly PtMm[]): boolean {
+  // measured on the outline without its sub-millimetre steps: two ends that overlap by a hair
+  // step back and forth, and each such step is half a turn of its own
+  const pts = simplify(
+    outer.filter((p, i) => dist(p, outer[(i + 1) % outer.length]) > 1e-6),
+    1,
+  );
+  if (pts.length < 3) return false;
+  let sum = 0;
+  const n = pts.length;
+  const turn: number[] = [];
+  const leg: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const a = pts[(i - 1 + n) % n];
+    const b = pts[i];
+    const c = pts[(i + 1) % n];
+    const u = Math.atan2(b.y - a.y, b.x - a.x);
+    const v = Math.atan2(c.y - b.y, c.x - b.x);
+    let d = v - u;
+    while (d > Math.PI) d -= 2 * Math.PI;
+    while (d <= -Math.PI) d += 2 * Math.PI;
+    sum += d;
+    turn.push(d);
+    leg.push(dist(b, c));
+  }
+  if (Math.abs(Math.abs(sum) - 2 * Math.PI) >= 0.5) return false;
+  // a dart: the path goes in along one leg and out along the other, turning back on itself at
+  // the tip. The tip is one vertex, or — where the legs cross just before it — a few within some
+  // millimetres. No corner of a cut turns back that sharply: the walk has no outline here rather
+  // than a wrong one.
+  for (let i = 0; i < n; i++) {
+    if (leg[(i - 1 + n) % n] < WALK.spikeLegMm) continue;
+    let acc = 0;
+    let tip = 0;
+    for (let k = 0; k < n && tip <= WALK.spikeTipMm; k++) {
+      acc += turn[(i + k) % n];
+      // into the piece: against the way the outline goes round (a narrow tab turns back too,
+      // but with it)
+      if (
+        Math.sign(acc) !== Math.sign(sum) &&
+        Math.abs(acc) > WALK.spikeTurnRad &&
+        leg[(i + k) % n] >= WALK.spikeLegMm
+      )
+        return false;
+      tip += leg[(i + k) % n];
+    }
+  }
+  return true;
+}
+
 /** A side that ends ON another side cuts it there (in place). */
 function cutWhereSidesEnd(edges: Edge[]): void {
   const C = WALK;
@@ -238,7 +299,7 @@ function cutWhereSidesEnd(edges: Edge[]): void {
       1,
       ...parts
         .filter((p) => lenOf(p) >= 1)
-        .map((pts) => ({ pts, len: lenOf(pts), shared: o.shared })),
+        .map((pts, part) => ({ pts, len: lenOf(pts), shared: o.shared, src: o.src, part })),
     );
   }
 }
@@ -307,6 +368,53 @@ function search(edges: Edge[], seed: PtMm, lone: boolean): Walked | null {
     const top = out.slice(0, C.joins);
     cache.set(o, top);
     return top;
+  };
+  /** A side as the outline takes it: the edge, its direction, what is cut off its ends. */
+  type Laid = { e: Edge; rev: boolean; head: number; tail: number; corner?: PtMm };
+  const outlineOf = (laid: Laid[]): PtMm[] =>
+    laid.flatMap((x) => [
+      ...trimmed(x.rev ? [...x.e.pts].reverse() : x.e.pts, x.head, x.tail),
+      ...(x.corner ? [x.corner] : []),
+    ]);
+  const piecesOf = new Map<number, Edge[]>();
+  for (const e of edges) piecesOf.set(e.src, [...(piecesOf.get(e.src) ?? []), e]);
+  /**
+   * A path that leaves a printed line and comes back to the SAME line farther on has two ways
+   * between those points: the turn it took and the line itself. A dart, a notch, a pocket line
+   * are turns INTO the piece — the cut runs on along the line. A tab or an extension turns OUT
+   * of it. The outline is the outer of the two, so the larger area stands. The walk took the
+   * turn only because the path with the most own line is preferred, and a dart's legs are drawn
+   * in the size's own pen (Leah B TOP FRONT, the owner, 25 Nov).
+   */
+  const straightened = (path: Laid[]): Laid[] => {
+    let cur = path;
+    for (let pass = 0; pass < 20; pass++) {
+      let better: Laid[] | null = null;
+      const areaNow = Math.abs(signedArea(outlineOf(cur)));
+      for (let k = 0; k < cur.length && !better; k++)
+        for (let m = k + 2; m < cur.length && !better; m++) {
+          const a = cur[k];
+          const b = cur[m];
+          if (a.e.src !== b.e.src || a.rev !== b.rev) continue;
+          const [lo, hi] = a.rev ? [b.e.part, a.e.part] : [a.e.part, b.e.part];
+          if (hi - lo < 2) continue;
+          const between = (piecesOf.get(a.e.src) ?? []).filter((e) => e.part > lo && e.part < hi);
+          if (between.length !== hi - lo - 1 || between.some((e) => cur.some((x) => x.e === e)))
+            continue;
+          between.sort((x, y) => (a.rev ? y.part - x.part : x.part - y.part));
+          const alt: Laid[] = [
+            ...cur.slice(0, k),
+            { ...a, tail: 0, corner: undefined },
+            ...between.map((e) => ({ e, rev: a.rev, head: 0, tail: 0 })),
+            { ...b, head: 0 },
+            ...cur.slice(m + 1),
+          ];
+          if (Math.abs(signedArea(outlineOf(alt))) > areaNow * 1.0001) better = alt;
+        }
+      if (!better) break;
+      cur = better;
+    }
+    return cur;
   };
   // from the longest of the size's own lines; a line that runs past the piece on both ends is in
   // no closed path, so the next longest are tried after it
@@ -388,26 +496,20 @@ function search(edges: Edge[], seed: PtMm, lone: boolean): Walked | null {
           found++;
           const joins = [...cur.joins, j];
           const n = cur.path.length;
-          const outer: PtMm[] = [];
-          let corners = 0;
-          cur.path.forEach((x, k) => {
-            const prev = joins[(k - 1 + n) % n];
-            const next = joins[k];
-            outer.push(
-              ...trimmed(
-                x.rev ? [...x.e.pts].reverse() : x.e.pts,
-                prev.corner?.cutNext ?? 0,
-                next.corner?.cutPrev ?? 0,
-              ),
-            );
-            if (next.corner) {
-              outer.push(next.corner.at);
-              corners++;
-            }
-          });
-          if (outer.length < 3 || !pointInPoly(seed, outer)) continue;
-          const ownMm = cur.path.reduce((a, x) => a + (x.e.shared ? 0 : x.e.len), 0);
-          const sharedMm = cur.path.reduce((a, x) => a + (x.e.shared ? x.e.len : 0), 0);
+          const laid = straightened(
+            cur.path.map((x, k) => ({
+              e: x.e,
+              rev: x.rev,
+              head: joins[(k - 1 + n) % n].corner?.cutNext ?? 0,
+              tail: joins[k].corner?.cutPrev ?? 0,
+              corner: joins[k].corner?.at,
+            })),
+          );
+          const outer = outlineOf(laid);
+          const corners = laid.filter((x) => x.corner).length;
+          if (outer.length < 3 || !turnsOnce(outer) || !pointInPoly(seed, outer)) continue;
+          const ownMm = laid.reduce((a, x) => a + (x.e.shared ? 0 : x.e.len), 0);
+          const sharedMm = laid.reduce((a, x) => a + (x.e.shared ? x.e.len : 0), 0);
           const cost = cur.cost + j.cost;
           // the path with the most of the size's own line; of two alike the cheaper to join
           if (!best || ownMm > best.ownMm || (ownMm === best.ownMm && cost < best.cost))
@@ -442,12 +544,13 @@ export function walkOutline(
   /** The piece has no closed size: start near the label, take the path most on the own line. */
   lone = false,
 ): Walked | null {
-  const edges = (): Edge[] => [
-    ...own
-      .flatMap((pts) => clipped(pts, box, 3))
-      .map((pts) => ({ pts, len: lenOf(pts), shared: false })),
-    ...shared.map((pts) => ({ pts, len: lenOf(pts), shared: true })),
-  ];
+  const edges = (): Edge[] =>
+    [
+      ...own
+        .flatMap((pts) => clipped(pts, box, 3))
+        .map((pts) => ({ pts, len: lenOf(pts), shared: false, src: 0, part: 0 })),
+      ...shared.map((pts) => ({ pts, len: lenOf(pts), shared: true, src: 0, part: 0 })),
+    ].map((e, src) => ({ ...e, src }));
   const cut = edges();
   if (!cut.some((e) => !e.shared)) return null;
   cutWhereSidesEnd(cut);

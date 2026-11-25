@@ -86,6 +86,46 @@ describe('the walk', () => {
     expect(Math.min(...onVertical)).toBeGreaterThanOrEqual(19.5);
   });
 
+  it("runs on along a side past a dart drawn in the size's own pen", () => {
+    // a 200 × 120 piece; a dart from its bottom side: two legs from (150, 220) and (170, 220) to
+    // the apex (160, 150). The path through the legs has more own line; the cut runs past them.
+    const own: PtMm[][] = [
+      ...sides(100, 100, 200, 120),
+      [P(150, 220), P(160, 150)],
+      [P(160, 150), P(170, 220)],
+    ];
+    const w = walkOutline(own, [], box, P(120, 120));
+    expect(w).not.toBeNull();
+    expect(area(w!.outer)).toBeCloseTo(200 * 120, 0);
+  });
+
+  it('has no outline rather than one with a dart cut into it', () => {
+    // the bottom side is not printed across the mouth of the dart: the only closed path goes in
+    // along one leg and out along the other
+    const [top, right, , left] = sides(100, 100, 200, 120);
+    const own: PtMm[][] = [
+      top,
+      right,
+      [P(300, 220), P(170, 220)],
+      [P(150, 220), P(100, 220)],
+      left,
+      [P(150, 220), P(160, 150)],
+      [P(160, 150), P(170, 220)],
+    ];
+    expect(walkOutline(own, [], box, P(120, 120))).toBeNull();
+  });
+
+  it('goes round a tab that sticks out of a side', () => {
+    // the same piece with a 20 × 30 tab below its bottom side: the outline is the outer way
+    const own: PtMm[][] = [
+      ...sides(100, 100, 200, 120),
+      [P(150, 220), P(150, 250), P(170, 250), P(170, 220)],
+    ];
+    const w = walkOutline(own, [], box, P(120, 120));
+    expect(w).not.toBeNull();
+    expect(area(w!.outer)).toBeCloseTo(200 * 120 + 20 * 30, 0);
+  });
+
   it('lets a size walk a stretch only where four sizes run on it', () => {
     // the left side is one line for every size; each size has its own three other sides
     const linesOf = (r: number): PtMm[][] => {
