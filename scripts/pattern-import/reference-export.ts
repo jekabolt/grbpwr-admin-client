@@ -1,7 +1,8 @@
-// ETALON EXPORT — the pieces the owner confirms by eye (task: ground truth, 23 Nov 2026).
+// REFERENCE EXPORT — the pieces the owner confirms by eye (the reference set, 23 Nov 2026).
 // Replays a pieces snapshot on the current code and writes, per chosen piece, the sheet lines
-// around it and our outline of every exported size — the data of the review page.
-//   npx vite-node scripts/pattern-import/etalon-export.ts <pick.txt> <out.json>
+// around it and our outline of every exported size — the data of the review page. The owner's
+// answers on that page plus this file make reference.json (reference-build.ts).
+//   npx vite-node scripts/pattern-import/reference-export.ts <pick.txt> <out.json>
 // pick.txt: one piece per line, `<shot dir>\t<file id substring>\t<label | seed:N>\t<group>\t<id>`.
 // <id> keys the owner's answer: keep it when the list grows, or the answer is orphaned.
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -16,14 +17,26 @@ const flat = (pts: readonly P[]) => pts.flatMap((p) => [r1(p.x), r1(p.y)]);
 /** Douglas-Peucker: drops points within `tol` mm of the chord (the drawing only, never the data). */
 function simplify(pts: P[], tol: number): P[] {
   if (pts.length < 3) return pts;
+  const [A0, Z] = [pts[0], pts[pts.length - 1]];
+  if (Math.hypot(A0.x - Z.x, A0.y - Z.y) < 1e-6) {
+    // a ring: the chord of its ends is a point, so split it at the vertex farthest from the start
+    let far = 1;
+    pts.forEach((p, k) => {
+      if (Math.hypot(p.x - A0.x, p.y - A0.y) > Math.hypot(pts[far].x - A0.x, pts[far].y - A0.y))
+        far = k;
+    });
+    return [...simplify(pts.slice(0, far + 1), tol), ...simplify(pts.slice(far), tol).slice(1)];
+  }
   const keep = new Uint8Array(pts.length);
   keep[0] = keep[pts.length - 1] = 1;
   const stack: [number, number][] = [[0, pts.length - 1]];
   while (stack.length) {
     const [a, b] = stack.pop()!;
-    const A = pts[a], B = pts[b];
+    const A = pts[a],
+      B = pts[b];
     const L = Math.hypot(B.x - A.x, B.y - A.y) || 1e-9;
-    let far = -1, dmax = tol;
+    let far = -1,
+      dmax = tol;
     for (let k = a + 1; k < b; k++) {
       const d = Math.abs((B.x - A.x) * (A.y - pts[k].y) - (A.x - pts[k].x) * (B.y - A.y)) / L;
       if (d > dmax) (dmax = d), (far = k);
@@ -41,7 +54,8 @@ function clip(pts: P[], inBox: (p: P) => boolean): P[][] {
   const runs: P[][] = [];
   let cur: P[] = [];
   pts.forEach((p, k) => {
-    const near = inBox(p) || (k > 0 && inBox(pts[k - 1])) || (k + 1 < pts.length && inBox(pts[k + 1]));
+    const near =
+      inBox(p) || (k > 0 && inBox(pts[k - 1])) || (k + 1 < pts.length && inBox(pts[k + 1]));
     if (near) cur.push(p);
     else if (cur.length) runs.push(cur), (cur = []);
   });

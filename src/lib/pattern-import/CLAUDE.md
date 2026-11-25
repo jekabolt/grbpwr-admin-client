@@ -66,7 +66,7 @@ The program draws each size's outline on that size's own printed lines:
 
 - **No jump onto another stroke.** The typical error is short: the outline leaves its own line for
   a neighbour size's line at a corner for a few millimetres and comes back. A check over the whole
-  outline does not see it (`family-fit.md` §3 on branch `reference-set`); the check must be local.
+  outline does not see it (`docs/pattern-import/family-fit.md` §3); the check must be local.
 - **Corners are built** as the intersection of the two sides, not rounded, cut or bridged.
 - **Missing lines are drawn in** from evidence (the same stretch of a closed neighbour size, the
   walk), never from the grade prediction alone, and on their own DXF layer (owner, 11 Nov).
@@ -79,7 +79,7 @@ The program draws each size's outline on that size's own printed lines:
 A closed cell is not progress by itself: a cell can close on other sizes' lines (Kalla and Leah
 sizes 0/6/14 closed with 20–30 % of the outline on foreign strokes). Measures, in this order:
 
-1. verified-ok outlines of the reference set (`reference.json`, branch `reference-set`) moved by
+1. verified-ok outlines of the reference set (`scripts/pattern-import/reference.json`) moved by
    more than 1 mm — must stay 0;
 2. share of each outline within 0.5 mm of its own size line (`diag/own-share.mjs`) — must not fall;
 3. cells opened on the control files (Leah, Cassandra, Dyanna, Kalla) — must stay 0;
@@ -123,8 +123,13 @@ new behaviour to it meanwhile.
 - Pieces bench: `npx vite-node scripts/pattern-import/pieces-bench.ts <shot> …` replays the pieces
   step from saved snapshots in minutes (header of the file: capture, `--ref`, `--env`, `--par`).
   Use it for every patch; a full `dxf-shot.mjs` corpus run only at a milestone.
-- Reference check: `scripts/pattern-import/single-reference-check.ts`, and on branch
-  `reference-set` the verify section of this file.
+- Reference set (`scripts/pattern-import/reference.json`): pieces the owner judged by eye, per size
+  ok / bad, kept as outline points. `reference-check.ts reference.json --base <clone with .runs>`
+  finds each size again by geometry: ok → held / MOVED / LOST, bad → RETURNED / changed. Exit 1 on
+  MOVED or LOST only. Tolerance per size: min(1 mm, half the distance to the neighbouring size);
+  noise on unchanged code ≤ 0.4 mm. Pieces of set `confirm` (holdout40) never tune a rule. To grow
+  it: `reference-export.ts` → review page → `reference-build.ts`. One piece:
+  `single-reference-check.ts`.
 - Unit: `npx vitest run src/lib/pattern-import`. Do not run `yarn lint` / `yarn fix` (they rewrite
   all of `src/`). `yarn build:check` — xlsx / `tasks/sheet.ts` errors predate this branch.
 
@@ -148,7 +153,9 @@ an ablation of 25 Nov is measuring which of them change nothing.
 - Grade slope only from diverging rays; a shared edge given to the smallest outline that contains
   it; joint ray alignment of nests (closed 18 Nov: 0 wrong, but covers 36–75 % of a piece).
 - A whole-outline jump detector (p95 off the neighbours' grade): 3 of 32 bad sizes caught on unseen
-  pieces.
+  pieces. Local checks by sheet strokes or own-chain cover as a stop-gate: 20 of 25 bad caught, 65
+  of 210 ok flagged — a correct outline on another size's line is normal.
+- Shared-line ownership as a consecutive block of sizes: holds on 94 % of `tune`, 60 % of `confirm`.
 - More point rules in the fill (bridges, lone stretches, plugging with smaller sizes): they raised
   closed cells 6390 → 6633 while files reaching DXF stayed at 10.
 - PDF layers as the size signal: 4 of 692 archive PDFs keep per-size layers.

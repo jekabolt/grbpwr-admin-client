@@ -37,7 +37,7 @@ order are in `src/lib/pattern-import/CLAUDE.md` (owner, 25 Nov).
 | Diagnosis, scripts, pictures, this plan | `fix-pattern-pdf-open-lines` (PR #470) | pushed |
 | Stages 1A and 2 | `open-lines-rows`, commit `aacf5976f` | merged into the PR head 25 Nov on the owner's word |
 | Measurement switches for the bench (`LONE_OFF`, `INNER_PLUG_OFF`, outlines in the bench output) | `open-lines-bench-switches`, commit `deb6b2824` | pushed, not for merging |
-| The owner's reference set (`scripts/pattern-import/reference.json`, 50 pieces, 548 ok and 63 bad sizes), `family-fit.md`, `family-research/` | `reference-set`, commit `c2aa54469` | pushed, **not merged into the PR head: the owner decides** |
+| The owner's reference set (`scripts/pattern-import/reference.json`, 50 pieces, 548 ok and 63 bad sizes), `family-fit.md`, `family-research/` | `reference-set`, commit `c2aa54469` | merged into the PR head 25 Nov on the owner's word |
 
 ## Stages
 
@@ -81,8 +81,8 @@ Open: Clark H POCKET LINING and I POCKET WELT (32 cells) look drawn once too and
 
 - Done 25 Nov: `open-lines-rows` merged into `fix-pattern-pdf-open-lines` on the owner's word.
   The owner checked the Venice J picture the same day: correct.
-- The reference set is pushed on branch `reference-set` (24 Nov). Merging it into the PR head is
-  the owner's decision; every acceptance number of this plan depends on it.
+- Done 25 Nov: `reference-set` merged into `fix-pattern-pdf-open-lines` on the owner's word; the
+  check is `scripts/pattern-import/reference-check.ts` (how to run: `src/lib/pattern-import/CLAUDE.md`).
 - The switches `PDF_LAYERS_OFF` and `SNAPSHOT_STAGE` (read a layered PDF with its layers hidden,
   snapshot at the sizes step) exist only in the `reference-set` worktree, uncommitted.
 - Done 25 Nov: the stale "Where it stands" section of `src/lib/pattern-import/CLAUDE.md` is replaced,
