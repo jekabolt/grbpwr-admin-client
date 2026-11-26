@@ -90,6 +90,8 @@ export const WALK = {
   jogTurnRad: Math.PI / 6,
   jogStepMm: 8,
   jogLegMm: 10,
+  /** …or, beside a corner, one run that long and the other at least this, mm. */
+  jogCornerLegMm: 3,
   /** `sliverMm`: two parts of one outline nearer than this, mm … */
   sliverGapMm: 3,
   /** … and further apart than this along it, mm, are a strip the outline doubles back on. */
@@ -1007,7 +1009,14 @@ export function sliverMm(outer: readonly PtMm[]): number {
  * No cut has one (the owner, 26 Nov, on 16 of them: "there must be no step"). Found by the shape
  * of the outline alone — the reader's sizes are not asked.
  */
-export function jogsOf(outer: readonly PtMm[]): { at: PtMm; stepMm: number }[] {
+export function jogsOf(
+  outer: readonly PtMm[],
+  /**
+   * The shorter of the two runs either side of the step, mm. A step beside a corner has a short
+   * one (`WALK.jogCornerLegMm`): the blind test of 26 Nov missed two of those.
+   */
+  shortLegMm: number = WALK.jogLegMm,
+): { at: PtMm; stepMm: number }[] {
   const C = WALK;
   const s = simplify([...outer, outer[0]], 0.3).slice(0, -1);
   const n = s.length;
@@ -1026,7 +1035,8 @@ export function jogsOf(outer: readonly PtMm[]): { at: PtMm; stepMm: number }[] {
   }
   const out: { at: PtMm; stepMm: number }[] = [];
   for (let i = 0; i < n; i++) {
-    if (Math.abs(turn[i]) < C.jogTurnRad || leg[(i - 1 + n) % n] < C.jogLegMm) continue;
+    const legIn = leg[(i - 1 + n) % n];
+    if (Math.abs(turn[i]) < C.jogTurnRad || legIn < shortLegMm) continue;
     let acc = 0;
     for (let k = 1; k < n; k++) {
       const j = (i + k) % n;
@@ -1037,7 +1047,8 @@ export function jogsOf(outer: readonly PtMm[]): { at: PtMm; stepMm: number }[] {
       if (
         Math.sign(turn[j]) !== Math.sign(turn[i]) &&
         Math.abs(turn[i] + turn[j]) < Math.PI / 6 &&
-        leg[j] >= C.jogLegMm
+        leg[j] >= shortLegMm &&
+        Math.max(legIn, leg[j]) >= C.jogLegMm
       )
         out.push({ at: s[i], stepMm: acc });
       break;
@@ -1189,7 +1200,28 @@ export function walkChecks(
       const w = walkOutline(own, shared, box, at);
       if (!w) continue;
       const d = differs(w.outer, c.outer) ?? differs(c.outer, w.outer);
-      if (!d) continue;
+      if (!d) {
+        // The two outlines are one within `differMm` but for short stretches — and a step beside a
+        // corner is such a stretch: a millimetre off the line for the last centimetre of a side
+        // (Leah D size 00: the allowance offset bridged the bay between two of them and the piece
+        // was blocked as "offset collapsed"). The walk's outline, which has no step, is taken.
+        if (
+          jogsOf(c.outer, WALK.jogCornerLegMm).length > 0 &&
+          !jogsOf(w.outer, WALK.jogCornerLegMm).length
+        ) {
+          const per = lenOf([...w.outer, w.outer[0]]);
+          c.walk = {
+            outer: w.outer,
+            ownShare: per ? w.ownMm / per : 0,
+            maxMm: 0,
+            overMm: 0,
+            at: jogsOf(c.outer, WALK.jogCornerLegMm)[0].at,
+            verdict: 'walk',
+            jog: true,
+          };
+        }
+        continue;
+      }
       // a walk that went round something else is no rival: sizes of one piece nest
       if (
         !between(
