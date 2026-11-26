@@ -45,7 +45,13 @@ import { ScaleStep } from './steps/scale';
 import { SheetStep } from './steps/sheet';
 import { SizesStep } from './steps/sizes';
 import { ImportWorkerClient } from 'lib/pattern-import/worker/client';
-import { STEPS, stepIndex, useImportSession, type ImportSessionApi } from './use-import-session';
+import {
+  exportedRanks,
+  STEPS,
+  stepIndex,
+  useImportSession,
+  type ImportSessionApi,
+} from './use-import-session';
 import type { PieceFocus } from './piece-focus';
 import { DroppedLabels } from './steps/not-in-file';
 import { autopilotApply, resolverFor } from './autopilot/run';
@@ -703,9 +709,12 @@ function WizardBody({
         return n ? `map ${plural(n, 'size')}` : null;
       }
       case 'pieces': {
-        // the regions closed in every size: what goes on as pieces (a leak / tiny one does not)
+        // the regions closed in every size that is exported: what goes on as pieces (a leak / tiny
+        // one does not). The same rule as the step's blocker — counted over every size of the
+        // file the button said "use 2 pieces" and seven went on (the owner, 26 Nov 2026).
+        const mapped = exportedRanks(s.sizes?.map);
         const n = (s.pieces?.families ?? []).filter((f) =>
-          f.candidates.every((c) => c.outcome === 'closed'),
+          f.candidates.every((c) => (mapped && !mapped.has(c.rank)) || c.outcome === 'closed'),
         ).length;
         return n ? `use ${plural(n, 'piece')}` : null;
       }

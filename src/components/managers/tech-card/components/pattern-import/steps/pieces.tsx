@@ -1146,7 +1146,9 @@ export function PiecesStep({
    * the walk's outline (`walk`, `walk.verdict`) for the bench.
    */
   const outlineProblems = families.flatMap((f) => {
-    const asked = f.candidates.filter((c) => c.walk?.open && !c.walk.answer);
+    // only the sizes that go to the card: a size left out on the sizes step is never written,
+    // so nobody is asked about it (Leah: the first question was size 26 with 00–6 mapped)
+    const asked = f.candidates.filter((c) => c.walk?.open && !c.walk.answer && isExp(c.rank));
     return asked.length
       ? [
           {
