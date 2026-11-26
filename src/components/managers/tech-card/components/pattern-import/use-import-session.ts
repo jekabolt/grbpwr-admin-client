@@ -77,6 +77,7 @@ import {
   weakAsides,
   type AutoResolver,
 } from './auto-advance';
+import { errorWords } from './error-words';
 import { singlePageSheet } from './sheet-skip';
 import {
   normWriteStorage,
@@ -826,7 +827,7 @@ export function useImportSession(deps: {
       if (gen !== histGen.current) throw new StaleRun();
       // stopped again: the run stays as it is (kept, still to restore)
       if (importErrorCode(e) === 'cancelled') throw e;
-      const why = e instanceof Error ? e.message : String(e);
+      const why = errorWords(e);
       throw new ImportWorkerError(
         'no-session',
         `the run could not be restored after the stop (${why}) — read the files again`,
@@ -844,7 +845,7 @@ export function useImportSession(deps: {
   const fail = (e: unknown) => {
     // a stage of a run the operator has left (files read again, reset): nothing of the new one moves
     if (e instanceof StaleRun) return;
-    const message = e instanceof Error ? e.message : String(e);
+    const message = errorWords(e);
     const code = importErrorCode(e);
     failureRef.current = {
       stage:
@@ -1467,7 +1468,7 @@ export function useImportSession(deps: {
             result = {
               ok: false,
               failedScope: '',
-              message: `the apply failed: ${e instanceof Error ? e.message : String(e)}`,
+              message: `the apply failed: ${errorWords(e)}`,
               uploaded: [],
             };
           }
@@ -1696,9 +1697,7 @@ export function useImportSession(deps: {
         });
       } catch (e) {
         if (e instanceof StaleRun || importErrorCode(e) === 'cancelled') throw e;
-        notes.push(
-          `AI page roles: the pages could not be drawn (${e instanceof Error ? e.message : String(e)})`,
-        );
+        notes.push(`AI page roles: the pages could not be drawn (${errorWords(e)})`);
         continue;
       }
       patch({
@@ -1751,7 +1750,7 @@ export function useImportSession(deps: {
       try {
         names = await namer(out, { card: rc(), threshold: AI_AUTO_ACCEPT_T });
       } catch (e) {
-        namerError = `AI names unavailable (${e instanceof Error ? e.message : String(e)}) — type the codes by hand`;
+        namerError = `AI names unavailable (${errorWords(e)}) — type the codes by hand`;
       }
     } else setSom(null);
     names = mergeNames(withAiNames(plan, names));
