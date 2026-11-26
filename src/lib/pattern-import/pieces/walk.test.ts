@@ -8,7 +8,9 @@ import {
   applyOutlineChoices,
   differs,
   sharedStretches,
+  sliverMm,
   spanPath,
+  WALK,
   walkChecks,
   walkLines,
   walkOutline,
@@ -388,5 +390,31 @@ describe('a path over the printed lines between two points of an outline', () =>
 
   it('is nothing for a point that lies on no line', () => {
     expect(spanPath(own, [], box, P(160, 150), P(130, 180), 500)).toBeNull();
+  });
+});
+
+describe('sliverMm', () => {
+  it('is next to nothing on a plain outline and long where the outline doubles back', () => {
+    const plain = [
+      { x: 0, y: 0 },
+      { x: 200, y: 0 },
+      { x: 200, y: 300 },
+      { x: 0, y: 300 },
+    ];
+    expect(sliverMm(plain)).toBeLessThan(10);
+    // the top side runs out 150 mm along a line 2 mm above and comes back
+    const strip = [
+      { x: 0, y: 0 },
+      { x: 200, y: 0 },
+      { x: 200, y: 300 },
+      { x: 150, y: 300 },
+      { x: 150, y: 302 },
+      { x: 0, y: 302 },
+      { x: 0, y: 304 },
+      { x: 152, y: 304 },
+      { x: 152, y: 300 },
+      { x: 0, y: 300 },
+    ];
+    expect(sliverMm(strip)).toBeGreaterThan(WALK.sliverMm);
   });
 });

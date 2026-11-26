@@ -1278,6 +1278,11 @@ export type PieceCandidate = {
     leak?: true;
     /** The fill's outline has a jog (`jogsOf`) and the walk's has none: repaired the same way. */
     jog?: true;
+    /**
+     * The fill's outline doubles back along itself (`sliverMm`: a strip a few mm wide where it ran
+     * out along a neighbouring size's line and back) and the walk's does not: repaired the same way.
+     */
+    sliver?: true;
     auto?: true;
     /**
      * The fill left this size OPEN and the walk closes it on printed lines and built corners:

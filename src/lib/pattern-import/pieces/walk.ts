@@ -90,6 +90,15 @@ export const WALK = {
   jogTurnRad: Math.PI / 6,
   jogStepMm: 8,
   jogLegMm: 10,
+  /** `sliverMm`: two parts of one outline nearer than this, mm … */
+  sliverGapMm: 3,
+  /** … and further apart than this along it, mm, are a strip the outline doubles back on. */
+  sliverArcMm: 25,
+  /**
+   * An outline with this much of such a strip, mm, did not follow one line (Leah B size 2: 242 mm
+   * along the shoulder). A real slit cut into a piece is shorter (Xeranthemum: 60).
+   */
+  sliverMm: 80,
   /** By the neighbouring sizes: this share of the taken outline's parting stretch is between
    *  them or on an edge both share, and this share of the other's is not. */
   nestToWin: 0.9,
@@ -947,6 +956,51 @@ export function farLineMm(L: WalkLines, rank: number, outer: readonly PtMm[]): n
 }
 
 /**
+ * How much of a closed outline, mm, runs beside another part of itself: nearer than
+ * `WALK.sliverGapMm` to a point more than `WALK.sliverArcMm` away along the outline. A cut has
+ * next to none; a fill that ran out along the next size's line and came back has a strip as long
+ * as that line. Found by the shape of the outline alone.
+ */
+export function sliverMm(outer: readonly PtMm[]): number {
+  const P: PtMm[] = [];
+  for (let i = 0; i < outer.length; i++) {
+    const a = outer[i];
+    const b = outer[(i + 1) % outer.length];
+    const n = Math.max(1, Math.round(Math.hypot(b.x - a.x, b.y - a.y)));
+    for (let t = 0; t < n; t++)
+      P.push({ x: a.x + ((b.x - a.x) * t) / n, y: a.y + ((b.y - a.y) * t) / n });
+  }
+  const N = P.length;
+  const cell = WALK.sliverGapMm;
+  const key = (x: number, y: number) => `${x}:${y}`;
+  const grid = new Map<string, number[]>();
+  P.forEach((p, i) => {
+    const k = key(Math.floor(p.x / cell), Math.floor(p.y / cell));
+    const list = grid.get(k);
+    if (list) list.push(i);
+    else grid.set(k, [i]);
+  });
+  let near = 0;
+  for (let i = 0; i < N; i++) {
+    const p = P[i];
+    const cx = Math.floor(p.x / cell);
+    const cy = Math.floor(p.y / cell);
+    let hit = false;
+    for (let dx = -1; dx <= 1 && !hit; dx++)
+      for (let dy = -1; dy <= 1 && !hit; dy++)
+        for (const j of grid.get(key(cx + dx, cy + dy)) ?? []) {
+          const arc = Math.min(Math.abs(i - j), N - Math.abs(i - j));
+          if (arc > WALK.sliverArcMm && Math.hypot(P[j].x - p.x, P[j].y - p.y) < cell) {
+            hit = true;
+            break;
+          }
+        }
+    if (hit) near++;
+  }
+  return near;
+}
+
+/**
  * The jogs of an outline: a short step sideways — two sharp turns of opposite sense a few
  * millimetres apart, with a long run before and after. The outline leaves one printed line for
  * the next and goes on beside it: the fill's jump onto another stroke, at the scale of 1–3 mm.
@@ -1165,17 +1219,24 @@ export function walkChecks(
         jogsOf(c.outer).length > 0 &&
         !jogsOf(w.outer).length &&
         who.ownAloneMm / parted >= WALK.leakPrinted;
+      // …and a strip: the fill ran out along the next size's line and back (too near for the
+      // distant-line sign), the walk's outline has no such strip
+      const sliver =
+        sliverMm(c.outer) >= WALK.sliverMm &&
+        sliverMm(w.outer) < WALK.sliverMm &&
+        who.ownAloneMm / parted >= WALK.leakPrinted;
       c.walk = {
         outer: w.outer,
         ownShare: per ? w.ownMm / per : 0,
         maxMm: d.maxMm,
         overMm: d.overMm,
         at: d.at,
-        ...(leak || jog
+        ...(leak || jog || sliver
           ? {
               verdict: 'walk' as const,
               ...(leak ? { leak: true as const } : {}),
               ...(jog ? { jog: true as const } : {}),
+              ...(sliver ? { sliver: true as const } : {}),
             }
           : verdict
             ? { verdict: verdict.take }
@@ -1365,11 +1426,22 @@ export function applyOutlineChoices<F extends { seed: number; candidates: PieceC
 export function applyLeakRepairs<F extends { seed: number; candidates: PieceCandidate[] }>(
   families: F[],
 ): F[] {
-  if (!families.some((f) => f.candidates.some((c) => c.walk?.leak || c.walk?.jog))) return families;
+  const mends = (c: PieceCandidate) => !!(c.walk?.leak || c.walk?.jog || c.walk?.sliver);
+  // A closed outline that doubles back on itself and that the walk could not mend is not a cut
+  // the program can vouch for: the size is open, and the walk's outline (if it has one) is the
+  // proposal the operator is shown — the same question as for any open size.
+  const unsound = (c: PieceCandidate) =>
+    c.outcome === 'closed' &&
+    c.rankFrom !== 'walk' &&
+    c.outer.length > 3 &&
+    !(mends(c) && !c.walk?.answer) &&
+    c.walk?.answer !== 'fill' &&
+    sliverMm(c.outer) >= WALK.sliverMm;
+  if (!families.some((f) => f.candidates.some((c) => mends(c) || unsound(c)))) return families;
   return families.map((f) => ({
     ...f,
     candidates: f.candidates.map((c) =>
-      (c.walk?.leak || c.walk?.jog) && !c.walk.answer
+      c.walk && mends(c) && !c.walk.answer
         ? {
             ...c,
             outer: c.walk.outer,
@@ -1378,7 +1450,23 @@ export function applyLeakRepairs<F extends { seed: number; candidates: PieceCand
             rankFrom: 'walk' as const,
             walk: { ...c.walk, answer: 'walk' as const, auto: true as const, fillOuter: c.outer },
           }
-        : c,
+        : unsound(c)
+          ? {
+              ...c,
+              outcome: 'leak' as const,
+              leakAt: c.walk?.at ?? c.outer[0],
+              ...(c.walk
+                ? {
+                    walk: {
+                      ...c.walk,
+                      verdict: undefined,
+                      open: true as const,
+                      fillOuter: c.outer,
+                    },
+                  }
+                : {}),
+            }
+          : c,
     ),
   }));
 }
