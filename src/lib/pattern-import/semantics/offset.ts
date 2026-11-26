@@ -815,8 +815,14 @@ export function hullPockets(src: readonly PtMm[]): HullPocket[] {
   return pockets;
 }
 
+/**
+ * On by default (the owner, 26 Nov 2026): without it a near-rectangle — Leah's skirt back, hull
+ * ratio 0.9897 — was blocked as "collapsed to the convex hull" although its allowance line bridges
+ * no bay, and the browser, which has no env, could never switch it on. `OFFSET_HULL_POCKETS=0`
+ * (node) gives the old rule back.
+ */
 export const hullPocketsOn = () =>
-  typeof process !== 'undefined' && !!process.env?.OFFSET_HULL_POCKETS;
+  !(typeof process !== 'undefined' && process.env?.OFFSET_HULL_POCKETS === '0');
 
 /**
  * The collapse bridges a bay wider than two allowances and deeper than 0.5 mm. A true parallel

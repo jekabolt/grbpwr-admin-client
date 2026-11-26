@@ -156,8 +156,8 @@ then one full-set run with all 14 off together, diff 0 → delete them in one co
   `GRADE_DRAW_OFF` `NEST_CROSS_OFF` `CONT_ORDER_OFF` `TICK_THROUGH_OFF` `TICK_ORDER_OFF`
   `TICK_THROUGH_NEAREST_OFF` `BORROW_LANDED_OFF` `SPLIT_PEN_OFF` `TILE_TEXT_JOIN_OFF`
   `ONE_BLOCK_OFF` `GFIT_LOCAL_OFF` `GRADE_P2_LOOSE_OFF` `AUTO_GAP_OFF`.
-- `GFIT_NEST_WALK` is on by default; only `=0` disables it.
-- On with `=1` (off in the browser): `GFIT_EDGE_ACCEPT` `GFIT_LOCAL_CORRIDOR` `OFFSET_HULL_POCKETS`.
+- `GFIT_NEST_WALK` and `OFFSET_HULL_POCKETS` are on by default; only `=0` disables them.
+- On with `=1` (off in the browser): `GFIT_EDGE_ACCEPT` `GFIT_LOCAL_CORRIDOR`.
 
 ### Dead ends — do not retry
 

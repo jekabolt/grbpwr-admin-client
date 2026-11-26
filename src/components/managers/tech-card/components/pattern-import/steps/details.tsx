@@ -821,7 +821,13 @@ export function DetailsStep({
       case 'offset-hull':
       case 'offset-self-intersection':
       case 'offset-topology':
-        body = say('check line & allowance, or the outline in pieces');
+        // the engine's own words for why the allowance line could not be built: without them the
+        // operator is told to check something and not what
+        body = say(
+          b.detail
+            ? `${b.detail} — check line & allowance, or the outline in pieces`
+            : 'check line & allowance, or the outline in pieces',
+        );
         break;
       default:
         body = PIECES_REASONS.has(b.reason) ? (

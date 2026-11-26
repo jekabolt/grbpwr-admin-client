@@ -29,10 +29,12 @@ describe('OFFSET_HULL_POCKETS', () => {
       { x: 80, y: 60 },
       { x: 0, y: 60 },
     ];
+    process.env.OFFSET_HULL_POCKETS = '0';
     const off = offsetContour(src, 10);
     expect(off.report.ok).toBe(false);
     expect(off.report.reason ?? '').toMatch(/convex hull/);
-    process.env.OFFSET_HULL_POCKETS = '1';
+    // the default since 26 Nov 2026
+    delete process.env.OFFSET_HULL_POCKETS;
     const on = offsetContour(src, 10);
     expect(on.report.reason ?? '').not.toMatch(/convex hull/);
     expect(on.report.ok).toBe(true);
@@ -124,7 +126,7 @@ describe('OFFSET_HULL_POCKETS', () => {
     expect(parallelDeviation(shifted, src, 10)).toBeGreaterThan(0.2);
     for (const on of [false, true]) {
       if (on) process.env.OFFSET_HULL_POCKETS = '1';
-      else delete process.env.OFFSET_HULL_POCKETS;
+      else process.env.OFFSET_HULL_POCKETS = '0';
       const r = offsetContour(src, 10);
       expect(r.report.maxDeviationMm).toBeLessThanOrEqual(0.2);
       expect(r.report.reason ?? '').not.toMatch(/deviation/);
